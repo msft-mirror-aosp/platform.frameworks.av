@@ -436,16 +436,32 @@ void C2SoftMpeg4Enc::process(
         }
 
         ++mNumInputFrames;
-        std::unique_ptr<C2StreamInitDataInfo::output> csd =
-            C2StreamInitDataInfo::output::AllocUnique(outputSize, 0u);
-        if (!csd) {
-            ALOGE("CSD allocation failed");
-            mSignalledError = true;
-            work->result = C2_NO_MEMORY;
-            return;
+        if (outputSize) {
+            std::unique_ptr<C2StreamInitDataInfo::output> csd =
+                C2StreamInitDataInfo::output::AllocUnique(outputSize, 0u);
+            if (!csd) {
+                ALOGE("CSD allocation failed");
+                mSignalledError = true;
+                work->result = C2_NO_MEMORY;
+                return;
+            }
+            memcpy(csd->m.value, outPtr, outputSize);
+            work->worklets.front()->output.configUpdate.push_back(std::move(csd));
         }
-        memcpy(csd->m.value, outPtr, outputSize);
-        work->worklets.front()->output.configUpdate.push_back(std::move(csd));
+    }
+
+    // handle dynamic bitrate change
+    {
+        IntfImpl::Lock lock = mIntf->lock();
+        std::shared_ptr<C2StreamBitrateInfo::output> bitrate = mIntf->getBitrate_l();
+        lock.unlock();
+
+        if (bitrate != mBitrate) {
+            mBitrate = bitrate;
+            int layerBitrate[2] = {static_cast<int>(mBitrate->value), 0};
+            ALOGV("Calling PVUpdateBitRate %d", layerBitrate[0]);
+            PVUpdateBitRate(mHandle, layerBitrate);
+        }
     }
 
     std::shared_ptr<const C2GraphicView> rView;
@@ -652,11 +668,13 @@ private:
 
 }  // namespace android
 
+__attribute__((cfi_canonical_jump_table))
 extern "C" ::C2ComponentFactory* CreateCodec2Factory() {
     ALOGV("in %s", __func__);
     return new ::android::C2SoftMpeg4EncFactory();
 }
 
+__attribute__((cfi_canonical_jump_table))
 extern "C" void DestroyCodec2Factory(::C2ComponentFactory* factory) {
     ALOGV("in %s", __func__);
     delete factory;

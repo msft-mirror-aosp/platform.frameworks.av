@@ -18,8 +18,8 @@
 #define LOG_TAG "MidiIoWrapper"
 #include <utils/Log.h>
 
-#include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
 
