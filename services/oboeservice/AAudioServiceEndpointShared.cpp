@@ -22,6 +22,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 #include "binding/AAudioServiceMessage.h"
 #include "client/AudioStreamInternal.h"
@@ -213,4 +214,13 @@ aaudio_result_t AAudioServiceEndpointShared::getTimestamp(int64_t *positionFrame
         result = AAUDIO_ERROR_UNAVAILABLE;
     }
     return result;
+}
+
+void AAudioServiceEndpointShared::handleDisconnectRegisteredStreamsAsync() {
+    android::sp<AAudioServiceEndpointShared> holdEndpoint(this);
+    std::thread asyncTask([holdEndpoint]() {
+        // We do not need the returned vector.
+        holdEndpoint->disconnectRegisteredStreams();
+    });
+    asyncTask.detach();
 }
