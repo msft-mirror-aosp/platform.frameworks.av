@@ -20,6 +20,8 @@
 #include <log/log.h>
 #include <utils/NativeHandle.h>
 
+#include <android-base/properties.h>
+
 #include <C2Component.h>
 #include <C2Param.h>
 #include <util/C2InterfaceHelper.h>
@@ -324,7 +326,8 @@ CCodecConfig::CCodecConfig()
     : mInputFormat(new AMessage),
       mOutputFormat(new AMessage),
       mUsingSurface(false),
-      mTunneled(false) { }
+      mTunneled(false),
+      mPushBlankBuffersOnStop(false) { }
 
 void CCodecConfig::initializeStandardParams() {
     typedef Domain D;
@@ -657,24 +660,29 @@ void CCodecConfig::initializeStandardParams() {
     add(ConfigMapper(KEY_SAMPLE_RATE,   C2_PARAMKEY_CODED_SAMPLE_RATE,  "value")
         .limitTo(D::AUDIO & D::CODED));
 
-    add(ConfigMapper(KEY_PCM_ENCODING,  C2_PARAMKEY_PCM_ENCODING,       "value")
+    auto pcmEncodingMapper = [](C2Value v) -> C2Value {
+        int32_t value;
+        C2Config::pcm_encoding_t to;
+        if (v.get(&value) && C2Mapper::map(value, &to)) {
+            return to;
+        }
+        return C2Value();
+    };
+    auto pcmEncodingReverse = [](C2Value v) -> C2Value {
+        C2Config::pcm_encoding_t value;
+        int32_t to;
+        using C2ValueType=typename _c2_reduce_enum_to_underlying_type<decltype(value)>::type;
+        if (v.get((C2ValueType*)&value) && C2Mapper::map(value, &to)) {
+            return to;
+        }
+        return C2Value();
+    };
+    add(ConfigMapper(KEY_PCM_ENCODING,              C2_PARAMKEY_PCM_ENCODING, "value")
         .limitTo(D::AUDIO)
-        .withMappers([](C2Value v) -> C2Value {
-            int32_t value;
-            C2Config::pcm_encoding_t to;
-            if (v.get(&value) && C2Mapper::map(value, &to)) {
-                return to;
-            }
-            return C2Value();
-        }, [](C2Value v) -> C2Value {
-            C2Config::pcm_encoding_t value;
-            int32_t to;
-            using C2ValueType=typename _c2_reduce_enum_to_underlying_type<decltype(value)>::type;
-            if (v.get((C2ValueType*)&value) && C2Mapper::map(value, &to)) {
-                return to;
-            }
-            return C2Value();
-        }));
+        .withMappers(pcmEncodingMapper, pcmEncodingReverse));
+    add(ConfigMapper("android._codec-pcm-encoding", C2_PARAMKEY_PCM_ENCODING, "value")
+        .limitTo(D::AUDIO & D::READ)
+        .withMappers(pcmEncodingMapper, pcmEncodingReverse));
 
     add(ConfigMapper(KEY_IS_ADTS, C2_PARAMKEY_AAC_PACKAGING, "value")
         .limitTo(D::AUDIO & D::CODED)
@@ -894,6 +902,9 @@ void CCodecConfig::initializeStandardParams() {
     add(ConfigMapper(KEY_AAC_MAX_OUTPUT_CHANNEL_COUNT, C2_PARAMKEY_MAX_CHANNEL_COUNT, "value")
         .limitTo(D::AUDIO & (D::CONFIG | D::PARAM | D::READ)));
 
+    add(ConfigMapper(KEY_MAX_OUTPUT_CHANNEL_COUNT, C2_PARAMKEY_MAX_CHANNEL_COUNT, "value")
+        .limitTo(D::AUDIO & (D::CONFIG | D::PARAM | D::READ)));
+
     add(ConfigMapper(KEY_AAC_SBR_MODE, C2_PARAMKEY_AAC_SBR_MODE, "value")
         .limitTo(D::AUDIO & D::ENCODER & (D::CONFIG | D::PARAM | D::READ))
         .withMapper([](C2Value v) -> C2Value {
@@ -948,9 +959,13 @@ void CCodecConfig::initializeStandardParams() {
             return value == 0 ? C2_FALSE : C2_TRUE;
         }));
 
-    /* still to do
-    constexpr char KEY_PUSH_BLANK_BUFFERS_ON_STOP[] = "push-blank-buffers-on-shutdown";
+    add(ConfigMapper(KEY_VIDEO_QP_AVERAGE, C2_PARAMKEY_AVERAGE_QP, "value")
+        .limitTo(D::ENCODER & D::VIDEO & D::READ));
 
+    add(ConfigMapper(KEY_PICTURE_TYPE, C2_PARAMKEY_PICTURE_TYPE, "value")
+        .limitTo(D::ENCODER & D::VIDEO & D::READ));
+
+    /* still to do
        not yet used by MediaCodec, but defined as MediaFormat
     KEY_AUDIO_SESSION_ID // we use "audio-hw-sync"
     KEY_OUTPUT_REORDER_DEPTH
@@ -1098,15 +1113,21 @@ status_t CCodecConfig::subscribeToConfigUpdate(
         const std::shared_ptr<Codec2Client::Configurable> &configurable,
         const std::vector<C2Param::Index> &indices,
         c2_blocking_t blocking) {
+    static const int32_t kProductFirstApiLevel =
+        base::GetIntProperty<int32_t>("ro.product.first_api_level", 0);
+    static const int32_t kBoardApiLevel =
+        base::GetIntProperty<int32_t>("ro.board.first_api_level", 0);
+    static const int32_t kFirstApiLevel =
+        (kBoardApiLevel != 0) ? kBoardApiLevel : kProductFirstApiLevel;
     mSubscribedIndices.insert(indices.begin(), indices.end());
-    // TODO: enable this when components no longer crash on this config
-    if (mSubscribedIndices.size() != mSubscribedIndicesSize && false) {
-        std::vector<uint32_t> indices;
+    if (mSubscribedIndices.size() != mSubscribedIndicesSize
+            && kFirstApiLevel >= __ANDROID_API_T__) {
+        std::vector<uint32_t> indicesVector;
         for (C2Param::Index ix : mSubscribedIndices) {
-            indices.push_back(ix);
+            indicesVector.push_back(ix);
         }
         std::unique_ptr<C2SubscribedParamIndicesTuning> subscribeTuning =
-            C2SubscribedParamIndicesTuning::AllocUnique(indices);
+            C2SubscribedParamIndicesTuning::AllocUnique(indicesVector);
         std::vector<std::unique_ptr<C2SettingResult>> results;
         c2_status_t c2Err = configurable->config({ subscribeTuning.get() }, blocking, &results);
         if (c2Err != C2_OK && c2Err != C2_BAD_INDEX) {
@@ -1882,7 +1903,9 @@ status_t CCodecConfig::querySupportedParameters(std::vector<std::string> *names)
     names->clear();
     // TODO: expand to standard params
     for (const auto &[key, desc] : mVendorParams) {
-        names->push_back(key);
+        if (desc->isVisible()) {
+            names->push_back(key);
+        }
     }
     return OK;
 }

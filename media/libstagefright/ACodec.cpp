@@ -2195,7 +2195,10 @@ status_t ACodec::configureCodec(
             }
 
             if (!msg->findInt32("aac-max-output-channel_count", &maxOutputChannelCount)) {
-                maxOutputChannelCount = -1;
+                // check non AAC-specific key
+                if (!msg->findInt32("max-output-channel-count", &maxOutputChannelCount)) {
+                    maxOutputChannelCount = -1;
+                }
             }
             if (!msg->findInt32("aac-pcm-limiter-enable", &pcmLimiterEnable)) {
                 // value is unknown
@@ -3304,10 +3307,12 @@ status_t ACodec::configureTunneledVideoPlayback(
     if (err != OK) {
         ALOGE("native_window_set_sideband_stream(%p) failed! (err %d).",
                 sidebandHandle, err);
-        return err;
     }
 
-    return OK;
+    native_handle_close(sidebandHandle);
+    native_handle_delete(sidebandHandle);
+
+    return err;
 }
 
 status_t ACodec::setVideoPortFormatType(
@@ -5395,21 +5400,21 @@ status_t ACodec::getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify) {
                             err = mOMXNode->getParameter(
                                     (OMX_INDEXTYPE)OMX_IndexParamAudioAndroidAacDrcPresentation,
                                     &presentation, sizeof(presentation));
-                            if (err != OK) {
-                                return err;
+                            if (err == OK) {
+                                notify->setInt32("aac-encoded-target-level",
+                                                 presentation.nEncodedTargetLevel);
+                                notify->setInt32("aac-drc-cut-level", presentation.nDrcCut);
+                                notify->setInt32("aac-drc-boost-level", presentation.nDrcBoost);
+                                notify->setInt32("aac-drc-heavy-compression",
+                                                 presentation.nHeavyCompression);
+                                notify->setInt32("aac-target-ref-level",
+                                                 presentation.nTargetReferenceLevel);
+                                notify->setInt32("aac-drc-effect-type",
+                                                 presentation.nDrcEffectType);
+                                notify->setInt32("aac-drc-album-mode", presentation.nDrcAlbumMode);
+                                notify->setInt32("aac-drc-output-loudness",
+                                                 presentation.nDrcOutputLoudness);
                             }
-                            notify->setInt32("aac-encoded-target-level",
-                                             presentation.nEncodedTargetLevel);
-                            notify->setInt32("aac-drc-cut-level", presentation.nDrcCut);
-                            notify->setInt32("aac-drc-boost-level", presentation.nDrcBoost);
-                            notify->setInt32("aac-drc-heavy-compression",
-                                             presentation.nHeavyCompression);
-                            notify->setInt32("aac-target-ref-level",
-                                             presentation.nTargetReferenceLevel);
-                            notify->setInt32("aac-drc-effect-type", presentation.nDrcEffectType);
-                            notify->setInt32("aac-drc-album-mode", presentation.nDrcAlbumMode);
-                            notify->setInt32("aac-drc-output-loudness",
-                                             presentation.nDrcOutputLoudness);
                         }
                     }
                     break;
@@ -5431,6 +5436,7 @@ status_t ACodec::getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify) {
                     notify->setInt32("channel-count", params.nChannels);
                     notify->setInt32("sample-rate", params.nSampleRate);
                     notify->setInt32("bitrate", params.nBitRate);
+                    notify->setInt32("aac-profile", params.eAACProfile);
                     break;
                 }
 
@@ -9202,6 +9208,21 @@ status_t ACodec::getOMXChannelMapping(size_t numChannels, OMX_AUDIO_CHANNELTYPE 
             return -EINVAL;
     }
 
+    return OK;
+}
+
+status_t ACodec::querySupportedParameters(std::vector<std::string> *names) {
+    if (!names) {
+        return BAD_VALUE;
+    }
+    return OK;
+}
+
+status_t ACodec::subscribeToParameters([[maybe_unused]] const std::vector<std::string> &names) {
+    return OK;
+}
+
+status_t ACodec::unsubscribeFromParameters([[maybe_unused]] const std::vector<std::string> &names) {
     return OK;
 }
 

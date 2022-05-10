@@ -181,6 +181,11 @@ public:
 
     void setMetaMode(MetaMode mode);
 
+    /**
+     * Push a blank buffer to the configured native output surface.
+     */
+    status_t pushBlankBufferToOutputSurface();
+
 private:
     class QueueGuard;
 
@@ -273,6 +278,7 @@ private:
         size_t numExtraSlots;
         uint32_t inputDelay;
         uint32_t pipelineDelay;
+        c2_cntr64_t lastFlushIndex;
 
         FrameReassembler frameReassembler;
     };
@@ -323,6 +329,8 @@ private:
         return mCrypto != nullptr || mDescrambler != nullptr;
     }
     std::atomic_bool mSendEncryptedInfoBuffer;
+
+    std::atomic_bool mTunneled;
 };
 
 // Conversion of a c2_status_t value to a status_t value may depend on the

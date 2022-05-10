@@ -37,7 +37,8 @@ public:
 
     status_t openOutput(audio_module_handle_t module,
                         audio_io_handle_t *output,
-                        audio_config_t * /*config*/,
+                        audio_config_t * /*halConfig*/,
+                        audio_config_base_t * /*mixerConfig*/,
                         const sp<DeviceDescriptorBase>& /*device*/,
                         uint32_t * /*latencyMs*/,
                         audio_output_flags_t /*flags*/) override {
@@ -102,6 +103,11 @@ public:
         ++mAudioPortListUpdateCount;
     }
 
+    status_t setDeviceConnectedState(
+            const struct audio_port_v7 *port __unused, bool connected __unused) override {
+        return NO_ERROR;
+    }
+
     // Helper methods for tests
     size_t getActivePatchesCount() const { return mActivePatches.size(); }
 
@@ -132,7 +138,12 @@ public:
     }
 
     size_t getRoutingUpdatedCounter() const {
-        return mRoutingUpdatedUpdateCount; }
+        return mRoutingUpdatedUpdateCount;
+    }
+
+    void onVolumeRangeInitRequest() override {
+
+    }
 
     status_t updateSecondaryOutputs(
             const TrackSecondaryOutputsMap& trackSecondaryOutputs __unused) override {

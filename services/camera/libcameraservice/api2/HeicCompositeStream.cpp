@@ -441,6 +441,10 @@ void HeicCompositeStream::onHeicFormatChanged(sp<AMessage>& newFormat) {
             newFormat->setInt32(KEY_TILE_HEIGHT, mGridHeight);
             newFormat->setInt32(KEY_GRID_ROWS, mGridRows);
             newFormat->setInt32(KEY_GRID_COLUMNS, mGridCols);
+            int32_t left, top, right, bottom;
+            if (newFormat->findRect("crop", &left, &top, &right, &bottom)) {
+                newFormat->setRect("crop", 0, 0, mOutputWidth - 1, mOutputHeight - 1);
+            }
         }
     }
     newFormat->setInt32(KEY_IS_DEFAULT, 1 /*isPrimary*/);
@@ -1130,7 +1134,8 @@ status_t HeicCompositeStream::processCompletedInputFrame(int64_t frameNumber,
     // Copy the content of the file to memory.
     sp<GraphicBuffer> gb = GraphicBuffer::from(inputFrame.anb);
     void* dstBuffer;
-    auto res = gb->lockAsync(GRALLOC_USAGE_SW_WRITE_OFTEN, &dstBuffer, inputFrame.fenceFd);
+    GraphicBufferLocker gbLocker(gb);
+    auto res = gbLocker.lockAsync(&dstBuffer, inputFrame.fenceFd);
     if (res != OK) {
         ALOGE("%s: Error trying to lock output buffer fence: %s (%d)", __FUNCTION__,
                 strerror(-res), res);

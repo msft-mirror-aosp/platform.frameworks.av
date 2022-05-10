@@ -25,6 +25,9 @@
  * 2) Consistent behavior and documentation.
  */
 
+#define AMEDIAMETRICS_INITIAL_MAX_VOLUME (0.f)
+#define AMEDIAMETRICS_INITIAL_MIN_VOLUME (1.f)
+
 /*
  * Taxonomy of audio keys
  *
@@ -60,6 +63,10 @@
 // Keys are strings used for MediaMetrics Item Keys
 #define AMEDIAMETRICS_KEY_AUDIO_FLINGER       AMEDIAMETRICS_KEY_PREFIX_AUDIO "flinger"
 #define AMEDIAMETRICS_KEY_AUDIO_POLICY        AMEDIAMETRICS_KEY_PREFIX_AUDIO "policy"
+
+// Error keys
+#define AMEDIAMETRICS_KEY_AUDIO_TRACK_ERROR   AMEDIAMETRICS_KEY_PREFIX_AUDIO_TRACK "error"
+#define AMEDIAMETRICS_KEY_AUDIO_RECORD_ERROR  AMEDIAMETRICS_KEY_PREFIX_AUDIO_RECORD "error"
 
 /*
  * MediaMetrics Properties are unified space for consistency and readability.
@@ -112,9 +119,15 @@
 #define AMEDIAMETRICS_PROP_DEVICETIMENS   "deviceTimeNs"   // int64_t playback/record time
 #define AMEDIAMETRICS_PROP_DEVICEVOLUME   "deviceVolume"   // double - average device volume
 
+#define AMEDIAMETRICS_PROP_DEVICEMAXVOLUMEDURATIONNS "deviceMaxVolumeDurationNs" // int64_t
+#define AMEDIAMETRICS_PROP_DEVICEMAXVOLUME "deviceMaxVolume" // double - maximum device volume
+#define AMEDIAMETRICS_PROP_DEVICEMINVOLUMEDURATIONNS "deviceMinVolumeDurationNs" // int64_t
+#define AMEDIAMETRICS_PROP_DEVICEMINVOLUME "deviceMinVolume" // double - minimum device volume
+
 #define AMEDIAMETRICS_PROP_DIRECTION      "direction"      // string AAudio input or output
 #define AMEDIAMETRICS_PROP_DURATIONNS     "durationNs"     // int64 duration time span
 #define AMEDIAMETRICS_PROP_ENCODING       "encoding"       // string value of format
+
 #define AMEDIAMETRICS_PROP_EVENT          "event#"         // string value (often func name)
 #define AMEDIAMETRICS_PROP_EXECUTIONTIMENS "executionTimeNs"  // time to execute the event
 
@@ -127,6 +140,8 @@
 #define AMEDIAMETRICS_PROP_INTERVALCOUNT  "intervalCount"  // int32
 #define AMEDIAMETRICS_PROP_LATENCYMS      "latencyMs"      // double value
 #define AMEDIAMETRICS_PROP_LOGSESSIONID   "logSessionId"   // hex string, "" none
+#define AMEDIAMETRICS_PROP_METHODCODE     "methodCode"     // int64_t an int indicating method
+#define AMEDIAMETRICS_PROP_METHODNAME     "methodName"     // string method name
 #define AMEDIAMETRICS_PROP_NAME           "name"           // string value
 #define AMEDIAMETRICS_PROP_ORIGINALFLAGS  "originalFlags"  // int32
 #define AMEDIAMETRICS_PROP_OUTPUTDEVICES  "outputDevices"  // string value
@@ -146,7 +161,17 @@
 #define AMEDIAMETRICS_PROP_STARTUPMS      "startupMs"      // double value
 // State is "ACTIVE" or "STOPPED" for AudioRecord
 #define AMEDIAMETRICS_PROP_STATE          "state"          // string
-#define AMEDIAMETRICS_PROP_STATUS         "status"         // int32 status_t
+#define AMEDIAMETRICS_PROP_STATUS         "status#"        // int32 status_t
+                                                           // AAudio uses their own status codes
+// Supplemental information to the status code.
+#define AMEDIAMETRICS_PROP_STATUSSUBCODE  "statusSubCode"  // int32, specific code
+                                                           // used in conjunction with status.
+#define AMEDIAMETRICS_PROP_STATUSMESSAGE  "statusMessage"  // string, supplemental info.
+                                                           // Arbitrary information treated as
+                                                           // informational, may be logcat msg,
+                                                           // or an exception with stack trace.
+                                                           // Treated as "debug" information.
+
 #define AMEDIAMETRICS_PROP_STREAMTYPE     "streamType"     // string (AudioTrack)
 #define AMEDIAMETRICS_PROP_THREADID       "threadId"       // int32 value io handle
 #define AMEDIAMETRICS_PROP_THROTTLEMS     "throttleMs"     // double
@@ -201,6 +226,7 @@
 #define AMEDIAMETRICS_PROP_EVENT_VALUE_SETVOLUME  "setVolume"  // AudioTrack
 #define AMEDIAMETRICS_PROP_EVENT_VALUE_START      "start"  // AudioTrack, AudioRecord
 #define AMEDIAMETRICS_PROP_EVENT_VALUE_STOP       "stop"   // AudioTrack, AudioRecord
+#define AMEDIAMETRICS_PROP_EVENT_VALUE_TIMEOUT    "timeout"  // AudioFlinger, AudioPolicy
 #define AMEDIAMETRICS_PROP_EVENT_VALUE_UNDERRUN   "underrun" // from Thread
 
 // Possible values for AMEDIAMETRICS_PROP_CALLERNAME
@@ -214,5 +240,79 @@
 #define AMEDIAMETRICS_PROP_CALLERNAME_VALUE_SOUNDPOOL     "soundpool"      // SoundPool
 #define AMEDIAMETRICS_PROP_CALLERNAME_VALUE_TONEGENERATOR "tonegenerator"  // dial tones
 #define AMEDIAMETRICS_PROP_CALLERNAME_VALUE_UNKNOWN       "unknown"        // callerName not set
+
+// MediaMetrics errors are expected to cover the following sources:
+// https://docs.oracle.com/javase/7/docs/api/java/lang/RuntimeException.html
+// https://docs.oracle.com/javase/7/docs/api/java/lang/Exception.html
+// https://cs.android.com/android/platform/superproject/+/master:frameworks/native/libs/binder/include/binder/Status.h;drc=88e25c0861499ee3ab885814dddc097ab234cb7b;l=57
+// https://cs.android.com/android/platform/superproject/+/master:frameworks/base/media/java/android/media/AudioSystem.java;drc=3ac246c43294d7f7012bdcb0ccb7bae1aa695bd4;l=785
+// https://cs.android.com/android/platform/superproject/+/master:frameworks/av/media/libaaudio/include/aaudio/AAudio.h;drc=cfd3a6fa3aaaf712a890dc02452b38ef401083b8;l=120
+// https://abseil.io/docs/cpp/guides/status-codes
+
+// Status errors:
+// An empty status string or "ok" is interpreted as no error.
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_OK                "ok"
+
+// Error category: argument
+//   IllegalArgumentException
+//   NullPointerException
+//   BAD_VALUE
+//   absl::INVALID_ARGUMENT
+//   absl::OUT_OF_RANGE
+//   Out of range, out of bounds.
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_ARGUMENT          "argument"
+
+// Error category: io
+//   IOException
+//   android.os.DeadObjectException, android.os.RemoteException
+//   DEAD_OBJECT
+//   FAILED_TRANSACTION
+//   IO_ERROR
+//   file or ioctl failure
+//   Service, rpc, binder, or socket failure.
+//   Hardware or device failure.
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_IO                "io"
+
+// Error category: outOfMemory
+//   OutOfMemoryException
+//   NO_MEMORY
+//   absl::RESOURCE_EXHAUSTED
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_MEMORY            "memory"
+
+// Error category: security
+//   SecurityException
+//   PERMISSION_DENIED
+//   absl::PERMISSION_DENIED
+//   absl::UNAUTHENTICATED
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_SECURITY          "security"
+
+// Error category: state
+//   IllegalStateException
+//   UnsupportedOperationException
+//   INVALID_OPERATION
+//   NO_INIT
+//   absl::NOT_FOUND
+//   absl::ALREADY_EXISTS
+//   absl::FAILED_PRECONDITION
+//   absl::UNAVAILABLE
+//   absl::UNIMPLEMENTED
+//   Functionality not implemented (argument may or may not be correct).
+//   Call unexpected or out of order.
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_STATE             "state"
+
+// Error category: timeout
+//   TimeoutException
+//   WOULD_BLOCK
+//   absl::DEADLINE_EXCEEDED
+//   absl::ABORTED
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_TIMEOUT           "timeout"
+
+// Error category: unknown
+//   Exception (Java specified not listed above, or custom app/service)
+//   UNKNOWN_ERROR
+//   absl::INTERNAL
+//   absl::DATA_LOSS
+//   Catch-all bucket for errors not listed above.
+#define AMEDIAMETRICS_PROP_STATUS_VALUE_UNKNOWN           "unknown"
 
 #endif // ANDROID_MEDIA_MEDIAMETRICSCONSTANTS_H

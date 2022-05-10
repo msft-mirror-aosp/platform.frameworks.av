@@ -18,16 +18,10 @@ package android.media;
 
 import android.content.AttributionSourceState;
 
-import android.media.audio.common.AudioFormat;
-
 import android.media.AudioAttributesEx;
 import android.media.AudioAttributesInternal;
-import android.media.AudioConfig;
-import android.media.AudioConfigBase;
-import android.media.AudioDevice;
+import android.media.AudioDirectMode;
 import android.media.AudioMix;
-import android.media.AudioMode;
-import android.media.AudioOffloadInfo;
 import android.media.AudioOffloadMode;
 import android.media.AudioPatch;
 import android.media.AudioPolicyDeviceState;
@@ -38,19 +32,30 @@ import android.media.AudioPortConfig;
 import android.media.AudioPortRole;
 import android.media.AudioPortType;
 import android.media.AudioProductStrategy;
-import android.media.AudioSourceType;
-import android.media.AudioStreamType;
-import android.media.AudioUsage;
-import android.media.AudioUuid;
 import android.media.AudioVolumeGroup;
 import android.media.DeviceRole;
 import android.media.EffectDescriptor;
 import android.media.GetInputForAttrResponse;
 import android.media.GetOutputForAttrResponse;
+import android.media.GetSpatializerResponse;
 import android.media.IAudioPolicyServiceClient;
 import android.media.ICaptureStateListener;
-import android.media.Int;
+import android.media.INativeSpatializerCallback;
 import android.media.SoundTriggerSession;
+import android.media.audio.common.AudioConfig;
+import android.media.audio.common.AudioConfigBase;
+import android.media.audio.common.AudioDevice;
+import android.media.audio.common.AudioDeviceDescription;
+import android.media.audio.common.AudioFormatDescription;
+import android.media.audio.common.AudioMode;
+import android.media.audio.common.AudioProfile;
+import android.media.audio.common.AudioOffloadInfo;
+import android.media.audio.common.AudioPort;
+import android.media.audio.common.AudioSource;
+import android.media.audio.common.AudioStreamType;
+import android.media.audio.common.AudioUsage;
+import android.media.audio.common.AudioUuid;
+import android.media.audio.common.Int;
 
 /**
  * IAudioPolicyService interface (see AudioPolicyInterface for method descriptions).
@@ -60,16 +65,15 @@ import android.media.SoundTriggerSession;
 interface IAudioPolicyService {
     oneway void onNewAudioModulesAvailable();
 
-    void setDeviceConnectionState(in AudioDevice device,
-                                  in AudioPolicyDeviceState state,
-                                  @utf8InCpp String deviceName,
-                                  in AudioFormat encodedFormat);
+    void setDeviceConnectionState(in AudioPolicyDeviceState state,
+                                  in android.media.audio.common.AudioPort port,
+                                  in AudioFormatDescription encodedFormat);
 
     AudioPolicyDeviceState getDeviceConnectionState(in AudioDevice device);
 
     void handleDeviceConfigChange(in AudioDevice device,
                                   @utf8InCpp String deviceName,
-                                  in AudioFormat encodedFormat);
+                                  in AudioFormatDescription encodedFormat);
 
     void setPhoneState(AudioMode state, int /* uid_t */ uid);
 
@@ -114,18 +118,18 @@ interface IAudioPolicyService {
                           int indexMax);
 
     void setStreamVolumeIndex(AudioStreamType stream,
-                              int /* audio_devices_t */ device,
+                              in AudioDeviceDescription device,
                               int index);
 
     int getStreamVolumeIndex(AudioStreamType stream,
-                             int /* audio_devices_t */ device);
+                             in AudioDeviceDescription device);
 
     void setVolumeIndexForAttributes(in AudioAttributesInternal attr,
-                                     int /* audio_devices_t */ device,
+                                     in AudioDeviceDescription device,
                                      int index);
 
     int getVolumeIndexForAttributes(in AudioAttributesInternal attr,
-                                    int /* audio_devices_t */ device);
+                                    in AudioDeviceDescription device);
 
     int getMaxVolumeIndexForAttributes(in AudioAttributesInternal attr);
 
@@ -133,9 +137,7 @@ interface IAudioPolicyService {
 
     int /* product_strategy_t */ getStrategyForStream(AudioStreamType stream);
 
-    int /* bitmask of audio_devices_t */ getDevicesForStream(AudioStreamType stream);
-
-    AudioDevice[] getDevicesForAttributes(in AudioAttributesEx attr);
+    AudioDevice[] getDevicesForAttributes(in AudioAttributesEx attr, boolean forVolume);
 
     int /* audio_io_handle_t */ getOutputForEffect(in EffectDescriptor desc);
 
@@ -155,7 +157,7 @@ interface IAudioPolicyService {
 
     boolean isStreamActiveRemotely(AudioStreamType stream, int inPastMs);
 
-    boolean isSourceActive(AudioSourceType source);
+    boolean isSourceActive(AudioSource source);
 
     /**
      * On input, count represents the maximum length of the returned array.
@@ -170,7 +172,7 @@ interface IAudioPolicyService {
                                                        @utf8InCpp String opPackageName,
                                                        in AudioUuid uuid,
                                                        int priority,
-                                                       AudioSourceType source);
+                                                       AudioSource source);
 
     int /* audio_unique_id_t */ addStreamDefaultEffect(in AudioUuid type,
                                                        @utf8InCpp String opPackageName,
@@ -212,8 +214,8 @@ interface IAudioPolicyService {
                        inout Int count,
                        out AudioPort[] ports);
 
-    /** Get attributes for a given audio port. */
-    AudioPort getAudioPort(in AudioPort port);
+    /** Get attributes for the audio port with the given id (AudioPort.hal.id field). */
+    AudioPort getAudioPort(int /* audio_port_handle_t */ portId);
 
     /**
      * Create an audio patch between several source and sink ports.
@@ -268,7 +270,7 @@ interface IAudioPolicyService {
 
     boolean getMasterMono();
 
-    float getStreamVolumeDB(AudioStreamType stream, int index, int /* audio_devices_t */ device);
+    float getStreamVolumeDB(AudioStreamType stream, int index, in AudioDeviceDescription device);
 
     /**
      * Populates supported surround formats and their enabled state in formats and formatsEnabled.
@@ -279,7 +281,7 @@ interface IAudioPolicyService {
      * number of elements without actually retrieving them.
      */
     void getSurroundFormats(inout Int count,
-                            out AudioFormat[] formats,
+                            out AudioFormatDescription[] formats,
                             out boolean[] formatsEnabled);
 
     /**
@@ -291,21 +293,24 @@ interface IAudioPolicyService {
      * number of elements without actually retrieving them.
      */
     void getReportedSurroundFormats(inout Int count,
-                                    out AudioFormat[] formats);
+                                    out AudioFormatDescription[] formats);
 
-    AudioFormat[] getHwOffloadEncodingFormatsSupportedForA2DP();
+    AudioFormatDescription[] getHwOffloadFormatsSupportedForBluetoothMedia(
+                                    in AudioDeviceDescription device);
 
-    void setSurroundFormatEnabled(AudioFormat audioFormat, boolean enabled);
+    void setSurroundFormatEnabled(in AudioFormatDescription audioFormat, boolean enabled);
 
-    void setAssistantUid(int /* uid_t */ uid);
+    void setAssistantServicesUids(in int[] /* uid_t[] */ uids);
 
-    void setHotwordDetectionServiceUid(int /* uid_t */ uid);
+    void setActiveAssistantServicesUids(in int[] /* uid_t[] */ activeUids);
 
     void setA11yServicesUids(in int[] /* uid_t[] */ uids);
 
     void setCurrentImeUid(int /* uid_t */ uid);
 
     boolean isHapticPlaybackSupported();
+
+    boolean isUltrasoundSupported();
 
     AudioProductStrategy[] listAudioProductStrategies();
     int /* product_strategy_t */ getProductStrategyFromAudioAttributes(in AudioAttributesEx aa,
@@ -329,23 +334,64 @@ interface IAudioPolicyService {
     AudioDevice[] getDevicesForRoleAndStrategy(int /* product_strategy_t */ strategy,
                                                DeviceRole role);
 
-    void setDevicesRoleForCapturePreset(AudioSourceType audioSource,
+    void setDevicesRoleForCapturePreset(AudioSource audioSource,
                                         DeviceRole role,
                                         in AudioDevice[] devices);
 
-    void addDevicesRoleForCapturePreset(AudioSourceType audioSource,
+    void addDevicesRoleForCapturePreset(AudioSource audioSource,
                                         DeviceRole role,
                                         in AudioDevice[] devices);
 
-    void removeDevicesRoleForCapturePreset(AudioSourceType audioSource,
+    void removeDevicesRoleForCapturePreset(AudioSource audioSource,
                                            DeviceRole role,
                                            in AudioDevice[] devices);
 
-    void clearDevicesRoleForCapturePreset(AudioSourceType audioSource,
+    void clearDevicesRoleForCapturePreset(AudioSource audioSource,
                                           DeviceRole role);
 
-    AudioDevice[] getDevicesForRoleAndCapturePreset(AudioSourceType audioSource,
+    AudioDevice[] getDevicesForRoleAndCapturePreset(AudioSource audioSource,
                                                     DeviceRole role);
 
     boolean registerSoundTriggerCaptureStateListener(ICaptureStateListener listener);
+
+    /** If a spatializer stage effect is present on the platform, this will return an
+     * ISpatializer interface (see GetSpatializerResponse,aidl) to control this
+     * feature.
+     * If no spatializer stage is present, a null interface is returned.
+     * The INativeSpatializerCallback passed must not be null.
+     * Only one ISpatializer interface can exist at a given time. The native audio policy
+     * service will reject the request if an interface was already acquired and previous owner
+     * did not die or call ISpatializer.release().
+     */
+    GetSpatializerResponse getSpatializer(INativeSpatializerCallback callback);
+
+    /** Queries if some kind of spatialization will be performed if the audio playback context
+     * described by the provided arguments is present.
+     * The context is made of:
+     * - The audio attributes describing the playback use case.
+     * - The audio configuration describing the audio format, channels, sampling rate...
+     * - The devices describing the sink audio device selected for playback.
+     * All arguments are optional and only the specified arguments are used to match against
+     * supported criteria. For instance, supplying no argument will tell if spatialization is
+     * supported or not in general.
+     */
+    boolean canBeSpatialized(in @nullable AudioAttributesInternal attr,
+                             in @nullable AudioConfig config,
+                             in AudioDevice[] devices);
+
+    /**
+     * Query how the direct playback is currently supported on the device.
+     */
+    AudioDirectMode getDirectPlaybackSupport(in AudioAttributesInternal attr,
+                                              in AudioConfig config);
+
+    /**
+     * Query audio profiles available for direct playback on the current output device(s)
+     * for the specified audio attributes.
+     */
+    AudioProfile[] getDirectProfilesForAttributes(in AudioAttributesInternal attr);
+
+    // When adding a new method, please review and update
+    // AudioPolicyService.cpp AudioPolicyService::onTransact()
+    // AudioPolicyService.cpp IAUDIOPOLICYSERVICE_BINDER_METHOD_MACRO_LIST
 }

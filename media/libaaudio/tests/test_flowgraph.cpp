@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "flowgraph/ClipToRange.h"
+#include "flowgraph/MonoBlend.h"
 #include "flowgraph/MonoToMultiConverter.h"
 #include "flowgraph/SourceFloat.h"
 #include "flowgraph/RampLinear.h"
@@ -32,26 +33,73 @@
 #include "flowgraph/SourceI16.h"
 #include "flowgraph/SourceI24.h"
 
-using namespace flowgraph;
+using namespace FLOWGRAPH_OUTER_NAMESPACE::flowgraph;
 
 constexpr int kBytesPerI24Packed = 3;
 
+// Simple test that tries to reproduce a Clang compiler bug.
+__attribute__((noinline))
+void local_convert_float_to_int16(const float *input,
+                                  int16_t *output,
+                                  int count) {
+    for (int i = 0; i < count; i++) {
+        int32_t n = (int32_t) (*input++ * 32768.0f);
+        *output++ = std::min(INT16_MAX, std::max(INT16_MIN, n)); // clip
+    }
+}
+
+TEST(test_flowgraph, local_convert_float_int16) {
+    static constexpr int kNumSamples = 8;
+    static constexpr std::array<float, kNumSamples> input = {
+        1.0f, 0.5f, -0.25f, -1.0f,
+        0.0f, 53.9f, -87.2f, -1.02f};
+    static constexpr std::array<int16_t, kNumSamples>  expected = {
+        32767, 16384, -8192, -32768,
+        0, 32767, -32768, -32768};
+    std::array<int16_t, kNumSamples> output;
+
+    // Do it inline, which will probably work even with the buggy compiler.
+    // This validates the expected data.
+    const float *in = input.data();
+    int16_t *out = output.data();
+    output.fill(777);
+    for (int i = 0; i < kNumSamples; i++) {
+        int32_t n = (int32_t) (*in++ * 32768.0f);
+        *out++ = std::min(INT16_MAX, std::max(INT16_MIN, n)); // clip
+    }
+    for (int i = 0; i < kNumSamples; i++) {
+        EXPECT_EQ(expected.at(i), output.at(i)) << ", i = " << i;
+    }
+
+    // Convert audio signal using the function.
+    output.fill(777);
+    local_convert_float_to_int16(input.data(), output.data(), kNumSamples);
+    for (int i = 0; i < kNumSamples; i++) {
+        EXPECT_EQ(expected.at(i), output.at(i)) << ", i = " << i;
+    }
+}
+
 TEST(test_flowgraph, module_sinki16) {
-    static const float input[] = {1.0f, 0.5f, -0.25f, -1.0f, 0.0f, 53.9f, -87.2f};
-    static const int16_t expected[] = {32767, 16384, -8192, -32768, 0, 32767, -32768};
-    int16_t output[20];
+    static constexpr int kNumSamples = 8;
+    static constexpr std::array<float, kNumSamples> input = {
+        1.0f, 0.5f, -0.25f, -1.0f,
+        0.0f, 53.9f, -87.2f, -1.02f};
+    static constexpr std::array<int16_t, kNumSamples>  expected = {
+        32767, 16384, -8192, -32768,
+        0, 32767, -32768, -32768};
+    std::array<int16_t, kNumSamples + 10> output; // larger than input
+
     SourceFloat sourceFloat{1};
     SinkI16 sinkI16{1};
 
-    int numInputFrames = sizeof(input) / sizeof(input[0]);
-    sourceFloat.setData(input, numInputFrames);
+    sourceFloat.setData(input.data(), kNumSamples);
     sourceFloat.output.connect(&sinkI16.input);
 
-    int numOutputFrames = sizeof(output) / sizeof(int16_t);
-    int32_t numRead = sinkI16.read(output, numOutputFrames);
-    ASSERT_EQ(numInputFrames, numRead);
+    output.fill(777);
+    int32_t numRead = sinkI16.read(output.data(), output.size());
+    ASSERT_EQ(kNumSamples, numRead);
     for (int i = 0; i < numRead; i++) {
-        EXPECT_EQ(expected[i], output[i]);
+        EXPECT_EQ(expected.at(i), output.at(i)) << ", i = " << i;
     }
 }
 
@@ -76,31 +124,40 @@ TEST(test_flowgraph, module_mono_to_stereo) {
 }
 
 TEST(test_flowgraph, module_ramp_linear) {
+    constexpr int singleNumOutput = 1;
     constexpr int rampSize = 5;
     constexpr int numOutput = 100;
     constexpr float value = 1.0f;
-    constexpr float target = 100.0f;
+    constexpr float initialTarget = 10.0f;
+    constexpr float finalTarget = 100.0f;
+    constexpr float tolerance = 0.0001f; // arbitrary
     float output[numOutput] = {};
     RampLinear rampLinear{1};
     SinkFloat sinkFloat{1};
 
     rampLinear.input.setValue(value);
     rampLinear.setLengthInFrames(rampSize);
-    rampLinear.setTarget(target);
-    rampLinear.forceCurrent(0.0f);
-
     rampLinear.output.connect(&sinkFloat.input);
 
+    // Check that the values go to the initial target instantly.
+    rampLinear.setTarget(initialTarget);
+    int32_t singleNumRead = sinkFloat.read(output, singleNumOutput);
+    ASSERT_EQ(singleNumRead, singleNumOutput);
+    EXPECT_NEAR(value * initialTarget, output[0], tolerance);
+
+    // Now set target and check that the linear ramp works as expected.
+    rampLinear.setTarget(finalTarget);
     int32_t numRead = sinkFloat.read(output, numOutput);
+    const float incrementSize = (finalTarget - initialTarget) / rampSize;
     ASSERT_EQ(numOutput, numRead);
-    constexpr float tolerance = 0.0001f; // arbitrary
+
     int i = 0;
     for (; i < rampSize; i++) {
-        float expected = i * value * target / rampSize;
+        float expected = value * (initialTarget + i * incrementSize);
         EXPECT_NEAR(expected, output[i], tolerance);
     }
     for (; i < numOutput; i++) {
-        float expected = value * target;
+        float expected = value * finalTarget;
         EXPECT_NEAR(expected, output[i], tolerance);
     }
 }
@@ -155,3 +212,29 @@ TEST(test_flowgraph, module_clip_to_range) {
         EXPECT_NEAR(expected[i], output[i], tolerance);
     }
 }
+
+TEST(test_flowgraph, module_mono_blend) {
+    // Two channel to two channel with 3 inputs and outputs.
+    constexpr int numChannels = 2;
+    constexpr int numFrames = 3;
+
+    static const float input[] = {-0.7, 0.5, -0.25, 1.25, 1000, 2000};
+    static const float expected[] = {-0.1, -0.1, 0.5, 0.5, 1500, 1500};
+    float output[100];
+    SourceFloat sourceFloat{numChannels};
+    MonoBlend monoBlend{numChannels};
+    SinkFloat sinkFloat{numChannels};
+
+    sourceFloat.setData(input, numFrames);
+
+    sourceFloat.output.connect(&monoBlend.input);
+    monoBlend.output.connect(&sinkFloat.input);
+
+    int32_t numRead = sinkFloat.read(output, numFrames);
+    ASSERT_EQ(numRead, numFrames);
+    constexpr float tolerance = 0.000001f; // arbitrary
+    for (int i = 0; i < numRead; i++) {
+        EXPECT_NEAR(expected[i], output[i], tolerance);
+    }
+}
+

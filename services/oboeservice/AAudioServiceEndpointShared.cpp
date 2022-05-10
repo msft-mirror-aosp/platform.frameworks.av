@@ -78,7 +78,7 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
     result = mStreamInternal->open(builder);
 
     setSampleRate(mStreamInternal->getSampleRate());
-    setSamplesPerFrame(mStreamInternal->getSamplesPerFrame());
+    setChannelMask(mStreamInternal->getChannelMask());
     setDeviceId(mStreamInternal->getDeviceId());
     setSessionId(mStreamInternal->getSessionId());
     setFormat(AUDIO_FORMAT_PCM_FLOAT); // force for mixer
@@ -213,4 +213,13 @@ aaudio_result_t AAudioServiceEndpointShared::getTimestamp(int64_t *positionFrame
         result = AAUDIO_ERROR_UNAVAILABLE;
     }
     return result;
+}
+
+void AAudioServiceEndpointShared::handleDisconnectRegisteredStreamsAsync() {
+    android::sp<AAudioServiceEndpointShared> holdEndpoint(this);
+    std::thread asyncTask([holdEndpoint]() {
+        // We do not need the returned vector.
+        holdEndpoint->disconnectRegisteredStreams();
+    });
+    asyncTask.detach();
 }
