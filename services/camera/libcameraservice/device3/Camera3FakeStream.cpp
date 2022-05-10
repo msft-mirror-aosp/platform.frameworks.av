@@ -48,7 +48,7 @@ status_t Camera3FakeStream::getBufferLocked(camera_stream_buffer *,
 
 status_t Camera3FakeStream::returnBufferLocked(
         const camera_stream_buffer &,
-        nsecs_t, const std::vector<size_t>&) {
+        nsecs_t, nsecs_t, int32_t, const std::vector<size_t>&) {
     ATRACE_CALL();
     ALOGE("%s: Stream %d: Fake stream cannot return buffers!", __FUNCTION__, mId);
     return INVALID_OPERATION;
@@ -56,8 +56,9 @@ status_t Camera3FakeStream::returnBufferLocked(
 
 status_t Camera3FakeStream::returnBufferCheckedLocked(
             const camera_stream_buffer &,
-            nsecs_t,
+            nsecs_t, nsecs_t,
             bool,
+            int32_t,
             const std::vector<size_t>&,
             /*out*/
             sp<Fence>*) {
@@ -75,7 +76,7 @@ void Camera3FakeStream::dump(int fd, const Vector<String16> &args) const {
     Camera3IOStreamBase::dump(fd, args);
 }
 
-status_t Camera3FakeStream::setTransform(int) {
+status_t Camera3FakeStream::setTransform(int, bool) {
     ATRACE_CALL();
     // Do nothing
     return OK;

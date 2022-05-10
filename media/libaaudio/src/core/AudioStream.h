@@ -253,6 +253,14 @@ public:
         return mContentType;
     }
 
+    aaudio_spatialization_behavior_t getSpatializationBehavior() const {
+        return mSpatializationBehavior;
+    }
+
+    bool isContentSpatialized() const {
+        return mIsContentSpatialized;
+    }
+
     aaudio_input_preset_t getInputPreset() const {
         return mInputPreset;
     }
@@ -269,8 +277,17 @@ public:
         return mIsPrivacySensitive;
     }
 
+    bool getRequireMonoBlend() const {
+        return mRequireMonoBlend;
+    }
+
+    float getAudioBalance() const {
+        return mAudioBalance;
+    }
+
     /**
-     * This is only valid after setSamplesPerFrame() and setFormat() have been called.
+     * This is only valid after setChannelMask() and setFormat()
+     * have been called.
      */
     int32_t getBytesPerFrame() const {
         return mSamplesPerFrame * getBytesPerSample();
@@ -284,7 +301,7 @@ public:
     }
 
     /**
-     * This is only valid after setSamplesPerFrame() and setDeviceFormat() have been called.
+     * This is only valid after setChannelMask() and setDeviceFormat() have been called.
      */
     int32_t getBytesPerDeviceFrame() const {
         return getSamplesPerFrame() * audio_bytes_per_sample(getDeviceFormat());
@@ -316,6 +333,15 @@ public:
 
     int32_t getFramesPerDataCallback() const {
         return mFramesPerDataCallback;
+    }
+
+    aaudio_channel_mask_t getChannelMask() const {
+        return mChannelMask;
+    }
+
+    void setChannelMask(aaudio_channel_mask_t channelMask) {
+        mChannelMask = channelMask;
+        mSamplesPerFrame = AAudioConvert_channelMaskToCount(channelMask);
     }
 
     /**
@@ -429,7 +455,7 @@ protected:
     // PlayerBase allows the system to control the stream volume.
     class MyPlayerBase : public android::PlayerBase {
     public:
-        MyPlayerBase() {};
+        MyPlayerBase() = default;
 
         virtual ~MyPlayerBase() = default;
 
@@ -492,11 +518,6 @@ protected:
      */
     void setSampleRate(int32_t sampleRate) {
         mSampleRate = sampleRate;
-    }
-
-    // This should not be called after the open() call.
-    void setSamplesPerFrame(int32_t samplesPerFrame) {
-        mSamplesPerFrame = samplesPerFrame;
     }
 
     // This should not be called after the open() call.
@@ -563,7 +584,7 @@ protected:
      * @param numFrames
      * @return original pointer or the conversion buffer
      */
-    virtual const void * maybeConvertDeviceData(const void *audioData, int32_t numFrames) {
+    virtual const void * maybeConvertDeviceData(const void *audioData, int32_t /*numFrames*/) {
         return audioData;
     }
 
@@ -589,6 +610,14 @@ protected:
         mContentType = contentType;
     }
 
+    void setSpatializationBehavior(aaudio_spatialization_behavior_t spatializationBehavior) {
+        mSpatializationBehavior = spatializationBehavior;
+    }
+
+    void setIsContentSpatialized(bool isContentSpatialized) {
+        mIsContentSpatialized = isContentSpatialized;
+    }
+
     /**
      * This should not be called after the open() call.
      */
@@ -608,6 +637,20 @@ protected:
      */
     void setPrivacySensitive(bool privacySensitive) {
         mIsPrivacySensitive = privacySensitive;
+    }
+
+    /**
+     * This should not be called after the open() call.
+     */
+    void setRequireMonoBlend(bool requireMonoBlend) {
+        mRequireMonoBlend = requireMonoBlend;
+    }
+
+    /**
+     * This should not be called after the open() call.
+     */
+    void setAudioBalance(float audioBalance) {
+        mAudioBalance = audioBalance;
     }
 
     std::string mMetricsId; // set once during open()
@@ -633,6 +676,7 @@ private:
 
     // These do not change after open().
     int32_t                     mSamplesPerFrame = AAUDIO_UNSPECIFIED;
+    aaudio_channel_mask_t       mChannelMask = AAUDIO_UNSPECIFIED;
     int32_t                     mSampleRate = AAUDIO_UNSPECIFIED;
     int32_t                     mDeviceId = AAUDIO_UNSPECIFIED;
     aaudio_sharing_mode_t       mSharingMode = AAUDIO_SHARING_MODE_SHARED;
@@ -645,9 +689,13 @@ private:
 
     aaudio_usage_t              mUsage           = AAUDIO_UNSPECIFIED;
     aaudio_content_type_t       mContentType     = AAUDIO_UNSPECIFIED;
+    aaudio_spatialization_behavior_t mSpatializationBehavior = AAUDIO_UNSPECIFIED;
+    bool                        mIsContentSpatialized = false;
     aaudio_input_preset_t       mInputPreset     = AAUDIO_UNSPECIFIED;
     aaudio_allowed_capture_policy_t mAllowedCapturePolicy = AAUDIO_ALLOW_CAPTURE_BY_ALL;
     bool                        mIsPrivacySensitive = false;
+    bool                        mRequireMonoBlend = false;
+    float                       mAudioBalance = 0;
 
     int32_t                     mSessionId = AAUDIO_UNSPECIFIED;
 

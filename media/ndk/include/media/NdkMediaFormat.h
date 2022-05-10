@@ -311,6 +311,10 @@ extern const char* AMEDIAFORMAT_KEY_SAMPLE_FILE_OFFSET __INTRODUCED_IN(31);
 extern const char* AMEDIAFORMAT_KEY_LAST_SAMPLE_INDEX_IN_CHUNK __INTRODUCED_IN(31);
 extern const char* AMEDIAFORMAT_KEY_SAMPLE_TIME_BEFORE_APPEND __INTRODUCED_IN(31);
 
+extern const char* AMEDIAFORMAT_KEY_PICTURE_TYPE __INTRODUCED_IN(33);
+extern const char* AMEDIAFORMAT_KEY_VIDEO_ENCODING_STATISTICS_LEVEL __INTRODUCED_IN(33);
+extern const char* AMEDIAFORMAT_KEY_VIDEO_QP_AVERAGE __INTRODUCED_IN(33);
+
 extern const char* AMEDIAFORMAT_VIDEO_QP_B_MAX __INTRODUCED_IN(31);
 extern const char* AMEDIAFORMAT_VIDEO_QP_B_MIN __INTRODUCED_IN(31);
 extern const char* AMEDIAFORMAT_VIDEO_QP_I_MAX __INTRODUCED_IN(31);
@@ -319,6 +323,34 @@ extern const char* AMEDIAFORMAT_VIDEO_QP_MAX __INTRODUCED_IN(31);
 extern const char* AMEDIAFORMAT_VIDEO_QP_MIN __INTRODUCED_IN(31);
 extern const char* AMEDIAFORMAT_VIDEO_QP_P_MAX __INTRODUCED_IN(31);
 extern const char* AMEDIAFORMAT_VIDEO_QP_P_MIN __INTRODUCED_IN(31);
+
+/**
+ * MPEG-H audio profile and level compatibility.
+ *
+ * See FDAmd_2 of ISO_IEC_23008-3;2019 MHAProfileAndLevelCompatibilitySetBox.
+ *
+ * Available since API level 32.
+ */
+extern const char* AMEDIAFORMAT_KEY_MPEGH_COMPATIBLE_SETS __INTRODUCED_IN(32);
+
+/**
+ * MPEG-H audio profile level indication.
+ *
+ * See ISO_IEC_23008-3;2019 MHADecoderConfigurationRecord mpegh3daProfileLevelIndication.
+ *
+ * Available since API level 32.
+ */
+extern const char* AMEDIAFORMAT_KEY_MPEGH_PROFILE_LEVEL_INDICATION __INTRODUCED_IN(32);
+
+/**
+ * MPEG-H audio reference channel layout.
+ *
+ * See ISO_IEC_23008-3;2019 MHADecoderConfigurationRecord referenceChannelLayout
+ * and ISO_IEC_23001‐8 ChannelConfiguration value.
+ *
+ * Available since API level 32.
+ */
+extern const char* AMEDIAFORMAT_KEY_MPEGH_REFERENCE_CHANNEL_LAYOUT __INTRODUCED_IN(32);
 
 __END_DECLS
 

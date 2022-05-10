@@ -21,9 +21,11 @@
 #include <inttypes.h>
 #include <math.h>
 #include <sys/resource.h>
+#include <thread>
 
 #include <android/media/IAudioPolicyService.h>
 #include <android-base/macros.h>
+#include <android-base/stringprintf.h>
 #include <audio_utils/clock.h>
 #include <audio_utils/primitives.h>
 #include <binder/IPCThreadState.h>
@@ -43,6 +45,7 @@
 static const int kMaxLoopCountNotifications = 32;
 
 using ::android::aidl_utils::statusTFromBinderStatus;
+using ::android::base::StringPrintf;
 
 namespace android {
 // ---------------------------------------------------------------------------
@@ -170,8 +173,8 @@ bool AudioTrack::isDirectOutputSupported(const audio_config_base_t& config,
     if (aps == 0) return false;
 
     auto result = [&]() -> ConversionResult<bool> {
-        media::AudioConfigBase configAidl = VALUE_OR_RETURN(
-                legacy2aidl_audio_config_base_t_AudioConfigBase(config));
+        media::audio::common::AudioConfigBase configAidl = VALUE_OR_RETURN(
+                legacy2aidl_audio_config_base_t_AudioConfigBase(config, false /*isInput*/));
         media::AudioAttributesInternal attributesAidl = VALUE_OR_RETURN(
                 legacy2aidl_audio_attributes_t_AudioAttributesInternal(attributes));
         bool retAidl;
@@ -196,6 +199,7 @@ void AudioTrack::MediaMetrics::gather(const AudioTrack *track)
 
 #define MM_PREFIX "android.media.audiotrack." // avoid cut-n-paste errors.
 
+    // Do not change this without changing the MediaMetricsService side.
     // Java API 28 entries, do not change.
     mMetricsItem->setCString(MM_PREFIX "streamtype", toString(track->streamType()).c_str());
     mMetricsItem->setCString(MM_PREFIX "type",
@@ -211,6 +215,7 @@ void AudioTrack::MediaMetrics::gather(const AudioTrack *track)
     mMetricsItem->setInt32(MM_PREFIX "frameCount", (int32_t)track->mFrameCount);
     mMetricsItem->setCString(MM_PREFIX "attributes", toString(track->mAttributes).c_str());
     mMetricsItem->setCString(MM_PREFIX "logSessionId", track->mLogSessionId.c_str());
+    mMetricsItem->setInt32(MM_PREFIX "underrunFrames", (int32_t)track->getUnderrunFrames());
 }
 
 // hand the user a snapshot of the metrics.
@@ -253,8 +258,7 @@ AudioTrack::AudioTrack(
         audio_channel_mask_t channelMask,
         size_t frameCount,
         audio_output_flags_t flags,
-        callback_t cbf,
-        void* user,
+        const wp<IAudioTrackCallback> & callback,
         int32_t notificationFrames,
         audio_session_t sessionId,
         transfer_type transferType,
@@ -273,10 +277,91 @@ AudioTrack::AudioTrack(
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
 
-    (void)set(streamType, sampleRate, format, channelMask,
-            frameCount, flags, cbf, user, notificationFrames,
-            0 /*sharedBuffer*/, false /*threadCanCallJava*/, sessionId, transferType, offloadInfo,
-            attributionSource, pAttributes, doNotReconnect, maxRequiredSpeed, selectedDeviceId);
+    // make_unique does not aggregate init until c++20
+    mSetParams = std::unique_ptr<SetParams>{
+            new SetParams{streamType, sampleRate, format, channelMask, frameCount, flags, callback,
+                          notificationFrames, 0 /*sharedBuffer*/, false /*threadCanCallJava*/,
+                          sessionId, transferType, offloadInfo, attributionSource, pAttributes,
+                          doNotReconnect, maxRequiredSpeed, selectedDeviceId}};
+}
+
+namespace {
+    class LegacyCallbackWrapper : public AudioTrack::IAudioTrackCallback {
+      const AudioTrack::legacy_callback_t mCallback;
+      void * const mData;
+      public:
+        LegacyCallbackWrapper(AudioTrack::legacy_callback_t callback, void* user)
+            : mCallback(callback), mData(user) {}
+        size_t onMoreData(const AudioTrack::Buffer & buffer) override {
+          AudioTrack::Buffer copy = buffer;
+          mCallback(AudioTrack::EVENT_MORE_DATA, mData, static_cast<void*>(&copy));
+          return copy.size();
+        }
+        void onUnderrun() override {
+            mCallback(AudioTrack::EVENT_UNDERRUN, mData, nullptr);
+        }
+        void onLoopEnd(int32_t loopsRemaining) override {
+            mCallback(AudioTrack::EVENT_LOOP_END, mData, &loopsRemaining);
+        }
+        void onMarker(uint32_t markerPosition) override {
+            mCallback(AudioTrack::EVENT_MARKER, mData, &markerPosition);
+        }
+        void onNewPos(uint32_t newPos) override {
+            mCallback(AudioTrack::EVENT_NEW_POS, mData, &newPos);
+        }
+        void onBufferEnd() override {
+            mCallback(AudioTrack::EVENT_BUFFER_END, mData, nullptr);
+        }
+        void onNewIAudioTrack() override {
+            mCallback(AudioTrack::EVENT_NEW_IAUDIOTRACK, mData, nullptr);
+        }
+        void onStreamEnd() override {
+            mCallback(AudioTrack::EVENT_STREAM_END, mData, nullptr);
+        }
+        size_t onCanWriteMoreData(const AudioTrack::Buffer & buffer) override {
+          AudioTrack::Buffer copy = buffer;
+          mCallback(AudioTrack::EVENT_CAN_WRITE_MORE_DATA, mData, static_cast<void*>(&copy));
+          return copy.size();
+        }
+    };
+}
+
+AudioTrack::AudioTrack(
+        audio_stream_type_t streamType,
+        uint32_t sampleRate,
+        audio_format_t format,
+        audio_channel_mask_t channelMask,
+        size_t frameCount,
+        audio_output_flags_t flags,
+        legacy_callback_t callback,
+        void* user,
+        int32_t notificationFrames,
+        audio_session_t sessionId,
+        transfer_type transferType,
+        const audio_offload_info_t *offloadInfo,
+        const AttributionSourceState& attributionSource,
+        const audio_attributes_t* pAttributes,
+        bool doNotReconnect,
+        float maxRequiredSpeed,
+        audio_port_handle_t selectedDeviceId)
+    : mStatus(NO_INIT),
+      mState(STATE_STOPPED),
+      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
+      mPreviousSchedulingGroup(SP_DEFAULT),
+      mPausedPosition(0),
+      mAudioTrackCallback(new AudioTrackCallback())
+{
+    mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
+    if (callback != nullptr) {
+        mLegacyCallbackWrapper = sp<LegacyCallbackWrapper>::make(callback, user);
+    } else if (user) {
+        LOG_ALWAYS_FATAL("Callback data provided without callback pointer!");
+    }
+    mSetParams = std::unique_ptr<SetParams>{new SetParams{
+            streamType, sampleRate, format, channelMask, frameCount, flags, mLegacyCallbackWrapper,
+            notificationFrames, 0 /*sharedBuffer*/, false /*threadCanCallJava*/, sessionId,
+            transferType, offloadInfo, attributionSource, pAttributes, doNotReconnect,
+            maxRequiredSpeed, selectedDeviceId}};
 }
 
 AudioTrack::AudioTrack(
@@ -286,8 +371,7 @@ AudioTrack::AudioTrack(
         audio_channel_mask_t channelMask,
         const sp<IMemory>& sharedBuffer,
         audio_output_flags_t flags,
-        callback_t cbf,
-        void* user,
+        const wp<IAudioTrackCallback>& callback,
         int32_t notificationFrames,
         audio_session_t sessionId,
         transfer_type transferType,
@@ -306,10 +390,56 @@ AudioTrack::AudioTrack(
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
 
-    (void)set(streamType, sampleRate, format, channelMask,
-            0 /*frameCount*/, flags, cbf, user, notificationFrames,
-            sharedBuffer, false /*threadCanCallJava*/, sessionId, transferType, offloadInfo,
-            attributionSource, pAttributes, doNotReconnect, maxRequiredSpeed);
+    mSetParams = std::unique_ptr<SetParams>{
+            new SetParams{streamType, sampleRate, format, channelMask, 0 /*frameCount*/, flags,
+                          callback, notificationFrames, sharedBuffer, false /*threadCanCallJava*/,
+                          sessionId, transferType, offloadInfo, attributionSource, pAttributes,
+                          doNotReconnect, maxRequiredSpeed, AUDIO_PORT_HANDLE_NONE}};
+}
+
+AudioTrack::AudioTrack(
+        audio_stream_type_t streamType,
+        uint32_t sampleRate,
+        audio_format_t format,
+        audio_channel_mask_t channelMask,
+        const sp<IMemory>& sharedBuffer,
+        audio_output_flags_t flags,
+        legacy_callback_t callback,
+        void* user,
+        int32_t notificationFrames,
+        audio_session_t sessionId,
+        transfer_type transferType,
+        const audio_offload_info_t *offloadInfo,
+        const AttributionSourceState& attributionSource,
+        const audio_attributes_t* pAttributes,
+        bool doNotReconnect,
+        float maxRequiredSpeed)
+    : mStatus(NO_INIT),
+      mState(STATE_STOPPED),
+      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
+      mPreviousSchedulingGroup(SP_DEFAULT),
+      mPausedPosition(0),
+      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
+      mAudioTrackCallback(new AudioTrackCallback())
+{
+    mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
+    if (callback) {
+        mLegacyCallbackWrapper = sp<LegacyCallbackWrapper>::make(callback, user);
+    } else if (user) {
+        LOG_ALWAYS_FATAL("Callback data provided without callback pointer!");
+    }
+    mSetParams = std::unique_ptr<SetParams>{new SetParams{
+            streamType, sampleRate, format, channelMask, 0 /*frameCount*/, flags,
+            mLegacyCallbackWrapper, notificationFrames, sharedBuffer, false /*threadCanCallJava*/,
+            sessionId, transferType, offloadInfo, attributionSource, pAttributes, doNotReconnect,
+            maxRequiredSpeed, AUDIO_PORT_HANDLE_NONE}};
+}
+
+void AudioTrack::onFirstRef() {
+    if (mSetParams) {
+        set(*mSetParams);
+        mSetParams.reset();
+    }
 }
 
 AudioTrack::~AudioTrack()
@@ -352,12 +482,13 @@ void AudioTrack::stopAndJoinCallbacks() {
     // Otherwise the callback thread will never exit.
     stop();
     if (mAudioTrackThread != 0) { // not thread safe
-        mProxy->interrupt();
         mAudioTrackThread->requestExit();   // see comment in AudioTrack.h
+        mProxy->interrupt();
         mAudioTrackThread->requestExitAndWait();
         mAudioTrackThread.clear();
     }
-    // No lock here: worst case we remove a NULL callback which will be a nop
+
+    AutoMutex lock(mLock);
     if (mDeviceCallback != 0 && mOutput != AUDIO_IO_HANDLE_NONE) {
         // This may not stop all of these device callbacks!
         // TODO: Add some sort of protection.
@@ -373,8 +504,8 @@ status_t AudioTrack::set(
         audio_channel_mask_t channelMask,
         size_t frameCount,
         audio_output_flags_t flags,
-        callback_t cbf,
-        void* user,
+        legacy_callback_t callback,
+        void * user,
         int32_t notificationFrames,
         const sp<IMemory>& sharedBuffer,
         bool threadCanCallJava,
@@ -387,13 +518,45 @@ status_t AudioTrack::set(
         float maxRequiredSpeed,
         audio_port_handle_t selectedDeviceId)
 {
+    if (callback) {
+        mLegacyCallbackWrapper = sp<LegacyCallbackWrapper>::make(callback, user);
+    } else if (user) {
+        LOG_ALWAYS_FATAL("Callback data provided without callback pointer!");
+    }
+    return set(streamType, sampleRate,format, channelMask, frameCount, flags,
+               mLegacyCallbackWrapper, notificationFrames, sharedBuffer, threadCanCallJava,
+               sessionId, transferType, offloadInfo, attributionSource, pAttributes,
+               doNotReconnect, maxRequiredSpeed, selectedDeviceId);
+}
+status_t AudioTrack::set(
+        audio_stream_type_t streamType,
+        uint32_t sampleRate,
+        audio_format_t format,
+        audio_channel_mask_t channelMask,
+        size_t frameCount,
+        audio_output_flags_t flags,
+        const wp<IAudioTrackCallback>& callback,
+        int32_t notificationFrames,
+        const sp<IMemory>& sharedBuffer,
+        bool threadCanCallJava,
+        audio_session_t sessionId,
+        transfer_type transferType,
+        const audio_offload_info_t *offloadInfo,
+        const AttributionSourceState& attributionSource,
+        const audio_attributes_t* pAttributes,
+        bool doNotReconnect,
+        float maxRequiredSpeed,
+        audio_port_handle_t selectedDeviceId)
+{
+    LOG_ALWAYS_FATAL_IF(mInitialized, "%s: should not be called twice", __func__);
+    mInitialized = true;
     status_t status;
     uint32_t channelCount;
     pid_t callingPid;
     pid_t myPid;
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
-
+    std::string errorMessage;
     // Note mPortId is not valid until the track is created, so omit mPortId in ALOG for set.
     ALOGV("%s(): streamType %d, sampleRate %u, format %#x, channelMask %#x, frameCount %zu, "
           "flags #%x, notificationFrames %d, sessionId %d, transferType %d, uid %d, pid %d",
@@ -402,86 +565,24 @@ status_t AudioTrack::set(
           sessionId, transferType, attributionSource.uid, attributionSource.pid);
 
     mThreadCanCallJava = threadCanCallJava;
+
+    // These variables are pulled in an error report, so we initialize them early.
     mSelectedDeviceId = selectedDeviceId;
     mSessionId = sessionId;
+    mChannelMask = channelMask;
+    mReqFrameCount = mFrameCount = frameCount;
+    mSampleRate = sampleRate;
+    mOriginalSampleRate = sampleRate;
+    mAttributes = pAttributes != nullptr ? *pAttributes : AUDIO_ATTRIBUTES_INITIALIZER;
+    mPlaybackRate = AUDIO_PLAYBACK_RATE_DEFAULT;
 
-    switch (transferType) {
-    case TRANSFER_DEFAULT:
-        if (sharedBuffer != 0) {
-            transferType = TRANSFER_SHARED;
-        } else if (cbf == NULL || threadCanCallJava) {
-            transferType = TRANSFER_SYNC;
-        } else {
-            transferType = TRANSFER_CALLBACK;
-        }
-        break;
-    case TRANSFER_CALLBACK:
-    case TRANSFER_SYNC_NOTIF_CALLBACK:
-        if (cbf == NULL || sharedBuffer != 0) {
-            ALOGE("%s(): Transfer type %s but cbf == NULL || sharedBuffer != 0",
-                    convertTransferToText(transferType), __func__);
-            status = BAD_VALUE;
-            goto exit;
-        }
-        break;
-    case TRANSFER_OBTAIN:
-    case TRANSFER_SYNC:
-        if (sharedBuffer != 0) {
-            ALOGE("%s(): Transfer type TRANSFER_OBTAIN but sharedBuffer != 0", __func__);
-            status = BAD_VALUE;
-            goto exit;
-        }
-        break;
-    case TRANSFER_SHARED:
-        if (sharedBuffer == 0) {
-            ALOGE("%s(): Transfer type TRANSFER_SHARED but sharedBuffer == 0", __func__);
-            status = BAD_VALUE;
-            goto exit;
-        }
-        break;
-    default:
-        ALOGE("%s(): Invalid transfer type %d",
-                __func__, transferType);
-        status = BAD_VALUE;
-        goto exit;
-    }
-    mSharedBuffer = sharedBuffer;
-    mTransfer = transferType;
-    mDoNotReconnect = doNotReconnect;
-
-    ALOGV_IF(sharedBuffer != 0, "%s(): sharedBuffer: %p, size: %zu",
-            __func__, sharedBuffer->unsecurePointer(), sharedBuffer->size());
-
-    ALOGV("%s(): streamType %d frameCount %zu flags %04x",
-            __func__, streamType, frameCount, flags);
-
-    // invariant that mAudioTrack != 0 is true only after set() returns successfully
-    if (mAudioTrack != 0) {
-        ALOGE("%s(): Track already in use", __func__);
-        status = INVALID_OPERATION;
-        goto exit;
-    }
-
-    // handle default values first.
-    if (streamType == AUDIO_STREAM_DEFAULT) {
-        streamType = AUDIO_STREAM_MUSIC;
-    }
-    if (pAttributes == NULL) {
-        if (uint32_t(streamType) >= AUDIO_STREAM_PUBLIC_CNT) {
-            ALOGE("%s(): Invalid stream type %d", __func__, streamType);
-            status = BAD_VALUE;
-            goto exit;
-        }
-        mOriginalStreamType = streamType;
-
-    } else {
+    // update format and flags before storing them in mFormat, mOrigFlags and mFlags
+    if (pAttributes != NULL) {
         // stream type shouldn't be looked at, this track has audio attributes
-        memcpy(&mAttributes, pAttributes, sizeof(audio_attributes_t));
         ALOGV("%s(): Building AudioTrack with attributes:"
                 " usage=%d content=%d flags=0x%x tags=[%s]",
                 __func__,
                  mAttributes.usage, mAttributes.content_type, mAttributes.flags, mAttributes.tags);
-        mOriginalStreamType = AUDIO_STREAM_DEFAULT;
         audio_flags_to_audio_output_flags(mAttributes.flags, &flags);
     }
 
@@ -491,23 +592,6 @@ status_t AudioTrack::set(
     } else if (format == AUDIO_FORMAT_IEC61937) { // HDMI pass-through?
         flags = static_cast<audio_output_flags_t>(flags | AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO);
     }
-
-    // validate parameters
-    if (!audio_is_valid_format(format)) {
-        ALOGE("%s(): Invalid format %#x", __func__, format);
-        status = BAD_VALUE;
-        goto exit;
-    }
-    mFormat = format;
-
-    if (!audio_is_output_channel(channelMask)) {
-        ALOGE("%s(): Invalid channel mask %#x",  __func__, channelMask);
-        status = BAD_VALUE;
-        goto exit;
-    }
-    mChannelMask = channelMask;
-    channelCount = audio_channel_count_from_out_mask(channelMask);
-    mChannelCount = channelCount;
 
     // force direct flag if format is not linear PCM
     // or offload was requested
@@ -527,7 +611,96 @@ status_t AudioTrack::set(
         flags = (audio_output_flags_t)(flags | AUDIO_OUTPUT_FLAG_DIRECT);
     }
 
-    if (flags & AUDIO_OUTPUT_FLAG_DIRECT) {
+    mFormat = format;
+    mOrigFlags = mFlags = flags;
+
+    switch (transferType) {
+    case TRANSFER_DEFAULT:
+        if (sharedBuffer != 0) {
+            transferType = TRANSFER_SHARED;
+        } else if (callback == nullptr|| threadCanCallJava) {
+            transferType = TRANSFER_SYNC;
+        } else {
+            transferType = TRANSFER_CALLBACK;
+        }
+        break;
+    case TRANSFER_CALLBACK:
+    case TRANSFER_SYNC_NOTIF_CALLBACK:
+        if (callback == nullptr || sharedBuffer != 0) {
+            errorMessage = StringPrintf(
+                    "%s: Transfer type %s but callback == nullptr || sharedBuffer != 0",
+                    convertTransferToText(transferType), __func__);
+            status = BAD_VALUE;
+            goto error;
+        }
+        break;
+    case TRANSFER_OBTAIN:
+    case TRANSFER_SYNC:
+        if (sharedBuffer != 0) {
+            errorMessage = StringPrintf(
+                    "%s: Transfer type TRANSFER_OBTAIN but sharedBuffer != 0", __func__);
+            status = BAD_VALUE;
+            goto error;
+        }
+        break;
+    case TRANSFER_SHARED:
+        if (sharedBuffer == 0) {
+            errorMessage = StringPrintf(
+                    "%s: Transfer type TRANSFER_SHARED but sharedBuffer == 0", __func__);
+            status = BAD_VALUE;
+            goto error;
+        }
+        break;
+    default:
+        errorMessage = StringPrintf("%s: Invalid transfer type %d", __func__, transferType);
+        status = BAD_VALUE;
+        goto error;
+    }
+    mSharedBuffer = sharedBuffer;
+    mTransfer = transferType;
+    mDoNotReconnect = doNotReconnect;
+
+    ALOGV_IF(sharedBuffer != 0, "%s(): sharedBuffer: %p, size: %zu",
+            __func__, sharedBuffer->unsecurePointer(), sharedBuffer->size());
+
+    // invariant that mAudioTrack != 0 is true only after set() returns successfully
+    if (mAudioTrack != 0) {
+        errorMessage = StringPrintf("%s: Track already in use", __func__);
+        status = INVALID_OPERATION;
+        goto error;
+    }
+
+    // handle default values first.
+    if (streamType == AUDIO_STREAM_DEFAULT) {
+        streamType = AUDIO_STREAM_MUSIC;
+    }
+    if (pAttributes == NULL) {
+        if (uint32_t(streamType) >= AUDIO_STREAM_PUBLIC_CNT) {
+            errorMessage = StringPrintf("%s: Invalid stream type %d", __func__, streamType);
+            status = BAD_VALUE;
+            goto error;
+        }
+        mOriginalStreamType = streamType;
+    } else {
+        mOriginalStreamType = AUDIO_STREAM_DEFAULT;
+    }
+
+    // validate parameters
+    if (!audio_is_valid_format(format)) {
+        errorMessage = StringPrintf("%s: Invalid format %#x", __func__, format);
+        status = BAD_VALUE;
+        goto error;
+    }
+
+    if (!audio_is_output_channel(channelMask)) {
+        errorMessage = StringPrintf("%s: Invalid channel mask %#x",  __func__, channelMask);
+        status = BAD_VALUE;
+        goto error;
+    }
+    channelCount = audio_channel_count_from_out_mask(channelMask);
+    mChannelCount = channelCount;
+
+    if (mFlags & AUDIO_OUTPUT_FLAG_DIRECT) {
         if (audio_has_proportional_frames(format)) {
             mFrameSize = channelCount * audio_bytes_per_sample(format);
         } else {
@@ -541,13 +714,12 @@ status_t AudioTrack::set(
     }
 
     // sampling rate must be specified for direct outputs
-    if (sampleRate == 0 && (flags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
+    if (sampleRate == 0 && (mFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
+        errorMessage = StringPrintf(
+                "%s: sample rate must be specified for direct outputs", __func__);
         status = BAD_VALUE;
-        goto exit;
+        goto error;
     }
-    mSampleRate = sampleRate;
-    mOriginalSampleRate = sampleRate;
-    mPlaybackRate = AUDIO_PLAYBACK_RATE_DEFAULT;
     // 1.0 <= mMaxRequiredSpeed <= AUDIO_TIMESTRETCH_SPEED_MAX
     mMaxRequiredSpeed = min(max(maxRequiredSpeed, 1.0f), AUDIO_TIMESTRETCH_SPEED_MAX);
 
@@ -567,22 +739,22 @@ status_t AudioTrack::set(
     mVolume[AUDIO_INTERLEAVE_RIGHT] = 1.0f;
     mSendLevel = 0.0f;
     // mFrameCount is initialized in createTrack_l
-    mReqFrameCount = frameCount;
     if (notificationFrames >= 0) {
         mNotificationFramesReq = notificationFrames;
         mNotificationsPerBufferReq = 0;
     } else {
-        if (!(flags & AUDIO_OUTPUT_FLAG_FAST)) {
-            ALOGE("%s(): notificationFrames=%d not permitted for non-fast track",
+        if (!(mFlags & AUDIO_OUTPUT_FLAG_FAST)) {
+            errorMessage = StringPrintf(
+                    "%s: notificationFrames=%d not permitted for non-fast track",
                     __func__, notificationFrames);
             status = BAD_VALUE;
-            goto exit;
+            goto error;
         }
         if (frameCount > 0) {
             ALOGE("%s(): notificationFrames=%d not permitted with non-zero frameCount=%zu",
                     __func__, notificationFrames, frameCount);
             status = BAD_VALUE;
-            goto exit;
+            goto error;
         }
         mNotificationFramesReq = 0;
         const uint32_t minNotificationsPerBuffer = 1;
@@ -607,11 +779,10 @@ status_t AudioTrack::set(
         mClientAttributionSource.pid = VALUE_OR_FATAL(legacy2aidl_uid_t_int32_t(callingPid));
     }
     mAuxEffectId = 0;
-    mOrigFlags = mFlags = flags;
-    mCbf = cbf;
+    mCallback = callback;
 
-    if (cbf != NULL) {
-        mAudioTrackThread = new AudioTrackThread(*this);
+    if (callback != nullptr) {
+        mAudioTrackThread = sp<AudioTrackThread>::make(*this);
         mAudioTrackThread->run("AudioTrack", ANDROID_PRIORITY_AUDIO, 0 /*stack*/);
         // thread begins in paused state, and will not reference us until start()
     }
@@ -627,10 +798,10 @@ status_t AudioTrack::set(
             mAudioTrackThread->requestExitAndWait();
             mAudioTrackThread.clear();
         }
+        // We do not goto error to prevent double-logging errors.
         goto exit;
     }
 
-    mUserData = user;
     mLoopCount = 0;
     mLoopStart = 0;
     mLoopEnd = 0;
@@ -661,6 +832,12 @@ status_t AudioTrack::set(
     mFramesWrittenAtRestore = -1; // -1 is a unique initializer.
     mVolumeHandler = new media::VolumeHandler();
 
+error:
+    if (status != NO_ERROR) {
+        ALOGE_IF(!errorMessage.empty(), "%s", errorMessage.c_str());
+        reportError(status, AMEDIAMETRICS_PROP_EVENT_VALUE_CREATE, errorMessage.c_str());
+    }
+    // fall through
 exit:
     mStatus = status;
     return status;
@@ -674,7 +851,7 @@ status_t AudioTrack::set(
         uint32_t channelMask,
         size_t frameCount,
         audio_output_flags_t flags,
-        callback_t cbf,
+        legacy_callback_t callback,
         void* user,
         int32_t notificationFrames,
         const sp<IMemory>& sharedBuffer,
@@ -693,11 +870,15 @@ status_t AudioTrack::set(
     attributionSource.uid = VALUE_OR_FATAL(legacy2aidl_uid_t_int32_t(uid));
     attributionSource.pid = VALUE_OR_FATAL(legacy2aidl_pid_t_int32_t(pid));
     attributionSource.token = sp<BBinder>::make();
-    return set(streamType, sampleRate, format,
-            static_cast<audio_channel_mask_t>(channelMask),
-            frameCount, flags, cbf, user, notificationFrames, sharedBuffer,
-            threadCanCallJava, sessionId, transferType, offloadInfo, attributionSource,
-            pAttributes, doNotReconnect, maxRequiredSpeed, selectedDeviceId);
+    if (callback) {
+        mLegacyCallbackWrapper = sp<LegacyCallbackWrapper>::make(callback, user);
+    } else if (user) {
+        LOG_ALWAYS_FATAL("Callback data provided without callback pointer!");
+    }
+    return set(streamType, sampleRate, format, static_cast<audio_channel_mask_t>(channelMask),
+               frameCount, flags, mLegacyCallbackWrapper, notificationFrames, sharedBuffer,
+               threadCanCallJava, sessionId, transferType, offloadInfo, attributionSource,
+               pAttributes, doNotReconnect, maxRequiredSpeed, selectedDeviceId);
 }
 
 // -------------------------------------------------------------------------
@@ -945,6 +1126,61 @@ void AudioTrack::flush_l()
     }
     mProxy->flush();
     mAudioTrack->flush();
+}
+
+bool AudioTrack::pauseAndWait(const std::chrono::milliseconds& timeout)
+{
+    using namespace std::chrono_literals;
+
+    // We use atomic access here for state variables - these are used as hints
+    // to ensure we have ramped down audio.
+    const int priorState = mProxy->getState();
+    const uint32_t priorPosition = mProxy->getPosition().unsignedValue();
+
+    pause();
+
+    // Only if we were previously active, do we wait to ramp down the audio.
+    if (priorState != CBLK_STATE_ACTIVE) return true;
+
+    AutoMutex lock(mLock);
+    // offload and direct tracks do not wait because pause volume ramp is handled by hardware.
+    if (isOffloadedOrDirect_l()) return true;
+
+    // Wait for the track state to be anything besides pausing.
+    // This ensures that the volume has ramped down.
+    constexpr auto SLEEP_INTERVAL_MS = 10ms;
+    constexpr auto POSITION_TIMEOUT_MS = 40ms; // don't wait longer than this for position change.
+    auto begin = std::chrono::steady_clock::now();
+    while (true) {
+        // Wait for state and position to change.
+        // After pause() the server state should be PAUSING, but that may immediately
+        // convert to PAUSED by prepareTracks before data is read into the mixer.
+        // Hence we check that the state is not PAUSING and that the server position
+        // has advanced to be a more reliable estimate that the volume ramp has completed.
+        const int state = mProxy->getState();
+        const uint32_t position = mProxy->getPosition().unsignedValue();
+
+        mLock.unlock(); // only local variables accessed until lock.
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - begin);
+        if (state != CBLK_STATE_PAUSING &&
+                (elapsed >= POSITION_TIMEOUT_MS || position != priorPosition)) {
+            ALOGV("%s: success state:%d, position:%u after %lld ms"
+                    " (prior state:%d  prior position:%u)",
+                    __func__, state, position, elapsed.count(), priorState, priorPosition);
+            return true;
+        }
+        std::chrono::milliseconds remaining = timeout - elapsed;
+        if (remaining.count() <= 0) {
+            ALOGW("%s: timeout expired state:%d still pausing:%d after %lld ms",
+                    __func__, state, CBLK_STATE_PAUSING, elapsed.count());
+            return false;
+        }
+        // It is conceivable that the track is restored while sleeping;
+        // as this logic is advisory, we allow that.
+        std::this_thread::sleep_for(std::min(remaining, SLEEP_INTERVAL_MS));
+        mLock.lock();
+    }
 }
 
 void AudioTrack::pause()
@@ -1275,10 +1511,6 @@ ssize_t AudioTrack::setBufferSizeInFrames(size_t bufferSizeInFrames)
     if (mOutput == AUDIO_IO_HANDLE_NONE || mProxy.get() == 0) {
         return NO_INIT;
     }
-    // Reject if timed track or compressed audio.
-    if (!audio_is_linear_pcm(mFormat)) {
-        return INVALID_OPERATION;
-    }
 
     ssize_t originalBufferSize = mProxy->getBufferSizeInFrames();
     ssize_t finalBufferSize  = mProxy->setBufferSizeInFrames((uint32_t) bufferSizeInFrames);
@@ -1371,12 +1603,12 @@ void AudioTrack::setLoop_l(uint32_t loopStart, uint32_t loopEnd, int loopCount)
 
 status_t AudioTrack::setMarkerPosition(uint32_t marker)
 {
+    AutoMutex lock(mLock);
     // The only purpose of setting marker position is to get a callback
-    if (mCbf == NULL || isOffloadedOrDirect()) {
+    if (!mCallback.promote() || isOffloadedOrDirect_l()) {
         return INVALID_OPERATION;
     }
 
-    AutoMutex lock(mLock);
     mMarkerPosition = marker;
     mMarkerReached = false;
 
@@ -1404,12 +1636,12 @@ status_t AudioTrack::getMarkerPosition(uint32_t *marker) const
 
 status_t AudioTrack::setPositionUpdatePeriod(uint32_t updatePeriod)
 {
+    AutoMutex lock(mLock);
     // The only purpose of setting position update period is to get a callback
-    if (mCbf == NULL || isOffloadedOrDirect()) {
+    if (!mCallback.promote() || isOffloadedOrDirect_l()) {
         return INVALID_OPERATION;
     }
 
-    AutoMutex lock(mLock);
     mNewPosition = updateAndGetPosition_l() + updatePeriod;
     mUpdatePeriod = updatePeriod;
 
@@ -1555,6 +1787,8 @@ audio_io_handle_t AudioTrack::getOutput() const
 
 status_t AudioTrack::setOutputDevice(audio_port_handle_t deviceId) {
     AutoMutex lock(mLock);
+    ALOGV("%s(%d): deviceId=%d mSelectedDeviceId=%d",
+            __func__, mPortId, deviceId, mSelectedDeviceId);
     if (mSelectedDeviceId != deviceId) {
         mSelectedDeviceId = deviceId;
         if (mStatus == NO_ERROR) {
@@ -1648,12 +1882,13 @@ status_t AudioTrack::createTrack_l()
 {
     status_t status;
     bool callbackAdded = false;
+    std::string errorMessage;
 
     const sp<IAudioFlinger>& audioFlinger = AudioSystem::get_audio_flinger();
     if (audioFlinger == 0) {
-        ALOGE("%s(%d): Could not get audioflinger",
+        errorMessage = StringPrintf("%s(%d): Could not get audioflinger",
                 __func__, mPortId);
-        status = NO_INIT;
+        status = DEAD_OBJECT;
         goto exit;
     }
 
@@ -1730,10 +1965,11 @@ status_t AudioTrack::createTrack_l()
     }
 
     if (status != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
-        ALOGE("%s(%d): AudioFlinger could not create track, status: %d output %d",
+        errorMessage = StringPrintf(
+                "%s(%d): AudioFlinger could not create track, status: %d output %d",
                 __func__, mPortId, status, output.outputId);
         if (status == NO_ERROR) {
-            status = NO_INIT;
+            status = INVALID_OPERATION; // device not ready
         }
         goto exit;
     }
@@ -1764,8 +2000,8 @@ status_t AudioTrack::createTrack_l()
     output.audioTrack->getCblk(&sfr);
     sp<IMemory> iMem = VALUE_OR_FATAL(aidl2legacy_NullableSharedFileRegion_IMemory(sfr));
     if (iMem == 0) {
-        ALOGE("%s(%d): Could not get control block", __func__, mPortId);
-        status = NO_INIT;
+        errorMessage = StringPrintf("%s(%d): Could not get control block", __func__, mPortId);
+        status = FAILED_TRANSACTION;
         goto exit;
     }
     // TODO: Using unsecurePointer() has some associated security pitfalls
@@ -1774,8 +2010,9 @@ status_t AudioTrack::createTrack_l()
     //       issue (e.g. by copying).
     void *iMemPointer = iMem->unsecurePointer();
     if (iMemPointer == NULL) {
-        ALOGE("%s(%d): Could not get control block pointer", __func__, mPortId);
-        status = NO_INIT;
+        errorMessage = StringPrintf(
+                "%s(%d): Could not get control block pointer", __func__, mPortId);
+        status = FAILED_TRANSACTION;
         goto exit;
     }
     // invariant that mAudioTrack != 0 is true only after set() returns successfully
@@ -1799,7 +2036,7 @@ status_t AudioTrack::createTrack_l()
                 mAwaitBoost = true;
             }
         } else {
-            ALOGD("%s(%d): AUDIO_OUTPUT_FLAG_FAST denied by server; frameCount %zu -> %zu",
+            ALOGV("%s(%d): AUDIO_OUTPUT_FLAG_FAST denied by server; frameCount %zu -> %zu",
                   __func__, mPortId, mReqFrameCount, mFrameCount);
         }
     }
@@ -1833,8 +2070,10 @@ status_t AudioTrack::createTrack_l()
         //       issue (e.g. by copying).
         buffers = mSharedBuffer->unsecurePointer();
         if (buffers == NULL) {
-            ALOGE("%s(%d): Could not get buffer pointer", __func__, mPortId);
-            status = NO_INIT;
+            errorMessage = StringPrintf(
+                    "%s(%d): Could not get buffer pointer", __func__, mPortId);
+            ALOGE("%s", errorMessage.c_str());
+            status = FAILED_TRANSACTION;
             goto exit;
         }
     }
@@ -1912,6 +2151,7 @@ status_t AudioTrack::createTrack_l()
         .set(AMEDIAMETRICS_PROP_VOLUME_LEFT, (double)mVolume[AUDIO_INTERLEAVE_LEFT])
         .set(AMEDIAMETRICS_PROP_VOLUME_RIGHT, (double)mVolume[AUDIO_INTERLEAVE_RIGHT])
         .set(AMEDIAMETRICS_PROP_STATE, stateToString(mState))
+        .set(AMEDIAMETRICS_PROP_STATUS, (int32_t)NO_ERROR)
         .set(AMEDIAMETRICS_PROP_AUXEFFECTID, (int32_t)mAuxEffectId)
         .set(AMEDIAMETRICS_PROP_SAMPLERATE, (int32_t)mSampleRate)
         .set(AMEDIAMETRICS_PROP_PLAYBACK_SPEED, (double)mPlaybackRate.mSpeed)
@@ -1932,15 +2172,45 @@ status_t AudioTrack::createTrack_l()
     }
 
 exit:
-    if (status != NO_ERROR && callbackAdded) {
-        // note: mOutput is always valid is callbackAdded is true
-        AudioSystem::removeAudioDeviceCallback(this, mOutput, mPortId);
+    if (status != NO_ERROR) {
+        if (callbackAdded) {
+            // note: mOutput is always valid is callbackAdded is true
+            AudioSystem::removeAudioDeviceCallback(this, mOutput, mPortId);
+        }
+        ALOGE_IF(!errorMessage.empty(), "%s", errorMessage.c_str());
+        reportError(status, AMEDIAMETRICS_PROP_EVENT_VALUE_CREATE, errorMessage.c_str());
     }
-
     mStatus = status;
 
     // sp<IAudioTrack> track destructor will cause releaseOutput() to be called by AudioFlinger
     return status;
+}
+
+void AudioTrack::reportError(status_t status, const char *event, const char *message) const
+{
+    if (status == NO_ERROR) return;
+    // We report error on the native side because some callers do not come
+    // from Java.
+    // Ensure these variables are initialized in set().
+    mediametrics::LogItem(AMEDIAMETRICS_KEY_AUDIO_TRACK_ERROR)
+        .set(AMEDIAMETRICS_PROP_EVENT, event)
+        .set(AMEDIAMETRICS_PROP_STATUS, (int32_t)status)
+        .set(AMEDIAMETRICS_PROP_STATUSMESSAGE, message)
+        .set(AMEDIAMETRICS_PROP_ORIGINALFLAGS, toString(mOrigFlags).c_str())
+        .set(AMEDIAMETRICS_PROP_SESSIONID, (int32_t)mSessionId)
+        .set(AMEDIAMETRICS_PROP_CONTENTTYPE, toString(mAttributes.content_type).c_str())
+        .set(AMEDIAMETRICS_PROP_USAGE, toString(mAttributes.usage).c_str())
+        .set(AMEDIAMETRICS_PROP_SELECTEDDEVICEID, (int32_t)mSelectedDeviceId)
+        .set(AMEDIAMETRICS_PROP_ENCODING, toString(mFormat).c_str())
+        .set(AMEDIAMETRICS_PROP_CHANNELMASK, (int32_t)mChannelMask)
+        // the following are NOT immutable
+        // frame count is initially the requested frame count, but may be adjusted
+        // by AudioFlinger after creation.
+        .set(AMEDIAMETRICS_PROP_FRAMECOUNT, (int32_t)mFrameCount)
+        .set(AMEDIAMETRICS_PROP_SAMPLERATE, (int32_t)mSampleRate)
+        .set(AMEDIAMETRICS_PROP_PLAYBACK_SPEED, (double)mPlaybackRate.mSpeed)
+        .set(AMEDIAMETRICS_PROP_PLAYBACK_PITCH, (double)mPlaybackRate.mPitch)
+        .record();
 }
 
 status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, int32_t waitCount, size_t *nonContig)
@@ -1953,7 +2223,7 @@ status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, int32_t waitCount, size_t
     }
     if (mTransfer != TRANSFER_OBTAIN) {
         audioBuffer->frameCount = 0;
-        audioBuffer->size = 0;
+        audioBuffer->mSize = 0;
         audioBuffer->raw = NULL;
         if (nonContig != NULL) {
             *nonContig = 0;
@@ -2045,7 +2315,7 @@ status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, const struct timespec *re
     } while (((status == DEAD_OBJECT) || (status == NOT_ENOUGH_DATA)) && (tryCounter-- > 0));
 
     audioBuffer->frameCount = buffer.mFrameCount;
-    audioBuffer->size = buffer.mFrameCount * mFrameSize;
+    audioBuffer->mSize = buffer.mFrameCount * mFrameSize;
     audioBuffer->raw = buffer.mRaw;
     audioBuffer->sequence = oldSequence;
     if (nonContig != NULL) {
@@ -2061,7 +2331,7 @@ void AudioTrack::releaseBuffer(const Buffer* audioBuffer)
         return;
     }
 
-    size_t stepCount = audioBuffer->size / mFrameSize;
+    size_t stepCount = audioBuffer->mSize / mFrameSize;
     if (stepCount == 0) {
         return;
     }
@@ -2141,8 +2411,8 @@ ssize_t AudioTrack::write(const void* buffer, size_t userSize, bool blocking)
             return ssize_t(err);
         }
 
-        size_t toWrite = audioBuffer.size;
-        memcpy(audioBuffer.i8, buffer, toWrite);
+        size_t toWrite = audioBuffer.size();
+        memcpy(audioBuffer.raw, buffer, toWrite);
         buffer = ((const char *) buffer) + toWrite;
         userSize -= toWrite;
         written += toWrite;
@@ -2172,10 +2442,15 @@ nsecs_t AudioTrack::processAudioBuffer()
 {
     // Currently the AudioTrack thread is not created if there are no callbacks.
     // Would it ever make sense to run the thread, even without callbacks?
-    // If so, then replace this by checks at each use for mCbf != NULL.
+    // If so, then replace this by checks at each use for mCallback != NULL.
     LOG_ALWAYS_FATAL_IF(mCblk == NULL);
-
     mLock.lock();
+    sp<IAudioTrackCallback> callback = mCallback.promote();
+    if (!callback) {
+        mCallback = nullptr;
+        mLock.unlock();
+        return NS_NEVER;
+    }
     if (mAwaitBoost) {
         mAwaitBoost = false;
         mLock.unlock();
@@ -2273,7 +2548,7 @@ nsecs_t AudioTrack::processAudioBuffer()
     sp<AudioTrackClientProxy> proxy = mProxy;
 
     // Determine the number of new loop callback(s) that will be needed, while locked.
-    int loopCountNotifications = 0;
+    uint32_t loopCountNotifications = 0;
     uint32_t loopPeriod = 0; // time in frames for next EVENT_LOOP_END or EVENT_BUFFER_END
 
     if (mLoopCount > 0) {
@@ -2295,7 +2570,7 @@ nsecs_t AudioTrack::processAudioBuffer()
     }
 
     // These fields don't need to be cached, because they are assigned only by set():
-    //     mTransfer, mCbf, mUserData, mFormat, mFrameSize, mFlags
+    // mTransfer, mCallback, mUserData, mFormat, mFrameSize, mFlags
     // mFlags is also assigned by createTrack_l(), but not the bit we care about.
 
     mLock.unlock();
@@ -2320,7 +2595,7 @@ nsecs_t AudioTrack::processAudioBuffer()
             if (status != DEAD_OBJECT) {
                 // for DEAD_OBJECT, we do not send a EVENT_STREAM_END after stop();
                 // instead, the application should handle the EVENT_NEW_IAUDIOTRACK.
-                mCbf(EVENT_STREAM_END, mUserData, NULL);
+                callback->onStreamEnd();
             }
             {
                 AutoMutex lock(mLock);
@@ -2343,28 +2618,27 @@ nsecs_t AudioTrack::processAudioBuffer()
 
     // perform callbacks while unlocked
     if (newUnderrun) {
-        mCbf(EVENT_UNDERRUN, mUserData, NULL);
+        callback->onUnderrun();
     }
     while (loopCountNotifications > 0) {
-        mCbf(EVENT_LOOP_END, mUserData, NULL);
         --loopCountNotifications;
+        callback->onLoopEnd(mLoopCount > 0 ? loopCountNotifications + mLoopCountNotified : -1);
     }
     if (flags & CBLK_BUFFER_END) {
-        mCbf(EVENT_BUFFER_END, mUserData, NULL);
+        callback->onBufferEnd();
     }
     if (markerReached) {
-        mCbf(EVENT_MARKER, mUserData, &markerPosition);
+        callback->onMarker(markerPosition.value());
     }
     while (newPosCount > 0) {
-        size_t temp = newPosition.value(); // FIXME size_t != uint32_t
-        mCbf(EVENT_NEW_POS, mUserData, &temp);
+        callback->onNewPos(newPosition.value());
         newPosition += updatePeriod;
         newPosCount--;
     }
 
     if (mObservedSequence != sequence) {
         mObservedSequence = sequence;
-        mCbf(EVENT_NEW_IAUDIOTRACK, mUserData, NULL);
+        callback->onNewIAudioTrack();
         // for offloaded tracks, just wait for the upper layers to recreate the track
         if (isOffloadedOrDirect()) {
             return NS_INACTIVE;
@@ -2496,16 +2770,15 @@ nsecs_t AudioTrack::processAudioBuffer()
             }
         }
 
-        size_t reqSize = audioBuffer.size;
+        size_t reqSize = audioBuffer.size();
         if (mTransfer == TRANSFER_SYNC_NOTIF_CALLBACK) {
             // when notifying client it can write more data, pass the total size that can be
             // written in the next write() call, since it's not passed through the callback
-            audioBuffer.size += nonContig;
+            audioBuffer.mSize += nonContig;
         }
-        mCbf(mTransfer == TRANSFER_CALLBACK ? EVENT_MORE_DATA : EVENT_CAN_WRITE_MORE_DATA,
-                mUserData, &audioBuffer);
-        size_t writtenSize = audioBuffer.size;
-
+        const size_t writtenSize = (mTransfer == TRANSFER_CALLBACK)
+                                      ? callback->onMoreData(audioBuffer)
+                                      : callback->onCanWriteMoreData(audioBuffer);
         // Validate on returned size
         if (ssize_t(writtenSize) < 0 || writtenSize > reqSize) {
             ALOGE("%s(%d): EVENT_MORE_DATA requested %zu bytes but callback returned %zd bytes",
@@ -2564,6 +2837,9 @@ nsecs_t AudioTrack::processAudioBuffer()
             }
             return ns;
         }
+
+        // releaseBuffer reads from audioBuffer.size
+        audioBuffer.mSize = writtenSize;
 
         size_t releasedFrames = writtenSize / mFrameSize;
         audioBuffer.frameCount = releasedFrames;
