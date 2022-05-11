@@ -18,6 +18,9 @@
 #define LOG_TAG "Codec2Mapper"
 #include <utils/Log.h>
 
+#include <map>
+#include <optional>
+
 #include <media/stagefright/MediaCodecConstants.h>
 #include <media/stagefright/SurfaceUtils.h>
 #include <media/stagefright/foundation/ALookup.h>
@@ -92,6 +95,7 @@ ALookup<C2Config::profile_t, int32_t> sAvcProfiles = {
 
 ALookup<C2Config::bitrate_mode_t, int32_t> sBitrateModes = {
     { C2Config::BITRATE_CONST,      BITRATE_MODE_CBR },
+    { C2Config::BITRATE_CONST_SKIP_ALLOWED, BITRATE_MODE_CBR_FD },
     { C2Config::BITRATE_VARIABLE,   BITRATE_MODE_VBR },
     { C2Config::BITRATE_IGNORE,     BITRATE_MODE_CQ },
 };
@@ -166,6 +170,9 @@ ALookup<C2Config::level_t, int32_t> sDolbyVisionLevels = {
     { C2Config::LEVEL_DV_MAIN_UHD_30, DolbyVisionLevelUhd30 },
     { C2Config::LEVEL_DV_MAIN_UHD_48, DolbyVisionLevelUhd48 },
     { C2Config::LEVEL_DV_MAIN_UHD_60, DolbyVisionLevelUhd60 },
+    { C2Config::LEVEL_DV_MAIN_UHD_120, DolbyVisionLevelUhd120 },
+    { C2Config::LEVEL_DV_MAIN_8K_30,  DolbyVisionLevel8k30 },
+    { C2Config::LEVEL_DV_MAIN_8K_60,  DolbyVisionLevel8k60 },
 
     // high tiers are not yet supported on android, for now map them to main tier
     { C2Config::LEVEL_DV_HIGH_HD_24,  DolbyVisionLevelHd24 },
@@ -177,6 +184,9 @@ ALookup<C2Config::level_t, int32_t> sDolbyVisionLevels = {
     { C2Config::LEVEL_DV_HIGH_UHD_30, DolbyVisionLevelUhd30 },
     { C2Config::LEVEL_DV_HIGH_UHD_48, DolbyVisionLevelUhd48 },
     { C2Config::LEVEL_DV_HIGH_UHD_60, DolbyVisionLevelUhd60 },
+    { C2Config::LEVEL_DV_HIGH_UHD_120, DolbyVisionLevelUhd120 },
+    { C2Config::LEVEL_DV_HIGH_8K_30,  DolbyVisionLevel8k30 },
+    { C2Config::LEVEL_DV_HIGH_8K_60,  DolbyVisionLevel8k60 },
 };
 
 ALookup<C2Config::profile_t, int32_t> sDolbyVisionProfiles = {
@@ -254,6 +264,8 @@ ALookup<C2Config::profile_t, int32_t> sHevcProfiles = {
     { C2Config::PROFILE_HEVC_MAIN_STILL, HEVCProfileMainStill },
     { C2Config::PROFILE_HEVC_MAIN_INTRA, HEVCProfileMain },
     { C2Config::PROFILE_HEVC_MAIN_10_INTRA, HEVCProfileMain10 },
+    { C2Config::PROFILE_HEVC_MAIN_10, HEVCProfileMain10HDR10 },
+    { C2Config::PROFILE_HEVC_MAIN_10, HEVCProfileMain10HDR10Plus },
 };
 
 ALookup<C2Config::profile_t, int32_t> sHevcHdrProfiles = {
@@ -380,13 +392,15 @@ ALookup<C2Config::level_t, int32_t> sAv1Levels = {
     { C2Config::LEVEL_AV1_7_3,  AV1Level73 },
 };
 
-
 ALookup<C2Config::profile_t, int32_t> sAv1Profiles = {
-    // TODO: will need to disambiguate between Main8 and Main10
     { C2Config::PROFILE_AV1_0, AV1ProfileMain8 },
     { C2Config::PROFILE_AV1_0, AV1ProfileMain10 },
     { C2Config::PROFILE_AV1_0, AV1ProfileMain10HDR10 },
     { C2Config::PROFILE_AV1_0, AV1ProfileMain10HDR10Plus },
+};
+
+ALookup<C2Config::profile_t, int32_t> sAv1TenbitProfiles = {
+    { C2Config::PROFILE_AV1_0, AV1ProfileMain10 },
 };
 
 ALookup<C2Config::profile_t, int32_t> sAv1HdrProfiles = {
@@ -395,6 +409,30 @@ ALookup<C2Config::profile_t, int32_t> sAv1HdrProfiles = {
 
 ALookup<C2Config::profile_t, int32_t> sAv1Hdr10PlusProfiles = {
     { C2Config::PROFILE_AV1_0, AV1ProfileMain10HDR10Plus },
+};
+
+// HAL_PIXEL_FORMAT_* -> COLOR_Format*
+ALookup<uint32_t, int32_t> sPixelFormats = {
+    { HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, COLOR_FormatSurface },
+
+    // YCBCR_420_888 maps to YUV420Flexible and vice versa
+    { HAL_PIXEL_FORMAT_YCBCR_420_888,          COLOR_FormatYUV420Flexible },
+
+    // Fallback matches for YCBCR_420_888
+    { HAL_PIXEL_FORMAT_YCBCR_420_888,          COLOR_FormatYUV420Planar },
+    { HAL_PIXEL_FORMAT_YCBCR_420_888,          COLOR_FormatYUV420SemiPlanar },
+    { HAL_PIXEL_FORMAT_YCBCR_420_888,          COLOR_FormatYUV420PackedPlanar },
+    { HAL_PIXEL_FORMAT_YCBCR_420_888,          COLOR_FormatYUV420PackedSemiPlanar },
+
+    // Fallback matches for YUV420Flexible
+    { HAL_PIXEL_FORMAT_YCRCB_420_SP,           COLOR_FormatYUV420Flexible },
+    { HAL_PIXEL_FORMAT_YV12,                   COLOR_FormatYUV420Flexible },
+
+    { HAL_PIXEL_FORMAT_YCBCR_422_SP,           COLOR_FormatYUV422PackedSemiPlanar },
+    { HAL_PIXEL_FORMAT_YCBCR_422_I,            COLOR_FormatYUV422PackedPlanar },
+    { HAL_PIXEL_FORMAT_YCBCR_P010,             COLOR_FormatYUVP010 },
+    { HAL_PIXEL_FORMAT_RGBA_1010102,           COLOR_Format32bitABGR2101010 },
+    { HAL_PIXEL_FORMAT_RGBA_FP16,              COLOR_Format64bitABGRFloat },
 };
 
 /**
@@ -602,9 +640,9 @@ private:
 };
 
 struct Av1ProfileLevelMapper : ProfileLevelMapperHelper {
-    Av1ProfileLevelMapper(bool isHdr = false, bool isHdr10Plus = false) :
+    Av1ProfileLevelMapper(bool isHdr = false, bool isHdr10Plus = false, int32_t bitDepth = 8) :
         ProfileLevelMapperHelper(),
-        mIsHdr(isHdr), mIsHdr10Plus(isHdr10Plus) {}
+        mIsHdr(isHdr), mIsHdr10Plus(isHdr10Plus), mBitDepth(bitDepth) {}
 
     virtual bool simpleMap(C2Config::level_t from, int32_t *to) {
         return sAv1Levels.map(from, to);
@@ -613,19 +651,22 @@ struct Av1ProfileLevelMapper : ProfileLevelMapperHelper {
         return sAv1Levels.map(from, to);
     }
     virtual bool simpleMap(C2Config::profile_t from, int32_t *to) {
-        return mIsHdr10Plus ? sAv1Hdr10PlusProfiles.map(from, to) :
-                     mIsHdr ? sAv1HdrProfiles.map(from, to) :
-                              sAv1Profiles.map(from, to);
+        return (mBitDepth == 10) ? sAv1TenbitProfiles.map(from, to) :
+                    mIsHdr10Plus ? sAv1Hdr10PlusProfiles.map(from, to) :
+                          mIsHdr ? sAv1HdrProfiles.map(from, to) :
+                                   sAv1Profiles.map(from, to);
     }
     virtual bool simpleMap(int32_t from, C2Config::profile_t *to) {
-        return mIsHdr10Plus ? sAv1Hdr10PlusProfiles.map(from, to) :
-                     mIsHdr ? sAv1HdrProfiles.map(from, to) :
-                              sAv1Profiles.map(from, to);
+        return (mBitDepth == 10) ? sAv1TenbitProfiles.map(from, to) :
+                    mIsHdr10Plus ? sAv1Hdr10PlusProfiles.map(from, to) :
+                          mIsHdr ? sAv1HdrProfiles.map(from, to) :
+                                   sAv1Profiles.map(from, to);
     }
 
 private:
     bool mIsHdr;
     bool mIsHdr10Plus;
+    int32_t mBitDepth;
 };
 
 } // namespace
@@ -668,6 +709,18 @@ C2Mapper::GetHdrProfileLevelMapper(std::string mediaType, bool isHdr10Plus) {
         return std::make_shared<Vp9ProfileLevelMapper>(true, isHdr10Plus);
     } else if (mediaType == MIMETYPE_VIDEO_AV1) {
         return std::make_shared<Av1ProfileLevelMapper>(true, isHdr10Plus);
+    }
+    return nullptr;
+}
+
+// static
+std::shared_ptr<C2Mapper::ProfileLevelMapper>
+C2Mapper::GetBitDepthProfileLevelMapper(std::string mediaType, int32_t bitDepth) {
+    std::transform(mediaType.begin(), mediaType.end(), mediaType.begin(), ::tolower);
+    if (bitDepth == 8) {
+        return GetProfileLevelMapper(mediaType);
+    } else if (mediaType == MIMETYPE_VIDEO_AV1 && bitDepth == 10) {
+        return std::make_shared<Av1ProfileLevelMapper>(false, false, bitDepth);
     }
     return nullptr;
 }
@@ -955,41 +1008,19 @@ bool C2Mapper::map(ColorAspects::Transfer from, C2Color::transfer_t *to) {
 // static
 bool C2Mapper::mapPixelFormatFrameworkToCodec(
         int32_t frameworkValue, uint32_t *c2Value) {
-    switch (frameworkValue) {
-        case COLOR_FormatSurface:
-            *c2Value = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
-            return true;
-        case COLOR_FormatYUV420Flexible:
-        case COLOR_FormatYUV420Planar:
-        case COLOR_FormatYUV420SemiPlanar:
-        case COLOR_FormatYUV420PackedPlanar:
-        case COLOR_FormatYUV420PackedSemiPlanar:
-            *c2Value = HAL_PIXEL_FORMAT_YCBCR_420_888;
-            return true;
-        default:
-            // Passthrough
-            *c2Value = uint32_t(frameworkValue);
-            return true;
+    if (!sPixelFormats.map(frameworkValue, c2Value)) {
+        // passthrough if not mapped
+        *c2Value = uint32_t(frameworkValue);
     }
+    return true;
 }
 
 // static
 bool C2Mapper::mapPixelFormatCodecToFramework(
         uint32_t c2Value, int32_t *frameworkValue) {
-    switch (c2Value) {
-        case HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED:
-            *frameworkValue = COLOR_FormatSurface;
-            return true;
-        case HAL_PIXEL_FORMAT_YCBCR_422_SP:
-        case HAL_PIXEL_FORMAT_YCRCB_420_SP:
-        case HAL_PIXEL_FORMAT_YCBCR_422_I:
-        case HAL_PIXEL_FORMAT_YCBCR_420_888:
-        case HAL_PIXEL_FORMAT_YV12:
-            *frameworkValue = COLOR_FormatYUV420Flexible;
-            return true;
-        default:
-            // Passthrough
-            *frameworkValue = int32_t(c2Value);
-            return true;
+    if (!sPixelFormats.map(c2Value, frameworkValue)) {
+        // passthrough if not mapped
+        *frameworkValue = int32_t(c2Value);
     }
+    return true;
 }

@@ -50,6 +50,8 @@ static constexpr int32_t kDefaultCodecPriority = 1;
 static constexpr int32_t kDefaultBitrateMbps = 10 * 1000 * 1000;
 // Default frame rate.
 static constexpr int32_t kDefaultFrameRate = 30;
+// Default codec complexity
+static constexpr int32_t kDefaultCodecComplexity = 1;
 
 template <typename T>
 void VideoTrackTranscoder::BlockingQueue<T>::push(T const& value, bool front) {
@@ -247,6 +249,7 @@ media_status_t VideoTrackTranscoder::configureDestinationFormat(
 
     SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_PRIORITY, encoderFormat, kDefaultCodecPriority);
     SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_FRAME_RATE, encoderFormat, kDefaultFrameRate);
+    SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_COMPLEXITY, encoderFormat, kDefaultCodecComplexity);
     AMediaFormat_setInt32(encoderFormat, AMEDIAFORMAT_KEY_COLOR_FORMAT, kColorFormatSurface);
 
     // Always encode without rotation. The rotation degree will be transferred directly to
@@ -268,8 +271,7 @@ media_status_t VideoTrackTranscoder::configureDestinationFormat(
         return AMEDIA_ERROR_INVALID_PARAMETER;
     }
 
-// TODO: replace __ANDROID_API_FUTURE__with 31 when it's official (b/178144708)
-#define __TRANSCODING_MIN_API__ __ANDROID_API_FUTURE__
+#define __TRANSCODING_MIN_API__ 31
 
     AMediaCodec* encoder;
     if (__builtin_available(android __TRANSCODING_MIN_API__, *)) {

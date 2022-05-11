@@ -191,6 +191,11 @@ struct ColorUtils {
     static void setHDRStaticInfoIntoFormat(const HDRStaticInfo &info, sp<AMessage> &format);
     // writes |info| into format.
     static void setHDRStaticInfoIntoAMediaFormat(const HDRStaticInfo &info, AMediaFormat *format);
+    // (internal) used by the setHDRStaticInfoInfo* routines
+    static void fillHdrStaticInfoBuffer( const HDRStaticInfo &info, uint8_t *data);
+
+    // determine whether HDR static info is valid
+    static bool isHDRStaticInfoValid(HDRStaticInfo *info);
 };
 
 inline static const char *asString(android::ColorUtils::ColorStandard i, const char *def = "??") {

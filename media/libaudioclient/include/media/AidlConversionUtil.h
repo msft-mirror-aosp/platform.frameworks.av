@@ -20,42 +20,13 @@
 #include <type_traits>
 #include <utility>
 
-#include <android-base/expected.h>
 #include <binder/Status.h>
+#include <error/Result.h>
 
 namespace android {
 
 template <typename T>
-using ConversionResult = base::expected<T, status_t>;
-
-// Convenience macros for working with ConversionResult, useful for writing converted for aggregate
-// types.
-
-#define VALUE_OR_RETURN(result)                                \
-    ({                                                         \
-        auto _tmp = (result);                                  \
-        if (!_tmp.ok()) return base::unexpected(_tmp.error()); \
-        std::move(_tmp.value());                               \
-    })
-
-#define RETURN_IF_ERROR(result) \
-    if (status_t _tmp = (result); _tmp != OK) return base::unexpected(_tmp);
-
-#define VALUE_OR_RETURN_STATUS(x)           \
-    ({                                      \
-       auto _tmp = (x);                     \
-       if (!_tmp.ok()) return _tmp.error(); \
-       std::move(_tmp.value());             \
-     })
-
-#define VALUE_OR_FATAL(result)                                        \
-    ({                                                                \
-       auto _tmp = (result);                                          \
-       LOG_ALWAYS_FATAL_IF(!_tmp.ok(),                                \
-                           "Function: %s Line: %d Failed result (%d)",\
-                           __FUNCTION__, __LINE__, _tmp.error());     \
-       std::move(_tmp.value());                                       \
-     })
+using ConversionResult = error::Result<T>;
 
 /**
  * A generic template to safely cast between integral types, respecting limits of the destination
@@ -106,6 +77,26 @@ status_t convertRange(InputIterator start,
 }
 
 /**
+ * A generic template that helps convert containers of convertible types, using iterators.
+ * Uses a limit as maximum conversion items.
+ */
+template<typename InputIterator, typename OutputIterator, typename Func>
+status_t convertRangeWithLimit(InputIterator start,
+                      InputIterator end,
+                      OutputIterator out,
+                      const Func& itemConversion,
+                      const size_t limit) {
+    InputIterator last = end;
+    if (end - start > limit) {
+        last = start + limit;
+    }
+    for (InputIterator iter = start; (iter != last); ++iter, ++out) {
+        *out = VALUE_OR_RETURN_STATUS(itemConversion(*iter));
+    }
+    return OK;
+}
+
+/**
  * A generic template that helps convert containers of convertible types.
  */
 template<typename OutputContainer, typename InputContainer, typename Func>
@@ -117,6 +108,62 @@ convertContainer(const InputContainer& input, const Func& itemConversion) {
         *ins = VALUE_OR_RETURN(itemConversion(item));
     }
     return output;
+}
+
+/**
+ * A generic template that helps convert containers of convertible types
+ * using an item conversion function with an additional parameter.
+ */
+template<typename OutputContainer, typename InputContainer, typename Func, typename Parameter>
+ConversionResult<OutputContainer>
+convertContainer(const InputContainer& input, const Func& itemConversion, const Parameter& param) {
+    OutputContainer output;
+    auto ins = std::inserter(output, output.begin());
+    for (const auto& item : input) {
+        *ins = VALUE_OR_RETURN(itemConversion(item, param));
+    }
+    return output;
+}
+
+/**
+ * A generic template that helps to "zip" two input containers of the same size
+ * into a single vector of converted types. The conversion function must
+ * thus accept two arguments.
+ */
+template<typename OutputContainer, typename InputContainer1,
+        typename InputContainer2, typename Func>
+ConversionResult<OutputContainer>
+convertContainers(const InputContainer1& input1, const InputContainer2& input2,
+        const Func& itemConversion) {
+    auto iter2 = input2.begin();
+    OutputContainer output;
+    auto ins = std::inserter(output, output.begin());
+    for (const auto& item1 : input1) {
+        RETURN_IF_ERROR(iter2 != input2.end() ? OK : BAD_VALUE);
+        *ins = VALUE_OR_RETURN(itemConversion(item1, *iter2++));
+    }
+    return output;
+}
+
+/**
+ * A generic template that helps to "unzip" a per-element conversion into
+ * a pair of elements into a pair of containers. The conversion function
+ * must emit a pair of elements.
+ */
+template<typename OutputContainer1, typename OutputContainer2,
+        typename InputContainer, typename Func>
+ConversionResult<std::pair<OutputContainer1, OutputContainer2>>
+convertContainerSplit(const InputContainer& input, const Func& itemConversion) {
+    OutputContainer1 output1;
+    OutputContainer2 output2;
+    auto ins1 = std::inserter(output1, output1.begin());
+    auto ins2 = std::inserter(output2, output2.begin());
+    for (const auto& item : input) {
+        auto out_pair = VALUE_OR_RETURN(itemConversion(item));
+        *ins1 = out_pair.first;
+        *ins2 = out_pair.second;
+    }
+    return std::make_pair(output1, output2);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

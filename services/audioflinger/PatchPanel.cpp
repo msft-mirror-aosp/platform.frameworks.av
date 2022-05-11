@@ -258,6 +258,7 @@ status_t AudioFlinger::PatchPanel::createAudioPatch(const struct audio_patch *pa
                             reinterpret_cast<PlaybackThread*>(thread.get()), false /*closeThread*/);
                 } else {
                     audio_config_t config = AUDIO_CONFIG_INITIALIZER;
+                    audio_config_base_t mixerConfig = AUDIO_CONFIG_BASE_INITIALIZER;
                     audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
                     audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
                     if (patch->sinks[0].config_mask & AUDIO_PORT_CONFIG_SAMPLE_RATE) {
@@ -276,6 +277,7 @@ status_t AudioFlinger::PatchPanel::createAudioPatch(const struct audio_patch *pa
                                                             patch->sinks[0].ext.device.hw_module,
                                                             &output,
                                                             &config,
+                                                            &mixerConfig,
                                                             outputDevice,
                                                             outputDeviceAddress,
                                                             flags);
@@ -573,6 +575,12 @@ status_t AudioFlinger::PatchPanel::Patch::createConnections(PatchPanel *panel)
 
     // create a special playback track to render to playback thread.
     // this track is given the same buffer as the PatchRecord buffer
+
+    // Default behaviour is to start as soon as possible to have the lowest possible latency even if
+    // it might glitch.
+    // Disable this behavior for FM Tuner source if no fast capture/mixer available.
+    const bool isFmBridge = mAudioPatch.sources[0].ext.device.type == AUDIO_DEVICE_IN_FM_TUNER;
+    const size_t frameCountToBeReady = isFmBridge && !usePassthruPatchRecord ? frameCount / 4 : 1;
     sp<PlaybackThread::PatchTrack> tempPatchTrack = new PlaybackThread::PatchTrack(
                                            mPlayback.thread().get(),
                                            streamType,
@@ -582,7 +590,9 @@ status_t AudioFlinger::PatchPanel::Patch::createConnections(PatchPanel *panel)
                                            frameCount,
                                            tempRecordTrack->buffer(),
                                            tempRecordTrack->bufferSize(),
-                                           outputFlags);
+                                           outputFlags,
+                                           {} /*timeout*/,
+                                           frameCountToBeReady);
     status = mPlayback.checkTrack(tempPatchTrack.get());
     if (status != NO_ERROR) {
         return status;

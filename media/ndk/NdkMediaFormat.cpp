@@ -200,8 +200,11 @@ bool AMediaFormat_getString(AMediaFormat* mData, const char *name, const char **
     AString tmp;
     if (mData->mFormat->findString(name, &tmp)) {
         String8 ret(tmp.c_str());
-        mData->mStringCache.add(String8(name), ret);
-        *out = ret.string();
+        ssize_t i = mData->mStringCache.add(String8(name), ret);
+        if (i < 0) {
+            return false;
+        }
+        *out = mData->mStringCache.valueAt(i).string();
         return true;
     }
     return false;
@@ -351,8 +354,14 @@ EXPORT const char* AMEDIAFORMAT_KEY_MAX_WIDTH = "max-width";
 EXPORT const char* AMEDIAFORMAT_KEY_MIME = "mime";
 EXPORT const char* AMEDIAFORMAT_KEY_MPEG_USER_DATA = "mpeg-user-data";
 EXPORT const char* AMEDIAFORMAT_KEY_MPEG2_STREAM_HEADER = "mpeg2-stream-header";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEGH_COMPATIBLE_SETS = "mpegh-compatible-sets";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEGH_PROFILE_LEVEL_INDICATION =
+        "mpegh-profile-level-indication";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEGH_REFERENCE_CHANNEL_LAYOUT =
+        "mpegh-reference-channel-layout";
 EXPORT const char* AMEDIAFORMAT_KEY_OPERATING_RATE = "operating-rate";
 EXPORT const char* AMEDIAFORMAT_KEY_PCM_ENCODING = "pcm-encoding";
+EXPORT const char* AMEDIAFORMAT_KEY_PICTURE_TYPE = "picture-type";
 EXPORT const char* AMEDIAFORMAT_KEY_PRIORITY = "priority";
 EXPORT const char* AMEDIAFORMAT_KEY_PROFILE = "profile";
 EXPORT const char* AMEDIAFORMAT_KEY_PCM_BIG_ENDIAN = "pcm-big-endian";
@@ -386,6 +395,9 @@ EXPORT const char* AMEDIAFORMAT_KEY_TITLE = "title";
 EXPORT const char* AMEDIAFORMAT_KEY_TRACK_ID = "track-id";
 EXPORT const char* AMEDIAFORMAT_KEY_TRACK_INDEX = "track-index";
 EXPORT const char* AMEDIAFORMAT_KEY_VALID_SAMPLES = "valid-samples";
+EXPORT const char* AMEDIAFORMAT_KEY_VIDEO_ENCODING_STATISTICS_LEVEL =
+        "video-encoding-statistics-level";
+EXPORT const char* AMEDIAFORMAT_KEY_VIDEO_QP_AVERAGE = "video-qp-average";
 EXPORT const char* AMEDIAFORMAT_VIDEO_QP_B_MAX = "video-qp-b-max";
 EXPORT const char* AMEDIAFORMAT_VIDEO_QP_B_MIN = "video-qp-b-min";
 EXPORT const char* AMEDIAFORMAT_VIDEO_QP_I_MAX = "video-qp-i-max";

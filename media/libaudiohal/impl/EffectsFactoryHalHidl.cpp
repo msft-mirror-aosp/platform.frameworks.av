@@ -21,8 +21,9 @@
 
 #include <UuidUtils.h>
 #include <util/EffectUtils.h>
+#include <utils/Log.h>
 
-#include "ConversionHelperHidl.h"
+#include "EffectConversionHelperHidl.h"
 #include "EffectBufferHalHidl.h"
 #include "EffectHalHidl.h"
 #include "EffectsFactoryHalHidl.h"
@@ -33,13 +34,12 @@ using ::android::hardware::Return;
 
 namespace android {
 namespace effect {
-namespace CPP_VERSION {
 
 using namespace ::android::hardware::audio::common::CPP_VERSION;
 using namespace ::android::hardware::audio::effect::CPP_VERSION;
 
 EffectsFactoryHalHidl::EffectsFactoryHalHidl(sp<IEffectsFactory> effectsFactory)
-        : ConversionHelperHidl("EffectsFactory") {
+        : EffectConversionHelperHidl("EffectsFactory") {
     ALOG_ASSERT(effectsFactory != nullptr, "Provided IEffectsFactory service is NULL");
     mEffectsFactory = effectsFactory;
 }
@@ -73,7 +73,9 @@ status_t EffectsFactoryHalHidl::getDescriptor(
         uint32_t index, effect_descriptor_t *pDescriptor) {
     // TODO: We need somehow to track the changes on the server side
     // or figure out how to convert everybody to query all the descriptors at once.
-    // TODO: check for nullptr
+    if (pDescriptor == nullptr) {
+        return BAD_VALUE;
+    }
     if (mLastDescriptors.size() == 0) {
         status_t queryResult = queryAllDescriptors();
         if (queryResult != OK) return queryResult;
@@ -85,7 +87,9 @@ status_t EffectsFactoryHalHidl::getDescriptor(
 
 status_t EffectsFactoryHalHidl::getDescriptor(
         const effect_uuid_t *pEffectUuid, effect_descriptor_t *pDescriptor) {
-    // TODO: check for nullptr
+    if (pDescriptor == nullptr || pEffectUuid == nullptr) {
+        return BAD_VALUE;
+    }
     if (mEffectsFactory == 0) return NO_INIT;
     Uuid hidlUuid;
     UuidUtils::uuidFromHal(*pEffectUuid, &hidlUuid);
@@ -103,6 +107,33 @@ status_t EffectsFactoryHalHidl::getDescriptor(
         else return NO_INIT;
     }
     return processReturn(__FUNCTION__, ret);
+}
+
+status_t EffectsFactoryHalHidl::getDescriptors(const effect_uuid_t *pEffectType,
+                                               std::vector<effect_descriptor_t> *descriptors) {
+    if (pEffectType == nullptr || descriptors == nullptr) {
+        return BAD_VALUE;
+    }
+
+    uint32_t numEffects = 0;
+    status_t status = queryNumberEffects(&numEffects);
+    if (status != NO_ERROR) {
+        ALOGW("%s error %d from FactoryHal queryNumberEffects", __func__, status);
+        return status;
+    }
+
+    for (uint32_t i = 0; i < numEffects; i++) {
+        effect_descriptor_t descriptor;
+        status = getDescriptor(i, &descriptor);
+        if (status != NO_ERROR) {
+            ALOGW("%s error %d from FactoryHal getDescriptor", __func__, status);
+            continue;
+        }
+        if (memcmp(&descriptor.type, pEffectType, sizeof(effect_uuid_t)) == 0) {
+            descriptors->push_back(descriptor);
+        }
+    }
+    return descriptors->empty() ? NAME_NOT_FOUND : NO_ERROR;
 }
 
 status_t EffectsFactoryHalHidl::createEffect(
@@ -149,6 +180,18 @@ status_t EffectsFactoryHalHidl::dumpEffects(int fd) {
     hidlHandle->data[0] = fd;
     Return<void> ret = mEffectsFactory->debug(hidlHandle, {} /* options */);
     native_handle_delete(hidlHandle);
+
+    // TODO(b/111997867, b/177271958)  Workaround - remove when fixed.
+    // A Binder transmitted fd may not close immediately due to a race condition b/111997867
+    // when the remote binder thread removes the last refcount to the fd blocks in the
+    // kernel for binder activity. We send a Binder ping() command to unblock the thread
+    // and complete the fd close / release.
+    //
+    // See DeviceHalHidl::dump(), EffectHalHidl::dump(), StreamHalHidl::dump(),
+    //     EffectsFactoryHalHidl::dumpEffects().
+
+    (void)mEffectsFactory->ping(); // synchronous Binder call
+
     return processReturn(__FUNCTION__, ret);
 }
 
@@ -161,12 +204,14 @@ status_t EffectsFactoryHalHidl::mirrorBuffer(void* external, size_t size,
     return EffectBufferHalHidl::mirror(external, size, buffer);
 }
 
-} // namespace CPP_VERSION
 } // namespace effect
 
-extern "C" __attribute__((visibility("default"))) void* createIEffectsFactory() {
+// When a shared library is built from a static library, even explicit
+// exports from a static library are optimized out unless actually used by
+// the shared library. See EffectsFactoryHalHidlEntry.cpp.
+extern "C" void* createIEffectsFactoryImpl() {
     auto service = hardware::audio::effect::CPP_VERSION::IEffectsFactory::getService();
-    return service ? new effect::CPP_VERSION::EffectsFactoryHalHidl(service) : nullptr;
+    return service ? new effect::EffectsFactoryHalHidl(service) : nullptr;
 }
 
 } // namespace android

@@ -78,6 +78,19 @@ public:
                 .build());
 
         addParameter(
+            DefineParam(mBitrateMode, C2_PARAMKEY_BITRATE_MODE)
+                .withDefault(new C2StreamBitrateModeTuning::output(
+                        0u, C2Config::BITRATE_VARIABLE))
+                .withFields({
+                    C2F(mBitrateMode, value).oneOf({
+                        C2Config::BITRATE_CONST,
+                        C2Config::BITRATE_VARIABLE})
+                })
+                .withSetter(
+                    Setter<decltype(*mBitrateMode)>::StrictValueWithNoDeps)
+                .build());
+
+        addParameter(
                 DefineParam(mBitrate, C2_PARAMKEY_BITRATE)
                 .withDefault(new C2StreamBitrateInfo::output(0u, 128000))
                 .withFields({C2F(mBitrate, value).inRange(500, 512000)})
@@ -100,12 +113,14 @@ public:
     uint32_t getSampleRate() const { return mSampleRate->value; }
     uint32_t getChannelCount() const { return mChannelCount->value; }
     uint32_t getBitrate() const { return mBitrate->value; }
+    uint32_t getBitrateMode() const { return mBitrateMode->value; }
     uint32_t getComplexity() const { return mComplexity->value; }
 
 private:
     std::shared_ptr<C2StreamSampleRateInfo::input> mSampleRate;
     std::shared_ptr<C2StreamChannelCountInfo::input> mChannelCount;
     std::shared_ptr<C2StreamBitrateInfo::output> mBitrate;
+    std::shared_ptr<C2StreamBitrateModeTuning::output> mBitrateMode;
     std::shared_ptr<C2StreamComplexityTuning::output> mComplexity;
     std::shared_ptr<C2StreamMaxBufferSizeInfo::input> mInputMaxBufSize;
 };
@@ -135,6 +150,7 @@ c2_status_t C2SoftOpusEnc::configureEncoder() {
     mSampleRate = mIntf->getSampleRate();
     mChannelCount = mIntf->getChannelCount();
     uint32_t bitrate = mIntf->getBitrate();
+    uint32_t bitrateMode = mIntf->getBitrateMode();
     int complexity = mIntf->getComplexity();
     mNumSamplesPerFrame = mSampleRate / (1000 / mFrameDurationMs);
     mNumPcmBytesPerInputFrame =
@@ -189,14 +205,24 @@ c2_status_t C2SoftOpusEnc::configureEncoder() {
         return C2_BAD_VALUE;
     }
 
-    // Constrained VBR
-    if (opus_multistream_encoder_ctl(mEncoder, OPUS_SET_VBR(1) != OPUS_OK)) {
-        ALOGE("failed to set vbr type");
-        return C2_BAD_VALUE;
-    }
-    if (opus_multistream_encoder_ctl(mEncoder, OPUS_SET_VBR_CONSTRAINT(1) !=
-            OPUS_OK)) {
-        ALOGE("failed to set vbr constraint");
+    if (bitrateMode == C2Config::BITRATE_VARIABLE) {
+        // Constrained VBR
+        if (opus_multistream_encoder_ctl(mEncoder, OPUS_SET_VBR(1) != OPUS_OK)) {
+            ALOGE("failed to set vbr type");
+            return C2_BAD_VALUE;
+        }
+        if (opus_multistream_encoder_ctl(mEncoder, OPUS_SET_VBR_CONSTRAINT(1) !=
+                OPUS_OK)) {
+            ALOGE("failed to set vbr constraint");
+            return C2_BAD_VALUE;
+        }
+    } else if (bitrateMode == C2Config::BITRATE_CONST) {
+        if (opus_multistream_encoder_ctl(mEncoder, OPUS_SET_VBR(0) != OPUS_OK)) {
+            ALOGE("failed to set cbr type");
+            return C2_BAD_VALUE;
+        }
+    } else {
+        ALOGE("unknown bitrate mode");
         return C2_BAD_VALUE;
     }
 
@@ -219,7 +245,7 @@ c2_status_t C2SoftOpusEnc::initEncoder() {
     mIsFirstFrame = true;
     mEncoderFlushed = false;
     mBufferAvailable = false;
-    mAnchorTimeStamp = 0ull;
+    mAnchorTimeStamp = 0;
     mProcessedSamples = 0;
     mFilledLen = 0;
     mFrameDurationMs = DEFAULT_FRAME_DURATION_MS;
@@ -240,7 +266,7 @@ c2_status_t C2SoftOpusEnc::onStop() {
     mIsFirstFrame = true;
     mEncoderFlushed = false;
     mBufferAvailable = false;
-    mAnchorTimeStamp = 0ull;
+    mAnchorTimeStamp = 0;
     mProcessedSamples = 0u;
     mFilledLen = 0;
     if (mEncoder) {
@@ -337,7 +363,7 @@ void C2SoftOpusEnc::process(const std::unique_ptr<C2Work>& work,
         }
     }
     if (mIsFirstFrame && inSize > 0) {
-        mAnchorTimeStamp = work->input.ordinal.timestamp.peekull();
+        mAnchorTimeStamp = work->input.ordinal.timestamp.peekll();
         mIsFirstFrame = false;
     }
 
@@ -360,7 +386,7 @@ void C2SoftOpusEnc::process(const std::unique_ptr<C2Work>& work,
     size_t inPos = 0;
     size_t processSize = 0;
     mBytesEncoded = 0;
-    uint64_t outTimeStamp = 0u;
+    int64_t outTimeStamp = 0;
     std::shared_ptr<C2Buffer> buffer;
     uint64_t inputIndex = work->input.ordinal.frameIndex.peeku();
     const uint8_t* inPtr = rView.data() + inOffset;
@@ -558,7 +584,7 @@ c2_status_t C2SoftOpusEnc::drainInternal(
         mOutputBlock.reset();
     }
     mProcessedSamples += (mNumPcmBytesPerInputFrame / sizeof(int16_t));
-    uint64_t outTimeStamp =
+    int64_t outTimeStamp =
         mProcessedSamples * 1000000ll / mChannelCount / mSampleRate;
     outOrdinal.frameIndex = mOutIndex++;
     outOrdinal.timestamp = mAnchorTimeStamp + outTimeStamp;
@@ -586,7 +612,7 @@ c2_status_t C2SoftOpusEnc::drain(uint32_t drainMode,
         return C2_OMITTED;
     }
     mIsFirstFrame = true;
-    mAnchorTimeStamp = 0ull;
+    mAnchorTimeStamp = 0;
     mProcessedSamples = 0u;
     return drainInternal(pool, nullptr);
 }

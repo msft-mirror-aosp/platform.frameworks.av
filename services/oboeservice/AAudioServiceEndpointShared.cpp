@@ -78,7 +78,7 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
     result = mStreamInternal->open(builder);
 
     setSampleRate(mStreamInternal->getSampleRate());
-    setSamplesPerFrame(mStreamInternal->getSamplesPerFrame());
+    setChannelMask(mStreamInternal->getChannelMask());
     setDeviceId(mStreamInternal->getDeviceId());
     setSessionId(mStreamInternal->getSessionId());
     setFormat(AUDIO_FORMAT_PCM_FLOAT); // force for mixer
@@ -126,9 +126,9 @@ aaudio_result_t aaudio::AAudioServiceEndpointShared::startSharingThread_l() {
     // Prevent this object from getting deleted before the thread has a chance to create
     // its strong pointer. Assume the thread will call decStrong().
     this->incStrong(nullptr);
-    aaudio_result_t result = getStreamInternal()->createThread_l(periodNanos,
-                                                                 aaudio_endpoint_thread_proc,
-                                                                 this);
+    aaudio_result_t result = getStreamInternal()->createThread(periodNanos,
+                                                               aaudio_endpoint_thread_proc,
+                                                               this);
     if (result != AAUDIO_OK) {
         this->decStrong(nullptr); // Because the thread won't do it.
     }
@@ -213,4 +213,13 @@ aaudio_result_t AAudioServiceEndpointShared::getTimestamp(int64_t *positionFrame
         result = AAUDIO_ERROR_UNAVAILABLE;
     }
     return result;
+}
+
+void AAudioServiceEndpointShared::handleDisconnectRegisteredStreamsAsync() {
+    android::sp<AAudioServiceEndpointShared> holdEndpoint(this);
+    std::thread asyncTask([holdEndpoint]() {
+        // We do not need the returned vector.
+        holdEndpoint->disconnectRegisteredStreams();
+    });
+    asyncTask.detach();
 }

@@ -19,6 +19,8 @@
     #error This header file should only be included from AudioFlinger.h
 #endif
 
+#include <math.h>
+
 // Checks and monitors OP_PLAY_AUDIO
 class OpPlayAudioMonitor : public RefBase {
 public:
@@ -80,7 +82,8 @@ public:
                                 /** default behaviour is to start when there are as many frames
                                   * ready as possible (aka. Buffer is full). */
                                 size_t frameCountToBeReady = SIZE_MAX,
-                                float speed = 1.0f);
+                                float speed = 1.0f,
+                                bool isSpatialized = false);
     virtual             ~Track();
     virtual status_t    initCheck() const;
 
@@ -161,12 +164,20 @@ public:
             }
             /** Return at what intensity to play haptics, used in mixer. */
             os::HapticScale getHapticIntensity() const { return mHapticIntensity; }
+            /** Return the maximum amplitude allowed for haptics data, used in mixer. */
+            float getHapticMaxAmplitude() const { return mHapticMaxAmplitude; }
             /** Set intensity of haptic playback, should be set after querying vibrator service. */
             void    setHapticIntensity(os::HapticScale hapticIntensity) {
                 if (os::isValidHapticScale(hapticIntensity)) {
                     mHapticIntensity = hapticIntensity;
                     setHapticPlaybackEnabled(mHapticIntensity != os::HapticScale::MUTE);
                 }
+            }
+            /** Set maximum amplitude allowed for haptic data, should be set after querying
+             *  vibrator service.
+             */
+            void    setHapticMaxAmplitude(float maxAmplitude) {
+                mHapticMaxAmplitude = maxAmplitude;
             }
             sp<os::ExternalVibration> getExternalVibration() const { return mExternalVibration; }
 
@@ -183,8 +194,16 @@ public:
        }
     }
 
+    static bool checkServerLatencySupported(
+            audio_format_t format, audio_output_flags_t flags) {
+        return audio_is_linear_pcm(format)
+                && (flags & AUDIO_OUTPUT_FLAG_HW_AV_SYNC) == 0;
+    }
+
     audio_output_flags_t getOutputFlags() const { return mFlags; }
     float getSpeed() const { return mSpeed; }
+    bool isSpatialized() const override { return mIsSpatialized; }
+
 protected:
     // for numerous
     friend class PlaybackThread;
@@ -282,6 +301,8 @@ protected:
     bool                mHapticPlaybackEnabled = false; // indicates haptic playback enabled or not
     // intensity to play haptic data
     os::HapticScale mHapticIntensity = os::HapticScale::MUTE;
+    // max amplitude allowed for haptic data
+    float mHapticMaxAmplitude = NAN;
     class AudioVibrationController : public os::BnExternalVibrationController {
     public:
         explicit AudioVibrationController(Track* track) : mTrack(track) {}
@@ -332,6 +353,7 @@ private:
     audio_output_flags_t mFlags;
     TeePatches  mTeePatches;
     const float         mSpeed;
+    const bool          mIsSpatialized;
 };  // end of Track
 
 
