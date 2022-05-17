@@ -1893,8 +1893,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const String8&
         // Set rotate-and-crop override behavior
         if (mOverrideRotateAndCropMode != ANDROID_SCALER_ROTATE_AND_CROP_AUTO) {
             client->setRotateAndCropOverride(mOverrideRotateAndCropMode);
-        } else if (effectiveApiLevel == API_2) {
-
+        } else {
           client->setRotateAndCropOverride(
               CameraServiceProxyWrapper::getRotateAndCropOverride(
                   clientPackageName, facing, multiuser_get_user_id(clientUid)));
@@ -2432,7 +2431,7 @@ Status CameraService::notifyDisplayConfigurationChange() {
     for (auto& current : clients) {
         if (current != nullptr) {
             const auto basicClient = current->getValue();
-            if (basicClient.get() != nullptr && basicClient->canCastToApiClient(API_2)) {
+            if (basicClient.get() != nullptr) {
               basicClient->setRotateAndCropOverride(
                   CameraServiceProxyWrapper::getRotateAndCropOverride(
                       basicClient->getPackageName(),
@@ -3724,10 +3723,21 @@ void CameraService::UidPolicy::onUidIdle(uid_t uid, bool /* disabled */) {
 
 void CameraService::UidPolicy::onUidStateChanged(uid_t uid, int32_t procState,
         int64_t procStateSeq __unused, int32_t capability __unused) {
-    Mutex::Autolock _l(mUidLock);
-    if (mMonitoredUids.find(uid) != mMonitoredUids.end() &&
-            mMonitoredUids[uid].procState != procState) {
-        mMonitoredUids[uid].procState = procState;
+    bool procStateChange = false;
+    {
+        Mutex::Autolock _l(mUidLock);
+        if (mMonitoredUids.find(uid) != mMonitoredUids.end() &&
+                mMonitoredUids[uid].procState != procState) {
+            mMonitoredUids[uid].procState = procState;
+            procStateChange = true;
+        }
+    }
+
+    if (procStateChange) {
+        sp<CameraService> service = mService.promote();
+        if (service != nullptr) {
+            service->notifyMonitoredUids();
+        }
     }
 }
 
