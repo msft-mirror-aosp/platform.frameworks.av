@@ -31,7 +31,9 @@
 
 #include <camera/CaptureResult.h>
 
-#include "android/hardware/camera/metadata/3.8/types.h"
+#include "CameraServiceWatchdog.h"
+#include <aidl/android/hardware/camera/device/CameraBlob.h>
+
 #include "common/CameraDeviceBase.h"
 #include "device3/BufferUtils.h"
 #include "device3/StatusTracker.h"
@@ -50,7 +52,6 @@
 #include <camera_metadata_hidden.h>
 
 using android::camera3::camera_capture_request_t;
-using android::camera3::camera_jpeg_blob_t;
 using android::camera3::camera_request_template;
 using android::camera3::camera_stream_buffer_t;
 using android::camera3::camera_stream_configuration_t;
@@ -88,7 +89,9 @@ class Camera3Device :
     static void cleanupNativeHandles(
             std::vector<native_handle_t*> *handles, bool closeFd = false);
 
-    IPCTransport getTransportType() { return mInterface->getTransportType(); }
+    virtual IPCTransport getTransportType() const override {
+        return mInterface->getTransportType();
+    }
 
     /**
      * CameraDeviceBase interface
@@ -97,6 +100,9 @@ class Camera3Device :
     const String8& getId() const override;
 
     metadata_vendor_id_t getVendorTagId() const override { return mVendorTagId; }
+
+    // Watchdog thread
+    sp<CameraServiceWatchdog> mCameraServiceWatchdog;
 
     // Transitions to idle state on success.
     virtual status_t initialize(sp<CameraProviderManager> /*manager*/,
@@ -141,7 +147,7 @@ class Camera3Device :
             uint64_t consumerUsage = 0,
             int64_t dynamicRangeProfile =
             ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
-            int streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
             int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO) override;
 
@@ -156,7 +162,7 @@ class Camera3Device :
             uint64_t consumerUsage = 0,
             int64_t dynamicRangeProfile =
             ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
-            int streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
             int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO) override;
 
@@ -294,13 +300,14 @@ class Camera3Device :
     status_t disconnectImpl();
     static status_t removeFwkOnlyRegionKeys(CameraMetadata *request);
 
+    float getMaxPreviewFps(sp<camera3::Camera3OutputStreamInterface> stream);
+
     static const size_t        kDumpLockAttempts  = 10;
     static const size_t        kDumpSleepDuration = 100000; // 0.10 sec
     static const nsecs_t       kActiveTimeout     = 500000000;  // 500 ms
     static const nsecs_t       kMinWarnInflightDuration = 5000000000; // 5 s
     static const size_t        kInFlightWarnLimit = 30;
     static const size_t        kInFlightWarnLimitHighSpeed = 256; // batch size 32 * pipe depth 8
-    static const nsecs_t       kDefaultExpectedDuration = 100000000; // 100 ms
     static const nsecs_t       kMinInflightDuration = 5000000000; // 5 s
     static const nsecs_t       kBaseGetBufferWait = 3000000000; // 3 sec.
     // SCHED_FIFO priority for request submission thread in HFR mode
@@ -308,7 +315,8 @@ class Camera3Device :
 
     struct                     RequestTrigger;
     // minimal jpeg buffer size: 256KB + blob header
-    static const ssize_t       kMinJpegBufferSize = 256 * 1024 + sizeof(camera_jpeg_blob_t);
+    static const ssize_t       kMinJpegBufferSize =
+            256 * 1024 + sizeof(aidl::android::hardware::camera::device::CameraBlob);
     // Constant to use for stream ID when one doesn't exist
     static const int           NO_STREAM = -1;
 
@@ -352,7 +360,7 @@ class Camera3Device :
         HalInterface(const HalInterface &other);
         HalInterface();
 
-        virtual IPCTransport getTransportType() = 0;
+        virtual IPCTransport getTransportType() const = 0;
 
         // Returns true if constructed with a valid device or session, and not yet cleared
         virtual bool valid() = 0;
@@ -954,8 +962,9 @@ class Camera3Device :
         // send request in mNextRequests to HAL in a batch. Return true = sucssess
         bool sendRequestsBatch();
 
-        // Calculate the expected maximum duration for a request
-        nsecs_t calculateMaxExpectedDuration(const camera_metadata_t *request);
+        // Calculate the expected (minimum, maximum) duration range for a request
+        std::pair<nsecs_t, nsecs_t> calculateExpectedDurationRange(
+                const camera_metadata_t *request);
 
         // Check and update latest session parameters based on the current request settings.
         bool updateSessionParameters(const CameraMetadata& settings);
@@ -980,6 +989,8 @@ class Camera3Device :
 
         Mutex              mRequestLock;
         Condition          mRequestSignal;
+        bool               mRequestClearing;
+
         Condition          mRequestSubmittedSignal;
         RequestList        mRequestQueue;
         RequestList        mRepeatingRequests;
@@ -1070,7 +1081,7 @@ class Camera3Device :
 
     status_t registerInFlight(uint32_t frameNumber,
             int32_t numBuffers, CaptureResultExtras resultExtras, bool hasInput,
-            bool callback, nsecs_t maxExpectedDuration,
+            bool callback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
             const std::set<std::set<String8>>& physicalCameraIds,
             bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto,
             const std::set<std::string>& cameraIdsWithZoom, const SurfaceMap& outputSurfaces,
@@ -1320,6 +1331,9 @@ class Camera3Device :
     // Whether the camera framework overrides the device characteristics for
     // performance class.
     bool mOverrideForPerfClass;
+
+    // The current minimum expected frame duration based on AE_TARGET_FPS_RANGE
+    nsecs_t mMinExpectedDuration = 0;
 
     // Injection camera related methods.
     class Camera3DeviceInjectionMethods : public virtual RefBase {

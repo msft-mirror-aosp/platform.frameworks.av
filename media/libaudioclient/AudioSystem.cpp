@@ -70,6 +70,7 @@ std::set<audio_error_callback> AudioSystem::gAudioErrorCallbacks;
 dynamic_policy_callback AudioSystem::gDynPolicyCallback = NULL;
 record_config_callback AudioSystem::gRecordConfigCallback = NULL;
 routing_callback AudioSystem::gRoutingCallback = NULL;
+vol_range_init_req_callback AudioSystem::gVolRangeInitReqCallback = NULL;
 
 // Required to be held while calling into gSoundTriggerCaptureStateListener.
 class CaptureStateListenerImpl;
@@ -781,6 +782,11 @@ status_t AudioSystem::AudioFlingerClient::removeAudioDeviceCallback(
     gRoutingCallback = cb;
 }
 
+/*static*/ void AudioSystem::setVolInitReqCallback(vol_range_init_req_callback cb) {
+    Mutex::Autolock _l(gLock);
+    gVolRangeInitReqCallback = cb;
+}
+
 // client singleton for AudioPolicyService binder interface
 // protected by gLockAPS
 sp<IAudioPolicyService> AudioSystem::gAudioPolicyService;
@@ -824,6 +830,11 @@ const sp<IAudioPolicyService> AudioSystem::get_audio_policy_service() {
     }
 
     return ap;
+}
+
+void AudioSystem::clearAudioPolicyService() {
+    Mutex::Autolock _l(gLockAPS);
+    gAudioPolicyService.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -959,7 +970,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
                                        audio_output_flags_t flags,
                                        audio_port_handle_t* selectedDeviceId,
                                        audio_port_handle_t* portId,
-                                       std::vector<audio_io_handle_t>* secondaryOutputs) {
+                                       std::vector<audio_io_handle_t>* secondaryOutputs,
+                                       bool *isSpatialized) {
     if (attr == nullptr) {
         ALOGE("%s NULL audio attributes", __func__);
         return BAD_VALUE;
@@ -1012,6 +1024,7 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
     *portId = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_port_handle_t(responseAidl.portId));
     *secondaryOutputs = VALUE_OR_RETURN_STATUS(convertContainer<std::vector<audio_io_handle_t>>(
             responseAidl.secondaryOutputs, aidl2legacy_int32_t_audio_io_handle_t));
+    *isSpatialized = responseAidl.isSpatialized;
 
     return OK;
 }
@@ -1142,8 +1155,15 @@ status_t AudioSystem::initStreamVolume(audio_stream_type_t stream,
             legacy2aidl_audio_stream_type_t_AudioStreamType(stream));
     int32_t indexMinAidl = VALUE_OR_RETURN_STATUS(convertIntegral<int32_t>(indexMin));
     int32_t indexMaxAidl = VALUE_OR_RETURN_STATUS(convertIntegral<int32_t>(indexMax));
-    return statusTFromBinderStatus(
+    status_t status = statusTFromBinderStatus(
             aps->initStreamVolume(streamAidl, indexMinAidl, indexMaxAidl));
+    if (status == DEAD_OBJECT) {
+        // This is a critical operation since w/o proper stream volumes no audio
+        // will be heard. Make sure we recover from a failure in any case.
+        ALOGE("Received DEAD_OBJECT from APS, clearing the client");
+        clearAudioPolicyService();
+    }
+    return status;
 }
 
 status_t AudioSystem::setStreamVolumeIndex(audio_stream_type_t stream,
@@ -1253,24 +1273,9 @@ product_strategy_t AudioSystem::getStrategyForStream(audio_stream_type_t stream)
     return result.value_or(PRODUCT_STRATEGY_NONE);
 }
 
-DeviceTypeSet AudioSystem::getDevicesForStream(audio_stream_type_t stream) {
-    const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
-    if (aps == 0) return DeviceTypeSet{};
-
-    auto result = [&]() -> ConversionResult<DeviceTypeSet> {
-        AudioStreamType streamAidl = VALUE_OR_RETURN(
-                legacy2aidl_audio_stream_type_t_AudioStreamType(stream));
-        std::vector<AudioDeviceDescription> resultAidl;
-        RETURN_IF_ERROR(statusTFromBinderStatus(
-                aps->getDevicesForStream(streamAidl, &resultAidl)));
-        return convertContainer<DeviceTypeSet>(resultAidl,
-                aidl2legacy_AudioDeviceDescription_audio_devices_t);
-    }();
-    return result.value_or(DeviceTypeSet{});
-}
-
 status_t AudioSystem::getDevicesForAttributes(const AudioAttributes& aa,
-                                              AudioDeviceTypeAddrVector* devices) {
+                                              AudioDeviceTypeAddrVector* devices,
+                                              bool forVolume) {
     if (devices == nullptr) {
         return BAD_VALUE;
     }
@@ -1281,7 +1286,7 @@ status_t AudioSystem::getDevicesForAttributes(const AudioAttributes& aa,
             legacy2aidl_AudioAttributes_AudioAttributesEx(aa));
     std::vector<AudioDevice> retAidl;
     RETURN_STATUS_IF_ERROR(
-            statusTFromBinderStatus(aps->getDevicesForAttributes(aaAidl, &retAidl)));
+            statusTFromBinderStatus(aps->getDevicesForAttributes(aaAidl, forVolume, &retAidl)));
     *devices = VALUE_OR_RETURN_STATUS(
             convertContainer<AudioDeviceTypeAddrVector>(
                     retAidl,
@@ -1419,10 +1424,7 @@ void AudioSystem::clearAudioConfigCache() {
         }
         gAudioFlinger.clear();
     }
-    {
-        Mutex::Autolock _l(gLockAPS);
-        gAudioPolicyService.clear();
-    }
+    clearAudioPolicyService();
 }
 
 status_t AudioSystem::setSupportedSystemUsages(const std::vector<audio_usage_t>& systemUsages) {
@@ -2587,6 +2589,19 @@ Status AudioSystem::AudioPolicyServiceClient::onRoutingUpdated() {
     return Status::ok();
 }
 
+Status AudioSystem::AudioPolicyServiceClient::onVolumeRangeInitRequest() {
+    vol_range_init_req_callback cb = NULL;
+    {
+        Mutex::Autolock _l(AudioSystem::gLock);
+        cb = gVolRangeInitReqCallback;
+    }
+
+    if (cb != NULL) {
+        cb();
+    }
+    return Status::ok();
+}
+
 void AudioSystem::AudioPolicyServiceClient::binderDied(const wp<IBinder>& who __unused) {
     {
         Mutex::Autolock _l(mLock);
@@ -2597,10 +2612,7 @@ void AudioSystem::AudioPolicyServiceClient::binderDied(const wp<IBinder>& who __
             mAudioVolumeGroupCallback[i]->onServiceDied();
         }
     }
-    {
-        Mutex::Autolock _l(gLockAPS);
-        AudioSystem::gAudioPolicyService.clear();
-    }
+    AudioSystem::clearAudioPolicyService();
 
     ALOGW("AudioPolicyService server died!");
 }

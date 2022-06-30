@@ -21,6 +21,7 @@
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
 #include <Codec2BufferUtils.h>
+#include <Codec2CommonUtils.h>
 #include <Codec2Mapper.h>
 #include <SimpleC2Interface.h>
 #include <log/log.h>
@@ -55,8 +56,8 @@ class C2SoftGav1Dec::IntfImpl : public SimpleInterface<void>::BaseParams {
         DefineParam(mSize, C2_PARAMKEY_PICTURE_SIZE)
             .withDefault(new C2StreamPictureSizeInfo::output(0u, 320, 240))
             .withFields({
-                C2F(mSize, width).inRange(2, 4096, 2),
-                C2F(mSize, height).inRange(2, 4096, 2),
+                C2F(mSize, width).inRange(2, 4096),
+                C2F(mSize, height).inRange(2, 4096),
             })
             .withSetter(SizeSetter)
             .build());
@@ -190,11 +191,23 @@ class C2SoftGav1Dec::IntfImpl : public SimpleInterface<void>::BaseParams {
               .withSetter(ColorAspectsSetter, mDefaultColorAspects, mCodedColorAspects)
               .build());
 
+    std::vector<uint32_t> pixelFormats = {HAL_PIXEL_FORMAT_YCBCR_420_888};
+    if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
+        pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
+    }
+    // If color format surface isn't added to supported formats, there is no way to know
+    // when the color-format is configured to surface. This is necessary to be able to
+    // choose 10-bit format while decoding 10-bit clips in surface mode.
+    pixelFormats.push_back(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
+
     // TODO: support more formats?
-    addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
-                     .withConstValue(new C2StreamPixelFormatInfo::output(
-                         0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
-                     .build());
+    addParameter(
+            DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
+            .withDefault(new C2StreamPixelFormatInfo::output(
+                              0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
+            .withFields({C2F(mPixelFormat, value).oneOf(pixelFormats)})
+            .withSetter((Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps))
+            .build());
   }
 
   static C2R SizeSetter(bool mayBlock,
@@ -315,6 +328,9 @@ class C2SoftGav1Dec::IntfImpl : public SimpleInterface<void>::BaseParams {
     return C2R::Ok();
   }
 
+  // unsafe getters
+  std::shared_ptr<C2StreamPixelFormatInfo::output> getPixelFormat_l() const { return mPixelFormat; }
+
  private:
   std::shared_ptr<C2StreamProfileLevelInfo::input> mProfileLevel;
   std::shared_ptr<C2StreamPictureSizeInfo::output> mSize;
@@ -335,8 +351,7 @@ C2SoftGav1Dec::C2SoftGav1Dec(const char *name, c2_node_id_t id,
           std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
       mIntf(intfImpl),
       mCodecCtx(nullptr) {
-  gettimeofday(&mTimeStart, nullptr);
-  gettimeofday(&mTimeEnd, nullptr);
+  mTimeStart = mTimeEnd = systemTime();
 }
 
 C2SoftGav1Dec::~C2SoftGav1Dec() { onRelease(); }
@@ -403,6 +418,11 @@ static int GetCPUCoreCount() {
 bool C2SoftGav1Dec::initDecoder() {
   mSignalledError = false;
   mSignalledOutputEos = false;
+  mHalPixelFormat = HAL_PIXEL_FORMAT_YV12;
+  {
+      IntfImpl::Lock lock = mIntf->lock();
+      mPixelFormatInfo = mIntf->getPixelFormat_l();
+  }
   mCodecCtx.reset(new libgav1::Decoder());
 
   if (mCodecCtx == nullptr) {
@@ -506,19 +526,17 @@ void C2SoftGav1Dec::process(const std::unique_ptr<C2Work> &work,
   int64_t frameIndex = work->input.ordinal.frameIndex.peekll();
   if (inSize) {
     uint8_t *bitstream = const_cast<uint8_t *>(rView.data() + inOffset);
-    int32_t decodeTime = 0;
-    int32_t delay = 0;
 
-    GETTIME(&mTimeStart, nullptr);
-    TIME_DIFF(mTimeEnd, mTimeStart, delay);
+    mTimeStart = systemTime();
+    nsecs_t delay = mTimeStart - mTimeEnd;
 
     const Libgav1StatusCode status =
         mCodecCtx->EnqueueFrame(bitstream, inSize, frameIndex,
                                 /*buffer_private_data=*/nullptr);
 
-    GETTIME(&mTimeEnd, nullptr);
-    TIME_DIFF(mTimeStart, mTimeEnd, decodeTime);
-    ALOGV("decodeTime=%4d delay=%4d\n", decodeTime, delay);
+    mTimeEnd = systemTime();
+    nsecs_t decodeTime = mTimeEnd - mTimeStart;
+    ALOGV("decodeTime=%4" PRId64 " delay=%4" PRId64 "\n", decodeTime, delay);
 
     if (status != kLibgav1StatusOk) {
       ALOGE("av1 decoder failed to decode frame. status: %d.", status);
@@ -628,10 +646,10 @@ bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
 
   std::shared_ptr<C2GraphicBlock> block;
   uint32_t format = HAL_PIXEL_FORMAT_YV12;
-  if (buffer->bitdepth == 10) {
+  std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;
+  if (buffer->bitdepth == 10 && mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
     IntfImpl::Lock lock = mIntf->lock();
-    std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects =
-        mIntf->getColorAspects_l();
+    codedColorAspects = mIntf->getColorAspects_l();
     bool allowRGBA1010102 = false;
     if (codedColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
         codedColorAspects->matrix == C2Color::MATRIX_BT2020 &&
@@ -648,10 +666,32 @@ bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
       return false;
     }
   }
+
+  if (mHalPixelFormat != format) {
+    C2StreamPixelFormatInfo::output pixelFormat(0u, format);
+    std::vector<std::unique_ptr<C2SettingResult>> failures;
+    c2_status_t err = mIntf->config({&pixelFormat }, C2_MAY_BLOCK, &failures);
+    if (err == C2_OK) {
+      work->worklets.front()->output.configUpdate.push_back(
+          C2Param::Copy(pixelFormat));
+    } else {
+      ALOGE("Config update pixelFormat failed");
+      mSignalledError = true;
+      work->workletsProcessed = 1u;
+      work->result = C2_CORRUPTED;
+      return UNKNOWN_ERROR;
+    }
+    mHalPixelFormat = format;
+  }
+
   C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
 
-  c2_status_t err = pool->fetchGraphicBlock(align(mWidth, 16), mHeight, format,
-                                            usage, &block);
+  // We always create a graphic block that is width aligned to 16 and height
+  // aligned to 2. We set the correct "crop" value of the image in the call to
+  // createGraphicBuffer() by setting the correct image dimensions.
+  c2_status_t err = pool->fetchGraphicBlock(align(mWidth, 16),
+                                            align(mHeight, 2), format, usage,
+                                            &block);
 
   if (err != C2_OK) {
     ALOGE("fetchGraphicBlock for Output failed with status %d", err);
@@ -687,9 +727,11 @@ bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
     const uint16_t *srcV = (const uint16_t *)buffer->plane[2];
 
     if (format == HAL_PIXEL_FORMAT_RGBA_1010102) {
-        convertYUV420Planar16ToY410((uint32_t *)dstY, srcY, srcU, srcV, srcYStride / 2,
-                                    srcUStride / 2, srcVStride / 2, dstYStride / sizeof(uint32_t),
-                                    mWidth, mHeight);
+        convertYUV420Planar16ToY410OrRGBA1010102(
+                (uint32_t *)dstY, srcY, srcU, srcV, srcYStride / 2,
+                srcUStride / 2, srcVStride / 2,
+                dstYStride / sizeof(uint32_t), mWidth, mHeight,
+                std::static_pointer_cast<const C2ColorAspectsStruct>(codedColorAspects));
     } else if (format == HAL_PIXEL_FORMAT_YCBCR_P010) {
         convertYUV420Planar16ToP010((uint16_t *)dstY, (uint16_t *)dstU, srcY, srcU, srcV,
                                     srcYStride / 2, srcUStride / 2, srcVStride / 2, dstYStride / 2,

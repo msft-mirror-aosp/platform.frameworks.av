@@ -18,8 +18,12 @@
 #define ATRACE_TAG ATRACE_TAG_CAMERA
 //#define LOG_NDEBUG 0
 
+#include <algorithm>
 #include <ctime>
 #include <fstream>
+
+#include <aidl/android/hardware/camera/device/CameraBlob.h>
+#include <aidl/android/hardware/camera/device/CameraBlobId.h>
 
 #include <android-base/unique_fd.h>
 #include <cutils/properties.h>
@@ -27,6 +31,7 @@
 #include <utils/Log.h>
 #include <utils/Trace.h>
 
+#include <common/CameraDeviceBase.h>
 #include "api1/client2/JpegProcessor.h"
 #include "Camera3OutputStream.h"
 #include "utils/TraceHFR.h"
@@ -40,14 +45,17 @@ namespace android {
 
 namespace camera3 {
 
+using aidl::android::hardware::camera::device::CameraBlob;
+using aidl::android::hardware::camera::device::CameraBlobId;
+
 Camera3OutputStream::Camera3OutputStream(int id,
         sp<Surface> consumer,
         uint32_t width, uint32_t height, int format,
         android_dataspace dataSpace, camera_stream_rotation_t rotation,
         nsecs_t timestampOffset, const String8& physicalCameraId,
-        const std::unordered_set<int32_t> &sensorPixelModesUsed,
+        const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
-        int streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
+        int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
         int mirrorMode) :
         Camera3IOStreamBase(id, CAMERA_STREAM_OUTPUT, width, height,
                             /*maxSize*/0, format, dataSpace, rotation,
@@ -62,7 +70,8 @@ Camera3OutputStream::Camera3OutputStream(int id,
         mConsumerUsage(0),
         mDropBuffers(false),
         mMirrorMode(mirrorMode),
-        mDequeueBufferLatency(kDequeueLatencyBinSize) {
+        mDequeueBufferLatency(kDequeueLatencyBinSize),
+        mIPCTransport(transport) {
 
     if (mConsumer == NULL) {
         ALOGE("%s: Consumer is NULL!", __FUNCTION__);
@@ -78,9 +87,9 @@ Camera3OutputStream::Camera3OutputStream(int id,
         uint32_t width, uint32_t height, size_t maxSize, int format,
         android_dataspace dataSpace, camera_stream_rotation_t rotation,
         nsecs_t timestampOffset, const String8& physicalCameraId,
-        const std::unordered_set<int32_t> &sensorPixelModesUsed,
+        const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
-        int streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
+        int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
         int mirrorMode) :
         Camera3IOStreamBase(id, CAMERA_STREAM_OUTPUT, width, height, maxSize,
                             format, dataSpace, rotation, physicalCameraId, sensorPixelModesUsed,
@@ -94,7 +103,8 @@ Camera3OutputStream::Camera3OutputStream(int id,
         mConsumerUsage(0),
         mDropBuffers(false),
         mMirrorMode(mirrorMode),
-        mDequeueBufferLatency(kDequeueLatencyBinSize) {
+        mDequeueBufferLatency(kDequeueLatencyBinSize),
+        mIPCTransport(transport) {
 
     if (format != HAL_PIXEL_FORMAT_BLOB && format != HAL_PIXEL_FORMAT_RAW_OPAQUE) {
         ALOGE("%s: Bad format for size-only stream: %d", __FUNCTION__,
@@ -116,9 +126,9 @@ Camera3OutputStream::Camera3OutputStream(int id,
         uint64_t consumerUsage, android_dataspace dataSpace,
         camera_stream_rotation_t rotation, nsecs_t timestampOffset,
         const String8& physicalCameraId,
-        const std::unordered_set<int32_t> &sensorPixelModesUsed,
+        const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
-        int streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
+        int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
         int mirrorMode) :
         Camera3IOStreamBase(id, CAMERA_STREAM_OUTPUT, width, height,
                             /*maxSize*/0, format, dataSpace, rotation,
@@ -133,7 +143,8 @@ Camera3OutputStream::Camera3OutputStream(int id,
         mConsumerUsage(consumerUsage),
         mDropBuffers(false),
         mMirrorMode(mirrorMode),
-        mDequeueBufferLatency(kDequeueLatencyBinSize) {
+        mDequeueBufferLatency(kDequeueLatencyBinSize),
+        mIPCTransport(transport) {
     // Deferred consumer only support preview surface format now.
     if (format != HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
         ALOGE("%s: Deferred consumer only supports IMPLEMENTATION_DEFINED format now!",
@@ -161,9 +172,10 @@ Camera3OutputStream::Camera3OutputStream(int id, camera_stream_type_t type,
                                          camera_stream_rotation_t rotation,
                                          const String8& physicalCameraId,
                                          const std::unordered_set<int32_t> &sensorPixelModesUsed,
+                                         IPCTransport transport,
                                          uint64_t consumerUsage, nsecs_t timestampOffset,
                                          int setId, bool isMultiResolution,
-                                         int64_t dynamicRangeProfile, int streamUseCase,
+                                         int64_t dynamicRangeProfile, int64_t streamUseCase,
                                          bool deviceTimeBaseIsRealtime, int timestampBase,
                                          int mirrorMode) :
         Camera3IOStreamBase(id, type, width, height,
@@ -179,7 +191,8 @@ Camera3OutputStream::Camera3OutputStream(int id, camera_stream_type_t type,
         mConsumerUsage(consumerUsage),
         mDropBuffers(false),
         mMirrorMode(mirrorMode),
-        mDequeueBufferLatency(kDequeueLatencyBinSize) {
+        mDequeueBufferLatency(kDequeueLatencyBinSize),
+        mIPCTransport(transport) {
 
     bool needsReleaseNotify = setId > CAMERA3_STREAM_SET_ID_INVALID;
     mBufferProducerListener = new BufferProducerListener(this, needsReleaseNotify);
@@ -303,6 +316,75 @@ status_t Camera3OutputStream::returnBufferLocked(
     return OK;
 }
 
+status_t Camera3OutputStream::fixUpHidlJpegBlobHeader(ANativeWindowBuffer* anwBuffer, int fence) {
+    // Lock the JPEG buffer for CPU read
+    sp<GraphicBuffer> graphicBuffer = GraphicBuffer::from(anwBuffer);
+    void* mapped = nullptr;
+    base::unique_fd fenceFd(dup(fence));
+    // Use USAGE_SW_WRITE_RARELY since we're going to re-write the CameraBlob
+    // header.
+    GraphicBufferLocker gbLocker(graphicBuffer);
+    status_t res =
+            gbLocker.lockAsync(
+                    GraphicBuffer::USAGE_SW_READ_OFTEN | GraphicBuffer::USAGE_SW_WRITE_RARELY,
+                    &mapped, fenceFd.get());
+    if (res != OK) {
+        ALOGE("%s: Failed to lock the buffer: %s (%d)", __FUNCTION__, strerror(-res), res);
+        return res;
+    }
+
+    uint8_t *hidlHeaderStart =
+            static_cast<uint8_t*>(mapped) + graphicBuffer->getWidth() - sizeof(camera_jpeg_blob_t);
+    // Check that the jpeg buffer is big enough to contain HIDL camera blob
+    if (hidlHeaderStart < static_cast<uint8_t *>(mapped)) {
+        ALOGE("%s, jpeg buffer not large enough to fit HIDL camera blob %" PRIu32, __FUNCTION__,
+                graphicBuffer->getWidth());
+        return BAD_VALUE;
+    }
+    camera_jpeg_blob_t *hidlBlobHeader = reinterpret_cast<camera_jpeg_blob_t *>(hidlHeaderStart);
+
+    // Check that the blob is indeed the jpeg blob id.
+    if (hidlBlobHeader->jpeg_blob_id != CAMERA_JPEG_BLOB_ID) {
+        ALOGE("%s, jpeg blob id %d is not correct", __FUNCTION__, hidlBlobHeader->jpeg_blob_id);
+        return BAD_VALUE;
+    }
+
+    // Retrieve id and blob size
+    CameraBlobId blobId = static_cast<CameraBlobId>(hidlBlobHeader->jpeg_blob_id);
+    uint32_t blobSizeBytes = hidlBlobHeader->jpeg_size;
+
+    if (blobSizeBytes > (graphicBuffer->getWidth() - sizeof(camera_jpeg_blob_t))) {
+        ALOGE("%s, blobSize in HIDL jpeg blob : %d is corrupt, buffer size %" PRIu32, __FUNCTION__,
+                  blobSizeBytes, graphicBuffer->getWidth());
+    }
+
+    uint8_t *aidlHeaderStart =
+            static_cast<uint8_t*>(mapped) + graphicBuffer->getWidth() - sizeof(CameraBlob);
+
+    // Check that the jpeg buffer is big enough to contain AIDL camera blob
+    if (aidlHeaderStart < static_cast<uint8_t *>(mapped)) {
+        ALOGE("%s, jpeg buffer not large enough to fit AIDL camera blob %" PRIu32, __FUNCTION__,
+                graphicBuffer->getWidth());
+        return BAD_VALUE;
+    }
+
+    if (static_cast<uint8_t*>(mapped) + blobSizeBytes > aidlHeaderStart) {
+        ALOGE("%s, jpeg blob with size %d , buffer size %" PRIu32 " not large enough to fit"
+                " AIDL camera blob without corrupting jpeg", __FUNCTION__, blobSizeBytes,
+                graphicBuffer->getWidth());
+        return BAD_VALUE;
+    }
+
+    // Fill in JPEG header
+    CameraBlob aidlHeader = {
+            .blobId = blobId,
+            .blobSizeBytes = static_cast<int32_t>(blobSizeBytes)
+    };
+    memcpy(aidlHeaderStart, &aidlHeader, sizeof(CameraBlob));
+    graphicBuffer->unlock();
+    return OK;
+}
+
 status_t Camera3OutputStream::returnBufferCheckedLocked(
             const camera_stream_buffer &buffer,
             nsecs_t timestamp,
@@ -368,27 +450,34 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
             }
             mTraceFirstBuffer = false;
         }
-
-        // If this is a JPEG output, and image dump mask is set, save image to
-        // disk.
-        if (getFormat() == HAL_PIXEL_FORMAT_BLOB && getDataSpace() == HAL_DATASPACE_V0_JFIF &&
-                mImageDumpMask) {
-            dumpImageToDisk(timestamp, anwBuffer, anwReleaseFence);
+        // Fix CameraBlob id type discrepancy between HIDL and AIDL, details : http://b/229688810
+        if (getFormat() == HAL_PIXEL_FORMAT_BLOB && getDataSpace() == HAL_DATASPACE_V0_JFIF) {
+            if (mIPCTransport == IPCTransport::HIDL) {
+                fixUpHidlJpegBlobHeader(anwBuffer, anwReleaseFence);
+            }
+            // If this is a JPEG output, and image dump mask is set, save image to
+            // disk.
+            if (mImageDumpMask) {
+                dumpImageToDisk(timestamp, anwBuffer, anwReleaseFence);
+            }
         }
 
-        nsecs_t t = mPreviewFrameScheduler != nullptr ? readoutTimestamp : timestamp;
-        t -= mTimestampOffset;
-        if (mPreviewFrameScheduler != nullptr) {
-            res = mPreviewFrameScheduler->queuePreviewBuffer(t, transform,
-                    anwBuffer, anwReleaseFence);
+        if (mPreviewFrameSpacer != nullptr) {
+            res = mPreviewFrameSpacer->queuePreviewBuffer(timestamp - mTimestampOffset,
+                    readoutTimestamp - mTimestampOffset, transform, anwBuffer, anwReleaseFence);
             if (res != OK) {
-                ALOGE("%s: Stream %d: Error queuing buffer to preview buffer scheduler: %s (%d)",
+                ALOGE("%s: Stream %d: Error queuing buffer to preview buffer spacer: %s (%d)",
                         __FUNCTION__, mId, strerror(-res), res);
                 return res;
             }
         } else {
+            nsecs_t captureTime = (mSyncToDisplay ? readoutTimestamp : timestamp)
+                    - mTimestampOffset;
+            nsecs_t presentTime = mSyncToDisplay ?
+                    syncTimestampToDisplayLocked(captureTime) : captureTime;
+
             setTransform(transform, true/*mayChangeMirror*/);
-            res = native_window_set_buffers_timestamp(mConsumer.get(), t);
+            res = native_window_set_buffers_timestamp(mConsumer.get(), presentTime);
             if (res != OK) {
                 ALOGE("%s: Stream %d: Error setting timestamp: %s (%d)",
                       __FUNCTION__, mId, strerror(-res), res);
@@ -476,7 +565,7 @@ status_t Camera3OutputStream::configureQueueLocked() {
         return res;
     }
 
-    if ((res = configureConsumerQueueLocked(true /*allowPreviewScheduler*/)) != OK) {
+    if ((res = configureConsumerQueueLocked(true /*allowPreviewRespace*/)) != OK) {
         return res;
     }
 
@@ -500,7 +589,7 @@ status_t Camera3OutputStream::configureQueueLocked() {
     return OK;
 }
 
-status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewScheduler) {
+status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewRespace) {
     status_t res;
 
     mTraceFirstBuffer = true;
@@ -590,19 +679,28 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewSche
     int timestampBase = getTimestampBase();
     bool isDefaultTimeBase = (timestampBase ==
             OutputConfiguration::TIMESTAMP_BASE_DEFAULT);
-    if (allowPreviewScheduler)  {
-        // We cannot distinguish between a SurfaceView and an ImageReader of
-        // preview buffer format. The PreviewFrameScheduler needs to handle both.
+    if (allowPreviewRespace)  {
         bool forceChoreographer = (timestampBase ==
                 OutputConfiguration::TIMESTAMP_BASE_CHOREOGRAPHER_SYNCED);
-        bool defaultToChoreographer = (isDefaultTimeBase && isConsumedByHWComposer() &&
-                !property_get_bool("camera.disable_preview_scheduler", false));
+        bool defaultToChoreographer = (isDefaultTimeBase &&
+                isConsumedByHWComposer());
+        bool defaultToSpacer = (isDefaultTimeBase &&
+                isConsumedByHWTexture() &&
+                !isConsumedByCPU() &&
+                !isVideoStream());
         if (forceChoreographer || defaultToChoreographer) {
-            mPreviewFrameScheduler = std::make_unique<PreviewFrameScheduler>(*this, mConsumer);
-            mTotalBufferCount += PreviewFrameScheduler::kQueueDepthWatermark;
+            mSyncToDisplay = true;
+            mTotalBufferCount += kDisplaySyncExtraBuffer;
+        } else if (defaultToSpacer) {
+            mPreviewFrameSpacer = new PreviewFrameSpacer(this, mConsumer);
+            mTotalBufferCount ++;
+            res = mPreviewFrameSpacer->run(String8::format("PreviewSpacer-%d", mId).string());
+            if (res != OK) {
+                ALOGE("%s: Unable to start preview spacer", __FUNCTION__);
+                return res;
+            }
         }
     }
-
     mHandoutTotalBufferCount = 0;
     mFrameCount = 0;
     mLastTimestamp = 0;
@@ -874,6 +972,10 @@ status_t Camera3OutputStream::disconnectLocked() {
     }
 
     returnPrefetchedBuffersLocked();
+
+    if (mPreviewFrameSpacer != nullptr) {
+        mPreviewFrameSpacer->requestExit();
+    }
 
     ALOGV("%s: disconnecting stream %d from native window", __FUNCTION__, getId());
 
@@ -1168,6 +1270,17 @@ bool Camera3OutputStream::isConsumedByHWTexture() const {
     return (usage & GRALLOC_USAGE_HW_TEXTURE) != 0;
 }
 
+bool Camera3OutputStream::isConsumedByCPU() const {
+    uint64_t usage = 0;
+    status_t res = getEndpointUsage(&usage);
+    if (res != OK) {
+        ALOGE("%s: getting end point usage failed: %s (%d).", __FUNCTION__, strerror(-res), res);
+        return false;
+    }
+
+    return (usage & GRALLOC_USAGE_SW_READ_MASK) != 0;
+}
+
 void Camera3OutputStream::dumpImageToDisk(nsecs_t timestamp,
         ANativeWindowBuffer* anwBuffer, int fence) {
     // Deriver output file name
@@ -1244,6 +1357,11 @@ status_t Camera3OutputStream::setBatchSize(size_t batchSize) {
     return OK;
 }
 
+void Camera3OutputStream::onMinDurationChanged(nsecs_t duration) {
+    Mutex::Autolock l(mLock);
+    mMinExpectedDuration = duration;
+}
+
 void Camera3OutputStream::returnPrefetchedBuffersLocked() {
     std::vector<Surface::BatchBuffer> batchedBuffers;
 
@@ -1259,6 +1377,94 @@ void Camera3OutputStream::returnPrefetchedBuffersLocked() {
     if (batchedBuffers.size() > 0) {
         mConsumer->cancelBuffers(batchedBuffers);
     }
+}
+
+nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
+    ParcelableVsyncEventData parcelableVsyncEventData;
+    auto res = mDisplayEventReceiver.getLatestVsyncEventData(&parcelableVsyncEventData);
+    if (res != OK) {
+        ALOGE("%s: Stream %d: Error getting latest vsync event data: %s (%d)",
+                __FUNCTION__, mId, strerror(-res), res);
+        mLastCaptureTime = t;
+        mLastPresentTime = t;
+        return t;
+    }
+
+    const VsyncEventData& vsyncEventData = parcelableVsyncEventData.vsync;
+    nsecs_t currentTime = systemTime();
+
+    // Reset capture to present time offset if:
+    // - More than 1 second between frames.
+    // - The frame duration deviates from multiples of vsync frame intervals.
+    nsecs_t captureInterval = t - mLastCaptureTime;
+    float captureToVsyncIntervalRatio = 1.0f * captureInterval / vsyncEventData.frameInterval;
+    float ratioDeviation = std::fabs(
+            captureToVsyncIntervalRatio - std::roundf(captureToVsyncIntervalRatio));
+    if (captureInterval > kSpacingResetIntervalNs ||
+            ratioDeviation >= kMaxIntervalRatioDeviation) {
+        nsecs_t minPresentT = mLastPresentTime + vsyncEventData.frameInterval / 2;
+        for (size_t i = 0; i < VsyncEventData::kFrameTimelinesLength; i++) {
+            const auto& timeline = vsyncEventData.frameTimelines[i];
+            if (timeline.deadlineTimestamp >= currentTime &&
+                    timeline.expectedPresentationTime > minPresentT) {
+                nsecs_t presentT = vsyncEventData.frameTimelines[i].expectedPresentationTime;
+                mCaptureToPresentOffset = presentT - t;
+                mLastCaptureTime = t;
+                mLastPresentTime = presentT;
+
+                // Move the expected presentation time back by 1/3 of frame interval to
+                // mitigate the time drift. Due to time drift, if we directly use the
+                // expected presentation time, often times 2 expected presentation time
+                // falls into the same VSYNC interval.
+                return presentT - vsyncEventData.frameInterval/3;
+            }
+        }
+    }
+
+    nsecs_t idealPresentT = t + mCaptureToPresentOffset;
+    nsecs_t expectedPresentT = mLastPresentTime;
+    nsecs_t minDiff = INT64_MAX;
+    // Derive minimum intervals between presentation times based on minimal
+    // expected duration. The minimum number of Vsyncs is:
+    // - 0 if minFrameDuration in (0, 1.5] * vSyncInterval,
+    // - 1 if minFrameDuration in (1.5, 2.5] * vSyncInterval,
+    // - and so on.
+    int minVsyncs = (mMinExpectedDuration - vsyncEventData.frameInterval / 2) /
+            vsyncEventData.frameInterval;
+    if (minVsyncs < 0) minVsyncs = 0;
+    nsecs_t minInterval = minVsyncs * vsyncEventData.frameInterval;
+    // Find best timestamp in the vsync timelines:
+    // - Only use at most 3 timelines to avoid long latency
+    // - closest to the ideal present time,
+    // - deadline timestamp is greater than the current time, and
+    // - the candidate present time is at least minInterval in the future
+    //   compared to last present time.
+    int maxTimelines = std::min(kMaxTimelines, (int)VsyncEventData::kFrameTimelinesLength);
+    float biasForShortDelay = 1.0f;
+    for (int i = 0; i < maxTimelines; i ++) {
+        const auto& vsyncTime = vsyncEventData.frameTimelines[i];
+        if (minVsyncs > 0) {
+            // Bias towards using smaller timeline index:
+            //   i = 0:                bias = 1
+            //   i = maxTimelines-1:   bias = -1
+            biasForShortDelay = 1.0 - 2.0 * i / (maxTimelines - 1);
+        }
+        if (std::abs(vsyncTime.expectedPresentationTime - idealPresentT) < minDiff &&
+                vsyncTime.deadlineTimestamp >= currentTime &&
+                vsyncTime.expectedPresentationTime >
+                mLastPresentTime + minInterval + biasForShortDelay * kTimelineThresholdNs) {
+            expectedPresentT = vsyncTime.expectedPresentationTime;
+            minDiff = std::abs(vsyncTime.expectedPresentationTime - idealPresentT);
+        }
+    }
+    mLastCaptureTime = t;
+    mLastPresentTime = expectedPresentT;
+
+    // Move the expected presentation time back by 1/3 of frame interval to
+    // mitigate the time drift. Due to time drift, if we directly use the
+    // expected presentation time, often times 2 expected presentation time
+    // falls into the same VSYNC interval.
+    return expectedPresentT - vsyncEventData.frameInterval/3;
 }
 
 bool Camera3OutputStream::shouldLogError(status_t res) {

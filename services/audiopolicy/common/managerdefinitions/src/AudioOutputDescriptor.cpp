@@ -571,12 +571,6 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
         lHalConfig.offload_info.channel_mask = lHalConfig.channel_mask;
         lHalConfig.offload_info.format = lHalConfig.format;
         lHalConfig.offload_info.stream_type = stream;
-        lHalConfig.offload_info.duration_us = -1;
-        lHalConfig.offload_info.has_video = true; // conservative
-        lHalConfig.offload_info.is_streaming = true; // likely
-        lHalConfig.offload_info.encapsulation_mode = lHalConfig.offload_info.encapsulation_mode;
-        lHalConfig.offload_info.content_id = lHalConfig.offload_info.content_id;
-        lHalConfig.offload_info.sync_id = lHalConfig.offload_info.sync_id;
     }
 
     audio_config_base_t lMixerConfig;
@@ -726,6 +720,14 @@ uint32_t SwAudioOutputDescriptor::getRecommendedMuteDurationMs() const
     return mProfile->recommendedMuteDurationMs;
 }
 
+void SwAudioOutputDescriptor::setTracksInvalidatedStatusByStrategy(product_strategy_t strategy) {
+    for (const auto &client : getClientIterable()) {
+        if (strategy == client->strategy()) {
+            client->setIsInvalid();
+        }
+    }
+}
+
 // HwAudioOutputDescriptor implementation
 HwAudioOutputDescriptor::HwAudioOutputDescriptor(const sp<SourceClientDescriptor>& source,
                                                  AudioPolicyClientInterface *clientInterface)
@@ -833,6 +835,16 @@ bool SwAudioOutputCollection::isStrategyActiveOnSameModule(product_strategy_t ps
     return false;
 }
 
+bool SwAudioOutputCollection::isStrategyActive(product_strategy_t ps) const
+{
+    for (size_t i = 0; i < size(); i++) {
+        if (valueAt(i)->isStrategyActive(ps)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 audio_io_handle_t SwAudioOutputCollection::getA2dpOutput() const
 {
     for (size_t i = 0; i < size(); i++) {
@@ -907,6 +919,16 @@ void SwAudioOutputCollection::clearSessionRoutesForDevice(
             }
         }
     }
+}
+bool SwAudioOutputCollection::isAnyDeviceTypeActive(const DeviceTypeSet& deviceTypes) const {
+    for (size_t i = 0; i < size(); i++) {
+        const sp<SwAudioOutputDescriptor> outputDesc = valueAt(i);
+        if (outputDesc->isActive()
+                && outputDesc->devices().containsDeviceAmongTypes(deviceTypes)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void SwAudioOutputCollection::dump(String8 *dst) const

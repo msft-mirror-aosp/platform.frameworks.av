@@ -21,13 +21,15 @@
 #include <utils/RefBase.h>
 #include <gui/IProducerListener.h>
 #include <gui/Surface.h>
+#include <gui/DisplayEventReceiver.h>
 
+#include "utils/IPCTransport.h"
 #include "utils/LatencyHistogram.h"
 #include "Camera3Stream.h"
 #include "Camera3IOStreamBase.h"
 #include "Camera3OutputStreamInterface.h"
 #include "Camera3BufferManager.h"
-#include "PreviewFrameScheduler.h"
+#include "PreviewFrameSpacer.h"
 
 namespace android {
 
@@ -88,10 +90,10 @@ class Camera3OutputStream :
             uint32_t width, uint32_t height, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation,
             nsecs_t timestampOffset, const String8& physicalCameraId,
-            const std::unordered_set<int32_t> &sensorPixelModesUsed,
+            const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
             int setId = CAMERA3_STREAM_SET_ID_INVALID, bool isMultiResolution = false,
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
-            int streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             bool deviceTimeBaseIsRealtime = false,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
             int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO);
@@ -105,10 +107,10 @@ class Camera3OutputStream :
             uint32_t width, uint32_t height, size_t maxSize, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation,
             nsecs_t timestampOffset, const String8& physicalCameraId,
-            const std::unordered_set<int32_t> &sensorPixelModesUsed,
+            const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
             int setId = CAMERA3_STREAM_SET_ID_INVALID, bool isMultiResolution = false,
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
-            int streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             bool deviceTimeBaseIsRealtime = false,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
             int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO);
@@ -121,10 +123,10 @@ class Camera3OutputStream :
             uint64_t consumerUsage, android_dataspace dataSpace,
             camera_stream_rotation_t rotation, nsecs_t timestampOffset,
             const String8& physicalCameraId,
-            const std::unordered_set<int32_t> &sensorPixelModesUsed,
+            const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
             int setId = CAMERA3_STREAM_SET_ID_INVALID, bool isMultiResolution = false,
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
-            int streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             bool deviceTimeBaseIsRealtime = false,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
             int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO);
@@ -156,6 +158,11 @@ class Camera3OutputStream :
      * Return if this output stream is consumed by hardware texture.
      */
     bool isConsumedByHWTexture() const;
+
+    /**
+     * Return if this output stream is consumed by CPU.
+     */
+    bool isConsumedByCPU() const;
 
     /**
      * Return if the consumer configuration of this stream is deferred.
@@ -240,6 +247,11 @@ class Camera3OutputStream :
     virtual status_t setBatchSize(size_t batchSize = 1) override;
 
     /**
+     * Notify the stream on change of min frame durations.
+     */
+    virtual void onMinDurationChanged(nsecs_t duration) override;
+
+    /**
      * Apply ZSL related consumer usage quirk.
      */
     static void applyZSLUsageQuirk(int format, uint64_t *consumerUsage /*inout*/);
@@ -252,11 +264,11 @@ class Camera3OutputStream :
             uint32_t width, uint32_t height, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation,
             const String8& physicalCameraId,
-            const std::unordered_set<int32_t> &sensorPixelModesUsed,
+            const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
             uint64_t consumerUsage = 0, nsecs_t timestampOffset = 0,
             int setId = CAMERA3_STREAM_SET_ID_INVALID, bool isMultiResolution = false,
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
-            int streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             bool deviceTimeBaseIsRealtime = false,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
             int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO);
@@ -275,10 +287,11 @@ class Camera3OutputStream :
             sp<Fence> *releaseFenceOut);
 
     virtual status_t disconnectLocked();
+    status_t fixUpHidlJpegBlobHeader(ANativeWindowBuffer* anwBuffer, int fence);
 
     status_t getEndpointUsageForSurface(uint64_t *usage,
             const sp<Surface>& surface) const;
-    status_t configureConsumerQueueLocked(bool allowPreviewScheduler);
+    status_t configureConsumerQueueLocked(bool allowPreviewRespace);
 
     // Consumer as the output of camera HAL
     sp<Surface> mConsumer;
@@ -392,13 +405,32 @@ class Camera3OutputStream :
 
     void returnPrefetchedBuffersLocked();
 
+
     static const int32_t kDequeueLatencyBinSize = 5; // in ms
     CameraLatencyHistogram mDequeueBufferLatency;
+    IPCTransport mIPCTransport = IPCTransport::INVALID;
 
     int mImageDumpMask = 0;
 
-    // The preview stream scheduler for re-timing frames
-    std::unique_ptr<PreviewFrameScheduler> mPreviewFrameScheduler;
+    // Re-space frames by overriding timestamp to align with display Vsync.
+    // Default is on for SurfaceView bound streams.
+    nsecs_t mMinExpectedDuration = 0;
+    bool mSyncToDisplay = false;
+    DisplayEventReceiver mDisplayEventReceiver;
+    nsecs_t mLastCaptureTime = 0;
+    nsecs_t mLastPresentTime = 0;
+    nsecs_t mCaptureToPresentOffset = 0;
+    static constexpr size_t kDisplaySyncExtraBuffer = 2;
+    static constexpr nsecs_t kSpacingResetIntervalNs = 50000000LL; // 50 millisecond
+    static constexpr nsecs_t kTimelineThresholdNs = 1000000LL; // 1 millisecond
+    static constexpr float kMaxIntervalRatioDeviation = 0.05f;
+    static constexpr int kMaxTimelines = 3;
+    nsecs_t syncTimestampToDisplayLocked(nsecs_t t);
+
+    // Re-space frames by delaying queueBuffer so that frame delivery has
+    // the same cadence as capture. Default is on for SurfaceTexture bound
+    // streams.
+    sp<PreviewFrameSpacer> mPreviewFrameSpacer;
 }; // class Camera3OutputStream
 
 } // namespace camera3

@@ -77,6 +77,7 @@ typedef void (*record_config_callback)(int event,
                                        audio_patch_handle_t patchHandle,
                                        audio_source_t source);
 typedef void (*routing_callback)();
+typedef void (*vol_range_init_req_callback)();
 
 class IAudioFlinger;
 class String8;
@@ -154,6 +155,7 @@ public:
     static void setDynPolicyCallback(dynamic_policy_callback cb);
     static void setRecordConfigCallback(record_config_callback);
     static void setRoutingCallback(routing_callback cb);
+    static void setVolInitReqCallback(vol_range_init_req_callback cb);
 
     // Sets the binder to use for accessing the AudioFlinger service. This enables the system server
     // to grant specific isolated processes access to the audio system. Currently used only for the
@@ -286,7 +288,8 @@ public:
                                      audio_output_flags_t flags,
                                      audio_port_handle_t *selectedDeviceId,
                                      audio_port_handle_t *portId,
-                                     std::vector<audio_io_handle_t> *secondaryOutputs);
+                                     std::vector<audio_io_handle_t> *secondaryOutputs,
+                                     bool *isSpatialized);
     static status_t startOutput(audio_port_handle_t portId);
     static status_t stopOutput(audio_port_handle_t portId);
     static void releaseOutput(audio_port_handle_t portId);
@@ -328,9 +331,9 @@ public:
     static status_t getMinVolumeIndexForAttributes(const audio_attributes_t &attr, int &index);
 
     static product_strategy_t getStrategyForStream(audio_stream_type_t stream);
-    static DeviceTypeSet getDevicesForStream(audio_stream_type_t stream);
     static status_t getDevicesForAttributes(const AudioAttributes &aa,
-                                            AudioDeviceTypeAddrVector *devices);
+                                            AudioDeviceTypeAddrVector *devices,
+                                            bool forVolume);
 
     static audio_io_handle_t getOutputForEffect(const effect_descriptor_t *desc);
     static status_t registerEffect(const effect_descriptor_t *desc,
@@ -347,6 +350,7 @@ public:
     static void clearAudioConfigCache();
 
     static const sp<media::IAudioPolicyService> get_audio_policy_service();
+    static void clearAudioPolicyService();
 
     // helpers for android.media.AudioManager.getProperty(), see description there for meaning
     static uint32_t getPrimaryOutputSamplingRate();
@@ -735,6 +739,7 @@ private:
                 int32_t patchHandle,
                 media::audio::common::AudioSource source) override;
         binder::Status onRoutingUpdated();
+        binder::Status onVolumeRangeInitRequest();
 
     private:
         Mutex                               mLock;
@@ -762,6 +767,7 @@ private:
     static dynamic_policy_callback gDynPolicyCallback;
     static record_config_callback gRecordConfigCallback;
     static routing_callback gRoutingCallback;
+    static vol_range_init_req_callback gVolRangeInitReqCallback;
 
     static size_t gInBuffSize;
     // previous parameters for recording buffer size queries

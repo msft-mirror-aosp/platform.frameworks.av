@@ -168,9 +168,8 @@ status_t CameraDeviceClient::initializeImpl(TProviderPtr providerPtr, const Stri
                                 __FUNCTION__, mCameraIdStr.c_str(), entry.data.i64[i]);
                     }
                 }
-                mDynamicProfileMap.emplace(
-                        ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
-                        standardBitmap);
+                mDynamicProfileMap[ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD] =
+                        standardBitmap;
             } else {
                 ALOGE("%s: Device %s supports 10-bit output but doesn't include a dynamic range"
                         " profile map!", __FUNCTION__, mCameraIdStr.c_str());
@@ -518,6 +517,17 @@ binder::Status CameraDeviceClient::submitRequestList(
 
         metadataRequestList.push_back(physicalSettingsList);
         surfaceMapList.push_back(surfaceMap);
+
+        // Save certain CaptureRequest settings
+        if (!request.mUserTag.empty()) {
+            mUserTag = request.mUserTag;
+        }
+        camera_metadata_entry entry =
+                physicalSettingsList.begin()->metadata.find(
+                        ANDROID_CONTROL_VIDEO_STABILIZATION_MODE);
+        if (entry.count == 1) {
+            mVideoStabilizationMode = entry.data.u8[0];
+        }
     }
     mRequestIdCounter++;
 
@@ -717,8 +727,10 @@ binder::Status CameraDeviceClient::isSessionConfigurationSupported(
     }
 
     *status = false;
+    camera3::metadataGetter getMetadata = [this](const String8 &id, bool /*overrideForPerfClass*/) {
+          return mDevice->infoPhysical(id);};
     ret = mProviderManager->isSessionConfigurationSupported(mCameraIdStr.string(),
-            sessionConfiguration, mOverrideForPerfClass, status);
+            sessionConfiguration, mOverrideForPerfClass, getMetadata, status);
     switch (ret) {
         case OK:
             // Expected, do nothing.
@@ -864,7 +876,7 @@ binder::Status CameraDeviceClient::createStream(
     bool deferredConsumerOnly = deferredConsumer && numBufferProducers == 0;
     bool isMultiResolution = outputConfiguration.isMultiResolution();
     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
-    int streamUseCase = outputConfiguration.getStreamUseCase();
+    int64_t streamUseCase = outputConfiguration.getStreamUseCase();
     int timestampBase = outputConfiguration.getTimestampBase();
     int mirrorMode = outputConfiguration.getMirrorMode();
 
@@ -1260,7 +1272,7 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
     }
     const std::vector<int32_t> &sensorPixelModesUsed =
             outputConfiguration.getSensorPixelModesUsed();
-    int streamUseCase = outputConfiguration.getStreamUseCase();
+    int64_t streamUseCase = outputConfiguration.getStreamUseCase();
     int timestampBase = outputConfiguration.getTimestampBase();
     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
     int mirrorMode = outputConfiguration.getMirrorMode();
@@ -1629,7 +1641,7 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
     const std::vector<int32_t> &sensorPixelModesUsed =
             outputConfiguration.getSensorPixelModesUsed();
     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
-    int streamUseCase= outputConfiguration.getStreamUseCase();
+    int64_t streamUseCase= outputConfiguration.getStreamUseCase();
     int timestampBase = outputConfiguration.getTimestampBase();
     int mirrorMode = outputConfiguration.getMirrorMode();
     for (auto& bufferProducer : bufferProducers) {
@@ -1964,7 +1976,8 @@ void CameraDeviceClient::notifyIdle(
     if (remoteCb != 0) {
         remoteCb->onDeviceIdle();
     }
-    Camera2ClientBase::notifyIdle(requestCount, resultErrorCount, deviceError, streamStats);
+    Camera2ClientBase::notifyIdleWithUserTag(requestCount, resultErrorCount, deviceError,
+            streamStats, mUserTag, mVideoStabilizationMode);
 }
 
 void CameraDeviceClient::notifyShutter(const CaptureResultExtras& resultExtras,

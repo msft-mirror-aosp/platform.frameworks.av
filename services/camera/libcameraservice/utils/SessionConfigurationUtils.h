@@ -21,13 +21,12 @@
 #include <camera/camera2/OutputConfiguration.h>
 #include <camera/camera2/SessionConfiguration.h>
 #include <camera/camera2/SubmitInfo.h>
-#include <android/hardware/camera/device/3.8/types.h>
 #include <aidl/android/hardware/camera/device/ICameraDevice.h>
 #include <android/hardware/camera/device/3.4/ICameraDeviceSession.h>
 #include <android/hardware/camera/device/3.7/ICameraDeviceSession.h>
-#include <android/hardware/camera/device/3.8/ICameraDeviceSession.h>
 
 #include <device3/Camera3StreamInterface.h>
+#include <utils/IPCTransport.h>
 
 #include <set>
 #include <stdint.h>
@@ -48,7 +47,7 @@
 namespace android {
 namespace camera3 {
 
-typedef std::function<CameraMetadata (const String8 &, int targetSdkVersion)> metadataGetter;
+typedef std::function<CameraMetadata (const String8 &, bool overrideForPerfClass)> metadataGetter;
 
 class StreamConfiguration {
 public:
@@ -99,11 +98,7 @@ binder::Status createSurfaceFromGbp(
         sp<Surface>& surface, const sp<IGraphicBufferProducer>& gbp,
         const String8 &logicalCameraId, const CameraMetadata &physicalCameraMetadata,
         const std::vector<int32_t> &sensorPixelModesUsed,  int64_t dynamicRangeProfile,
-        int streamUseCase, int timestampBase, int mirrorMode);
-
-void mapStreamInfo(const camera3::OutputStreamInfo &streamInfo,
-        camera3::camera_stream_rotation_t rotation, String8 physicalId, int32_t groupId,
-        hardware::camera::device::V3_8::Stream *stream /*out*/);
+        int64_t streamUseCase, int timestampBase, int mirrorMode);
 
 //check if format is 10-bit output compatible
 bool is10bitCompatibleFormat(int32_t format);
@@ -114,7 +109,7 @@ bool is10bitDynamicRangeProfile(int64_t dynamicRangeProfile);
 // Check if the device supports a given dynamicRangeProfile
 bool isDynamicRangeProfileSupported(int64_t dynamicRangeProfile, const CameraMetadata& staticMeta);
 
-bool isStreamUseCaseSupported(int streamUseCase, const CameraMetadata &deviceInfo);
+bool isStreamUseCaseSupported(int64_t streamUseCase, const CameraMetadata &deviceInfo);
 
 void mapStreamInfo(const OutputStreamInfo &streamInfo,
         camera3::camera_stream_rotation_t rotation, String8 physicalId,
@@ -132,24 +127,6 @@ bool deferredConsumer, int surfaceType);
 binder::Status checkOperatingMode(int operatingMode,
 const CameraMetadata &staticInfo, const String8 &cameraId);
 
-// utility function to convert AIDL SessionConfiguration to HIDL
-// streamConfiguration. Also checks for validity of SessionConfiguration and
-// returns a non-ok binder::Status if the passed in session configuration
-// isn't valid.
-binder::Status
-convertToHALStreamCombination(const SessionConfiguration& sessionConfiguration,
-        const String8 &cameraId, const CameraMetadata &deviceInfo,
-        metadataGetter getMetadata, const std::vector<std::string> &physicalCameraIds,
-        hardware::camera::device::V3_8::StreamConfiguration &streamConfiguration,
-        bool overrideForPerfClass, bool *earlyExit);
-
-// Utility function to convert a V3_8::StreamConfiguration to
-// V3_7::StreamConfiguration. Return false if the original V3_8 configuration cannot
-// be used by older version HAL.
-bool convertHALStreamCombinationFromV38ToV37(
-        hardware::camera::device::V3_7::StreamConfiguration &streamConfigV37,
-        const hardware::camera::device::V3_8::StreamConfiguration &streamConfigV38);
-
 binder::Status
 convertToHALStreamCombination(
     const SessionConfiguration& sessionConfiguration,
@@ -157,13 +134,6 @@ convertToHALStreamCombination(
     metadataGetter getMetadata, const std::vector<std::string> &physicalCameraIds,
     aidl::android::hardware::camera::device::StreamConfiguration &streamConfiguration,
     bool overrideForPerfClass, bool *earlyExit);
-
-// Utility function to convert a V3_7::StreamConfiguration to
-// V3_4::StreamConfiguration. Return false if the original V3_7 configuration cannot
-// be used by older version HAL.
-bool convertHALStreamCombinationFromV37ToV34(
-        hardware::camera::device::V3_4::StreamConfiguration &streamConfigV34,
-        const hardware::camera::device::V3_7::StreamConfiguration &streamConfigV37);
 
 StreamConfigurationPair getStreamConfigurationPair(const CameraMetadata &metadata);
 

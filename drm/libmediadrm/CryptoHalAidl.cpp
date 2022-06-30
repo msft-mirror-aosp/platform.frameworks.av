@@ -219,6 +219,7 @@ status_t CryptoHalAidl::destroyPlugin() {
     }
 
     mPlugin.reset();
+    mInitCheck = NO_INIT;
     return OK;
 }
 
@@ -353,7 +354,9 @@ ssize_t CryptoHalAidl::decrypt(const uint8_t keyId[16], const uint8_t iv[16],
 
     err = statusAidlToStatusT(statusAidl);
     std::string msgStr(statusAidl.getMessage());
-    *errorDetailMsg = toString8(msgStr);
+    if (errorDetailMsg != nullptr) {
+        *errorDetailMsg = toString8(msgStr);
+    }
     if (err != OK) {
         ALOGE("Failed on decrypt, error description:%s", statusAidl.getDescription().c_str());
         return err;
@@ -369,6 +372,10 @@ int32_t CryptoHalAidl::setHeap(const sp<HidlMemory>& heap) {
     }
 
     Mutex::Autolock autoLock(mLock);
+
+    if (mInitCheck != OK) {
+        return -1;
+    }
 
     int32_t seqNum = mHeapSeqNum++;
     uint32_t bufferId = static_cast<uint32_t>(seqNum);

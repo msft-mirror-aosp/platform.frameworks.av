@@ -19,13 +19,13 @@
 #include <log/log.h>
 
 #include <algorithm>
-
 #include <media/stagefright/foundation/AUtils.h>
 #include <media/stagefright/foundation/MediaDefs.h>
 
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
 #include <Codec2BufferUtils.h>
+#include <Codec2CommonUtils.h>
 #include <SimpleC2Interface.h>
 
 #include "C2SoftVpxDec.h"
@@ -218,11 +218,24 @@ public:
                 .build());
 
         // TODO: support more formats?
+        std::vector<uint32_t> pixelFormats = {HAL_PIXEL_FORMAT_YCBCR_420_888};
+#ifdef VP9
+        if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
+            pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
+        }
+        // If color format surface isn't added to supported formats, there is no way to know
+        // when the color-format is configured to surface. This is necessary to be able to
+        // choose 10-bit format while decoding 10-bit clips in surface mode
+        pixelFormats.push_back(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
+#endif
         addParameter(
                 DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
-                .withConstValue(new C2StreamPixelFormatInfo::output(
-                                     0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
+                .withDefault(new C2StreamPixelFormatInfo::output(
+                                  0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
+                .withFields({C2F(mPixelFormat, value).oneOf(pixelFormats)})
+                .withSetter((Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps))
                 .build());
+
     }
 
     static C2R SizeSetter(bool mayBlock, const C2P<C2StreamPictureSizeInfo::output> &oldMe,
@@ -296,6 +309,11 @@ public:
         (void)mayBlock;
         (void)me;  // TODO: validate
         return C2R::Ok();
+    }
+
+    // unsafe getters
+    std::shared_ptr<C2StreamPixelFormatInfo::output> getPixelFormat_l() const {
+        return mPixelFormat;
     }
 
 private:
@@ -424,6 +442,11 @@ status_t C2SoftVpxDec::initDecoder() {
 #else
     mMode = MODE_VP8;
 #endif
+    mHalPixelFormat = HAL_PIXEL_FORMAT_YV12;
+    {
+        IntfImpl::Lock lock = mIntf->lock();
+        mPixelFormatInfo = mIntf->getPixelFormat_l();
+    }
 
     mWidth = 320;
     mHeight = 240;
@@ -679,9 +702,11 @@ status_t C2SoftVpxDec::outputBuffer(
 
     std::shared_ptr<C2GraphicBlock> block;
     uint32_t format = HAL_PIXEL_FORMAT_YV12;
-    if (img->fmt == VPX_IMG_FMT_I42016) {
+    std::shared_ptr<C2StreamColorAspectsTuning::output> defaultColorAspects;
+    if (img->fmt == VPX_IMG_FMT_I42016 &&
+            mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
         IntfImpl::Lock lock = mIntf->lock();
-        std::shared_ptr<C2StreamColorAspectsTuning::output> defaultColorAspects = mIntf->getDefaultColorAspects_l();
+        defaultColorAspects = mIntf->getDefaultColorAspects_l();
         bool allowRGBA1010102 = false;
         if (defaultColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
             defaultColorAspects->matrix == C2Color::MATRIX_BT2020 &&
@@ -690,6 +715,24 @@ status_t C2SoftVpxDec::outputBuffer(
         }
         format = getHalPixelFormatForBitDepth10(allowRGBA1010102);
     }
+
+    if (mHalPixelFormat != format) {
+        C2StreamPixelFormatInfo::output pixelFormat(0u, format);
+        std::vector<std::unique_ptr<C2SettingResult>> failures;
+        c2_status_t err = mIntf->config({&pixelFormat }, C2_MAY_BLOCK, &failures);
+        if (err == C2_OK) {
+            work->worklets.front()->output.configUpdate.push_back(
+                C2Param::Copy(pixelFormat));
+        } else {
+            ALOGE("Config update pixelFormat failed");
+            mSignalledError = true;
+            work->workletsProcessed = 1u;
+            work->result = C2_CORRUPTED;
+            return UNKNOWN_ERROR;
+        }
+        mHalPixelFormat = format;
+    }
+
     C2MemoryUsage usage = { C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE };
     c2_status_t err = pool->fetchGraphicBlock(align(mWidth, 16), mHeight, format, usage, &block);
     if (err != C2_OK) {
@@ -733,11 +776,14 @@ status_t C2SoftVpxDec::outputBuffer(
                 queue->entries.push_back(
                         [dstY, srcY, srcU, srcV,
                          srcYStride, srcUStride, srcVStride, dstYStride,
-                         width = mWidth, height = std::min(mHeight - i, kHeight)] {
-                            convertYUV420Planar16ToY410(
+                         width = mWidth, height = std::min(mHeight - i, kHeight),
+                         defaultColorAspects] {
+                            convertYUV420Planar16ToY410OrRGBA1010102(
                                     (uint32_t *)dstY, srcY, srcU, srcV, srcYStride / 2,
                                     srcUStride / 2, srcVStride / 2, dstYStride / sizeof(uint32_t),
-                                    width, height);
+                                    width, height,
+                                    std::static_pointer_cast<const C2ColorAspectsStruct>(
+                                            defaultColorAspects));
                         });
                 srcY += srcYStride / 2 * kHeight;
                 srcU += srcUStride / 2 * (kHeight / 2);

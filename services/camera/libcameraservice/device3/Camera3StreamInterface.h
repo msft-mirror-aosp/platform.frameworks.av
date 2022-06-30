@@ -66,7 +66,7 @@ typedef struct camera_stream {
 
     std::unordered_set<int32_t> sensor_pixel_modes_used;
     int64_t dynamic_range_profile;
-    int use_case;
+    int64_t use_case;
 } camera_stream_t;
 
 typedef struct camera_stream_buffer {
@@ -111,7 +111,7 @@ class OutputStreamInfo {
         bool supportsOffline = false;
         std::unordered_set<int32_t> sensorPixelModesUsed;
         int64_t dynamicRangeProfile;
-        int streamUseCase;
+        int64_t streamUseCase;
         int timestampBase;
         int mirrorMode;
         OutputStreamInfo() :
@@ -128,6 +128,43 @@ class OutputStreamInfo {
             dataSpace(_dataSpace), consumerUsage(_consumerUsage),
             sensorPixelModesUsed(_sensorPixelModesUsed), dynamicRangeProfile(_dynamicRangeProfile),
             streamUseCase(_streamUseCase), timestampBase(_timestampBase), mirrorMode(_mirrorMode) {}
+};
+
+// Utility class to lock and unlock a GraphicBuffer
+class GraphicBufferLocker {
+public:
+    GraphicBufferLocker(sp<GraphicBuffer> buffer) : _buffer(buffer) {}
+
+    status_t lockAsync(uint32_t usage, void** dstBuffer, int fenceFd) {
+        if (_buffer == nullptr) return BAD_VALUE;
+
+        status_t res = OK;
+        if (!_locked) {
+            status_t res =  _buffer->lockAsync(usage, dstBuffer, fenceFd);
+            if (res == OK) {
+                _locked = true;
+            }
+        }
+        return res;
+    }
+
+    status_t lockAsync(void** dstBuffer, int fenceFd) {
+        return lockAsync(GRALLOC_USAGE_SW_WRITE_OFTEN, dstBuffer, fenceFd);
+    }
+
+    ~GraphicBufferLocker() {
+        if (_locked && _buffer != nullptr) {
+            auto res = _buffer->unlock();
+            if (res != OK) {
+                ALOGE("%s: Error trying to unlock buffer: %s (%d)", __FUNCTION__,
+                        strerror(-res), res);
+            }
+        }
+    }
+
+private:
+    sp<GraphicBuffer> _buffer;
+    bool _locked = false;
 };
 
 /**

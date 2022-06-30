@@ -483,7 +483,7 @@ public:
                             if (track->isFastTrack()) {
                                 result |= FAST_SESSION;  // caution, only represents first track.
                             }
-                            if (track->canBeSpatialized()) {
+                            if (track->isSpatialized()) {
                                 result |= SPATIALIZED_SESSION;  // caution, only first track.
                             }
                             break;
@@ -686,6 +686,9 @@ protected:
                 // ThreadLoop statistics per iteration.
                 int64_t                 mLastIoBeginNs = -1;
                 int64_t                 mLastIoEndNs = -1;
+
+                // ThreadSnapshot is thread-safe (internally locked)
+                mediautils::ThreadSnapshot mThreadSnapshot;
 
                 // This should be read under ThreadBase lock (if not on the threadLoop thread).
                 audio_utils::Statistics<double> mIoJitterMs{0.995 /* alpha */};
@@ -960,7 +963,8 @@ public:
                                 pid_t tid,
                                 status_t *status /*non-NULL*/,
                                 audio_port_handle_t portId,
-                                const sp<media::IAudioTrackCallback>& callback);
+                                const sp<media::IAudioTrackCallback>& callback,
+                                bool isSpatialized);
 
                 AudioStreamOut* getOutput() const;
                 AudioStreamOut* clearOutput();

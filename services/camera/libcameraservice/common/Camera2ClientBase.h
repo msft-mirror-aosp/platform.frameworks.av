@@ -73,10 +73,11 @@ public:
 
     virtual void          notifyError(int32_t errorCode,
                                       const CaptureResultExtras& resultExtras);
-    virtual status_t      notifyActive();  // Returns errors on app ops permission failures
-    virtual void          notifyIdle(int64_t requestCount, int64_t resultErrorCount,
-                                     bool deviceError,
-                                     const std::vector<hardware::CameraStreamStats>& streamStats);
+    // Returns errors on app ops permission failures
+    virtual status_t      notifyActive(float maxPreviewFps);
+    virtual void          notifyIdle(int64_t /*requestCount*/, int64_t /*resultErrorCount*/,
+                                     bool /*deviceError*/,
+                                     const std::vector<hardware::CameraStreamStats>&) {}
     virtual void          notifyShutter(const CaptureResultExtras& resultExtras,
                                         nsecs_t timestamp);
     virtual void          notifyAutoFocus(uint8_t newState, int triggerId);
@@ -86,6 +87,11 @@ public:
     virtual void          notifyPrepared(int streamId);
     virtual void          notifyRequestQueueEmpty();
     virtual void          notifyRepeatingRequestError(long lastFrameNumber);
+
+    void                  notifyIdleWithUserTag(int64_t requestCount, int64_t resultErrorCount,
+                                     bool deviceError,
+                                     const std::vector<hardware::CameraStreamStats>& streamStats,
+                                     const std::string& userTag, int videoStabilizationMode);
 
     int                   getCameraId() const;
     const sp<CameraDeviceBase>&
@@ -145,8 +151,6 @@ protected:
     mutable Mutex         mBinderSerializationLock;
 
     /** CameraDeviceBase instance wrapping HAL3+ entry */
-
-    const int mDeviceVersion;
 
     // Note: This was previously set to const to avoid mDevice being updated -
     // b/112639939 (update of sp<> is racy) during dumpDevice (which is important to be lock free

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,10 +45,32 @@ using HalDeviceStatusType = aidl::android::hardware::camera::common::CameraDevic
 using ICameraProvider = aidl::android::hardware::camera::provider::ICameraProvider;
 using StatusListener = CameraProviderManager::StatusListener;
 
+static status_t mapExceptionCodeToStatusT(binder_exception_t binderException) {
+    switch (binderException) {
+        case EX_NONE:
+            return OK;
+        case EX_ILLEGAL_ARGUMENT:
+        case EX_NULL_POINTER:
+        case EX_BAD_PARCELABLE:
+        case EX_ILLEGAL_STATE:
+            return BAD_VALUE;
+        case EX_UNSUPPORTED_OPERATION:
+            return INVALID_OPERATION;
+        case EX_TRANSACTION_FAILED:
+            return DEAD_OBJECT;
+        default:
+            return UNKNOWN_ERROR;
+    }
+}
+
 status_t AidlProviderInfo::mapToStatusT(const ndk::ScopedAStatus& s) {
     using Status = aidl::android::hardware::camera::common::Status;
+    auto exceptionCode = s.getExceptionCode();
+    if (exceptionCode != EX_SERVICE_SPECIFIC) {
+        return mapExceptionCodeToStatusT(exceptionCode);
+    }
     Status st = static_cast<Status>(s.getServiceSpecificError());
-    switch(st) {
+    switch (st) {
         case Status::OK:
             return OK;
         case Status::ILLEGAL_ARGUMENT:
@@ -516,6 +538,13 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
     if (flashAvailable.count == 1 &&
             flashAvailable.data.u8[0] == ANDROID_FLASH_INFO_AVAILABLE_TRUE) {
         mHasFlashUnit = true;
+        // Fix up flash strength tags for devices without these keys.
+        res = fixupTorchStrengthTags();
+        if (OK != res) {
+            ALOGE("%s: Unable to add default ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL and"
+                    "ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL tags: %s (%d)", __FUNCTION__,
+                    strerror(-res), res);
+        }
     } else {
         mHasFlashUnit = false;
     }
@@ -671,15 +700,11 @@ status_t AidlProviderInfo::AidlDeviceInfo3::dumpState(int fd) {
 }
 
 status_t AidlProviderInfo::AidlDeviceInfo3::isSessionConfigurationSupported(
-        const SessionConfiguration &configuration, bool overrideForPerfClass, bool *status) {
+        const SessionConfiguration &configuration, bool overrideForPerfClass,
+        camera3::metadataGetter getMetadata, bool *status) {
 
     camera::device::StreamConfiguration streamConfiguration;
     bool earlyExit = false;
-    camera3::metadataGetter getMetadata = [this](const String8 &id, bool /*overrideForPerfClass*/) {
-          CameraMetadata physicalChars;
-          getPhysicalCameraCharacteristics(id.c_str(), &physicalChars);
-          return physicalChars;
-    };
     auto bRes = SessionConfigurationUtils::convertToHALStreamCombination(configuration,
             String8(mId.c_str()), mCameraCharacteristics, getMetadata, mPhysicalIds,
             streamConfiguration, overrideForPerfClass, &earlyExit);

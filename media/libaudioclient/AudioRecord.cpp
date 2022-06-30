@@ -307,6 +307,8 @@ status_t AudioRecord::set(
         int32_t maxSharedAudioHistoryMs)
 {
     status_t status = NO_ERROR;
+    LOG_ALWAYS_FATAL_IF(mInitialized, "%s: should not be called twice", __func__);
+    mInitialized = true;
     // Note mPortId is not valid until the track is created, so omit mPortId in ALOG for set.
     ALOGV("%s(): inputSource %d, sampleRate %u, format %#x, channelMask %#x, frameCount %zu, "
           "notificationFrames %u, sessionId %d, transferType %d, flags %#x, attributionSource %s"
@@ -1329,6 +1331,7 @@ nsecs_t AudioRecord::processAudioBuffer()
     const sp<IAudioRecordCallback> callback = mCallback.promote();
     if (!callback) {
         mCallback = nullptr;
+        mLock.unlock();
         return NS_NEVER;
     }
     if (mAwaitBoost) {

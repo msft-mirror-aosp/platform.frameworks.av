@@ -16,7 +16,9 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "Codec2Buffer"
+#define ATRACE_TAG  ATRACE_TAG_VIDEO
 #include <utils/Log.h>
+#include <utils/Trace.h>
 
 #include <aidl/android/hardware/graphics/common/Cta861_3.h>
 #include <aidl/android/hardware/graphics/common/Smpte2086.h>
@@ -229,6 +231,7 @@ public:
           mAllocatedDepth(0),
           mBackBufferSize(0),
           mMediaImage(new ABuffer(sizeof(MediaImage2))) {
+        ATRACE_CALL();
         if (!format->findInt32(KEY_COLOR_FORMAT, &mClientColorFormat)) {
             mClientColorFormat = COLOR_FormatYUV420Flexible;
         }
@@ -262,6 +265,39 @@ public:
                 mediaImage->mType = MediaImage2::MEDIA_IMAGE_TYPE_YUV;
                 if (layout.numPlanes != 3) {
                     ALOGD("Converter: %d planes for YUV layout", layout.numPlanes);
+                    mInitCheck = BAD_VALUE;
+                    return;
+                }
+                std::optional<int> clientBitDepth = {};
+                switch (mClientColorFormat) {
+                    case COLOR_FormatYUVP010:
+                        clientBitDepth = 10;
+                        break;
+                    case COLOR_FormatYUV411PackedPlanar:
+                    case COLOR_FormatYUV411Planar:
+                    case COLOR_FormatYUV420Flexible:
+                    case COLOR_FormatYUV420PackedPlanar:
+                    case COLOR_FormatYUV420PackedSemiPlanar:
+                    case COLOR_FormatYUV420Planar:
+                    case COLOR_FormatYUV420SemiPlanar:
+                    case COLOR_FormatYUV422Flexible:
+                    case COLOR_FormatYUV422PackedPlanar:
+                    case COLOR_FormatYUV422PackedSemiPlanar:
+                    case COLOR_FormatYUV422Planar:
+                    case COLOR_FormatYUV422SemiPlanar:
+                    case COLOR_FormatYUV444Flexible:
+                    case COLOR_FormatYUV444Interleaved:
+                        clientBitDepth = 8;
+                        break;
+                    default:
+                        // no-op; used with optional
+                        break;
+
+                }
+                // conversion fails if client bit-depth and the component bit-depth differs
+                if ((clientBitDepth) && (bitDepth != clientBitDepth.value())) {
+                    ALOGD("Bit depth of client: %d and component: %d differs",
+                        *clientBitDepth, bitDepth);
                     mInitCheck = BAD_VALUE;
                     return;
                 }
@@ -581,6 +617,7 @@ public:
      * Copy C2GraphicView to MediaImage2.
      */
     status_t copyToMediaImage() {
+        ATRACE_CALL();
         if (mInitCheck != OK) {
             return mInitCheck;
         }
@@ -619,7 +656,9 @@ sp<GraphicBlockBuffer> GraphicBlockBuffer::Allocate(
         const sp<AMessage> &format,
         const std::shared_ptr<C2GraphicBlock> &block,
         std::function<sp<ABuffer>(size_t)> alloc) {
+    ATRACE_BEGIN("GraphicBlockBuffer::Allocate block->map()");
     C2GraphicView view(block->map().get());
+    ATRACE_END();
     if (view.error() != C2_OK) {
         ALOGD("C2GraphicBlock::map failed: %d", view.error());
         return nullptr;
@@ -664,6 +703,7 @@ GraphicBlockBuffer::GraphicBlockBuffer(
 }
 
 std::shared_ptr<C2Buffer> GraphicBlockBuffer::asC2Buffer() {
+    ATRACE_CALL();
     uint32_t width = mView.width();
     uint32_t height = mView.height();
     if (!mWrapped) {
@@ -752,8 +792,10 @@ sp<ConstGraphicBlockBuffer> ConstGraphicBlockBuffer::Allocate(
         ALOGD("C2Buffer precond fail");
         return nullptr;
     }
+    ATRACE_BEGIN("ConstGraphicBlockBuffer::Allocate block->map()");
     std::unique_ptr<const C2GraphicView> view(std::make_unique<const C2GraphicView>(
             buffer->data().graphicBlocks()[0].map().get()));
+    ATRACE_END();
     std::unique_ptr<const C2GraphicView> holder;
 
     GraphicView2MediaImageConverter converter(*view, format, false /* copy */);
@@ -854,11 +896,13 @@ bool ConstGraphicBlockBuffer::canCopy(const std::shared_ptr<C2Buffer> &buffer) c
         return false;
     }
 
+    ATRACE_BEGIN("ConstGraphicBlockBuffer::canCopy block->map()");
     GraphicView2MediaImageConverter converter(
             buffer->data().graphicBlocks()[0].map().get(),
             // FIXME: format() is not const, but we cannot change it, so do a const cast here
             const_cast<ConstGraphicBlockBuffer *>(this)->format(),
             true /* copy */);
+    ATRACE_END();
     if (converter.initCheck() != OK) {
         ALOGD("ConstGraphicBlockBuffer::canCopy: converter init failed: %d", converter.initCheck());
         return false;
@@ -973,16 +1017,47 @@ sp<IMapper4> GetMapper4() {
     return sMapper;
 }
 
-class NativeHandleDeleter {
+class Gralloc4Buffer {
 public:
-    explicit NativeHandleDeleter(native_handle_t *handle) : mHandle(handle) {}
-    ~NativeHandleDeleter() {
-        if (mHandle) {
-            native_handle_delete(mHandle);
+    Gralloc4Buffer(const C2Handle *const handle) : mBuffer(nullptr) {
+        sp<IMapper4> mapper = GetMapper4();
+        if (!mapper) {
+            return;
+        }
+        // Unwrap raw buffer handle from the C2Handle
+        native_handle_t *nh = UnwrapNativeCodec2GrallocHandle(handle);
+        if (!nh) {
+            return;
+        }
+        // Import the raw handle so IMapper can use the buffer. The imported
+        // handle must be freed when the client is done with the buffer.
+        mapper->importBuffer(
+                hardware::hidl_handle(nh),
+                [&](const Error4 &error, void *buffer) {
+                    if (error == Error4::NONE) {
+                        mBuffer = buffer;
+                    }
+                });
+
+        // TRICKY: UnwrapNativeCodec2GrallocHandle creates a new handle but
+        //         does not clone the fds. Thus we need to delete the handle
+        //         without closing it.
+        native_handle_delete(nh);
+    }
+
+    ~Gralloc4Buffer() {
+        sp<IMapper4> mapper = GetMapper4();
+        if (mapper && mBuffer) {
+            // Free the imported buffer handle. This does not release the
+            // underlying buffer itself.
+            mapper->freeBuffer(mBuffer);
         }
     }
+
+    void *get() const { return mBuffer; }
+    operator bool() const { return (mBuffer != nullptr); }
 private:
-    native_handle_t *mHandle;
+    void *mBuffer;
 };
 
 }  // namspace
@@ -992,24 +1067,15 @@ c2_status_t GetHdrMetadataFromGralloc4Handle(
         std::shared_ptr<C2StreamHdrStaticMetadataInfo::input> *staticInfo,
         std::shared_ptr<C2StreamHdrDynamicMetadataInfo::input> *dynamicInfo) {
     c2_status_t err = C2_OK;
-    native_handle_t *nativeHandle = UnwrapNativeCodec2GrallocHandle(handle);
-    if (nativeHandle == nullptr) {
-        // Nothing to do
-        return err;
-    }
-    // TRICKY: UnwrapNativeCodec2GrallocHandle creates a new handle but
-    //         does not clone the fds. Thus we need to delete the handle
-    //         without closing it when going out of scope.
-    //         NativeHandle cannot solve this problem, as it would close and
-    //         delete the handle, while we need delete only.
-    NativeHandleDeleter nhd(nativeHandle);
     sp<IMapper4> mapper = GetMapper4();
-    if (!mapper) {
+    Gralloc4Buffer buffer(handle);
+    if (!mapper || !buffer) {
         // Gralloc4 not supported; nothing to do
         return err;
     }
     Error4 mapperErr = Error4::NONE;
     if (staticInfo) {
+        ALOGV("Grabbing static HDR info from gralloc4 metadata");
         staticInfo->reset(new C2StreamHdrStaticMetadataInfo::input(0u));
         memset(&(*staticInfo)->mastering, 0, sizeof((*staticInfo)->mastering));
         (*staticInfo)->maxCll = 0;
@@ -1038,7 +1104,7 @@ c2_status_t GetHdrMetadataFromGralloc4Handle(
                 mapperErr = Error4::BAD_VALUE;
             }
         };
-        Return<void> ret = mapper->get(nativeHandle, MetadataType_Smpte2086, cb);
+        Return<void> ret = mapper->get(buffer.get(), MetadataType_Smpte2086, cb);
         if (!ret.isOk()) {
             err = C2_REFUSED;
         } else if (mapperErr != Error4::NONE) {
@@ -1059,7 +1125,7 @@ c2_status_t GetHdrMetadataFromGralloc4Handle(
                 mapperErr = Error4::BAD_VALUE;
             }
         };
-        ret = mapper->get(nativeHandle, MetadataType_Cta861_3, cb);
+        ret = mapper->get(buffer.get(), MetadataType_Cta861_3, cb);
         if (!ret.isOk()) {
             err = C2_REFUSED;
         } else if (mapperErr != Error4::NONE) {
@@ -1067,6 +1133,7 @@ c2_status_t GetHdrMetadataFromGralloc4Handle(
         }
     }
     if (dynamicInfo) {
+        ALOGV("Grabbing dynamic HDR info from gralloc4 metadata");
         dynamicInfo->reset();
         IMapper4::get_cb cb = [&mapperErr, dynamicInfo](Error4 err, const hidl_vec<uint8_t> &vec) {
             mapperErr = err;
@@ -1080,7 +1147,7 @@ c2_status_t GetHdrMetadataFromGralloc4Handle(
                     vec.size(), 0u, C2Config::HDR_DYNAMIC_METADATA_TYPE_SMPTE_2094_40);
             memcpy((*dynamicInfo)->m.data, vec.data(), vec.size());
         };
-        Return<void> ret = mapper->get(nativeHandle, MetadataType_Smpte2094_40, cb);
+        Return<void> ret = mapper->get(buffer.get(), MetadataType_Smpte2094_40, cb);
         if (!ret.isOk() || mapperErr != Error4::NONE) {
             dynamicInfo->reset();
         }
@@ -1094,21 +1161,14 @@ c2_status_t SetHdrMetadataToGralloc4Handle(
         const std::shared_ptr<const C2StreamHdrDynamicMetadataInfo::output> &dynamicInfo,
         const C2Handle *const handle) {
     c2_status_t err = C2_OK;
-    native_handle_t *nativeHandle = UnwrapNativeCodec2GrallocHandle(handle);
-    if (nativeHandle == nullptr) {
-        // Nothing to do
-        return err;
-    }
-    // TRICKY: UnwrapNativeCodec2GrallocHandle creates a new handle but
-    //         does not clone the fds. Thus we need to delete the handle
-    //         without closing it when going out of scope.
-    NativeHandleDeleter nhd(nativeHandle);
     sp<IMapper4> mapper = GetMapper4();
-    if (!mapper) {
+    Gralloc4Buffer buffer(handle);
+    if (!mapper || !buffer) {
         // Gralloc4 not supported; nothing to do
         return err;
     }
     if (staticInfo && *staticInfo) {
+        ALOGV("Setting static HDR info as gralloc4 metadata");
         std::optional<Smpte2086> smpte2086 = Smpte2086{
             {staticInfo->mastering.red.x, staticInfo->mastering.red.y},
             {staticInfo->mastering.green.x, staticInfo->mastering.green.y},
@@ -1118,8 +1178,17 @@ c2_status_t SetHdrMetadataToGralloc4Handle(
             staticInfo->mastering.minLuminance,
         };
         hidl_vec<uint8_t> vec;
-        if (gralloc4::encodeSmpte2086(smpte2086, &vec) == OK) {
-            Return<Error4> ret = mapper->set(nativeHandle, MetadataType_Smpte2086, vec);
+        if (0.0 <= smpte2086->primaryRed.x && smpte2086->primaryRed.x <= 1.0
+                && 0.0 <= smpte2086->primaryRed.y && smpte2086->primaryRed.y <= 1.0
+                && 0.0 <= smpte2086->primaryGreen.x && smpte2086->primaryGreen.x <= 1.0
+                && 0.0 <= smpte2086->primaryGreen.y && smpte2086->primaryGreen.y <= 1.0
+                && 0.0 <= smpte2086->primaryBlue.x && smpte2086->primaryBlue.x <= 1.0
+                && 0.0 <= smpte2086->primaryBlue.y && smpte2086->primaryBlue.y <= 1.0
+                && 0.0 <= smpte2086->whitePoint.x && smpte2086->whitePoint.x <= 1.0
+                && 0.0 <= smpte2086->whitePoint.y && smpte2086->whitePoint.y <= 1.0
+                && 0.0 <= smpte2086->maxLuminance && 0.0 <= smpte2086->minLuminance
+                && gralloc4::encodeSmpte2086(smpte2086, &vec) == OK) {
+            Return<Error4> ret = mapper->set(buffer.get(), MetadataType_Smpte2086, vec);
             if (!ret.isOk()) {
                 err = C2_REFUSED;
             } else if (ret != Error4::NONE) {
@@ -1130,8 +1199,9 @@ c2_status_t SetHdrMetadataToGralloc4Handle(
             staticInfo->maxCll,
             staticInfo->maxFall,
         };
-        if (gralloc4::encodeCta861_3(cta861_3, &vec) == OK) {
-            Return<Error4> ret = mapper->set(nativeHandle, MetadataType_Cta861_3, vec);
+        if (0.0 <= cta861_3->maxContentLightLevel && 0.0 <= cta861_3->maxFrameAverageLightLevel
+                && gralloc4::encodeCta861_3(cta861_3, &vec) == OK) {
+            Return<Error4> ret = mapper->set(buffer.get(), MetadataType_Cta861_3, vec);
             if (!ret.isOk()) {
                 err = C2_REFUSED;
             } else if (ret != Error4::NONE) {
@@ -1139,10 +1209,8 @@ c2_status_t SetHdrMetadataToGralloc4Handle(
             }
         }
     }
-    if (dynamicInfo && *dynamicInfo) {
-        hidl_vec<uint8_t> vec;
-        vec.resize(dynamicInfo->flexCount());
-        memcpy(vec.data(), dynamicInfo->m.data, dynamicInfo->flexCount());
+    if (dynamicInfo && *dynamicInfo && dynamicInfo->flexCount() > 0) {
+        ALOGV("Setting dynamic HDR info as gralloc4 metadata");
         std::optional<IMapper4::MetadataType> metadataType;
         switch (dynamicInfo->m.type_) {
         case C2Config::HDR_DYNAMIC_METADATA_TYPE_SMPTE_2094_10:
@@ -1152,12 +1220,20 @@ c2_status_t SetHdrMetadataToGralloc4Handle(
             metadataType = MetadataType_Smpte2094_40;
             break;
         }
+
         if (metadataType) {
-            Return<Error4> ret = mapper->set(nativeHandle, *metadataType, vec);
-            if (!ret.isOk()) {
-                err = C2_REFUSED;
-            } else if (ret != Error4::NONE) {
-                err = C2_CORRUPTED;
+            std::vector<uint8_t> smpte2094_40;
+            smpte2094_40.resize(dynamicInfo->flexCount());
+            memcpy(smpte2094_40.data(), dynamicInfo->m.data, dynamicInfo->flexCount());
+
+            hidl_vec<uint8_t> vec;
+            if (gralloc4::encodeSmpte2094_40({ smpte2094_40 }, &vec) == OK) {
+                Return<Error4> ret = mapper->set(buffer.get(), *metadataType, vec);
+                if (!ret.isOk()) {
+                    err = C2_REFUSED;
+                } else if (ret != Error4::NONE) {
+                    err = C2_CORRUPTED;
+                }
             }
         } else {
             err = C2_BAD_VALUE;

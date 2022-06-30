@@ -43,6 +43,10 @@ cc_library_shared {
         "media_ndk_headers",
     ],
 
+    static_libs: [
+        "SurfaceFlingerProperties",
+    ],
+
     shared_libs: [
         "android.hardware.cas.native@1.0",
         "android.hardware.drm@1.0",
@@ -67,6 +71,7 @@ cc_library_shared {
         "libstagefright_codecbase",
         "libstagefright_foundation",
         "libstagefright_omx",
+	"libstagefright_surface_utils",
         "libstagefright_xmlparser",
         "libui",
         "libutils",

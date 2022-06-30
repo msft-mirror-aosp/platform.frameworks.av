@@ -261,8 +261,7 @@ C2SoftAomDec::C2SoftAomDec(const char* name, c2_node_id_t id,
     CREATE_DUMP_FILE(mInFile);
     CREATE_DUMP_FILE(mOutFile);
 
-    gettimeofday(&mTimeStart, nullptr);
-    gettimeofday(&mTimeEnd, nullptr);
+    mTimeStart = mTimeEnd = systemTime();
 }
 
 C2SoftAomDec::~C2SoftAomDec() {
@@ -463,19 +462,17 @@ void C2SoftAomDec::process(const std::unique_ptr<C2Work>& work,
     int64_t frameIndex = work->input.ordinal.frameIndex.peekll();
     if (inSize) {
         uint8_t* bitstream = const_cast<uint8_t*>(rView.data() + inOffset);
-        int32_t decodeTime = 0;
-        int32_t delay = 0;
 
         DUMP_TO_FILE(mOutFile, bitstream, inSize);
-        GETTIME(&mTimeStart, nullptr);
-        TIME_DIFF(mTimeEnd, mTimeStart, delay);
+        mTimeStart = systemTime();
+        nsecs_t delay = mTimeStart - mTimeEnd;
 
         aom_codec_err_t err =
             aom_codec_decode(mCodecCtx, bitstream, inSize, &frameIndex);
 
-        GETTIME(&mTimeEnd, nullptr);
-        TIME_DIFF(mTimeStart, mTimeEnd, decodeTime);
-        ALOGV("decodeTime=%4d delay=%4d\n", decodeTime, delay);
+        mTimeEnd = systemTime();
+        nsecs_t decodeTime = mTimeEnd - mTimeStart;
+        ALOGV("decodeTime=%4" PRId64 " delay=%4" PRId64 "\n", decodeTime, delay);
 
         if (err != AOM_CODEC_OK) {
             ALOGE("av1 decoder failed to decode frame err: %d", err);
@@ -539,9 +536,10 @@ bool C2SoftAomDec::outputBuffer(
 
     std::shared_ptr<C2GraphicBlock> block;
     uint32_t format = HAL_PIXEL_FORMAT_YV12;
+    std::shared_ptr<C2StreamColorAspectsTuning::output> defaultColorAspects;
     if (img->fmt == AOM_IMG_FMT_I42016) {
         IntfImpl::Lock lock = mIntf->lock();
-        std::shared_ptr<C2StreamColorAspectsTuning::output> defaultColorAspects = mIntf->getDefaultColorAspects_l();
+        defaultColorAspects = mIntf->getDefaultColorAspects_l();
 
         if (defaultColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
             defaultColorAspects->matrix == C2Color::MATRIX_BT2020 &&
@@ -588,10 +586,10 @@ bool C2SoftAomDec::outputBuffer(
         const uint16_t *srcV = (const uint16_t *)img->planes[AOM_PLANE_V];
 
         if (format == HAL_PIXEL_FORMAT_RGBA_1010102) {
-            convertYUV420Planar16ToY410((uint32_t *)dstY, srcY, srcU, srcV, srcYStride / 2,
-                                    srcUStride / 2, srcVStride / 2,
-                                    dstYStride / sizeof(uint32_t),
-                                    mWidth, mHeight);
+            convertYUV420Planar16ToY410OrRGBA1010102(
+                    (uint32_t *)dstY, srcY, srcU, srcV, srcYStride / 2, srcUStride / 2,
+                    srcVStride / 2, dstYStride / sizeof(uint32_t), mWidth, mHeight,
+                    std::static_pointer_cast<const C2ColorAspectsStruct>(defaultColorAspects));
         } else {
             convertYUV420Planar16ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride / 2,
                                         srcUStride / 2, srcVStride / 2, dstYStride, dstUVStride,
