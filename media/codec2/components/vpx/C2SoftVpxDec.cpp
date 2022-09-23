@@ -25,6 +25,7 @@
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
 #include <Codec2BufferUtils.h>
+#include <Codec2CommonUtils.h>
 #include <SimpleC2Interface.h>
 
 #include "C2SoftVpxDec.h"
@@ -68,8 +69,8 @@ public:
                 DefineParam(mSize, C2_PARAMKEY_PICTURE_SIZE)
                 .withDefault(new C2StreamPictureSizeInfo::output(0u, 320, 240))
                 .withFields({
-                    C2F(mSize, width).inRange(2, 2048, 2),
-                    C2F(mSize, height).inRange(2, 2048, 2),
+                    C2F(mSize, width).inRange(2, 2048),
+                    C2F(mSize, height).inRange(2, 2048),
                 })
                 .withSetter(SizeSetter)
                 .build());
@@ -219,9 +220,13 @@ public:
         // TODO: support more formats?
         std::vector<uint32_t> pixelFormats = {HAL_PIXEL_FORMAT_YCBCR_420_888};
 #ifdef VP9
-        if (isAtLeastT()) {
+        if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
             pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
         }
+        // If color format surface isn't added to supported formats, there is no way to know
+        // when the color-format is configured to surface. This is necessary to be able to
+        // choose 10-bit format while decoding 10-bit clips in surface mode
+        pixelFormats.push_back(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
 #endif
         addParameter(
                 DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
@@ -304,6 +309,11 @@ public:
         (void)mayBlock;
         (void)me;  // TODO: validate
         return C2R::Ok();
+    }
+
+    // unsafe getters
+    std::shared_ptr<C2StreamPixelFormatInfo::output> getPixelFormat_l() const {
+        return mPixelFormat;
     }
 
 private:
@@ -433,6 +443,11 @@ status_t C2SoftVpxDec::initDecoder() {
     mMode = MODE_VP8;
 #endif
     mHalPixelFormat = HAL_PIXEL_FORMAT_YV12;
+    {
+        IntfImpl::Lock lock = mIntf->lock();
+        mPixelFormatInfo = mIntf->getPixelFormat_l();
+    }
+
     mWidth = 320;
     mHeight = 240;
     mFrameParallelMode = false;
@@ -687,9 +702,11 @@ status_t C2SoftVpxDec::outputBuffer(
 
     std::shared_ptr<C2GraphicBlock> block;
     uint32_t format = HAL_PIXEL_FORMAT_YV12;
-    if (img->fmt == VPX_IMG_FMT_I42016) {
+    std::shared_ptr<C2StreamColorAspectsTuning::output> defaultColorAspects;
+    if (img->fmt == VPX_IMG_FMT_I42016 &&
+            mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
         IntfImpl::Lock lock = mIntf->lock();
-        std::shared_ptr<C2StreamColorAspectsTuning::output> defaultColorAspects = mIntf->getDefaultColorAspects_l();
+        defaultColorAspects = mIntf->getDefaultColorAspects_l();
         bool allowRGBA1010102 = false;
         if (defaultColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
             defaultColorAspects->matrix == C2Color::MATRIX_BT2020 &&
@@ -717,7 +734,12 @@ status_t C2SoftVpxDec::outputBuffer(
     }
 
     C2MemoryUsage usage = { C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE };
-    c2_status_t err = pool->fetchGraphicBlock(align(mWidth, 16), mHeight, format, usage, &block);
+    // We always create a graphic block that is width aligned to 16 and height
+    // aligned to 2. We set the correct "crop" value of the image in the call to
+    // createGraphicBuffer() by setting the correct image dimensions.
+    c2_status_t err = pool->fetchGraphicBlock(align(mWidth, 16),
+                                              align(mHeight, 2), format, usage,
+                                              &block);
     if (err != C2_OK) {
         ALOGE("fetchGraphicBlock for Output failed with status %d", err);
         work->result = err;
@@ -759,11 +781,14 @@ status_t C2SoftVpxDec::outputBuffer(
                 queue->entries.push_back(
                         [dstY, srcY, srcU, srcV,
                          srcYStride, srcUStride, srcVStride, dstYStride,
-                         width = mWidth, height = std::min(mHeight - i, kHeight)] {
-                            convertYUV420Planar16ToY410(
+                         width = mWidth, height = std::min(mHeight - i, kHeight),
+                         defaultColorAspects] {
+                            convertYUV420Planar16ToY410OrRGBA1010102(
                                     (uint32_t *)dstY, srcY, srcU, srcV, srcYStride / 2,
                                     srcUStride / 2, srcVStride / 2, dstYStride / sizeof(uint32_t),
-                                    width, height);
+                                    width, height,
+                                    std::static_pointer_cast<const C2ColorAspectsStruct>(
+                                            defaultColorAspects));
                         });
                 srcY += srcYStride / 2 * kHeight;
                 srcU += srcUStride / 2 * (kHeight / 2);
