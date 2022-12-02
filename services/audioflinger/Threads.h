@@ -1403,13 +1403,38 @@ protected:
 
                 std::atomic_bool mCheckOutputStageEffects{};
 
-                // A differential check on the timestamps to see if there is a change in the
-                // timestamp frame position between the last call to checkRunningTimestamp.
-                uint64_t mLastCheckedTimestampPosition = ~0LL;
 
-                bool checkRunningTimestamp();
+                // Provides periodic checking for timestamp advancement for underrun detection.
+                class IsTimestampAdvancing {
+                public:
+                    // The timestamp will not be checked any faster than the specified time.
+                    IsTimestampAdvancing(nsecs_t minimumTimeBetweenChecksNs)
+                        :   mMinimumTimeBetweenChecksNs(minimumTimeBetweenChecksNs)
+                    {
+                        clear();
+                    }
+                    // Check if the presentation position has advanced in the last periodic time.
+                    bool check(AudioStreamOut * output);
+                    // Clear the internal state when the playback state changes for the output
+                    // stream.
+                    void clear();
+                private:
+                    // The minimum time between timestamp checks.
+                    const nsecs_t mMinimumTimeBetweenChecksNs;
+                    // Add differential check on the timestamps to see if there is a change in the
+                    // timestamp frame position between the last call to check.
+                    uint64_t mPreviousPosition;
+                    // The time at which the last check occurred, to ensure we don't check too
+                    // frequently, giving the Audio HAL enough time to update its timestamps.
+                    nsecs_t mPreviousNs;
+                    // The valued is latched so we don't check timestamps too frequently.
+                    bool mLatchedValue;
+                };
+                IsTimestampAdvancing mIsTimestampAdvancing;
 
-    virtual     void flushHw_l() { mLastCheckedTimestampPosition = ~0LL; }
+    virtual     void flushHw_l() {
+                    mIsTimestampAdvancing.clear();
+                }
 };
 
 class MixerThread : public PlaybackThread {
@@ -1515,8 +1540,9 @@ class DirectOutputThread : public PlaybackThread {
 public:
 
     DirectOutputThread(const sp<AudioFlinger>& audioFlinger, AudioStreamOut* output,
-                       audio_io_handle_t id, bool systemReady)
-        : DirectOutputThread(audioFlinger, output, id, DIRECT, systemReady) { }
+                       audio_io_handle_t id, bool systemReady,
+                       const audio_offload_info_t& offloadInfo)
+        : DirectOutputThread(audioFlinger, output, id, DIRECT, systemReady, offloadInfo) { }
 
     virtual                 ~DirectOutputThread();
 
@@ -1548,11 +1574,14 @@ protected:
 
     virtual     void        onAddNewTrack_l();
 
+    const       audio_offload_info_t mOffloadInfo;
     bool mVolumeShaperActive = false;
 
     DirectOutputThread(const sp<AudioFlinger>& audioFlinger, AudioStreamOut* output,
-                       audio_io_handle_t id, ThreadBase::type_t type, bool systemReady);
+                       audio_io_handle_t id, ThreadBase::type_t type, bool systemReady,
+                       const audio_offload_info_t& offloadInfo);
     void processVolume_l(Track *track, bool lastTrack);
+    bool isTunerStream() const { return (mOffloadInfo.content_id > 0); }
 
     // prepareTracks_l() tells threadLoop_mix() the name of the single active track
     sp<Track>               mActiveTrack;
@@ -1590,7 +1619,8 @@ class OffloadThread : public DirectOutputThread {
 public:
 
     OffloadThread(const sp<AudioFlinger>& audioFlinger, AudioStreamOut* output,
-                  audio_io_handle_t id, bool systemReady);
+                  audio_io_handle_t id, bool systemReady,
+                  const audio_offload_info_t& offloadInfo);
     virtual                 ~OffloadThread() {};
                 void        flushHw_l() override;
 
@@ -2105,6 +2135,26 @@ class MmapThread : public ThreadBase
 
     virtual     bool        isStreamInitialized() { return false; }
 
+                void        setClientSilencedState_l(audio_port_handle_t portId, bool silenced) {
+                                mClientSilencedStates[portId] = silenced;
+                            }
+
+                size_t      eraseClientSilencedState_l(audio_port_handle_t portId) {
+                                return mClientSilencedStates.erase(portId);
+                            }
+
+                bool        isClientSilenced_l(audio_port_handle_t portId) const {
+                                const auto it = mClientSilencedStates.find(portId);
+                                return it != mClientSilencedStates.end() ? it->second : false;
+                            }
+
+                void        setClientSilencedIfExists_l(audio_port_handle_t portId, bool silenced) {
+                                const auto it = mClientSilencedStates.find(portId);
+                                if (it != mClientSilencedStates.end()) {
+                                    it->second = silenced;
+                                }
+                            }
+
  protected:
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
                 void        dumpTracks_l(int fd, const Vector<String16>& args) override;
@@ -2124,6 +2174,7 @@ class MmapThread : public ThreadBase
                 AudioHwDevice* const    mAudioHwDev;
                 ActiveTracks<MmapTrack> mActiveTracks;
                 float                   mHalVolFloat;
+                std::map<audio_port_handle_t, bool> mClientSilencedStates;
 
                 int32_t                 mNoCallbackWarningCount;
      static     constexpr int32_t       kMaxNoCallbackWarnings = 5;
