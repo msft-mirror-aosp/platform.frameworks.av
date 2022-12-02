@@ -59,11 +59,13 @@ using namespace std::chrono_literals;
        if (!_tmp.ok()) return aidl_utils::binderStatusFromStatusT(_tmp.error()); \
        std::move(_tmp.value()); })
 
-audio_channel_mask_t getMaxChannelMask(std::vector<audio_channel_mask_t> masks) {
+static audio_channel_mask_t getMaxChannelMask(
+        const std::vector<audio_channel_mask_t>& masks, size_t channelLimit = SIZE_MAX) {
     uint32_t maxCount = 0;
     audio_channel_mask_t maxMask = AUDIO_CHANNEL_NONE;
     for (auto mask : masks) {
         const size_t count = audio_channel_count_from_out_mask(mask);
+        if (count > channelLimit) continue;  // ignore masks greater than channelLimit
         if (count > maxCount) {
             maxMask = mask;
             maxCount = count;
@@ -238,9 +240,12 @@ sp<Spatializer> Spatializer::create(SpatializerPolicyCallback *callback) {
         spatializer = new Spatializer(descriptors[0], callback);
         if (spatializer->loadEngineConfiguration(effect) != NO_ERROR) {
             spatializer.clear();
+            ALOGW("%s loadEngine error: %d  effect Id %" PRId64,
+                    __func__, status, effect ? effect->effectId() : 0);
+        } else {
+            spatializer->mLocalLog.log("%s with effect Id %" PRId64, __func__,
+                                       effect ? effect->effectId() : 0);
         }
-        spatializer->mLocalLog.log("%s with effect Id %" PRId64, __func__,
-                                   effect ? effect->effectId() : 0);
     }
 
     return spatializer;
@@ -272,6 +277,16 @@ Spatializer::~Spatializer() {
     }
     mLooper.clear();
     mHandler.clear();
+}
+
+static std::string channelMaskVectorToString(
+        const std::vector<audio_channel_mask_t>& masks) {
+    std::stringstream ss;
+    for (const auto &mask : masks) {
+        if (ss.tellp() != 0) ss << "|";
+        ss << mask;
+    }
+    return ss.str();
 }
 
 status_t Spatializer::loadEngineConfiguration(sp<EffectHalInterface> effect) {
@@ -363,7 +378,7 @@ status_t Spatializer::loadEngineConfiguration(sp<EffectHalInterface> effect) {
     }
     mediametrics::LogItem(mMetricsId)
         .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_CREATE)
-        .set(AMEDIAMETRICS_PROP_CHANNELMASK, (int32_t)getMaxChannelMask(mChannelMasks))
+        .set(AMEDIAMETRICS_PROP_CHANNELMASKS, channelMaskVectorToString(mChannelMasks))
         .set(AMEDIAMETRICS_PROP_LEVELS, aidl_utils::enumsToString(mLevels))
         .set(AMEDIAMETRICS_PROP_MODES, aidl_utils::enumsToString(mSpatializationModes))
         .set(AMEDIAMETRICS_PROP_HEADTRACKINGMODES, aidl_utils::enumsToString(mHeadTrackingModes))
@@ -372,12 +387,24 @@ status_t Spatializer::loadEngineConfiguration(sp<EffectHalInterface> effect) {
     return NO_ERROR;
 }
 
+/* static */
+void Spatializer::sendEmptyCreateSpatializerMetricWithStatus(status_t status) {
+    mediametrics::LogItem(kDefaultMetricsId)
+        .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_CREATE)
+        .set(AMEDIAMETRICS_PROP_CHANNELMASKS, "")
+        .set(AMEDIAMETRICS_PROP_LEVELS, "")
+        .set(AMEDIAMETRICS_PROP_MODES, "")
+        .set(AMEDIAMETRICS_PROP_HEADTRACKINGMODES, "")
+        .set(AMEDIAMETRICS_PROP_STATUS, (int32_t)status)
+        .record();
+}
+
 /** Gets the channel mask, sampling rate and format set for the spatializer input. */
 audio_config_base_t Spatializer::getAudioInConfig() const {
     std::lock_guard lock(mLock);
     audio_config_base_t config = AUDIO_CONFIG_BASE_INITIALIZER;
     // For now use highest supported channel count
-    config.channel_mask = getMaxChannelMask(mChannelMasks);
+    config.channel_mask = getMaxChannelMask(mChannelMasks, FCC_LIMIT);
     return config;
 }
 
@@ -714,6 +741,17 @@ void Spatializer::onHeadToStagePose(const Pose3f& headToStage) {
     msg->post();
 }
 
+void Spatializer::resetEngineHeadPose_l() {
+    ALOGV("%s mEngine %p", __func__, mEngine.get());
+    if (mEngine == nullptr) {
+        return;
+    }
+    const std::vector<float> headToStage(6, 0.0);
+    setEffectParameter_l(SPATIALIZER_PARAM_HEAD_TO_STAGE, headToStage);
+    setEffectParameter_l(SPATIALIZER_PARAM_HEADTRACKING_MODE,
+            std::vector<SpatializerHeadTrackingMode>{SpatializerHeadTrackingMode::DISABLED});
+}
+
 void Spatializer::onHeadToStagePoseMsg(const std::vector<float>& headToStage) {
     ALOGV("%s", __func__);
     sp<media::ISpatializerHeadTrackingCallback> callback;
@@ -765,8 +803,12 @@ void Spatializer::onActualModeChangeMsg(HeadTrackingMode mode) {
         }
         mActualHeadTrackingMode = spatializerMode;
         if (mEngine != nullptr) {
-            setEffectParameter_l(SPATIALIZER_PARAM_HEADTRACKING_MODE,
-                                 std::vector<SpatializerHeadTrackingMode>{spatializerMode});
+            if (spatializerMode == SpatializerHeadTrackingMode::DISABLED) {
+                resetEngineHeadPose_l();
+            } else {
+                setEffectParameter_l(SPATIALIZER_PARAM_HEADTRACKING_MODE,
+                                     std::vector<SpatializerHeadTrackingMode>{spatializerMode});
+            }
         }
         callback = mHeadTrackingCallback;
         mLocalLog.log("%s: %s, spatializerMode %s", __func__, media::toString(mode).c_str(),
@@ -893,22 +935,34 @@ void Spatializer::updateActiveTracks(size_t numActiveTracks) {
 
 void Spatializer::checkSensorsState_l() {
     audio_latency_mode_t requestedLatencyMode = AUDIO_LATENCY_MODE_FREE;
-    bool lowLatencySupported = mSupportedLatencyModes.empty()
-            || (std::find(mSupportedLatencyModes.begin(), mSupportedLatencyModes.end(),
-                    AUDIO_LATENCY_MODE_LOW) != mSupportedLatencyModes.end());
-    if (mSupportsHeadTracking && mPoseController != nullptr) {
-        if (lowLatencySupported && mNumActiveTracks > 0 && mLevel != SpatializationLevel::NONE
-            && mDesiredHeadTrackingMode != HeadTrackingMode::STATIC
-            && mHeadSensor != SpatializerPoseController::INVALID_SENSOR) {
-            mPoseController->setHeadSensor(mHeadSensor);
-            mPoseController->setScreenSensor(mScreenSensor);
-            requestedLatencyMode = AUDIO_LATENCY_MODE_LOW;
+    const bool supportsSetLatencyMode = !mSupportedLatencyModes.empty();
+    const bool supportsLowLatencyMode = supportsSetLatencyMode && std::find(
+            mSupportedLatencyModes.begin(), mSupportedLatencyModes.end(),
+            AUDIO_LATENCY_MODE_LOW) != mSupportedLatencyModes.end();
+    if (mSupportsHeadTracking) {
+        if (mPoseController != nullptr) {
+            // TODO(b/253297301, b/255433067) reenable low latency condition check
+            // for Head Tracking after Bluetooth HAL supports it correctly.
+            if (mNumActiveTracks > 0 && mLevel != SpatializationLevel::NONE
+                && mDesiredHeadTrackingMode != HeadTrackingMode::STATIC
+                && mHeadSensor != SpatializerPoseController::INVALID_SENSOR) {
+                if (mEngine != nullptr) {
+                    setEffectParameter_l(SPATIALIZER_PARAM_HEADTRACKING_MODE,
+                            std::vector<SpatializerHeadTrackingMode>{mActualHeadTrackingMode});
+                }
+                mPoseController->setHeadSensor(mHeadSensor);
+                mPoseController->setScreenSensor(mScreenSensor);
+                if (supportsLowLatencyMode) requestedLatencyMode = AUDIO_LATENCY_MODE_LOW;
+            } else {
+                mPoseController->setHeadSensor(SpatializerPoseController::INVALID_SENSOR);
+                mPoseController->setScreenSensor(SpatializerPoseController::INVALID_SENSOR);
+                resetEngineHeadPose_l();
+            }
         } else {
-            mPoseController->setHeadSensor(SpatializerPoseController::INVALID_SENSOR);
-            mPoseController->setScreenSensor(SpatializerPoseController::INVALID_SENSOR);
+            resetEngineHeadPose_l();
         }
     }
-    if (mOutput != AUDIO_IO_HANDLE_NONE) {
+    if (mOutput != AUDIO_IO_HANDLE_NONE && supportsSetLatencyMode) {
         AudioSystem::setRequestedLatencyMode(mOutput, requestedLatencyMode);
     }
 }
@@ -919,8 +973,6 @@ void Spatializer::checkEngineState_l() {
             mEngine->setEnabled(true);
             setEffectParameter_l(SPATIALIZER_PARAM_LEVEL,
                     std::vector<SpatializationLevel>{mLevel});
-            setEffectParameter_l(SPATIALIZER_PARAM_HEADTRACKING_MODE,
-                    std::vector<SpatializerHeadTrackingMode>{mActualHeadTrackingMode});
         } else {
             setEffectParameter_l(SPATIALIZER_PARAM_LEVEL,
                     std::vector<SpatializationLevel>{SpatializationLevel::NONE});
@@ -942,6 +994,7 @@ void Spatializer::checkPoseController_l() {
         mPoseController->setDisplayOrientation(mDisplayOrientation);
     } else if (!isControllerNeeded && mPoseController != nullptr) {
         mPoseController.reset();
+        resetEngineHeadPose_l();
     }
     if (mPoseController != nullptr) {
         mPoseController->setDesiredMode(mDesiredHeadTrackingMode);
