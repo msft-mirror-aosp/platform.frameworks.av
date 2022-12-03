@@ -25,4 +25,11 @@
       android:targetSdkVersion="29"
   />
   -->
+
+  <!-- The segment below is required for Partner Driven Respins -->
+  <uses-sdk android:minSdkVersion="33" />
+  <install-constraints>
+    <fingerprint-prefix android:value="Android/aosp_barbet/barbet"/>
+  </install-constraints>
+  <!-- End Required Segment for Partner Driven Respins -->
 </manifest>
