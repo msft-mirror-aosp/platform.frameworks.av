@@ -15,14 +15,13 @@
  */
 
 #include <media/audiohal/DevicesFactoryHalInterface.h>
-#include <media/audiohal/FactoryHalHidl.h>
+#include <media/audiohal/FactoryHal.h>
 
 namespace android {
 
 // static
 sp<DevicesFactoryHalInterface> DevicesFactoryHalInterface::create() {
-    return createPreferredImpl<DevicesFactoryHalInterface>(
-            "android.hardware.audio", "IDevicesFactory");
+    return createPreferredImpl<DevicesFactoryHalInterface>(true /* isCore */);
 }
 
 } // namespace android

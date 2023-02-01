@@ -194,26 +194,15 @@ public:
             {AUDIO_FORMAT_E_AC3, {}},
             {AUDIO_FORMAT_DTS, {}},
             {AUDIO_FORMAT_DTS_HD, {}},
+            {AUDIO_FORMAT_DTS_HD_MA, {}},
+            {AUDIO_FORMAT_DTS_UHD, {}},
+            {AUDIO_FORMAT_DTS_UHD_P2, {}},
             {AUDIO_FORMAT_AAC_LC, {
                     AUDIO_FORMAT_AAC_HE_V1, AUDIO_FORMAT_AAC_HE_V2, AUDIO_FORMAT_AAC_ELD,
                     AUDIO_FORMAT_AAC_XHE}},
             {AUDIO_FORMAT_DOLBY_TRUEHD, {}},
             {AUDIO_FORMAT_E_AC3_JOC, {}},
             {AUDIO_FORMAT_AC4, {}}};
-    }
-
-    //TODO: b/193496180 use spatializer flag at audio HAL when available
-    // until then, use DEEP_BUFFER+FAST flag combo to indicate the spatializer output profile
-    void convertSpatializerFlag()
-    {
-        for (const auto& hwModule : mHwModules) {
-            for (const auto& curProfile : hwModule->getOutputProfiles()) {
-                if (curProfile->getFlags()
-                        == (AUDIO_OUTPUT_FLAG_FAST | AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) {
-                    curProfile->setFlags(AUDIO_OUTPUT_FLAG_SPATIALIZER);
-                }
-            }
-        }
     }
 
 private:

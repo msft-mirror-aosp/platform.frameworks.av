@@ -30,6 +30,7 @@
 
 namespace android {
 
+using detail::AudioHalVersionInfo;
 using media::IEffectClient;
 
 void AudioFlinger::DeviceEffectManager::createAudioPatch(audio_patch_handle_t handle,
@@ -106,8 +107,13 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::DeviceEffectManager::createEffect_l
         if (lStatus == NO_ERROR) {
             lStatus = effect->addHandle(handle.get());
             if (lStatus == NO_ERROR) {
-                effect->init(patches);
-                mDeviceEffects.emplace(device, effect);
+                lStatus = effect->init(patches);
+                if (lStatus == NAME_NOT_FOUND) {
+                    lStatus = NO_ERROR;
+                }
+                if (lStatus == NO_ERROR || lStatus == ALREADY_EXISTS) {
+                    mDeviceEffects.emplace(device, effect);
+                }
             }
         }
     }
@@ -125,14 +131,17 @@ status_t AudioFlinger::DeviceEffectManager::checkEffectCompatibility(
         return BAD_VALUE;
     }
 
-    static const float sMinDeviceEffectHalVersion = 6.0;
-    float halVersion = effectsFactory->getHalVersion();
+    static AudioHalVersionInfo sMinDeviceEffectHalVersion =
+            AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 6, 0);
+    AudioHalVersionInfo halVersion = effectsFactory->getHalVersion();
 
+    // We can trust AIDL generated AudioHalVersionInfo comparison operator (based on std::tie) as
+    // long as the type, major and minor sequence doesn't change in the definition.
     if (((desc->flags & EFFECT_FLAG_TYPE_MASK) != EFFECT_FLAG_TYPE_PRE_PROC
             && (desc->flags & EFFECT_FLAG_TYPE_MASK) != EFFECT_FLAG_TYPE_POST_PROC)
             || halVersion < sMinDeviceEffectHalVersion) {
-        ALOGW("%s() non pre/post processing device effect %s or incompatible API version %f",
-                __func__, desc->name, halVersion);
+        ALOGW("%s() non pre/post processing device effect %s or incompatible API version %s",
+                __func__, desc->name, halVersion.toString().c_str());
         return BAD_VALUE;
     }
 

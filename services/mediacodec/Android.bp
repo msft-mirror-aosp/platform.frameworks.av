@@ -19,6 +19,7 @@ cc_binary {
     name: "mediaswcodec",
     vendor_available: true,
     min_sdk_version: "29",
+    apex_available: ["com.android.media.swcodec"],
 
     srcs: [
         "main_swcodecservice.cpp",
@@ -52,6 +53,9 @@ prebuilt_etc {
         },
         arm64: {
             src: "seccomp_policy/mediaswcodec-arm64.policy",
+        },
+        riscv64: {
+            src: "seccomp_policy/mediaswcodec-riscv64.policy",
         },
         x86: {
             src: "seccomp_policy/mediaswcodec-x86.policy",
@@ -142,6 +146,9 @@ prebuilt_etc {
         },
         arm64: {
             src: "seccomp_policy/mediacodec-arm64.policy",
+        },
+        riscv64: {
+            enabled: false,
         },
         x86: {
             src: "seccomp_policy/mediacodec-x86.policy",

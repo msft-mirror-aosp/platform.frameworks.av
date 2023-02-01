@@ -18,15 +18,16 @@
 
 #define LOG_TAG "SensorPoseProvider"
 
-#include <inttypes.h>
-
+#include <algorithm>
 #include <future>
+#include <inttypes.h>
+#include <limits>
 #include <map>
 #include <thread>
 
+#include <android-base/stringprintf.h>
 #include <android-base/thread_annotations.h>
 #include <log/log_main.h>
-#include <sensor/Sensor.h>
 #include <sensor/SensorEventQueue.h>
 #include <sensor/SensorManager.h>
 #include <utils/Looper.h>
@@ -37,8 +38,11 @@ namespace android {
 namespace media {
 namespace {
 
+using android::base::StringAppendF;
+
 // Identifier to use for our event queue on the loop.
 // The number 19 is arbitrary, only useful if using multiple objects on the same looper.
+// Note: Instead of a fixed number, the SensorEventQueue's fd could be used instead.
 constexpr int kIdent = 19;
 
 static inline Looper* ALooper_to_Looper(ALooper* alooper) {
@@ -57,7 +61,8 @@ class EventQueueGuard {
     EventQueueGuard(const sp<SensorEventQueue>& queue, Looper* looper) : mQueue(queue) {
         mQueue->looper = Looper_to_ALooper(looper);
         mQueue->requestAdditionalInfo = false;
-        looper->addFd(mQueue->getFd(), kIdent, ALOOPER_EVENT_INPUT, nullptr, nullptr);
+        looper->addFd(mQueue->getFd(), kIdent, ALOOPER_EVENT_INPUT,
+                nullptr /* callback */, nullptr /* data */);
     }
 
     ~EventQueueGuard() {
@@ -72,7 +77,7 @@ class EventQueueGuard {
     [[nodiscard]] SensorEventQueue* get() const { return mQueue.get(); }
 
   private:
-    sp<SensorEventQueue> mQueue;
+    const sp<SensorEventQueue> mQueue;
 };
 
 /**
@@ -92,10 +97,7 @@ class SensorEnableGuard {
         }
     }
 
-    SensorEnableGuard(const SensorEnableGuard&) = delete;
-    SensorEnableGuard& operator=(const SensorEnableGuard&) = delete;
-
-    // Enable moving.
+    // Enable move and delete default copy-ctor/copy-assignment.
     SensorEnableGuard(SensorEnableGuard&& other) : mQueue(other.mQueue), mSensor(other.mSensor) {
         other.mSensor = SensorPoseProvider::INVALID_HANDLE;
     }
@@ -119,6 +121,7 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
     ~SensorPoseProviderImpl() override {
         // Disable all active sensors.
         mEnabledSensors.clear();
+        mQuit = true;
         mLooper->wake();
         mThread.join();
     }
@@ -127,38 +130,78 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
         // Figure out the sensor's data format.
         DataFormat format = getSensorFormat(sensor);
         if (format == DataFormat::kUnknown) {
-            ALOGE("Unknown format for sensor %" PRId32, sensor);
+            ALOGE("%s: Unknown format for sensor %" PRId32, __func__, sensor);
             return false;
         }
 
         {
             std::lock_guard lock(mMutex);
-            mEnabledSensorFormats.emplace(sensor, format);
+            mEnabledSensorsExtra.emplace(
+                    sensor,
+                    SensorExtra{.format = format,
+                                .samplingPeriod = static_cast<int32_t>(samplingPeriod.count())});
         }
 
         // Enable the sensor.
         if (mQueue->enableSensor(sensor, samplingPeriod.count(), 0, 0)) {
-            ALOGE("Failed to enable sensor");
+            ALOGE("%s: Failed to enable sensor %" PRId32, __func__, sensor);
             std::lock_guard lock(mMutex);
-            mEnabledSensorFormats.erase(sensor);
+            mEnabledSensorsExtra.erase(sensor);
             return false;
         }
 
-        mEnabledSensors.emplace(sensor, SensorEnableGuard(mQueue.get(), sensor));
+        mEnabledSensors.emplace(sensor, SensorEnableGuard(mQueue, sensor));
+        ALOGD("%s: Sensor %" PRId32 " started", __func__, sensor);
         return true;
     }
 
     void stopSensor(int handle) override {
+        ALOGD("%s: Sensor %" PRId32 " stopped", __func__, handle);
         mEnabledSensors.erase(handle);
         std::lock_guard lock(mMutex);
-        mEnabledSensorFormats.erase(handle);
+        mEnabledSensorsExtra.erase(handle);
+    }
+
+    std::string toString(unsigned level) override {
+        std::string prefixSpace(level, ' ');
+        std::string ss = prefixSpace + "SensorPoseProvider:\n";
+        bool needUnlock = false;
+
+        prefixSpace += " ";
+        auto now = std::chrono::steady_clock::now();
+        if (!mMutex.try_lock_until(now + media::kSpatializerDumpSysTimeOutInSecond)) {
+            ss.append(prefixSpace).append("try_lock failed, dumpsys below maybe INACCURATE!\n");
+        } else {
+            needUnlock = true;
+        }
+
+        // Enabled sensor information
+        StringAppendF(&ss, "%sSensors total number %zu:\n", prefixSpace.c_str(),
+                      mEnabledSensorsExtra.size());
+        for (auto sensor : mEnabledSensorsExtra) {
+            StringAppendF(&ss,
+                          "%s[Handle: 0x%08x, Format %s Period (set %d max %0.4f min %0.4f) ms",
+                          prefixSpace.c_str(), sensor.first, toString(sensor.second.format).c_str(),
+                          sensor.second.samplingPeriod, media::nsToFloatMs(sensor.second.maxPeriod),
+                          media::nsToFloatMs(sensor.second.minPeriod));
+            if (sensor.second.discontinuityCount.has_value()) {
+                StringAppendF(&ss, ", DiscontinuityCount: %d",
+                              sensor.second.discontinuityCount.value());
+            }
+            ss += "]\n";
+        }
+
+        if (needUnlock) {
+            mMutex.unlock();
+        }
+        return ss;
     }
 
   private:
     enum DataFormat {
         kUnknown,
         kQuaternion,
-        kRotationVectorsAndFlags,
+        kRotationVectorsAndDiscontinuityCount,
     };
 
     struct PoseEvent {
@@ -167,14 +210,23 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
         bool isNewReference;
     };
 
+    struct SensorExtra {
+        DataFormat format = DataFormat::kUnknown;
+        int32_t samplingPeriod = 0;
+        int64_t latestTimestamp = 0;
+        int64_t maxPeriod = 0;
+        int64_t minPeriod = std::numeric_limits<int64_t>::max();
+        std::optional<int32_t> discontinuityCount;
+    };
+
+    bool mQuit = false;
     sp<Looper> mLooper;
     Listener* const mListener;
     SensorManager* const mSensorManager;
-    std::thread mThread;
-    std::mutex mMutex;
-    std::map<int32_t, SensorEnableGuard> mEnabledSensors;
-    std::map<int32_t, DataFormat> mEnabledSensorFormats GUARDED_BY(mMutex);
+    std::timed_mutex mMutex;
     sp<SensorEventQueue> mQueue;
+    std::map<int32_t, SensorEnableGuard> mEnabledSensors;
+    std::map<int32_t, SensorExtra> mEnabledSensorsExtra GUARDED_BY(mMutex);
 
     // We must do some of the initialization operations on the worker thread, because the API relies
     // on the thread-local looper. In addition, as a matter of convenience, we store some of the
@@ -183,18 +235,25 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
     // the worker thread and that thread would notify, via the promise below whenever initialization
     // is finished, and whether it was successful.
     std::promise<bool> mInitPromise;
+    std::thread mThread;
 
     SensorPoseProviderImpl(const char* packageName, Listener* listener)
         : mListener(listener),
-          mSensorManager(&SensorManager::getInstanceForPackage(String16(packageName))),
-          mThread([this] { threadFunc(); }) {}
-
+          mSensorManager(&SensorManager::getInstanceForPackage(String16(packageName))) {
+        mThread = std::thread([this] { threadFunc(); });
+    }
     void initFinished(bool success) { mInitPromise.set_value(success); }
 
     bool waitInitFinished() { return mInitPromise.get_future().get(); }
 
     void threadFunc() {
-        // Obtain looper.
+        // Name our std::thread to help identification.  As is, canCallJava == false.
+        androidSetThreadName("SensorPoseProvider-looper");
+
+        // Run at the highest non-realtime priority.
+        androidSetThreadPriority(gettid(), PRIORITY_URGENT_AUDIO);
+
+        // The looper is started on the created std::thread.
         mLooper = Looper::prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
 
         // Create event queue.
@@ -210,20 +269,28 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
 
         initFinished(true);
 
-        while (true) {
-            int ret = mLooper->pollOnce(-1 /* no timeout */, nullptr, nullptr, nullptr);
+        while (!mQuit) {
+            const int ret = mLooper->pollOnce(-1 /* no timeout */, nullptr /* outFd */,
+                    nullptr /* outEvents */, nullptr /* outData */);
 
             switch (ret) {
                 case ALOOPER_POLL_WAKE:
-                    // Normal way to exit.
-                    return;
+                    // Continue to see if mQuit flag is set.
+                    // This can be spurious (due to bugreport being taken).
+                    continue;
 
                 case kIdent:
                     // Possible events on our queue.
                     break;
 
                 default:
-                    ALOGE("Unexpected status out of Looper::pollOnce: %d", ret);
+                    // Besides WAKE and kIdent, there should be no timeouts, callbacks,
+                    // ALOOPER_POLL_ERROR, or other events.
+                    // Exit now to avoid high frequency log spam on error,
+                    // e.g. if the fd becomes invalid (b/31093485).
+                    ALOGE("%s: Unexpected status out of Looper::pollOnce: %d", __func__, ret);
+                    mQuit = true;
+                    continue;
             }
 
             // Process an event.
@@ -235,7 +302,8 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
             ssize_t size = mQueue->filterEvents(&event, actual);
 
             if (size < 0 || size > 1) {
-                ALOGE("Unexpected return value from SensorEventQueue::filterEvents: %zd", size);
+                ALOGE("%s: Unexpected return value from SensorEventQueue::filterEvents: %zd",
+                        __func__, size);
                 break;
             }
             if (size == 0) {
@@ -245,20 +313,21 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
 
             handleEvent(event);
         }
+        ALOGD("%s: Exiting sensor event loop", __func__);
     }
 
     void handleEvent(const ASensorEvent& event) {
-        DataFormat format;
+        PoseEvent value;
         {
             std::lock_guard lock(mMutex);
-            auto iter = mEnabledSensorFormats.find(event.sensor);
-            if (iter == mEnabledSensorFormats.end()) {
+            auto iter = mEnabledSensorsExtra.find(event.sensor);
+            if (iter == mEnabledSensorsExtra.end()) {
                 // This can happen if we have any pending events shortly after stopping.
                 return;
             }
-            format = iter->second;
+            value = parseEvent(event, iter->second.format, &iter->second.discontinuityCount);
+            updateEventTimestamp(event, iter->second);
         }
-        auto value = parseEvent(event, format);
         mListener->onPose(event.timestamp, event.sensor, value.pose, value.twist,
                           value.isNewReference);
     }
@@ -274,14 +343,14 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
             return DataFormat::kQuaternion;
         }
 
-        if (sensor->getStringType() == "com.google.hardware.sensor.hid_dynamic.headtracker") {
-            return DataFormat::kRotationVectorsAndFlags;
+        if (sensor->getType() == ASENSOR_TYPE_HEAD_TRACKER) {
+            return DataFormat::kRotationVectorsAndDiscontinuityCount;
         }
 
         return DataFormat::kUnknown;
     }
 
-    std::optional<const Sensor> getSensorByHandle(int32_t handle) {
+    std::optional<const Sensor> getSensorByHandle(int32_t handle) override {
         const Sensor* const* list;
         ssize_t size;
 
@@ -313,8 +382,17 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
         return std::nullopt;
     }
 
-    static PoseEvent parseEvent(const ASensorEvent& event, DataFormat format) {
-        // TODO(ytai): Add more types.
+    void updateEventTimestamp(const ASensorEvent& event, SensorExtra& extra) {
+        if (extra.latestTimestamp != 0) {
+            int64_t gap = event.timestamp - extra.latestTimestamp;
+            extra.maxPeriod = std::max(gap, extra.maxPeriod);
+            extra.minPeriod = std::min(gap, extra.minPeriod);
+        }
+        extra.latestTimestamp = event.timestamp;
+    }
+
+    static PoseEvent parseEvent(const ASensorEvent& event, DataFormat format,
+                                std::optional<int32_t>* discontinutyCount) {
         switch (format) {
             case DataFormat::kQuaternion: {
                 Eigen::Quaternionf quat(event.data[3], event.data[0], event.data[1], event.data[2]);
@@ -323,23 +401,36 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
                 return PoseEvent{Pose3f(quat), std::optional<Twist3f>(), false};
             }
 
-            case DataFormat::kRotationVectorsAndFlags: {
-                // Custom sensor, assumed to contain:
-                // 3 floats representing orientation as a rotation vector (in rad).
-                // 3 floats representing angular velocity as a rotation vector (in rad/s).
-                // 1 uint32_t of flags, where:
-                // - LSb is '1' iff the given sample is the first one in a new frame of reference.
-                // - The rest of the bits are reserved for future use.
-                Eigen::Vector3f rotation = {event.data[0], event.data[1], event.data[2]};
-                Eigen::Vector3f twist = {event.data[3], event.data[4], event.data[5]};
+            case DataFormat::kRotationVectorsAndDiscontinuityCount: {
+                Eigen::Vector3f rotation = {event.head_tracker.rx, event.head_tracker.ry,
+                                            event.head_tracker.rz};
+                Eigen::Vector3f twist = {event.head_tracker.vx, event.head_tracker.vy,
+                                         event.head_tracker.vz};
                 Eigen::Quaternionf quat = rotationVectorToQuaternion(rotation);
-                uint32_t flags = *reinterpret_cast<const uint32_t*>(&event.data[6]);
+                bool isNewReference =
+                        !discontinutyCount->has_value() ||
+                        discontinutyCount->value() != event.head_tracker.discontinuity_count;
+                *discontinutyCount = event.head_tracker.discontinuity_count;
+
                 return PoseEvent{Pose3f(quat), Twist3f(Eigen::Vector3f::Zero(), twist),
-                                 (flags & (1 << 0)) != 0};
+                                 isNewReference};
             }
 
             default:
                 LOG_ALWAYS_FATAL("Unexpected sensor type: %d", static_cast<int>(format));
+        }
+    }
+
+    const static std::string toString(DataFormat format) {
+        switch (format) {
+            case DataFormat::kUnknown:
+                return "kUnknown";
+            case DataFormat::kQuaternion:
+                return "kQuaternion";
+            case DataFormat::kRotationVectorsAndDiscontinuityCount:
+                return "kRotationVectorsAndDiscontinuityCount";
+            default:
+                return "NotImplemented";
         }
     }
 };

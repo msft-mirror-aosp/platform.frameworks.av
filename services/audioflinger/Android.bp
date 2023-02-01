@@ -22,6 +22,10 @@ license {
 cc_library_shared {
     name: "libaudioflinger",
 
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_shared",
+    ],
+
     srcs: [
         "AudioFlinger.cpp",
         "AudioHwDevice.cpp",
@@ -41,6 +45,7 @@ cc_library_shared {
         "FastThreadState.cpp",
         "NBAIO_Tee.cpp",
         "PatchPanel.cpp",
+        "PropertyUtils.cpp",
         "SpdifStreamOut.cpp",
         "StateQueue.cpp",
         "Threads.cpp",
@@ -91,6 +96,7 @@ cc_library_shared {
     ],
 
     header_libs: [
+        "libaaudio_headers",
         "libaudioclient_headers",
         "libaudiohal_headers",
         "libmedia_headers",

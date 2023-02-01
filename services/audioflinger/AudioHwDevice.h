@@ -22,6 +22,8 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#include <android/media/audio/common/AudioMMapPolicyInfo.h>
+#include <android/media/audio/common/AudioMMapPolicyType.h>
 #include <media/audiohal/DeviceHalInterface.h>
 #include <utils/Errors.h>
 #include <system/audio.h>
@@ -38,6 +40,8 @@ public:
         // Means that this isn't a terminal module, and software patches
         // are used to transport audio data further.
         AHWD_IS_INSERT              = 0x4,
+        // This Module supports BT Latency mode control
+        AHWD_SUPPORTS_BT_LATENCY_MODES = 0x8,
     };
 
     AudioHwDevice(audio_module_handle_t handle,
@@ -62,6 +66,10 @@ public:
         return (0 != (mFlags & AHWD_IS_INSERT));
     }
 
+    bool supportsBluetoothVariableLatency() const {
+        return (0 != (mFlags & AHWD_SUPPORTS_BT_LATENCY_MODES));
+    }
+
     audio_module_handle_t handle() const { return mHandle; }
     const char *moduleName() const { return mModuleName; }
     sp<DeviceHalInterface> hwDevice() const { return mHwDevice; }
@@ -84,6 +92,14 @@ public:
     bool supportsAudioPatches() const;
 
     status_t getAudioPort(struct audio_port_v7 *port) const;
+
+    status_t getMmapPolicyInfos(
+            media::audio::common::AudioMMapPolicyType policyType,
+            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) const;
+
+    int32_t getAAudioMixerBurstCount() const;
+
+    int32_t getAAudioHardwareBurstMinUsec() const;
 
 private:
     const audio_module_handle_t mHandle;

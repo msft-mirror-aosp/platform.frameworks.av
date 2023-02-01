@@ -22,6 +22,8 @@
 #include <android/hardware/drm/1.4/IDrmPlugin.h>
 #include <android/hardware/drm/1.4/types.h>
 #include <media/stagefright/MediaErrors.h>
+#include <mediadrm/DrmMetricsLogger.h>
+#include <mediadrm/DrmStatus.h>
 #include <utils/Errors.h>  // for status_t
 #include <utils/Log.h>
 #include <utils/String8.h>
@@ -39,11 +41,19 @@
 #include <mutex>
 #include <string>
 #include <vector>
-
+#include <aidl/android/hardware/drm/LogMessage.h>
+#include <aidl/android/hardware/drm/Status.h>
+#include <aidl/android/hardware/drm/IDrmFactory.h>
 
 using namespace ::android::hardware::drm;
 using ::android::hardware::hidl_vec;
 using ::android::hardware::Return;
+
+using ::aidl::android::hardware::drm::LogPriority;
+using ::aidl::android::hardware::drm::LogMessage;
+using ::aidl::android::hardware::drm::Uuid;
+using StatusAidl = ::aidl::android::hardware::drm::Status;
+using IDrmFactoryAidl = ::aidl::android::hardware::drm::IDrmFactory;
 
 namespace android {
 
@@ -110,7 +120,7 @@ void LogToBuffer(android_LogPriority level, const uint8_t uuid[16], const char *
 
 bool UseDrmService();
 
-sp<IDrm> MakeDrm(status_t *pstatus = nullptr);
+sp<IDrm> MakeDrm(IDrmFrontend frontend = IDRM_JNI, status_t* pstatus = nullptr);
 
 sp<ICrypto> MakeCrypto(status_t *pstatus = nullptr);
 
@@ -157,6 +167,14 @@ void WriteKeysChange(
     obj.writeInt32(hasNewUsableKey);
 }
 
+inline Uuid toAidlUuid(const uint8_t uuid[16]) {
+    Uuid uuidAidl;
+    for (int i = 0; i < 16; ++i) uuidAidl.uuid[i] = uuid[i];
+    return uuidAidl;
+}
+
+std::vector<std::shared_ptr<IDrmFactoryAidl>> makeDrmFactoriesAidl();
+
 std::vector<sp<::V1_0::IDrmFactory>> MakeDrmFactories(const uint8_t uuid[16] = nullptr);
 
 std::vector<sp<::V1_0::IDrmPlugin>> MakeDrmPlugins(const uint8_t uuid[16],
@@ -180,6 +198,47 @@ inline status_t toStatusT(const android::hardware::Return<T> &status) {
     auto t = static_cast<T>(status);
     auto err = static_cast<::V1_4::Status>(t);
     return toStatusT_1_4(err);
+}
+
+DrmStatus statusAidlToDrmStatus(::ndk::ScopedAStatus& statusAidl);
+
+template<typename T, typename U>
+status_t GetLogMessagesAidl(const std::shared_ptr<U> &obj, Vector<::V1_4::LogMessage> &logs) {
+    std::shared_ptr<T> plugin = obj;
+    if (obj == NULL) {
+        LOG2BW("%s obj is null", U::descriptor);
+    } else if (plugin == NULL) {
+        LOG2BW("Cannot cast %s obj to %s plugin", U::descriptor, T::descriptor);
+    }
+
+    std::vector<LogMessage> pluginLogsAidl;
+    if (plugin != NULL) {
+        if(!plugin->getLogMessages(&pluginLogsAidl).isOk()) {
+            LOG2BW("%s::getLogMessages remote call failed", T::descriptor);
+        }
+    }
+
+    std::vector<::V1_4::LogMessage> pluginLogs;
+    for (LogMessage log : pluginLogsAidl) {
+        ::V1_4::LogMessage logHidl;
+        logHidl.timeMs = log.timeMs;
+        // skip negative convert check as count of enum elements is 7
+        logHidl.priority =  static_cast<::V1_4::LogPriority>((int32_t)log.priority);
+        logHidl.message = log.message;
+        pluginLogs.push_back(logHidl);
+    }
+
+    auto allLogs(gLogBuf.getLogs());
+    LOG2BD("framework logs size %zu; plugin logs size %zu",
+           allLogs.size(), pluginLogs.size());
+    std::copy(pluginLogs.begin(), pluginLogs.end(), std::back_inserter(allLogs));
+    std::sort(allLogs.begin(), allLogs.end(),
+              [](const ::V1_4::LogMessage &a, const ::V1_4::LogMessage &b) {
+                  return a.timeMs < b.timeMs;
+              });
+
+    logs.appendVector(allLogs);
+    return OK;
 }
 
 template<typename T, typename U>
@@ -225,14 +284,16 @@ status_t GetLogMessages(const sp<U> &obj, Vector<::V1_4::LogMessage> &logs) {
     return OK;
 }
 
-std::string GetExceptionMessage(status_t err, const char *msg,
+std::string GetExceptionMessage(const DrmStatus & err, const char *defaultMsg,
                                 const Vector<::V1_4::LogMessage> &logs);
 
 template<typename T>
-std::string GetExceptionMessage(status_t err, const char *msg, const sp<T> &iface) {
+std::string GetExceptionMessage(const DrmStatus &err, const char *defaultMsg, const sp<T> &iface) {
     Vector<::V1_4::LogMessage> logs;
-    iface->getLogMessages(logs);
-    return GetExceptionMessage(err, msg, logs);
+    if (iface != NULL) {
+        iface->getLogMessages(logs);
+    }
+    return GetExceptionMessage(err, defaultMsg, logs);
 }
 
 } // namespace DrmUtils

@@ -18,7 +18,7 @@
 
 #include <vector>
 
-#include <android/media/AudioPort.h>
+#include <android/media/AudioPortFw.h>
 #include <binder/Parcel.h>
 #include <binder/Parcelable.h>
 #include <media/AudioContainers.h>
@@ -36,19 +36,24 @@ class DeviceDescriptorBase : public AudioPort, public AudioPortConfig
 public:
      // Note that empty name refers by convention to a generic device.
     explicit DeviceDescriptorBase(audio_devices_t type);
-    DeviceDescriptorBase(audio_devices_t type, const std::string& address);
-    explicit DeviceDescriptorBase(const AudioDeviceTypeAddr& deviceTypeAddr);
+    DeviceDescriptorBase(audio_devices_t type, const std::string& address,
+            const FormatVector &encodedFormats = FormatVector{});
+    DeviceDescriptorBase(const AudioDeviceTypeAddr& deviceTypeAddr,
+            const FormatVector &encodedFormats = FormatVector{});
 
-    virtual ~DeviceDescriptorBase() {}
+    virtual ~DeviceDescriptorBase() = default;
 
     audio_devices_t type() const { return mDeviceTypeAddr.mType; }
     const std::string& address() const { return mDeviceTypeAddr.address(); }
     void setAddress(const std::string &address);
     const AudioDeviceTypeAddr& getDeviceTypeAddr() const { return mDeviceTypeAddr; }
 
+    const FormatVector& encodedFormats() const { return mEncodedFormats; }
+    bool supportsFormat(audio_format_t format);
+
     // AudioPortConfig
     virtual sp<AudioPort> getAudioPort() const {
-        return static_cast<AudioPort*>(const_cast<DeviceDescriptorBase*>(this));
+        return sp<AudioPort>::fromExisting(const_cast<DeviceDescriptorBase*>(this));
     }
     virtual void toAudioPortConfig(struct audio_port_config *dstConfig,
             const struct audio_port_config *srcConfig = NULL) const;
@@ -60,7 +65,7 @@ public:
     status_t setEncapsulationModes(uint32_t encapsulationModes);
     status_t setEncapsulationMetadataTypes(uint32_t encapsulationMetadataTypes);
 
-    void dump(std::string *dst, int spaces, int index,
+    void dump(std::string *dst, int spaces,
               const char* extraInfo = nullptr, bool verbose = true) const;
     void log() const;
 
@@ -74,14 +79,12 @@ public:
 
     bool equals(const sp<DeviceDescriptorBase>& other) const;
 
-    status_t writeToParcel(Parcel* parcel) const override;
-    status_t readFromParcel(const Parcel* parcel) override;
-
-    status_t writeToParcelable(media::AudioPort* parcelable) const;
-    status_t readFromParcelable(const media::AudioPort& parcelable);
+    status_t writeToParcelable(media::AudioPortFw* parcelable) const;
+    status_t readFromParcelable(const media::AudioPortFw& parcelable);
 
 protected:
     AudioDeviceTypeAddr mDeviceTypeAddr;
+    FormatVector        mEncodedFormats;
     uint32_t mEncapsulationModes = 0;
     uint32_t mEncapsulationMetadataTypes = 0;
 private:
@@ -113,8 +116,8 @@ AudioDeviceTypeAddrVector deviceTypeAddrsFromDescriptors(const DeviceDescriptorB
 
 // Conversion routines, according to AidlConversion.h conventions.
 ConversionResult<sp<DeviceDescriptorBase>>
-aidl2legacy_DeviceDescriptorBase(const media::AudioPort& aidl);
-ConversionResult<media::AudioPort>
+aidl2legacy_DeviceDescriptorBase(const media::AudioPortFw& aidl);
+ConversionResult<media::AudioPortFw>
 legacy2aidl_DeviceDescriptorBase(const sp<DeviceDescriptorBase>& legacy);
 
 } // namespace android

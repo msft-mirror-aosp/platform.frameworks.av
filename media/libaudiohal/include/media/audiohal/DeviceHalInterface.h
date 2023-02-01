@@ -17,8 +17,10 @@
 #ifndef ANDROID_HARDWARE_DEVICE_HAL_INTERFACE_H
 #define ANDROID_HARDWARE_DEVICE_HAL_INTERFACE_H
 
+#include <android/media/audio/common/AudioMMapPolicyInfo.h>
+#include <android/media/audio/common/AudioMMapPolicyType.h>
+#include <error/Result.h>
 #include <media/audiohal/EffectHalInterface.h>
-#include <media/MicrophoneInfo.h>
 #include <system/audio.h>
 #include <utils/Errors.h>
 #include <utils/RefBase.h>
@@ -104,7 +106,7 @@ class DeviceHalInterface : public RefBase
     virtual status_t releaseAudioPatch(audio_patch_handle_t patch) = 0;
 
     // Fills the list of supported attributes for a given audio port.
-    virtual status_t getAudioPort(struct audio_port *port) = 0;
+    virtual status_t getAudioPort(struct audio_port* port) = 0;
 
     // Fills the list of supported attributes for a given audio port.
     virtual status_t getAudioPort(struct audio_port_v7 *port) = 0;
@@ -113,15 +115,28 @@ class DeviceHalInterface : public RefBase
     virtual status_t setAudioPortConfig(const struct audio_port_config *config) = 0;
 
     // List microphones
-    virtual status_t getMicrophones(std::vector<media::MicrophoneInfo> *microphones) = 0;
+    virtual status_t getMicrophones(
+            std::vector<audio_microphone_characteristic_t>* microphones) = 0;
 
     virtual status_t addDeviceEffect(
             audio_port_handle_t device, sp<EffectHalInterface> effect) = 0;
     virtual status_t removeDeviceEffect(
             audio_port_handle_t device, sp<EffectHalInterface> effect) = 0;
 
+    virtual status_t getMmapPolicyInfos(
+            media::audio::common::AudioMMapPolicyType policyType,
+            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
+    virtual int32_t getAAudioMixerBurstCount() = 0;
+    virtual int32_t getAAudioHardwareBurstMinUsec() = 0;
+    virtual int32_t supportsBluetoothVariableLatency(bool* supports) = 0;
+
     // Update the connection status of an external device.
-    virtual status_t setConnectedState(const struct audio_port_v7 *port, bool connected) = 0;
+    virtual status_t setConnectedState(const struct audio_port_v7* port, bool connected) {
+        ALOGE("%s override me port %p connected %d", __func__, port, connected);
+        return OK;
+    }
+
+    virtual error::Result<audio_hw_sync_t> getHwAvSync() = 0;
 
     virtual status_t dump(int fd, const Vector<String16>& args) = 0;
 

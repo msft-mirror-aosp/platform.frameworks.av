@@ -39,7 +39,9 @@
 #include <media/ShmemCompat.h>
 #include <media/audiohal/EffectHalInterface.h>
 #include <media/audiohal/EffectsFactoryHalInterface.h>
+#include <mediautils/MethodStatistics.h>
 #include <mediautils/ServiceUtilities.h>
+#include <mediautils/TimeCheck.h>
 
 #include "AudioFlinger.h"
 
@@ -567,7 +569,8 @@ AudioFlinger::EffectModule::EffectModule(const sp<AudioFlinger::EffectCallbackIn
       mMaxDisableWaitCnt(1), // set by configure(), should be >= 1
       mDisableWaitCnt(0),    // set by process() and updateState()
       mOffloaded(false),
-      mAddedToHal(false)
+      mAddedToHal(false),
+      mIsOutput(false)
 #ifdef FLOAT_EFFECT_CHAIN
       , mSupportsFloat(false)
 #endif
@@ -960,6 +963,7 @@ status_t AudioFlinger::EffectModule::configure()
     mConfig.outputCfg.mask = EFFECT_CONFIG_ALL;
     mConfig.inputCfg.buffer.frameCount = callback->frameCount();
     mConfig.outputCfg.buffer.frameCount = mConfig.inputCfg.buffer.frameCount;
+    mIsOutput = callback->isOutput();
 
     ALOGV("configure() %p chain %p buffer %p framecount %zu",
           this, callback->chain().promote().get(),
@@ -978,7 +982,7 @@ status_t AudioFlinger::EffectModule::configure()
 
 #ifdef MULTICHANNEL_EFFECT_CHAIN
     if (status != NO_ERROR &&
-            callback->isOutput() &&
+            mIsOutput &&
             (mConfig.inputCfg.channels != AUDIO_CHANNEL_OUT_STEREO
                     || mConfig.outputCfg.channels != AUDIO_CHANNEL_OUT_STEREO)) {
         // Older effects may require exact STEREO position mask.
@@ -1053,6 +1057,13 @@ status_t AudioFlinger::EffectModule::configure()
                     &buf32,
                     &size,
                     &cmdStatus);
+        }
+
+        if (isVolumeControl()) {
+            // Force initializing the volume as 0 for volume control effect for safer ramping
+            uint32_t left = 0;
+            uint32_t right = 0;
+            setVolumeInternal(&left, &right, true /*controller*/);
         }
     }
 
@@ -1427,23 +1438,24 @@ status_t AudioFlinger::EffectModule::setVolume(uint32_t *left, uint32_t *right, 
             ((mDescriptor.flags & EFFECT_FLAG_VOLUME_MASK) == EFFECT_FLAG_VOLUME_CTRL ||
              (mDescriptor.flags & EFFECT_FLAG_VOLUME_MASK) == EFFECT_FLAG_VOLUME_IND ||
              (mDescriptor.flags & EFFECT_FLAG_VOLUME_MASK) == EFFECT_FLAG_VOLUME_MONITOR)) {
-        uint32_t volume[2];
-        uint32_t *pVolume = NULL;
-        uint32_t size = sizeof(volume);
-        volume[0] = *left;
-        volume[1] = *right;
-        if (controller) {
-            pVolume = volume;
-        }
-        status = mEffectInterface->command(EFFECT_CMD_SET_VOLUME,
-                                           size,
-                                           volume,
-                                           &size,
-                                           pVolume);
-        if (controller && status == NO_ERROR && size == sizeof(volume)) {
-            *left = volume[0];
-            *right = volume[1];
-        }
+        status = setVolumeInternal(left, right, controller);
+    }
+    return status;
+}
+
+status_t AudioFlinger::EffectModule::setVolumeInternal(
+        uint32_t *left, uint32_t *right, bool controller) {
+    uint32_t volume[2] = {*left, *right};
+    uint32_t *pVolume = controller ? volume : nullptr;
+    uint32_t size = sizeof(volume);
+    status_t status = mEffectInterface->command(EFFECT_CMD_SET_VOLUME,
+                                                size,
+                                                volume,
+                                                &size,
+                                                pVolume);
+    if (controller && status == NO_ERROR && size == sizeof(volume)) {
+        *left = volume[0];
+        *right = volume[1];
     }
     return status;
 }
@@ -1641,6 +1653,22 @@ status_t AudioFlinger::EffectModule::setVibratorInfo(const media::AudioVibratorI
     return status;
 }
 
+status_t AudioFlinger::EffectModule::getConfigs(
+        audio_config_base_t* inputCfg, audio_config_base_t* outputCfg, bool* isOutput) const {
+    Mutex::Autolock _l(mLock);
+    if (mConfig.inputCfg.mask == 0 || mConfig.outputCfg.mask == 0) {
+        return NO_INIT;
+    }
+    inputCfg->sample_rate = mConfig.inputCfg.samplingRate;
+    inputCfg->channel_mask = static_cast<audio_channel_mask_t>(mConfig.inputCfg.channels);
+    inputCfg->format = static_cast<audio_format_t>(mConfig.inputCfg.format);
+    outputCfg->sample_rate = mConfig.outputCfg.samplingRate;
+    outputCfg->channel_mask = static_cast<audio_channel_mask_t>(mConfig.outputCfg.channels);
+    outputCfg->format = static_cast<audio_format_t>(mConfig.outputCfg.format);
+    *isOutput = mIsOutput;
+    return NO_ERROR;
+}
+
 static std::string dumpInOutBuffer(bool isInput, const sp<EffectBufferHalInterface> &buffer) {
     std::stringstream ss;
 
@@ -1728,6 +1756,7 @@ AudioFlinger::EffectHandle::EffectHandle(const sp<EffectBase>& effect,
     mNotifyFramesProcessed(notifyFramesProcessed)
 {
     ALOGV("constructor %p client %p", this, client.get());
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 
     if (client == 0) {
         return;
@@ -1751,6 +1780,48 @@ AudioFlinger::EffectHandle::~EffectHandle()
     disconnect(false);
 }
 
+// Creates an association between Binder code to name for IEffect.
+#define IEFFECT_BINDER_METHOD_MACRO_LIST \
+BINDER_METHOD_ENTRY(enable) \
+BINDER_METHOD_ENTRY(disable) \
+BINDER_METHOD_ENTRY(command) \
+BINDER_METHOD_ENTRY(disconnect) \
+BINDER_METHOD_ENTRY(getCblk) \
+BINDER_METHOD_ENTRY(getConfig) \
+
+// singleton for Binder Method Statistics for IEffect
+mediautils::MethodStatistics<int>& getIEffectStatistics() {
+    using Code = int;
+
+#pragma push_macro("BINDER_METHOD_ENTRY")
+#undef BINDER_METHOD_ENTRY
+#define BINDER_METHOD_ENTRY(ENTRY) \
+        {(Code)media::BnEffect::TRANSACTION_##ENTRY, #ENTRY},
+
+    static mediautils::MethodStatistics<Code> methodStatistics{
+        IEFFECT_BINDER_METHOD_MACRO_LIST
+        METHOD_STATISTICS_BINDER_CODE_NAMES(Code)
+    };
+#pragma pop_macro("BINDER_METHOD_ENTRY")
+
+    return methodStatistics;
+}
+
+status_t AudioFlinger::EffectHandle::onTransact(
+        uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) {
+    const std::string methodName = getIEffectStatistics().getMethodForCode(code);
+    mediautils::TimeCheck check(
+            std::string("IEffect::").append(methodName),
+            [code](bool timeout, float elapsedMs) {
+        if (timeout) {
+            ; // we don't timeout right now on the effect interface.
+        } else {
+            getIEffectStatistics().event(code, elapsedMs);
+        }
+    }, {} /* timeoutDuration */, {} /* secondChanceDuration */, false /* crashOnTimeout */);
+    return BnEffect::onTransact(code, data, reply, flags);
+}
+
 status_t AudioFlinger::EffectHandle::initCheck()
 {
     return mClient == 0 || mCblkMemory != 0 ? OK : NO_MEMORY;
@@ -1759,6 +1830,13 @@ status_t AudioFlinger::EffectHandle::initCheck()
 #define RETURN(code) \
   *_aidl_return = (code); \
   return Status::ok();
+
+#define VALUE_OR_RETURN_STATUS_AS_OUT(exp)              \
+    ({                                                  \
+        auto _tmp = (exp);                              \
+        if (!_tmp.ok()) { RETURN(_tmp.error()); }       \
+        std::move(_tmp.value());                        \
+    })
 
 Status AudioFlinger::EffectHandle::enable(int32_t* _aidl_return)
 {
@@ -1869,6 +1947,32 @@ void AudioFlinger::EffectHandle::disconnect(bool unpinIfLast)
 Status AudioFlinger::EffectHandle::getCblk(media::SharedFileRegion* _aidl_return) {
     LOG_ALWAYS_FATAL_IF(!convertIMemoryToSharedFileRegion(mCblkMemory, _aidl_return));
     return Status::ok();
+}
+
+Status AudioFlinger::EffectHandle::getConfig(
+        media::EffectConfig* _config, int32_t* _aidl_return) {
+    AutoMutex _l(mLock);
+    sp<EffectBase> effect = mEffect.promote();
+    if (effect == nullptr || mDisconnected) {
+        RETURN(DEAD_OBJECT);
+    }
+    sp<EffectModule> effectModule = effect->asEffectModule();
+    if (effectModule == nullptr) {
+        RETURN(INVALID_OPERATION);
+    }
+    audio_config_base_t inputCfg = AUDIO_CONFIG_BASE_INITIALIZER;
+    audio_config_base_t outputCfg = AUDIO_CONFIG_BASE_INITIALIZER;
+    bool isOutput;
+    status_t status = effectModule->getConfigs(&inputCfg, &outputCfg, &isOutput);
+    if (status == NO_ERROR) {
+        constexpr bool isInput = false; // effects always use 'OUT' channel masks.
+        _config->inputCfg = VALUE_OR_RETURN_STATUS_AS_OUT(
+                legacy2aidl_audio_config_base_t_AudioConfigBase(inputCfg, isInput));
+        _config->outputCfg = VALUE_OR_RETURN_STATUS_AS_OUT(
+                legacy2aidl_audio_config_base_t_AudioConfigBase(outputCfg, isInput));
+        _config->isOnInputStream = !isOutput;
+    }
+    RETURN(status);
 }
 
 Status AudioFlinger::EffectHandle::command(int32_t cmdCode,
@@ -3260,6 +3364,8 @@ status_t AudioFlinger::DeviceEffectProxy::checkPort(const PatchPanel::Patch& pat
         } else {
             mHalEffect->setDevices({mDevice});
         }
+        mHalEffect->configure();
+
         *handle = new EffectHandle(mHalEffect, nullptr, nullptr, 0 /*priority*/,
                                    mNotifyFramesProcessed);
         status = (*handle)->initCheck();
@@ -3308,8 +3414,14 @@ status_t AudioFlinger::DeviceEffectProxy::checkPort(const PatchPanel::Patch& pat
 }
 
 void AudioFlinger::DeviceEffectProxy::onReleasePatch(audio_patch_handle_t patchHandle) {
-    Mutex::Autolock _l(mProxyLock);
-    mEffectHandles.erase(patchHandle);
+    sp<EffectHandle> effect;
+    {
+        Mutex::Autolock _l(mProxyLock);
+        if (mEffectHandles.find(patchHandle) != mEffectHandles.end()) {
+            effect = mEffectHandles.at(patchHandle);
+            mEffectHandles.erase(patchHandle);
+        }
+    }
 }
 
 
@@ -3317,6 +3429,7 @@ size_t AudioFlinger::DeviceEffectProxy::removeEffect(const sp<EffectModule>& eff
 {
     Mutex::Autolock _l(mProxyLock);
     if (effect == mHalEffect) {
+        mHalEffect->release_l();
         mHalEffect.clear();
         mDevicePort.id = AUDIO_PORT_HANDLE_NONE;
     }
@@ -3464,7 +3577,7 @@ status_t AudioFlinger::DeviceEffectProxy::ProxyCallback::removeEffectFromHal(
     if (proxy == nullptr) {
         return NO_INIT;
     }
-    return proxy->addEffectToHal(effect);
+    return proxy->removeEffectFromHal(effect);
 }
 
 bool AudioFlinger::DeviceEffectProxy::ProxyCallback::isOutput() const {
@@ -3514,6 +3627,24 @@ uint32_t AudioFlinger::DeviceEffectProxy::ProxyCallback::outChannelCount() const
         return 2;
     }
     return proxy->channelCount();
+}
+
+void AudioFlinger::DeviceEffectProxy::ProxyCallback::onEffectEnable(
+        const sp<EffectBase>& effectBase) {
+    sp<EffectModule> effect = effectBase->asEffectModule();
+    if (effect == nullptr) {
+        return;
+    }
+    effect->start();
+}
+
+void AudioFlinger::DeviceEffectProxy::ProxyCallback::onEffectDisable(
+        const sp<EffectBase>& effectBase) {
+    sp<EffectModule> effect = effectBase->asEffectModule();
+    if (effect == nullptr) {
+        return;
+    }
+    effect->stop();
 }
 
 } // namespace android

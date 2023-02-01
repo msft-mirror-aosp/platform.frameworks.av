@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
+#include <charconv>
 #include <inttypes.h>
+#include <mutex>
+#include <set>
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "NdkMediaCodec"
@@ -29,6 +32,7 @@
 #include <gui/Surface.h>
 
 #include <media/stagefright/foundation/ALooper.h>
+#include <media/stagefright/foundation/ABuffer.h>
 #include <media/stagefright/foundation/AMessage.h>
 
 #include <media/stagefright/PersistentSurface.h>
@@ -41,6 +45,7 @@ using namespace android;
 
 
 static media_status_t translate_error(status_t err) {
+
     if (err == OK) {
         return AMEDIA_OK;
     } else if (err == -EAGAIN) {
@@ -50,7 +55,18 @@ static media_status_t translate_error(status_t err) {
     } else if (err == DEAD_OBJECT) {
         return AMEDIACODEC_ERROR_RECLAIMED;
     }
-    ALOGE("sf error code: %d", err);
+
+    {
+        // minimize log flooding. Some CTS behavior made this noisy and apps could do the same.
+        static std::set<status_t> untranslated;
+        static std::mutex mutex;
+        std::lock_guard lg(mutex);
+
+        if (untranslated.find(err) == untranslated.end()) {
+            ALOGE("untranslated sf error code: %d", err);
+            untranslated.insert(err);
+        }
+    }
     return AMEDIA_ERROR_UNKNOWN;
 }
 
@@ -59,6 +75,7 @@ enum {
     kWhatAsyncNotify,
     kWhatRequestActivityNotifications,
     kWhatStopActivityNotifications,
+    kWhatFrameRenderedNotify,
 };
 
 struct AMediaCodecPersistentSurface : public Surface {
@@ -98,6 +115,11 @@ struct AMediaCodec {
     mutable Mutex mAsyncCallbackLock;
     AMediaCodecOnAsyncNotifyCallback mAsyncCallback;
     void *mAsyncCallbackUserData;
+
+    sp<AMessage> mFrameRenderedNotify;
+    mutable Mutex mFrameRenderedCallbackLock;
+    AMediaCodecOnFrameRendered mFrameRenderedCallback;
+    void *mFrameRenderedCallbackUserData;
 };
 
 CodecHandler::CodecHandler(AMediaCodec *codec) {
@@ -294,6 +316,75 @@ void CodecHandler::onMessageReceived(const sp<AMessage> &msg) {
             break;
         }
 
+        case kWhatFrameRenderedNotify:
+        {
+            sp<AMessage> data;
+            if (!msg->findMessage("data", &data)) {
+                ALOGE("kWhatFrameRenderedNotify: data is expected.");
+                break;
+            }
+
+            AMessage::Type type;
+            size_t n = data->countEntries();
+
+            thread_local std::vector<std::optional<int64_t>> mediaTimesInUs;
+            thread_local std::vector<std::optional<int64_t>> systemTimesInNs;
+            mediaTimesInUs.resize(n);
+            systemTimesInNs.resize(n);
+            std::fill_n(mediaTimesInUs.begin(), n, std::nullopt);
+            std::fill_n(systemTimesInNs.begin(), n, std::nullopt);
+            for (size_t i = 0; i < n; i++) {
+                AString name = data->getEntryNameAt(i, &type);
+                if (name.endsWith("-media-time-us")) {
+                    int64_t mediaTimeUs;
+                    AMessage::ItemData itemData = data->getEntryAt(i);
+                    itemData.find(&mediaTimeUs);
+
+                    int index = -1;
+                    std::from_chars_result result = std::from_chars(
+                            name.c_str(), name.c_str() + name.find("-"), index);
+                    if (result.ec == std::errc() && 0 <= index && index < n) {
+                        mediaTimesInUs[index] = mediaTimeUs;
+                    } else {
+                        std::error_code ec = std::make_error_code(result.ec);
+                        ALOGE("Unexpected media time index: #%d with value %lldus (err=%d %s)",
+                              index, (long long)mediaTimeUs, ec.value(), ec.message().c_str());
+                    }
+                } else if (name.endsWith("-system-nano")) {
+                    int64_t systemNano;
+                    AMessage::ItemData itemData = data->getEntryAt(i);
+                    itemData.find(&systemNano);
+
+                    int index = -1;
+                    std::from_chars_result result = std::from_chars(
+                            name.c_str(), name.c_str() + name.find("-"), index);
+                    if (result.ec == std::errc() && 0 <= index && index < n) {
+                        systemTimesInNs[index] = systemNano;
+                    } else {
+                        std::error_code ec = std::make_error_code(result.ec);
+                        ALOGE("Unexpected system time index: #%d with value %lldns (err=%d %s)",
+                              index, (long long)systemNano, ec.value(), ec.message().c_str());
+                    }
+                }
+            }
+
+            Mutex::Autolock _l(mCodec->mFrameRenderedCallbackLock);
+            if (mCodec->mFrameRenderedCallback != NULL) {
+                for (size_t i = 0; i < n; ++i) {
+                    if (mediaTimesInUs[i] && systemTimesInNs[i]) {
+                        mCodec->mFrameRenderedCallback(
+                                mCodec,
+                                mCodec->mFrameRenderedCallbackUserData,
+                                mediaTimesInUs[i].value(),
+                                systemTimesInNs[i].value());
+                    } else {
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+
         default:
             ALOGE("shouldn't be here");
             break;
@@ -471,25 +562,54 @@ media_status_t AMediaCodec_setAsyncNotifyCallback(
         AMediaCodecOnAsyncNotifyCallback callback,
         void *userdata) {
 
-    Mutex::Autolock _l(mData->mAsyncCallbackLock);
-
-    if (mData->mAsyncNotify == NULL) {
-        mData->mAsyncNotify = new AMessage(kWhatAsyncNotify, mData->mHandler);
+    {
+        Mutex::Autolock _l(mData->mAsyncCallbackLock);
+        if (mData->mAsyncNotify == NULL) {
+            mData->mAsyncNotify = new AMessage(kWhatAsyncNotify, mData->mHandler);
+        }
+        // we set this ahead so that we can be ready
+        // to receive callbacks as soon as the next call is a
+        // success.
+        mData->mAsyncCallback = callback;
+        mData->mAsyncCallbackUserData = userdata;
     }
 
     // always call, codec may have been reset/re-configured since last call.
     status_t err = mData->mCodec->setCallback(mData->mAsyncNotify);
     if (err != OK) {
+        {
+            //The setup gone wrong. clean up the pointers.
+            Mutex::Autolock _l(mData->mAsyncCallbackLock);
+            mData->mAsyncCallback = {};
+            mData->mAsyncCallbackUserData = nullptr;
+        }
         ALOGE("setAsyncNotifyCallback: err(%d), failed to set async callback", err);
         return translate_error(err);
     }
 
-    mData->mAsyncCallback = callback;
-    mData->mAsyncCallbackUserData = userdata;
-
     return AMEDIA_OK;
 }
 
+EXPORT
+media_status_t AMediaCodec_setOnFrameRenderedCallback(
+        AMediaCodec *mData,
+        AMediaCodecOnFrameRendered callback,
+        void *userdata) {
+    Mutex::Autolock _l(mData->mFrameRenderedCallbackLock);
+    if (mData->mFrameRenderedNotify == NULL) {
+        mData->mFrameRenderedNotify = new AMessage(kWhatFrameRenderedNotify, mData->mHandler);
+    }
+    status_t err = mData->mCodec->setOnFrameRenderedNotification(mData->mFrameRenderedNotify);
+    if (err != OK) {
+        ALOGE("setOnFrameRenderedNotifyCallback: err(%d), failed to set callback", err);
+        return translate_error(err);
+    }
+
+    mData->mFrameRenderedCallback = callback;
+    mData->mFrameRenderedCallbackUserData = userdata;
+
+    return AMEDIA_OK;
+}
 
 EXPORT
 media_status_t AMediaCodec_releaseCrypto(AMediaCodec *mData) {
