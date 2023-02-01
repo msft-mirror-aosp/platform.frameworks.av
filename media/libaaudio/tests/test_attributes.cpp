@@ -16,6 +16,11 @@
 
 // Test AAudio attributes such as Usage, ContentType and InputPreset.
 
+// TODO Many of these tests are duplicates of CTS tests in
+// "test_aaudio_attributes.cpp". That other file is more current.
+// So these tests could be deleted.
+
+#include <memory>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -36,7 +41,7 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
                             int privacyMode = DONT_SET,
                             aaudio_direction_t direction = AAUDIO_DIRECTION_OUTPUT) {
 
-    float *buffer = new float[kNumFrames * kChannelCount];
+    std::unique_ptr<float[]> buffer(new float[kNumFrames * kChannelCount]);
 
     AAudioStreamBuilder *aaudioBuilder = nullptr;
     AAudioStream *aaudioStream = nullptr;
@@ -91,7 +96,7 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
     aaudio_allowed_capture_policy_t expectedCapturePolicy =
             (capturePolicy == DONT_SET || capturePolicy == AAUDIO_UNSPECIFIED)
             ? AAUDIO_ALLOW_CAPTURE_BY_ALL // default
-            : preset;
+            : capturePolicy;
     EXPECT_EQ(expectedCapturePolicy, AAudioStream_getAllowedCapturePolicy(aaudioStream));
 
     bool expectedPrivacyMode =
@@ -105,16 +110,15 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
 
     if (direction == AAUDIO_DIRECTION_INPUT) {
         EXPECT_EQ(kNumFrames,
-                  AAudioStream_read(aaudioStream, buffer, kNumFrames, kNanosPerSecond));
+                  AAudioStream_read(aaudioStream, buffer.get(), kNumFrames, kNanosPerSecond));
     } else {
         EXPECT_EQ(kNumFrames,
-                  AAudioStream_write(aaudioStream, buffer, kNumFrames, kNanosPerSecond));
+                  AAudioStream_write(aaudioStream, buffer.get(), kNumFrames, kNanosPerSecond));
     }
 
     EXPECT_EQ(AAUDIO_OK, AAudioStream_requestStop(aaudioStream));
 
     EXPECT_EQ(AAUDIO_OK, AAudioStream_close(aaudioStream));
-    delete[] buffer;
 }
 
 static const aaudio_usage_t sUsages[] = {
@@ -132,10 +136,7 @@ static const aaudio_usage_t sUsages[] = {
     AAUDIO_USAGE_ASSISTANCE_SONIFICATION,
     AAUDIO_USAGE_GAME,
     AAUDIO_USAGE_ASSISTANT,
-    AAUDIO_SYSTEM_USAGE_EMERGENCY,
-    AAUDIO_SYSTEM_USAGE_SAFETY,
-    AAUDIO_SYSTEM_USAGE_VEHICLE_STATUS,
-    AAUDIO_SYSTEM_USAGE_ANNOUNCEMENT
+    // Note that the AAUDIO_SYSTEM_USAGE_* values requires special permission.
 };
 
 static const aaudio_content_type_t sContentypes[] = {

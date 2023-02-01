@@ -591,8 +591,7 @@ C2SoftHevcEnc::C2SoftHevcEnc(const char* name, c2_node_id_t id,
     CREATE_DUMP_FILE(mInFile);
     CREATE_DUMP_FILE(mOutFile);
 
-    gettimeofday(&mTimeStart, nullptr);
-    gettimeofday(&mTimeEnd, nullptr);
+    mTimeStart = mTimeEnd = systemTime();
 }
 
 C2SoftHevcEnc::~C2SoftHevcEnc() {
@@ -902,7 +901,8 @@ c2_status_t C2SoftHevcEnc::setEncodeArgs(ihevce_inp_buf_t* ps_encode_ip,
             yStride = width;
             uStride = vStride = yStride / 2;
             ConvertRGBToPlanarYUV(yPlane, yStride, height,
-                                  conversionBuffer.size(), *input);
+                                  conversionBuffer.size(), *input,
+                                  mColorAspects->matrix, mColorAspects->range);
             break;
         }
         case C2PlanarLayout::TYPE_YUV: {
@@ -1109,14 +1109,14 @@ void C2SoftHevcEnc::process(const std::unique_ptr<C2Work>& work,
         }
     }
 
-    std::shared_ptr<const C2GraphicView> view;
+    std::shared_ptr<C2GraphicView> view;
     std::shared_ptr<C2Buffer> inputBuffer = nullptr;
     bool eos = ((work->input.flags & C2FrameData::FLAG_END_OF_STREAM) != 0);
     if (eos) mSignalledEos = true;
 
     if (!work->input.buffers.empty()) {
         inputBuffer = work->input.buffers[0];
-        view = std::make_shared<const C2GraphicView>(
+        view = std::make_shared<C2GraphicView>(
             inputBuffer->data().graphicBlocks().front().map().get());
         if (view->error() != C2_OK) {
             ALOGE("graphic view map err = %d", view->error());
@@ -1125,6 +1125,9 @@ void C2SoftHevcEnc::process(const std::unique_ptr<C2Work>& work,
             work->workletsProcessed = 1u;
             return;
         }
+        //(b/232396154)
+        //workaround for incorrect crop size in view when using surface mode
+        view->setCrop_be(C2Rect(mSize->width, mSize->height));
     }
     IHEVCE_PLUGIN_STATUS_T err = IHEVCE_EOK;
 
@@ -1203,11 +1206,11 @@ void C2SoftHevcEnc::process(const std::unique_ptr<C2Work>& work,
         }
     }
 
-    uint64_t timeDelay = 0;
-    uint64_t timeTaken = 0;
+    nsecs_t timeDelay = 0;
+    nsecs_t timeTaken = 0;
     memset(&s_encode_op, 0, sizeof(s_encode_op));
-    GETTIME(&mTimeStart, nullptr);
-    TIME_DIFF(mTimeEnd, mTimeStart, timeDelay);
+    mTimeStart = systemTime();
+    timeDelay = mTimeStart - mTimeEnd;
 
     if (inputBuffer) {
         err = ihevce_encode(mCodecCtx, &s_encode_ip, &s_encode_op);
@@ -1222,12 +1225,12 @@ void C2SoftHevcEnc::process(const std::unique_ptr<C2Work>& work,
         fillEmptyWork(work);
     }
 
-    GETTIME(&mTimeEnd, nullptr);
     /* Compute time taken for decode() */
-    TIME_DIFF(mTimeStart, mTimeEnd, timeTaken);
+    mTimeEnd = systemTime();
+    timeTaken = mTimeEnd - mTimeStart;
 
-    ALOGV("timeTaken=%6d delay=%6d numBytes=%6d", (int)timeTaken,
-          (int)timeDelay, s_encode_op.i4_bytes_generated);
+    ALOGV("timeTaken=%6" PRId64 " delay=%6" PRId64 " numBytes=%6d", timeTaken,
+          timeDelay, s_encode_op.i4_bytes_generated);
 
     if (s_encode_op.i4_bytes_generated) {
         finishWork(s_encode_op.u8_pts, work, pool, &s_encode_op);

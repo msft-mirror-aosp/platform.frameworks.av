@@ -18,6 +18,8 @@
 #define A_CODEC_H_
 
 #include <stdint.h>
+#include <list>
+#include <vector>
 #include <android/native_window.h>
 #include <media/hardware/MetadataBufferType.h>
 #include <media/MediaCodecInfo.h>
@@ -265,11 +267,11 @@ private:
     sp<AMessage> mBaseOutputFormat;
 
     FrameRenderTracker mRenderTracker; // render information for buffers rendered by ACodec
-    Vector<BufferInfo> mBuffers[2];
+    std::vector<BufferInfo> mBuffers[2];
     bool mPortEOS[2];
     status_t mInputEOSResult;
 
-    List<sp<AMessage> > mDeferredQueue;
+    std::list<sp<AMessage>> mDeferredQueue;
 
     sp<AMessage> mLastOutputFormat;
     bool mIsVideo;
@@ -522,6 +524,7 @@ private:
     status_t setLatency(uint32_t latency);
     status_t getLatency(uint32_t *latency);
     status_t setTunnelPeek(int32_t tunnelPeek);
+    status_t setTunnelPeekLegacy(int32_t isLegacy);
     status_t setAudioPresentation(int32_t presentationId, int32_t programId);
     status_t setOperatingRate(float rateFloat, bool isVideo);
     status_t getIntraRefreshPeriod(uint32_t *intraRefreshPeriod);

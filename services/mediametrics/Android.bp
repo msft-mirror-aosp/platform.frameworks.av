@@ -138,6 +138,7 @@ cc_library {
         "AudioTypes.cpp",
         "cleaner.cpp",
         "iface_statsd.cpp",
+        "MediaDrmStatsdHelper.cpp",
         "MediaMetricsService.cpp",
         "statsd_audiopolicy.cpp",
         "statsd_audiorecord.cpp",
@@ -169,7 +170,7 @@ cc_library {
         "libmemunreachable",
         "libprotobuf-cpp-lite",
         "libstagefright_foundation",
-        "libstatslog",
+        "libstats_media_metrics",
         "libstatspull",
         "libstatssocket",
         "libutils",
@@ -177,8 +178,19 @@ cc_library {
     ],
 
     export_shared_lib_headers: [
+        "libstats_media_metrics",
         "libstatspull",
         "libstatssocket",
+    ],
+
+    // within the library, we use "xxx.h"
+    local_include_dirs: [
+        "include/mediametricsservice",
+    ],
+
+    // external parties use <mediametricsservice/xxx.h>
+    export_include_dirs: [
+        "include",
     ],
 
     static_libs: [
@@ -187,9 +199,36 @@ cc_library {
 
     header_libs: [
         "libaaudio_headers",
+        "libaudioutils_headers",
     ],
+}
 
-    include_dirs: [
-        "system/media/audio_utils/include",
+cc_library {
+    name: "libstats_media_metrics",
+    generated_sources: ["stats_media_metrics.cpp"],
+    generated_headers: ["stats_media_metrics.h"],
+    export_generated_headers: ["stats_media_metrics.h"],
+    shared_libs: [
+        "libcutils",
+        "libstatspull",
+        "libstatssocket",
+    ],
+}
+
+genrule {
+    name: "stats_media_metrics.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/stats_media_metrics.h --module media_metrics --namespace android,stats,media_metrics",
+    out: [
+        "stats_media_metrics.h",
+    ],
+}
+
+genrule {
+    name: "stats_media_metrics.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/stats_media_metrics.cpp --module media_metrics --namespace android,stats,media_metrics --importHeader stats_media_metrics.h",
+    out: [
+        "stats_media_metrics.cpp",
     ],
 }

@@ -66,6 +66,10 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
     return OK;
 }
 
+status_t CameraOfflineSessionClient::setCameraServiceWatchdog(bool) {
+    return OK;
+}
+
 status_t CameraOfflineSessionClient::setRotateAndCropOverride(uint8_t /*rotateAndCrop*/) {
     // Since we're not submitting more capture requests, changes to rotateAndCrop override
     // make no difference.
@@ -108,6 +112,18 @@ status_t CameraOfflineSessionClient::dumpClient(int fd, const Vector<String16>& 
     }
 
     return OK;
+}
+
+status_t CameraOfflineSessionClient::startWatchingTags(const String8 &tags, int outFd) {
+    return BasicClient::startWatchingTags(tags, outFd);
+}
+
+status_t CameraOfflineSessionClient::stopWatchingTags(int outFd) {
+    return BasicClient::stopWatchingTags(outFd);
+}
+
+status_t CameraOfflineSessionClient::dumpWatchedEventsToVector(std::vector<std::string> &out) {
+    return BasicClient::dumpWatchedEventsToVector(out);
 }
 
 binder::Status CameraOfflineSessionClient::disconnect() {
@@ -275,7 +291,7 @@ void CameraOfflineSessionClient::notifyShutter(const CaptureResultExtras& result
     }
 }
 
-status_t CameraOfflineSessionClient::notifyActive() {
+status_t CameraOfflineSessionClient::notifyActive(float maxPreviewFps __unused) {
     return startCameraStreamingOps();
 }
 
@@ -328,6 +344,20 @@ void CameraOfflineSessionClient::notifyRepeatingRequestError(long /*lastFrameNum
     ALOGE("%s: Unexpected repeating request error in offline mode!", __FUNCTION__);
     notifyError(hardware::camera2::ICameraDeviceCallbacks::ERROR_CAMERA_DEVICE,
                 CaptureResultExtras());
+}
+
+status_t CameraOfflineSessionClient::injectCamera(const String8& injectedCamId,
+            sp<CameraProviderManager> manager) {
+    ALOGV("%s: This client doesn't support the injection camera. injectedCamId: %s providerPtr: %p",
+            __FUNCTION__, injectedCamId.string(), manager.get());
+
+    return OK;
+}
+
+status_t CameraOfflineSessionClient::stopInjection() {
+    ALOGV("%s: This client doesn't support the injection camera.", __FUNCTION__);
+
+    return OK;
 }
 
 // ----------------------------------------------------------------------------

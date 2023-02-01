@@ -107,8 +107,7 @@ public:
 
     audio_attributes_t  attributes() const { return mAttr; }
 
-            bool canBeSpatialized() const { return mIsOut && (mAttr.flags
-                    & (AUDIO_FLAG_CONTENT_SPATIALIZED | AUDIO_FLAG_NEVER_SPATIALIZE)) == 0; }
+    virtual bool        isSpatialized() const { return false; }
 
 #ifdef TEE_SINK
            void         dumpTee(int fd, const std::string &reason) const {
@@ -397,6 +396,8 @@ protected:
     int64_t             mLogStartTimeNs = 0;    // Monotonic time at start()
     int64_t             mLogStartFrames = 0;    // Timestamp frames at start()
     double              mLogLatencyMs = 0.;     // Track the last log latency
+
+    bool                mLogForceVolumeUpdate = true; // force volume update to TrackMetrics.
 
     TrackMetrics        mTrackMetrics;
 

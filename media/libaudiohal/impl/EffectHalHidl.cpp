@@ -17,10 +17,16 @@
 #define LOG_TAG "EffectHalHidl"
 //#define LOG_NDEBUG 0
 
+#include <android/hidl/manager/1.0/IServiceManager.h>
+#include <android-base/stringprintf.h>
 #include <common/all-versions/VersionUtils.h>
 #include <cutils/native_handle.h>
+#include <cutils/properties.h>
 #include <hwbinder/IPCThreadState.h>
 #include <media/EffectsFactoryApi.h>
+#include <mediautils/SchedulingPolicyService.h>
+#include <mediautils/TimeCheck.h>
+#include <system/audio_effects/effect_spatializer.h>
 #include <utils/Log.h>
 
 #include <util/EffectUtils.h>
@@ -41,10 +47,23 @@ using namespace ::android::hardware::audio::common::CPP_VERSION;
 using namespace ::android::hardware::audio::effect::CPP_VERSION;
 
 EffectHalHidl::EffectHalHidl(const sp<IEffect>& effect, uint64_t effectId)
-        : mEffect(effect), mEffectId(effectId), mBuffersChanged(true), mEfGroup(nullptr) {
+        : EffectConversionHelperHidl("EffectHalHidl"),
+          mEffect(effect), mEffectId(effectId), mBuffersChanged(true), mEfGroup(nullptr) {
     effect_descriptor_t halDescriptor{};
     if (EffectHalHidl::getDescriptor(&halDescriptor) == NO_ERROR) {
         mIsInput = (halDescriptor.flags & EFFECT_FLAG_TYPE_PRE_PROC) == EFFECT_FLAG_TYPE_PRE_PROC;
+        const bool isSpatializer =
+                memcmp(&halDescriptor.type, FX_IID_SPATIALIZER, sizeof(effect_uuid_t)) == 0;
+        if (isSpatializer) {
+            constexpr int32_t kRTPriorityMin = 1;
+            constexpr int32_t kRTPriorityMax = 3;
+            const int32_t priorityBoost = property_get_int32("audio.spatializer.priority", 1);
+            if (priorityBoost >= kRTPriorityMin && priorityBoost <= kRTPriorityMax) {
+                ALOGD("%s: audio.spatializer.priority %d on effect %lld",
+                         __func__, priorityBoost, (long long)effectId);
+                mHalThreadPriority = priorityBoost;
+            }
+        }
     }
 }
 
@@ -59,20 +78,9 @@ EffectHalHidl::~EffectHalHidl() {
     }
 }
 
-// static
-status_t EffectHalHidl::analyzeResult(const Result& result) {
-    switch (result) {
-        case Result::OK: return OK;
-        case Result::INVALID_ARGUMENTS: return BAD_VALUE;
-        case Result::INVALID_STATE: return NOT_ENOUGH_DATA;
-        case Result::NOT_INITIALIZED: return NO_INIT;
-        case Result::NOT_SUPPORTED: return INVALID_OPERATION;
-        case Result::RESULT_TOO_BIG: return NO_MEMORY;
-        default: return NO_INIT;
-    }
-}
-
 status_t EffectHalHidl::setInBuffer(const sp<EffectBufferHalInterface>& buffer) {
+    TIME_CHECK();
+
     if (!mBuffersChanged) {
         if (buffer.get() == nullptr || mInBuffer.get() == nullptr) {
             mBuffersChanged = buffer.get() != mInBuffer.get();
@@ -85,6 +93,8 @@ status_t EffectHalHidl::setInBuffer(const sp<EffectBufferHalInterface>& buffer) 
 }
 
 status_t EffectHalHidl::setOutBuffer(const sp<EffectBufferHalInterface>& buffer) {
+    TIME_CHECK();
+
     if (!mBuffersChanged) {
         if (buffer.get() == nullptr || mOutBuffer.get() == nullptr) {
             mBuffersChanged = buffer.get() != mOutBuffer.get();
@@ -97,10 +107,14 @@ status_t EffectHalHidl::setOutBuffer(const sp<EffectBufferHalInterface>& buffer)
 }
 
 status_t EffectHalHidl::process() {
+    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+
     return processImpl(static_cast<uint32_t>(MessageQueueFlagBits::REQUEST_PROCESS));
 }
 
 status_t EffectHalHidl::processReverse() {
+    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+
     return processImpl(static_cast<uint32_t>(MessageQueueFlagBits::REQUEST_PROCESS_REVERSE));
 }
 
@@ -127,6 +141,8 @@ status_t EffectHalHidl::prepareForProcessing() {
         ALOGE_IF(!mEfGroup, "Event flag creation for effects failed");
         return NO_INIT;
     }
+
+    (void)checkHalThreadPriority();
     mStatusMQ = std::move(tempStatusMQ);
     return OK;
 }
@@ -183,6 +199,8 @@ status_t EffectHalHidl::setProcessBuffers() {
 
 status_t EffectHalHidl::command(uint32_t cmdCode, uint32_t cmdSize, void *pCmdData,
         uint32_t *replySize, void *pReplyData) {
+    TIME_CHECK();
+
     if (mEffect == 0) return NO_INIT;
 
     // Special cases.
@@ -214,6 +232,8 @@ status_t EffectHalHidl::command(uint32_t cmdCode, uint32_t cmdSize, void *pCmdDa
 }
 
 status_t EffectHalHidl::getDescriptor(effect_descriptor_t *pDescriptor) {
+    TIME_CHECK();
+
     if (mEffect == 0) return NO_INIT;
     Result retval = Result::NOT_INITIALIZED;
     Return<void> ret = mEffect->getDescriptor(
@@ -227,12 +247,16 @@ status_t EffectHalHidl::getDescriptor(effect_descriptor_t *pDescriptor) {
 }
 
 status_t EffectHalHidl::close() {
+    TIME_CHECK();
+
     if (mEffect == 0) return NO_INIT;
     Return<Result> ret = mEffect->close();
     return ret.isOk() ? analyzeResult(ret) : FAILED_TRANSACTION;
 }
 
 status_t EffectHalHidl::dump(int fd) {
+    TIME_CHECK();
+
     if (mEffect == 0) return NO_INIT;
     native_handle_t* hidlHandle = native_handle_create(1, 0);
     hidlHandle->data[0] = fd;
@@ -307,6 +331,68 @@ status_t EffectHalHidl::setConfigImpl(
         *static_cast<int32_t*>(pReplyData) = result;
     }
     return result;
+}
+
+status_t EffectHalHidl::getHalPid(pid_t *pid) const {
+    using ::android::hidl::base::V1_0::DebugInfo;
+    using ::android::hidl::manager::V1_0::IServiceManager;
+    DebugInfo debugInfo;
+    const auto ret = mEffect->getDebugInfo([&] (const auto &info) {
+        debugInfo = info;
+    });
+    if (!ret.isOk()) {
+        ALOGW("%s: cannot get effect debug info", __func__);
+        return INVALID_OPERATION;
+    }
+    if (debugInfo.pid != (int)IServiceManager::PidConstant::NO_PID) {
+        *pid = debugInfo.pid;
+        return NO_ERROR;
+    }
+    ALOGW("%s: effect debug info does not contain pid", __func__);
+    return NAME_NOT_FOUND;
+}
+
+status_t EffectHalHidl::getHalWorkerTid(pid_t *tid) {
+    int32_t reply = -1;
+    uint32_t replySize = sizeof(reply);
+    const status_t status =
+            command('gtid', 0 /* cmdSize */, nullptr /* pCmdData */, &replySize, &reply);
+    if (status == OK) {
+        *tid = (pid_t)reply;
+    } else {
+        ALOGW("%s: failed with status:%d", __func__, status);
+    }
+    return status;
+}
+
+bool EffectHalHidl::requestHalThreadPriority(pid_t threadPid, pid_t threadId) {
+    if (mHalThreadPriority == kRTPriorityDisabled) {
+        return true;
+    }
+    const int err = requestPriority(
+            threadPid, threadId,
+            mHalThreadPriority, false /*isForApp*/, true /*asynchronous*/);
+    ALOGW_IF(err, "%s: failed to set RT priority %d for pid %d tid %d; error %d",
+            __func__, mHalThreadPriority, threadPid, threadId, err);
+    // Audio will still work, but may be more susceptible to glitches.
+    return err == 0;
+}
+
+status_t EffectHalHidl::checkHalThreadPriority() {
+    if (mHalThreadPriority == kRTPriorityDisabled) return OK;
+    if (mHalThreadPriority < kRTPriorityMin
+            || mHalThreadPriority > kRTPriorityMax) return BAD_VALUE;
+
+    pid_t halPid, halWorkerTid;
+    const status_t status = getHalPid(&halPid) ?: getHalWorkerTid(&halWorkerTid);
+    const bool success = status == OK && requestHalThreadPriority(halPid, halWorkerTid);
+    ALOGD("%s: effectId %lld RT priority(%d) request %s%s",
+            __func__, (long long)mEffectId, mHalThreadPriority,
+            success ? "succeeded" : "failed",
+            status == OK
+                    ? base::StringPrintf(" for pid:%d tid:%d", halPid, halWorkerTid).c_str()
+                    : " (pid / tid cannot be read)");
+    return success ? OK : status != OK ? status : INVALID_OPERATION /* request failed */;
 }
 
 } // namespace effect

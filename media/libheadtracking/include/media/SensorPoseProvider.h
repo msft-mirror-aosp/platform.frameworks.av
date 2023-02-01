@@ -20,12 +20,16 @@
 #include <optional>
 
 #include <android/sensor.h>
+#include <sensor/Sensor.h>
 
 #include "Pose.h"
 #include "Twist.h"
 
 namespace android {
 namespace media {
+
+// Timeout for Spatializer dumpsys trylock, don't block for more than 3 seconds.
+constexpr auto kSpatializerDumpSysTimeOutInSecond = std::chrono::seconds(3);
 
 /**
  * A utility providing streaming of pose data from motion sensors provided by the Sensor Framework.
@@ -91,6 +95,19 @@ class SensorPoseProvider {
      * @param handle The sensor handle, as provided to startSensor().
      */
     virtual void stopSensor(int32_t handle) = 0;
+
+    /**
+     * Returns the sensor or nullopt if it does not exist.
+     *
+     * The Sensor object has const methods that can be used to
+     * discover properties of the sensor.
+     */
+    virtual std::optional<const Sensor> getSensorByHandle(int32_t handle) = 0;
+
+    /**
+     * Dump SensorPoseProvider parameters and history data.
+     */
+    virtual std::string toString(unsigned level) = 0;
 };
 
 }  // namespace media

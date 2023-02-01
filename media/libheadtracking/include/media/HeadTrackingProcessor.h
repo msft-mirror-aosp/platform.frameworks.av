@@ -38,10 +38,14 @@ class HeadTrackingProcessor {
     struct Options {
         float maxTranslationalVelocity = std::numeric_limits<float>::infinity();
         float maxRotationalVelocity = std::numeric_limits<float>::infinity();
-        float translationalDriftTimeConstant = std::numeric_limits<float>::infinity();
-        float rotationalDriftTimeConstant = std::numeric_limits<float>::infinity();
         int64_t freshnessTimeout = std::numeric_limits<int64_t>::max();
         float predictionDuration = 0;
+        int64_t autoRecenterWindowDuration = std::numeric_limits<int64_t>::max();
+        float autoRecenterTranslationalThreshold = std::numeric_limits<float>::infinity();
+        float autoRecenterRotationalThreshold = std::numeric_limits<float>::infinity();
+        int64_t screenStillnessWindowDuration = 0;
+        float screenStillnessTranslationalThreshold = std::numeric_limits<float>::infinity();
+        float screenStillnessRotationalThreshold = std::numeric_limits<float>::infinity();
     };
 
     /** Sets the desired head-tracking mode. */
@@ -92,8 +96,12 @@ class HeadTrackingProcessor {
      * This causes the current poses for both the head and/or screen to be considered "center".
      */
     virtual void recenter(bool recenterHead = true, bool recenterScreen = true) = 0;
-};
 
+    /**
+     * Dump HeadTrackingProcessor parameters under caller lock.
+     */
+    virtual std::string toString_l(unsigned level) const = 0;
+};
 /**
  * Creates an instance featuring a default implementation of the HeadTrackingProcessor interface.
  */

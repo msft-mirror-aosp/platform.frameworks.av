@@ -14,11 +14,17 @@ cc_library {
       "HeadTrackingProcessor.cpp",
       "ModeSelector.cpp",
       "Pose.cpp",
+      "PoseBias.cpp",
       "PoseDriftCompensator.cpp",
       "PoseRateLimiter.cpp",
       "QuaternionUtil.cpp",
       "ScreenHeadFusion.cpp",
+      "StillnessDetector.cpp",
       "Twist.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libbase",
     ],
     export_include_dirs: [
         "include",
@@ -37,6 +43,7 @@ cc_library {
       "SensorPoseProvider.cpp",
     ],
     shared_libs: [
+        "libbase",
         "libheadtracking",
         "liblog",
         "libsensor",
@@ -44,6 +51,7 @@ cc_library {
     ],
     export_shared_lib_headers: [
         "libheadtracking",
+        "libsensor",
     ],
 }
 
@@ -66,13 +74,16 @@ cc_test_host {
         "HeadTrackingProcessor-test.cpp",
         "ModeSelector-test.cpp",
         "Pose-test.cpp",
+        "PoseBias-test.cpp",
         "PoseDriftCompensator-test.cpp",
         "PoseRateLimiter-test.cpp",
         "QuaternionUtil-test.cpp",
         "ScreenHeadFusion-test.cpp",
+        "StillnessDetector-test.cpp",
         "Twist-test.cpp",
     ],
     shared_libs: [
+        "libaudioutils",
         "libheadtracking",
     ],
 }

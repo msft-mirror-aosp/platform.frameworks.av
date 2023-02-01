@@ -40,45 +40,29 @@ namespace android {
 
 struct audio_track_cblk_t;
 class AudioRecordClientProxy;
-
 // ----------------------------------------------------------------------------
 
 class AudioRecord : public AudioSystem::AudioDeviceCallback
 {
 public:
 
-    /* Events used by AudioRecord callback function (callback_t).
-     * Keep in sync with frameworks/base/media/java/android/media/AudioRecord.java NATIVE_EVENT_*.
-     */
-    enum event_type {
-        EVENT_MORE_DATA = 0,        // Request to read available data from buffer.
-                                    // If this event is delivered but the callback handler
-                                    // does not want to read the available data, the handler must
-                                    // explicitly ignore the event by setting frameCount to zero.
-        EVENT_OVERRUN = 1,          // Buffer overrun occurred.
-        EVENT_MARKER = 2,           // Record head is at the specified marker position
-                                    // (See setMarkerPosition()).
-        EVENT_NEW_POS = 3,          // Record head is at a new position
-                                    // (See setPositionUpdatePeriod()).
-        EVENT_NEW_IAUDIORECORD = 4, // IAudioRecord was re-created, either due to re-routing and
-                                    // voluntary invalidation by mediaserver, or mediaserver crash.
-    };
-
-    /* Client should declare a Buffer and pass address to obtainBuffer()
-     * and releaseBuffer().  See also callback_t for EVENT_MORE_DATA.
-     */
-
     class Buffer
     {
+      friend AudioRecord;
     public:
-        // FIXME use m prefix
+        size_t size() const { return mSize; }
+        size_t getFrameCount() const { return frameCount; }
+        uint8_t* data() const { return ui8; }
+        // Leaving public for now to assist refactoring. This class will
+        // be replaced.
         size_t      frameCount;     // number of sample frames corresponding to size;
                                     // on input to obtainBuffer() it is the number of frames desired
                                     // on output from obtainBuffer() it is the number of available
                                     //    frames to be read
                                     // on input to releaseBuffer() it is currently ignored
 
-        size_t      size;           // input/output in bytes == frameCount * frameSize
+    private:
+        size_t      mSize;          // input/output in bytes == frameCount * frameSize
                                     // on input to obtainBuffer() it is ignored
                                     // on output from obtainBuffer() it is the number of available
                                     //    bytes to be read, which is frameCount * frameSize
@@ -90,7 +74,7 @@ public:
         union {
             void*       raw;
             int16_t*    i16;        // signed 16-bit
-            int8_t*     i8;         // unsigned 8-bit, offset by 0x80
+            uint8_t*    ui8;        // unsigned 8-bit, offset by 0x80
                                     // input to obtainBuffer(): unused, output: pointer to buffer
         };
 
@@ -117,7 +101,27 @@ public:
      *          - EVENT_NEW_IAUDIORECORD: unused.
      */
 
-    typedef void (*callback_t)(int event, void* user, void *info);
+
+    class IAudioRecordCallback : public virtual RefBase {
+        friend AudioRecord;
+     protected:
+        // Request for client to read newly available data.
+        // Used for TRANSFER_CALLBACK mode.
+        // Parameters:
+        //  - buffer : Buffer to read from
+        // Returns:
+        //  - Number of bytes actually consumed.
+        virtual size_t onMoreData([[maybe_unused]] const AudioRecord::Buffer& buffer) { return 0; }
+        // A buffer overrun occurred.
+        virtual void onOverrun() {}
+        // Record head is at the specified marker (see setMarkerPosition()).
+        virtual void onMarker([[maybe_unused]] uint32_t markerPosition) {}
+        // Record head is at a new position (see setPositionUpdatePeriod()).
+        virtual void onNewPos([[maybe_unused]] uint32_t newPos) {}
+        // IAudioRecord was recreated due to re-routing, server invalidation or
+        // server crash.
+        virtual void onNewIAudioRecord() {}
+    };
 
     /* Returns the minimum frame count required for the successful creation of
      * an AudioRecord object.
@@ -182,24 +186,23 @@ public:
      * pAttributes:        If not NULL, supersedes inputSource for use case selection.
      * threadCanCallJava:  Not present in parameter list, and so is fixed at false.
      */
-
                         AudioRecord(audio_source_t inputSource,
                                     uint32_t sampleRate,
                                     audio_format_t format,
                                     audio_channel_mask_t channelMask,
                                     const android::content::AttributionSourceState& client,
                                     size_t frameCount = 0,
-                                    callback_t cbf = NULL,
-                                    void* user = NULL,
+                                    const wp<IAudioRecordCallback> &callback = nullptr,
                                     uint32_t notificationFrames = 0,
                                     audio_session_t sessionId = AUDIO_SESSION_ALLOCATE,
                                     transfer_type transferType = TRANSFER_DEFAULT,
                                     audio_input_flags_t flags = AUDIO_INPUT_FLAG_NONE,
-                                    const audio_attributes_t* pAttributes = NULL,
+                                    const audio_attributes_t* pAttributes = nullptr,
                                     audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE,
                                     audio_microphone_direction_t
                                         selectedMicDirection = MIC_DIRECTION_UNSPECIFIED,
                                     float selectedMicFieldDimension = MIC_FIELD_DIMENSION_DEFAULT);
+
 
     /* Terminates the AudioRecord and unregisters it from AudioFlinger.
      * Also destroys all resources associated with the AudioRecord.
@@ -223,13 +226,12 @@ public:
      *
      * threadCanCallJava:  Whether callbacks are made from an attached thread and thus can call JNI.
      */
-            status_t    set(audio_source_t inputSource,
+           status_t    set(audio_source_t inputSource,
                             uint32_t sampleRate,
                             audio_format_t format,
                             audio_channel_mask_t channelMask,
                             size_t frameCount = 0,
-                            callback_t cbf = NULL,
-                            void* user = NULL,
+                            const wp<IAudioRecordCallback> &callback = nullptr,
                             uint32_t notificationFrames = 0,
                             bool threadCanCallJava = false,
                             audio_session_t sessionId = AUDIO_SESSION_ALLOCATE,
@@ -237,7 +239,7 @@ public:
                             audio_input_flags_t flags = AUDIO_INPUT_FLAG_NONE,
                             uid_t uid = AUDIO_UID_INVALID,
                             pid_t pid = -1,
-                            const audio_attributes_t* pAttributes = NULL,
+                            const audio_attributes_t* pAttributes = nullptr,
                             audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE,
                             audio_microphone_direction_t
                                 selectedMicDirection = MIC_DIRECTION_UNSPECIFIED,
@@ -673,9 +675,11 @@ private:
     bool                    mActive;
 
     // for client callback handler
-    callback_t              mCbf;                   // callback handler for events, or NULL
-    void*                   mUserData;
 
+    wp<IAudioRecordCallback> mCallback;
+    sp<IAudioRecordCallback> mLegacyCallbackWrapper;
+
+    bool                    mInitialized = false;   // Protect against double set
     // for notification APIs
     uint32_t                mNotificationFramesReq; // requested number of frames between each
                                                     // notification callback
@@ -760,6 +764,13 @@ private:
     bool                    mTimestampRetrogradePositionReported = false; // reduce log spam
     bool                    mTimestampRetrogradeTimeReported = false;     // reduce log spam
 
+    // Format conversion. Maybe needed for adding fast tracks whose format is different from server.
+    audio_config_base_t     mServerConfig;
+    size_t                  mServerFrameSize;
+    size_t                  mServerSampleSize;
+    std::unique_ptr<uint8_t[]> mFormatConversionBufRaw;
+    Buffer                  mFormatConversionBuffer;
+
 private:
     class DeathNotifier : public IBinder::DeathRecipient {
     public:
@@ -824,6 +835,8 @@ private:
     MediaMetrics mMediaMetrics;
     std::string mMetricsId;  // GUARDED_BY(mLock), could change in createRecord_l().
     std::string mCallerName; // for example "aaudio"
+
+    void reportError(status_t status, const char *event, const char *message) const;
 };
 
 }; // namespace android

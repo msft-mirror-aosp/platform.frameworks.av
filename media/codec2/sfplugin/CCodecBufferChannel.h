@@ -130,9 +130,29 @@ public:
             bool buffersBoundToCodec);
 
     /**
-     * Request initial input buffers to be filled by client.
+     * Prepare initial input buffers to be filled by client.
+     *
+     * \param clientInputBuffers[out]   pointer to slot index -> buffer map.
+     *                                  On success, it contains prepared
+     *                                  initial input buffers.
      */
-    status_t requestInitialInputBuffers();
+    status_t prepareInitialInputBuffers(
+            std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers);
+
+    /**
+     * Request initial input buffers as prepared in clientInputBuffers.
+     *
+     * \param clientInputBuffers[in]    slot index -> buffer map with prepared
+     *                                  initial input buffers.
+     */
+    status_t requestInitialInputBuffers(
+            std::map<size_t, sp<MediaCodecBuffer>> &&clientInputBuffers);
+
+    /**
+     * Stop using buffers of the current output surface for other Codec
+     * instances to use the surface safely.
+     */
+    void stopUseOutputSurface();
 
     /**
      * Stop queueing buffers to the component. This object should never queue

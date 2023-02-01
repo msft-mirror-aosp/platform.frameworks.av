@@ -127,7 +127,8 @@ status_t AudioPolicyEffects::addInputEffects(audio_io_handle_t input,
             attributionSource.packageName = "android";
             attributionSource.token = sp<BBinder>::make();
             sp<AudioEffect> fx = new AudioEffect(attributionSource);
-            fx->set(NULL, &effect->mUuid, -1, 0, 0, audioSession, input);
+            fx->set(nullptr /*type */, &effect->mUuid, -1 /* priority */, nullptr /* callback */,
+                    audioSession, input);
             status_t status = fx->initCheck();
             if (status != NO_ERROR && status != ALREADY_EXISTS) {
                 ALOGW("addInputEffects(): failed to create Fx %s on source %d",
@@ -279,7 +280,8 @@ status_t AudioPolicyEffects::addOutputSessionEffects(audio_io_handle_t output,
             attributionSource.packageName = "android";
             attributionSource.token = sp<BBinder>::make();
             sp<AudioEffect> fx = new AudioEffect(attributionSource);
-            fx->set(NULL, &effect->mUuid, 0, 0, 0, audioSession, output);
+            fx->set(nullptr /* type */, &effect->mUuid, 0 /* priority */, nullptr /* callback */,
+                    audioSession, output);
             status_t status = fx->initCheck();
             if (status != NO_ERROR && status != ALREADY_EXISTS) {
                 ALOGE("addOutputSessionEffects(): failed to create Fx  %s on session %d",
@@ -345,7 +347,8 @@ status_t AudioPolicyEffects::addSourceDefaultEffect(const effect_uuid_t *type,
             (source > AUDIO_SOURCE_MAX &&
              source != AUDIO_SOURCE_HOTWORD &&
              source != AUDIO_SOURCE_FM_TUNER &&
-             source != AUDIO_SOURCE_ECHO_REFERENCE)) {
+             source != AUDIO_SOURCE_ECHO_REFERENCE &&
+             source != AUDIO_SOURCE_ULTRASOUND)) {
         ALOGE("addSourceDefaultEffect(): Unsupported source type %d", source);
         return BAD_VALUE;
     }
@@ -386,7 +389,7 @@ status_t AudioPolicyEffects::addSourceDefaultEffect(const effect_uuid_t *type,
         return res;
     }
     EffectDesc *effect = new EffectDesc(
-            descriptor.name, *type, opPackageName, *uuid, priority, *id);
+            descriptor.name, descriptor.type, opPackageName, descriptor.uuid, priority, *id);
     desc->mEffects.add(effect);
     // TODO(b/71813697): Support setting params as well.
 
@@ -451,7 +454,7 @@ status_t AudioPolicyEffects::addStreamDefaultEffect(const effect_uuid_t *type,
         return res;
     }
     EffectDesc *effect = new EffectDesc(
-            descriptor.name, *type, opPackageName, *uuid, priority, *id);
+            descriptor.name, descriptor.type, opPackageName, descriptor.uuid, priority, *id);
     desc->mEffects.add(effect);
     // TODO(b/71813697): Support setting params as well.
 
@@ -544,6 +547,7 @@ void AudioPolicyEffects::EffectVector::setProcessorEnabled(bool enabled)
     CAMCORDER_SRC_TAG,
     VOICE_REC_SRC_TAG,
     VOICE_COMM_SRC_TAG,
+    REMOTE_SUBMIX_SRC_TAG,
     UNPROCESSED_SRC_TAG,
     VOICE_PERFORMANCE_SRC_TAG
 };
@@ -982,8 +986,8 @@ void AudioPolicyEffects::initDefaultDeviceEffects()
             attributionSource.packageName = "android";
             attributionSource.token = sp<BBinder>::make();
             sp<AudioEffect> fx = new AudioEffect(attributionSource);
-            fx->set(EFFECT_UUID_NULL, &effectDesc->mUuid, 0, nullptr,
-                    nullptr, AUDIO_SESSION_DEVICE, AUDIO_IO_HANDLE_NONE,
+            fx->set(EFFECT_UUID_NULL, &effectDesc->mUuid, 0 /* priority */, nullptr /* callback */,
+                    AUDIO_SESSION_DEVICE, AUDIO_IO_HANDLE_NONE,
                     AudioDeviceTypeAddr{deviceEffects->getDeviceType(),
                                         deviceEffects->getDeviceAddress()});
             status_t status = fx->initCheck();

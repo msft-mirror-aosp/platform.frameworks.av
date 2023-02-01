@@ -15,14 +15,13 @@
  */
 
 #include <media/audiohal/EffectsFactoryHalInterface.h>
-#include <media/audiohal/FactoryHalHidl.h>
+#include <media/audiohal/FactoryHal.h>
 
 namespace android {
 
 // static
 sp<EffectsFactoryHalInterface> EffectsFactoryHalInterface::create() {
-    return createPreferredImpl<EffectsFactoryHalInterface>(
-            "android.hardware.audio.effect", "IEffectsFactory");
+    return createPreferredImpl<EffectsFactoryHalInterface>(false /* isCore */);
 }
 
 // static

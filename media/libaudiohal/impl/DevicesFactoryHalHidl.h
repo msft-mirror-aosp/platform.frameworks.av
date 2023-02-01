@@ -45,6 +45,8 @@ class DevicesFactoryHalHidl : public DevicesFactoryHalInterface
 
     status_t setCallbackOnce(sp<DevicesFactoryHalCallback> callback) override;
 
+    android::detail::AudioHalVersionInfo getHalVersion() const override;
+
   private:
     friend class ServiceNotificationListener;
     void addDeviceFactory(sp<IDevicesFactory> factory, bool needToNotify);

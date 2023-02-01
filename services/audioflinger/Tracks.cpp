@@ -334,6 +334,7 @@ AudioFlinger::TrackHandle::TrackHandle(const sp<AudioFlinger::PlaybackThread::Tr
     : BnAudioTrack(),
       mTrack(track)
 {
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 }
 
 AudioFlinger::TrackHandle::~TrackHandle() {
@@ -438,7 +439,8 @@ Status AudioFlinger::TrackHandle::getVolumeShaperState(
     return Status::ok();
 }
 
-Status AudioFlinger::TrackHandle::getDualMonoMode(media::AudioDualMonoMode* _aidl_return)
+Status AudioFlinger::TrackHandle::getDualMonoMode(
+        media::audio::common::AudioDualMonoMode* _aidl_return)
 {
     audio_dual_mono_mode_t mode = AUDIO_DUAL_MONO_MODE_OFF;
     const status_t status = mTrack->getDualMonoMode(&mode)
@@ -451,7 +453,7 @@ Status AudioFlinger::TrackHandle::getDualMonoMode(media::AudioDualMonoMode* _aid
 }
 
 Status AudioFlinger::TrackHandle::setDualMonoMode(
-        media::AudioDualMonoMode mode)
+        media::audio::common::AudioDualMonoMode mode)
 {
     const auto localMonoMode = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioDualMonoMode_audio_dual_mono_mode_t(mode));
@@ -475,7 +477,7 @@ Status AudioFlinger::TrackHandle::setAudioDescriptionMixLevel(float leveldB)
 }
 
 Status AudioFlinger::TrackHandle::getPlaybackRateParameters(
-        media::AudioPlaybackRate* _aidl_return)
+        media::audio::common::AudioPlaybackRate* _aidl_return)
 {
     audio_playback_rate_t localPlaybackRate{};
     status_t status = mTrack->getPlaybackRateParameters(&localPlaybackRate)
@@ -488,7 +490,7 @@ Status AudioFlinger::TrackHandle::getPlaybackRateParameters(
 }
 
 Status AudioFlinger::TrackHandle::setPlaybackRateParameters(
-        const media::AudioPlaybackRate& playbackRate)
+        const media::audio::common::AudioPlaybackRate& playbackRate)
 {
     const audio_playback_rate_t localPlaybackRate = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPlaybackRate_audio_playback_rate_t(playbackRate));
@@ -633,7 +635,8 @@ AudioFlinger::PlaybackThread::Track::Track(
             track_type type,
             audio_port_handle_t portId,
             size_t frameCountToBeReady,
-            float speed)
+            float speed,
+            bool isSpatialized)
     :   TrackBase(thread, client, attr, sampleRate, format, channelMask, frameCount,
                   // TODO: Using unsecurePointer() has some associated security pitfalls
                   //       (see declaration for details).
@@ -667,7 +670,8 @@ AudioFlinger::PlaybackThread::Track::Track(
     mResumeToStopping(false),
     mFlushHwPending(false),
     mFlags(flags),
-    mSpeed(speed)
+    mSpeed(speed),
+    mIsSpatialized(isSpatialized)
 {
     // client == 0 implies sharedBuffer == 0
     ALOG_ASSERT(!(client == 0 && sharedBuffer != 0));
@@ -1092,12 +1096,22 @@ status_t AudioFlinger::PlaybackThread::Track::start(AudioSystem::sync_event_t ev
                     __func__, mId, (int)mThreadIoHandle);
         }
 
-        // states to reset position info for non-offloaded/direct tracks
-        if (!isOffloaded() && !isDirect()
+        PlaybackThread *playbackThread = (PlaybackThread *)thread.get();
+
+        // states to reset position info for pcm tracks
+        if (audio_is_linear_pcm(mFormat)
                 && (state == IDLE || state == STOPPED || state == FLUSHED)) {
             mFrameMap.reset();
+
+            if (!isFastTrack() && (isDirect() || isOffloaded())) {
+                // Start point of track -> sink frame map. If the HAL returns a
+                // frame position smaller than the first written frame in
+                // updateTrackFrameInfo, the timestamp can be interpolated
+                // instead of using a larger value.
+                mFrameMap.push(mAudioTrackServerProxy->framesReleased(),
+                               playbackThread->framesWritten());
+            }
         }
-        PlaybackThread *playbackThread = (PlaybackThread *)thread.get();
         if (isFastTrack()) {
             // refresh fast track underruns on start because that field is never cleared
             // by the fast mixer; furthermore, the same track can be recycled, i.e. start
@@ -1121,6 +1135,7 @@ status_t AudioFlinger::PlaybackThread::Track::start(AudioSystem::sync_event_t ev
                     .mPosition[ExtendedTimestamp::LOCATION_KERNEL];
             mLogLatencyMs = 0.;
         }
+        mLogForceVolumeUpdate = true;  // at least one volume logged for metrics when starting.
 
         if (status == NO_ERROR || status == ALREADY_EXISTS) {
             // for streaming tracks, remove the buffer read stop limit.
@@ -1392,12 +1407,21 @@ void AudioFlinger::PlaybackThread::Track::setFinalVolume(float volume)
     if (mFinalVolume != volume) { // Compare to an epsilon if too many meaningless updates
         mFinalVolume = volume;
         setMetadataHasChanged();
-        mTrackMetrics.logVolume(volume);
+        mLogForceVolumeUpdate = true;
+    }
+    if (mLogForceVolumeUpdate) {
+        mLogForceVolumeUpdate = false;
+        mTrackMetrics.logVolume(mFinalVolume);
     }
 }
 
 void AudioFlinger::PlaybackThread::Track::copyMetadataTo(MetadataInserter& backInserter) const
 {
+    // Do not forward metadata for PatchTrack with unspecified stream type
+    if (mStreamType == AUDIO_STREAM_PATCH) {
+        return;
+    }
+
     playback_track_metadata_v7_t metadata;
     metadata.base = {
             .usage = mAttr.usage,
@@ -1896,9 +1920,7 @@ void AudioFlinger::PlaybackThread::Track::updateTrackFrameInfo(
     }
 }
 
-binder::Status AudioFlinger::PlaybackThread::Track::AudioVibrationController::mute(
-        /*out*/ bool *ret) {
-    *ret = false;
+bool AudioFlinger::PlaybackThread::Track::AudioVibrationController::setMute(bool muted) {
     sp<ThreadBase> thread = mTrack->mThread.promote();
     if (thread != 0) {
         // Lock for updating mHapticPlaybackEnabled.
@@ -1906,27 +1928,22 @@ binder::Status AudioFlinger::PlaybackThread::Track::AudioVibrationController::mu
         PlaybackThread *playbackThread = (PlaybackThread *)thread.get();
         if ((mTrack->channelMask() & AUDIO_CHANNEL_HAPTIC_ALL) != AUDIO_CHANNEL_NONE
                 && playbackThread->mHapticChannelCount > 0) {
-            mTrack->setHapticPlaybackEnabled(false);
-            *ret = true;
+            mTrack->setHapticPlaybackEnabled(!muted);
+            return true;
         }
     }
+    return false;
+}
+
+binder::Status AudioFlinger::PlaybackThread::Track::AudioVibrationController::mute(
+        /*out*/ bool *ret) {
+    *ret = setMute(true);
     return binder::Status::ok();
 }
 
 binder::Status AudioFlinger::PlaybackThread::Track::AudioVibrationController::unmute(
         /*out*/ bool *ret) {
-    *ret = false;
-    sp<ThreadBase> thread = mTrack->mThread.promote();
-    if (thread != 0) {
-        // Lock for updating mHapticPlaybackEnabled.
-        Mutex::Autolock _l(thread->mLock);
-        PlaybackThread *playbackThread = (PlaybackThread *)thread.get();
-        if ((mTrack->channelMask() & AUDIO_CHANNEL_HAPTIC_ALL) != AUDIO_CHANNEL_NONE
-                && playbackThread->mHapticChannelCount > 0) {
-            mTrack->setHapticPlaybackEnabled(true);
-            *ret = true;
-        }
-    }
+    *ret = setMute(false);
     return binder::Status::ok();
 }
 
@@ -2312,6 +2329,7 @@ AudioFlinger::RecordHandle::RecordHandle(
     : BnAudioRecord(),
     mRecordTrack(recordTrack)
 {
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 }
 
 AudioFlinger::RecordHandle::~RecordHandle() {
@@ -2635,6 +2653,8 @@ void AudioFlinger::RecordThread::RecordTrack::updateTrackFrameInfo(
     // ALOGD("FrameTime: %lld %lld", (long long)ft.frames, (long long)ft.timeNs);
     mKernelFrameTime.store(ft);
     if (!audio_is_linear_pcm(mFormat)) {
+        // Stream is direct, return provided timestamp with no conversion
+        mServerProxy->setTimestamp(timestamp);
         return;
     }
 

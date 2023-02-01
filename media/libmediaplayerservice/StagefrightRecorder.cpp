@@ -24,7 +24,8 @@
 #include <android-base/logging.h>
 #include <utils/Log.h>
 
-#include "WebmWriter.h"
+#include <webm/WebmWriter.h>
+
 #include "StagefrightRecorder.h"
 
 #include <algorithm>
@@ -66,7 +67,7 @@
 
 #include <system/audio.h>
 
-#include "ARTPWriter.h"
+#include <media/stagefright/rtsp/ARTPWriter.h>
 
 namespace android {
 
@@ -1963,6 +1964,10 @@ status_t StagefrightRecorder::setupVideoEncoder(
 
         case VIDEO_ENCODER_HEVC:
             format->setString("mime", MEDIA_MIMETYPE_VIDEO_HEVC);
+            break;
+
+        case VIDEO_ENCODER_DOLBY_VISION:
+            format->setString("mime", MEDIA_MIMETYPE_VIDEO_DOLBY_VISION);
             break;
 
         default:

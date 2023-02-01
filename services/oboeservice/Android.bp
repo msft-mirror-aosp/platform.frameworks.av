@@ -25,8 +25,13 @@ cc_library {
 
     name: "libaaudioservice",
 
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_shared",
+    ],
+
     srcs: [
         "AAudioClientTracker.cpp",
+        "AAudioCommandQueue.cpp",
         "AAudioEndpointManager.cpp",
         "AAudioMixer.cpp",
         "AAudioService.cpp",
