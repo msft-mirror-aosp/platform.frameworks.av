@@ -226,6 +226,9 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
     if (buffer->meta()->findInt32("tunnel-first-frame", &tmp) && tmp) {
         tunnelFirstFrame = true;
     }
+    if (buffer->meta()->findInt32("decode-only", &tmp) && tmp) {
+        flags |= C2FrameData::FLAG_DROP_FRAME;
+    }
     ALOGV("[%s] queueInputBuffer: buffer->size() = %zu", mName, buffer->size());
     std::list<std::unique_ptr<C2Work>> items;
     std::unique_ptr<C2Work> work(new C2Work);
@@ -960,9 +963,9 @@ status_t CCodecBufferChannel::renderOutputBuffer(
                     hdrDynamicInfo->m.data + hdrDynamicInfo->flexCount());
         }
         qbi.setHdrMetadata(hdr);
-
-        SetHdrMetadataToGralloc4Handle(hdrStaticInfo, hdrDynamicInfo, block.handle());
     }
+    SetMetadataToGralloc4Handle(dataSpace, hdrStaticInfo, hdrDynamicInfo, block.handle());
+
     // we don't have dirty regions
     qbi.setSurfaceDamage(Region::INVALID_REGION);
     android::IGraphicBufferProducer::QueueBufferOutput qbo;
@@ -1578,6 +1581,25 @@ void CCodecBufferChannel::stop() {
     mFirstValidFrameIndex = mFrameIndex.load(std::memory_order_relaxed);
 }
 
+void CCodecBufferChannel::stopUseOutputSurface(bool pushBlankBuffer) {
+    sp<Surface> surface = mOutputSurface.lock()->surface;
+    if (surface) {
+        C2BlockPool::local_id_t outputPoolId;
+        {
+            Mutexed<BlockPools>::Locked pools(mBlockPools);
+            outputPoolId = pools->outputPoolId;
+        }
+        if (mComponent) mComponent->stopUsingOutputSurface(outputPoolId);
+
+        if (pushBlankBuffer) {
+            sp<ANativeWindow> anw = static_cast<ANativeWindow *>(surface.get());
+            if (anw) {
+                pushBlankBuffersToNativeWindow(anw.get());
+            }
+        }
+    }
+}
+
 void CCodecBufferChannel::reset() {
     stop();
     if (mInputSurface != nullptr) {
@@ -1592,14 +1614,6 @@ void CCodecBufferChannel::reset() {
     {
         Mutexed<Output>::Locked output(mOutput);
         output->buffers.reset();
-    }
-    if (mOutputSurface.lock()->surface) {
-        C2BlockPool::local_id_t outputPoolId;
-        {
-            Mutexed<BlockPools>::Locked pools(mBlockPools);
-            outputPoolId = pools->outputPoolId;
-        }
-        mComponent->stopUsingOutputSurface(outputPoolId);
     }
 }
 
@@ -1992,6 +2006,12 @@ bool CCodecBufferChannel::handleWork(
         drop = true;
     }
 
+    // Workaround: if C2FrameData::FLAG_DROP_FRAME is not implemented in
+    // HAL, the flag is then removed in the corresponding output buffer.
+    if (work->input.flags & C2FrameData::FLAG_DROP_FRAME) {
+        flags |= BUFFER_FLAG_DECODE_ONLY;
+    }
+
     if (notifyClient && !buffer && !flags) {
         if (mTunneled && drop && outputFormat) {
             ALOGV("[%s] onWorkDone: Keep tunneled, drop frame with format change (%lld)",
@@ -2094,14 +2114,20 @@ void CCodecBufferChannel::sendOutputBuffers() {
     }
 }
 
-status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface) {
+status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface, bool pushBlankBuffer) {
     static std::atomic_uint32_t surfaceGeneration{0};
     uint32_t generation = (getpid() << 10) |
             ((surfaceGeneration.fetch_add(1, std::memory_order_relaxed) + 1)
                 & ((1 << 10) - 1));
 
     sp<IGraphicBufferProducer> producer;
-    int maxDequeueCount = mOutputSurface.lock()->maxDequeueBuffers;
+    int maxDequeueCount;
+    sp<Surface> oldSurface;
+    {
+        Mutexed<OutputSurface>::Locked outputSurface(mOutputSurface);
+        maxDequeueCount = outputSurface->maxDequeueBuffers;
+        oldSurface = outputSurface->surface;
+    }
     if (newSurface) {
         newSurface->setScalingMode(NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW);
         newSurface->setDequeueTimeout(kDequeueTimeoutNs);
@@ -2136,6 +2162,15 @@ status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface) {
         Mutexed<OutputSurface>::Locked output(mOutputSurface);
         output->surface = newSurface;
         output->generation = generation;
+    }
+
+    if (oldSurface && pushBlankBuffer) {
+        // When ReleaseSurface was set from MediaCodec,
+        // pushing a blank buffer at the end might be necessary.
+        sp<ANativeWindow> anw = static_cast<ANativeWindow *>(oldSurface.get());
+        if (anw) {
+            pushBlankBuffersToNativeWindow(anw.get());
+        }
     }
 
     return OK;
@@ -2225,15 +2260,6 @@ status_t toStatusT(c2_status_t c2s, c2_operation_t c2op) {
     default:
         return -static_cast<status_t>(c2s);
     }
-}
-
-status_t CCodecBufferChannel::pushBlankBufferToOutputSurface() {
-  Mutexed<OutputSurface>::Locked output(mOutputSurface);
-  sp<ANativeWindow> nativeWindow = static_cast<ANativeWindow *>(output->surface.get());
-  if (nativeWindow == nullptr) {
-      return INVALID_OPERATION;
-  }
-  return pushBlankBuffersToNativeWindow(nativeWindow.get());
 }
 
 }  // namespace android

@@ -354,8 +354,19 @@ void MediaCodecList::findMatchingCodecs(
 
 //static
 void MediaCodecList::findMatchingCodecs(
-        const char *mime, bool encoder, uint32_t flags, sp<AMessage> format,
+        const char *mime, bool encoder, uint32_t flags, const sp<AMessage> &format,
         Vector<AString> *matches) {
+    findMatchingCodecs(mime, encoder, flags, format, matches, /* checkProfile= */ true);
+    if (matches->empty()) {
+        ALOGV("no matching codec found, retrying without profile check");
+        findMatchingCodecs(mime, encoder, flags, format, matches, /* checkProfile= */ false);
+    }
+}
+
+//static
+void MediaCodecList::findMatchingCodecs(
+        const char *mime, bool encoder, uint32_t flags, const sp<AMessage> &format,
+        Vector<AString> *matches, bool checkProfile) {
     matches->clear();
 
     const sp<IMediaCodecList> list = getInstance();
@@ -379,7 +390,7 @@ void MediaCodecList::findMatchingCodecs(
 
         AString componentName = info->getCodecName();
 
-        if (!codecHandlesFormat(mime, info, format)) {
+        if (!codecHandlesFormat(mime, info, format, checkProfile)) {
             ALOGV("skipping codec '%s' which doesn't satisfy format %s",
                   componentName.c_str(), format->debugString(2).c_str());
             continue;
@@ -400,9 +411,10 @@ void MediaCodecList::findMatchingCodecs(
     }
 }
 
-/*static*/
-bool MediaCodecList::codecHandlesFormat(const char *mime, sp<MediaCodecInfo> info,
-                                        sp<AMessage> format) {
+// static
+bool MediaCodecList::codecHandlesFormat(
+        const char *mime, const sp<MediaCodecInfo> &info, const sp<AMessage> &format,
+        bool checkProfile) {
 
     if (format == nullptr) {
         ALOGD("codecHandlesFormat: no format, so no extra checks");
@@ -510,9 +522,7 @@ bool MediaCodecList::codecHandlesFormat(const char *mime, sp<MediaCodecInfo> inf
         }
 
         int32_t profile = -1;
-        if (format->findInt32("profile", &profile)) {
-            int32_t level = -1;
-            format->findInt32("level", &level);
+        if (checkProfile && format->findInt32("profile", &profile)) {
             Vector<MediaCodecInfo::ProfileLevel> profileLevels;
             capabilities->getSupportedProfileLevels(&profileLevels);
             auto it = profileLevels.begin();
@@ -520,14 +530,11 @@ bool MediaCodecList::codecHandlesFormat(const char *mime, sp<MediaCodecInfo> inf
                 if (profile != it->mProfile) {
                     continue;
                 }
-                if (level > -1 && level > it->mLevel) {
-                    continue;
-                }
                 break;
             }
 
             if (it == profileLevels.end()) {
-                ALOGV("Codec does not support profile %d with level %d", profile, level);
+                ALOGV("Codec does not support profile %d", profile);
                 return false;
             }
         }

@@ -51,6 +51,7 @@
 
 #include <aidl/android/hardware/camera/device/ICameraInjectionSession.h>
 #include <aidlcommonsupport/NativeHandle.h>
+#include <android/binder_ibinder_platform.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
 
 #include "utils/CameraTraces.h"
@@ -161,9 +162,13 @@ uint64_t AidlCamera3Device::mapProducerToFrameworkUsage(
     return (uint64_t)usage;
 }
 
-AidlCamera3Device::AidlCamera3Device(const String8& id, bool overrideForPerfClass,
-            bool legacyClient) : Camera3Device(id, overrideForPerfClass, legacyClient) {
-        mCallbacks = ndk::SharedRefBase::make<AidlCameraDeviceCallbacks>(this);
+AidlCamera3Device::AidlCamera3Device(
+        std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
+        const String8& id, bool overrideForPerfClass, bool overrideToPortrait,
+        bool legacyClient) :
+        Camera3Device(cameraServiceProxyWrapper, id, overrideForPerfClass, overrideToPortrait,
+        legacyClient) {
+    mCallbacks = ndk::SharedRefBase::make<AidlCameraDeviceCallbacks>(this);
 }
 
 status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
@@ -192,7 +197,8 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
       SET_ERR("Session iface returned is null");
       return INVALID_OPERATION;
     }
-    res = manager->getCameraCharacteristics(mId.string(), mOverrideForPerfClass, &mDeviceInfo);
+    res = manager->getCameraCharacteristics(mId.string(), mOverrideForPerfClass, &mDeviceInfo,
+            mOverrideToPortrait);
     if (res != OK) {
         SET_ERR_L("Could not retrieve camera characteristics: %s (%d)", strerror(-res), res);
         session->close();
@@ -206,7 +212,8 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         for (auto& physicalId : physicalCameraIds) {
             // Do not override characteristics for physical cameras
             res = manager->getCameraCharacteristics(
-                    physicalId, /*overrideForPerfClass*/false, &mPhysicalDeviceInfoMap[physicalId]);
+                    physicalId, /*overrideForPerfClass*/false, &mPhysicalDeviceInfoMap[physicalId],
+                    /*overrideToPortrait*/true);
             if (res != OK) {
                 SET_ERR_L("Could not retrieve camera %s characteristics: %s (%d)",
                         physicalId.c_str(), strerror(-res), res);
@@ -371,7 +378,8 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         mNumPartialResults, mVendorTagId, mDeviceInfo, mPhysicalDeviceInfoMap,
         mDistortionMappers, mZoomRatioMappers, mRotateAndCropMappers,
         mTagMonitor, mInputStream, mOutputStreams, mSessionStatsBuilder, listener, *this,
-        *this, *(mInterface), mLegacyClient, mMinExpectedDuration}, mResultMetadataQueue
+        *this, *(mInterface), mLegacyClient, mMinExpectedDuration, mIsFixedFps,
+        mOverrideToPortrait, mActivePhysicalId}, mResultMetadataQueue
     };
 
     for (const auto& result : results) {
@@ -412,7 +420,8 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         mNumPartialResults, mVendorTagId, mDeviceInfo, mPhysicalDeviceInfoMap,
         mDistortionMappers, mZoomRatioMappers, mRotateAndCropMappers,
         mTagMonitor, mInputStream, mOutputStreams, mSessionStatsBuilder, listener, *this,
-        *this, *(mInterface), mLegacyClient, mMinExpectedDuration}, mResultMetadataQueue
+        *this, *(mInterface), mLegacyClient, mMinExpectedDuration, mIsFixedFps,
+        mOverrideToPortrait, mActivePhysicalId}, mResultMetadataQueue
     };
     for (const auto& msg : msgs) {
         camera3::notify(states, msg);
@@ -669,6 +678,12 @@ status_t AidlCamera3Device::switchToOffline(
     return p->returnStreamBuffers(buffers);
 }
 
+::ndk::SpAIBinder AidlCamera3Device::AidlCameraDeviceCallbacks::createBinder() {
+    auto binder = BnCameraDeviceCallback::createBinder();
+    AIBinder_setInheritRt(binder.get(), /*inheritRt*/ true);
+    return binder;
+}
+
 ::ndk::ScopedAStatus AidlCamera3Device::returnStreamBuffers(
         const std::vector<camera::device::StreamBuffer>& buffers) {
     ReturnBufferStates states {
@@ -902,6 +917,7 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
                     cam3stream->getOriginalFormat() : src->format);
         dst.dataSpace = mapToAidlDataspace(cam3stream->isDataSpaceOverridden() ?
                     cam3stream->getOriginalDataSpace() : src->data_space);
+        dst.colorSpace = src->color_space;
 
         dst.bufferSize = bufferSizes[i];
         if (src->physical_camera_id != nullptr) {
@@ -1399,9 +1415,10 @@ AidlCamera3Device::AidlRequestThread::AidlRequestThread(wp<Camera3Device> parent
                 sp<HalInterface> interface,
                 const Vector<int32_t>& sessionParamKeys,
                 bool useHalBufManager,
-                bool supportCameraMute) :
+                bool supportCameraMute,
+                bool overrideToPortrait) :
           RequestThread(parent, statusTracker, interface, sessionParamKeys, useHalBufManager,
-                  supportCameraMute) {}
+                  supportCameraMute, overrideToPortrait) {}
 
 status_t AidlCamera3Device::AidlRequestThread::switchToOffline(
         const std::vector<int32_t>& streamsToKeep,
@@ -1570,9 +1587,10 @@ sp<Camera3Device::RequestThread> AidlCamera3Device::createNewRequestThread(
                 sp<Camera3Device::HalInterface> interface,
                 const Vector<int32_t>& sessionParamKeys,
                 bool useHalBufManager,
-                bool supportCameraMute) {
+                bool supportCameraMute,
+                bool overrideToPortrait) {
     return new AidlRequestThread(parent, statusTracker, interface, sessionParamKeys,
-            useHalBufManager, supportCameraMute);
+            useHalBufManager, supportCameraMute, overrideToPortrait);
 };
 
 sp<Camera3Device::Camera3DeviceInjectionMethods>

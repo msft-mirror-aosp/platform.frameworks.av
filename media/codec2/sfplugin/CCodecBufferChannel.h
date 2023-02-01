@@ -102,7 +102,7 @@ public:
     /**
      * Set output graphic surface for rendering.
      */
-    status_t setSurface(const sp<Surface> &surface);
+    status_t setSurface(const sp<Surface> &surface, bool pushBlankBuffer);
 
     /**
      * Set GraphicBufferSource object from which the component extracts input
@@ -147,6 +147,14 @@ public:
      */
     status_t requestInitialInputBuffers(
             std::map<size_t, sp<MediaCodecBuffer>> &&clientInputBuffers);
+
+    /**
+     * Stop using buffers of the current output surface for other Codec
+     * instances to use the surface safely.
+     *
+     * \param pushBlankBuffer[in]       push a blank buffer at the end if true
+     */
+    void stopUseOutputSurface(bool pushBlankBuffer);
 
     /**
      * Stop queueing buffers to the component. This object should never queue
@@ -194,11 +202,6 @@ public:
     };
 
     void setMetaMode(MetaMode mode);
-
-    /**
-     * Push a blank buffer to the configured native output surface.
-     */
-    status_t pushBlankBufferToOutputSurface();
 
 private:
     class QueueGuard;

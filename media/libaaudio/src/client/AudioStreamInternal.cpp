@@ -131,6 +131,10 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     request.getConfiguration().setBufferCapacity(builder.getBufferCapacity());
 
+    request.getConfiguration().setHardwareSamplesPerFrame(builder.getHardwareSamplesPerFrame());
+    request.getConfiguration().setHardwareSampleRate(builder.getHardwareSampleRate());
+    request.getConfiguration().setHardwareFormat(builder.getHardwareFormat());
+
     mDeviceChannelCount = getSamplesPerFrame(); // Assume it will be the same. Update if not.
 
     mServiceStreamHandle = mServiceInterface.openStream(request, configurationOutput);
@@ -191,6 +195,10 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     // Save device format so we can do format conversion and volume scaling together.
     setDeviceFormat(configurationOutput.getFormat());
+
+    setHardwareSamplesPerFrame(configurationOutput.getHardwareSamplesPerFrame());
+    setHardwareSampleRate(configurationOutput.getHardwareSampleRate());
+    setHardwareFormat(configurationOutput.getHardwareFormat());
 
     result = mServiceInterface.getStreamDescription(mServiceStreamHandle, mEndPointParcelable);
     if (result != AAUDIO_OK) {
@@ -315,11 +323,10 @@ aaudio_result_t AudioStreamInternal::release_l() {
     aaudio_result_t result = AAUDIO_OK;
     ALOGD("%s(): mServiceStreamHandle = 0x%08X", __func__, mServiceStreamHandle);
     if (mServiceStreamHandle != AAUDIO_HANDLE_INVALID) {
-        aaudio_stream_state_t currentState = getState();
         // Don't release a stream while it is running. Stop it first.
         // If DISCONNECTED then we should still try to stop in case the
         // error callback is still running.
-        if (isActive() || currentState == AAUDIO_STREAM_STATE_DISCONNECTED) {
+        if (isActive() || isDisconnected()) {
             requestStop_l();
         }
 
@@ -432,11 +439,11 @@ aaudio_result_t AudioStreamInternal::requestStart_l()
         return AAUDIO_ERROR_INVALID_STATE;
     }
 
-    aaudio_stream_state_t originalState = getState();
-    if (originalState == AAUDIO_STREAM_STATE_DISCONNECTED) {
+    if (isDisconnected()) {
         ALOGD("requestStart() but DISCONNECTED");
         return AAUDIO_ERROR_DISCONNECTED;
     }
+    aaudio_stream_state_t originalState = getState();
     setState(AAUDIO_STREAM_STATE_STARTING);
 
     // Clear any stale timestamps from the previous run.
@@ -456,7 +463,7 @@ aaudio_result_t AudioStreamInternal::requestStart_l()
         ALOGD("%s() error = %d, stream was probably stolen", __func__, result);
         // Stealing was added in R. Coerce result to improve backward compatibility.
         result = AAUDIO_ERROR_DISCONNECTED;
-        setState(AAUDIO_STREAM_STATE_DISCONNECTED);
+        setDisconnected();
     }
 
     startTime = AudioClock::getNanoseconds();
@@ -473,7 +480,6 @@ aaudio_result_t AudioStreamInternal::requestStart_l()
         result = createThread_l(periodNanos, aaudio_callback_thread_proc, this);
     }
     if (result != AAUDIO_OK) {
-        // TODO(b/214607638): Do we want to roll back to original state or keep as disconnected?
         setState(originalState);
     }
     return result;
@@ -499,8 +505,7 @@ int64_t AudioStreamInternal::calculateReasonableTimeout() {
 // This must be called under mStreamLock.
 aaudio_result_t AudioStreamInternal::stopCallback_l()
 {
-    if (isDataCallbackSet()
-            && (isActive() || getState() == AAUDIO_STREAM_STATE_DISCONNECTED)) {
+    if (isDataCallbackSet() && (isActive() || isDisconnected())) {
         mCallbackEnabled.store(false);
         aaudio_result_t result = joinThread_l(nullptr); // may temporarily unlock mStreamLock
         if (result == AAUDIO_ERROR_INVALID_HANDLE) {
@@ -525,7 +530,7 @@ aaudio_result_t AudioStreamInternal::requestStop_l() {
     // and the callback may have stopped the stream.
     // Check to make sure the stream still needs to be stopped.
     // See also AudioStream::safeStop_l().
-    if (!(isActive() || getState() == AAUDIO_STREAM_STATE_DISCONNECTED)) {
+    if (!(isActive() || isDisconnected())) {
         ALOGD("%s() returning early, not active or disconnected", __func__);
         return AAUDIO_OK;
     }
@@ -605,13 +610,6 @@ aaudio_result_t AudioStreamInternal::getTimestamp(clockid_t /*clockId*/,
     return AAUDIO_ERROR_INVALID_STATE;
 }
 
-aaudio_result_t AudioStreamInternal::updateStateMachine() {
-    if (isDataCallbackActive()) {
-        return AAUDIO_OK; // state is getting updated by the callback thread read/write call
-    }
-    return processCommands();
-}
-
 void AudioStreamInternal::logTimestamp(AAudioServiceMessage &command) {
     static int64_t oldPosition = 0;
     static int64_t oldTime = 0;
@@ -654,6 +652,8 @@ aaudio_result_t AudioStreamInternal::onEventFromServer(AAudioServiceMessage *mes
             if (getState() == AAUDIO_STREAM_STATE_STARTING) {
                 setState(AAUDIO_STREAM_STATE_STARTED);
             }
+            mPlayerBase->triggerPortIdUpdate(static_cast<audio_port_handle_t>(
+                                                 message->event.dataLong));
             break;
         case AAUDIO_SERVICE_EVENT_PAUSED:
             ALOGD("%s - got AAUDIO_SERVICE_EVENT_PAUSED", __func__);
@@ -680,7 +680,7 @@ aaudio_result_t AudioStreamInternal::onEventFromServer(AAudioServiceMessage *mes
                 mAudioEndpoint->eraseDataMemory();
             }
             result = AAUDIO_ERROR_DISCONNECTED;
-            setState(AAUDIO_STREAM_STATE_DISCONNECTED);
+            setDisconnected();
             ALOGW("%s - AAUDIO_SERVICE_EVENT_DISCONNECTED - FIFO cleared", __func__);
             break;
         case AAUDIO_SERVICE_EVENT_VOLUME:
@@ -814,7 +814,6 @@ aaudio_result_t AudioStreamInternal::processData(void *buffer, int32_t numFrames
 
             if (wakeTimeNanos > deadlineNanos) {
                 // If we time out, just return the framesWritten so far.
-                // TODO remove after we fix the deadline bug
                 ALOGW("processData(): entered at %lld nanos, currently %lld",
                       (long long) entryTimeNanos, (long long) currentTimeNanos);
                 ALOGW("processData(): TIMEOUT after %lld nanos",

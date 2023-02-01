@@ -18,6 +18,7 @@
 
 #define MEDIA_CODEC_H_
 
+#include <list>
 #include <memory>
 #include <vector>
 
@@ -89,6 +90,7 @@ struct MediaCodec : public AHandler {
         BUFFER_FLAG_EOS           = 4,
         BUFFER_FLAG_PARTIAL_FRAME = 8,
         BUFFER_FLAG_MUXER_DATA    = 16,
+        BUFFER_FLAG_DECODE_ONLY   = 32,
     };
 
     enum CVODegree {
@@ -408,6 +410,13 @@ private:
         kBufferRendered,
     };
 
+    enum class DequeueOutputResult {
+        kNoBuffer,
+        kDiscardedBuffer,
+        kRepliedWithError,
+        kSuccess,
+    };
+
     struct ResourceManagerServiceProxy;
 
     State mState;
@@ -456,12 +465,19 @@ private:
     int32_t mRotationDegrees;
     int32_t mAllowFrameDroppingBySurface;
 
-    int32_t mConfigColorTransfer;
-    bool mHDRStaticInfo;
-    bool mHDR10PlusInfo;
-    void updateHDRFormatMetric();
-    hdr_format getHDRFormat(const int32_t profile, const int32_t transfer,
-            const AString &mediaType);
+    enum {
+        kFlagHasHdrStaticInfo   = 1,
+        kFlagHasHdr10PlusInfo   = 2,
+    };
+    uint32_t mHdrInfoFlags;
+    void updateHdrMetrics(bool isConfig);
+    hdr_format getHdrFormat(const AString &mime, const int32_t profile,
+            const int32_t colorTransfer);
+    hdr_format getHdrFormatForEncoder(const AString &mime, const int32_t profile,
+            const int32_t colorTransfer);
+    hdr_format getHdrFormatForDecoder(const AString &mime, const int32_t profile,
+            const int32_t colorTransfer);
+    bool profileSupport10Bits(const AString &mime, const int32_t profile);
 
     // initial create parameters
     AString mInitName;
@@ -487,7 +503,7 @@ private:
     // stop/flush/reset/release.
     Mutex mBufferLock;
 
-    List<size_t> mAvailPortBuffers[2];
+    std::list<size_t> mAvailPortBuffers[2];
     std::vector<BufferInfo> mPortBuffers[2];
 
     int32_t mDequeueInputTimeoutGeneration;
@@ -505,7 +521,7 @@ private:
 
     sp<IDescrambler> mDescrambler;
 
-    List<sp<ABuffer> > mCSD;
+    std::list<sp<ABuffer> > mCSD;
 
     sp<AMessage> mActivityNotify;
 
@@ -547,7 +563,9 @@ private:
             sp<MediaCodecBuffer> *buffer, sp<AMessage> *format);
 
     bool handleDequeueInputBuffer(const sp<AReplyToken> &replyID, bool newRequest = false);
-    bool handleDequeueOutputBuffer(const sp<AReplyToken> &replyID, bool newRequest = false);
+    DequeueOutputResult handleDequeueOutputBuffer(
+            const sp<AReplyToken> &replyID,
+            bool newRequest = false);
     void cancelPendingDequeueOperations();
 
     void extractCSD(const sp<AMessage> &format);
@@ -631,6 +649,7 @@ private:
 
     void statsBufferSent(int64_t presentationUs, const sp<MediaCodecBuffer> &buffer);
     void statsBufferReceived(int64_t presentationUs, const sp<MediaCodecBuffer> &buffer);
+    bool discardDecodeOnlyOutputBuffer(size_t index);
 
     enum {
         // the default shape of our latency histogram buckets

@@ -78,7 +78,7 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
     case AUDIO_POLICY_FORCE_FOR_COMMUNICATION:
         if (config != AUDIO_POLICY_FORCE_SPEAKER && config != AUDIO_POLICY_FORCE_BT_SCO &&
             config != AUDIO_POLICY_FORCE_NONE) {
-            ALOGW("setForceUse() invalid config %d for FOR_COMMUNICATION", config);
+            ALOGW("setForceUse() invalid config %d for COMMUNICATION", config);
             return BAD_VALUE;
         }
         break;
@@ -88,14 +88,14 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
             config != AUDIO_POLICY_FORCE_ANALOG_DOCK &&
             config != AUDIO_POLICY_FORCE_DIGITAL_DOCK && config != AUDIO_POLICY_FORCE_NONE &&
             config != AUDIO_POLICY_FORCE_NO_BT_A2DP && config != AUDIO_POLICY_FORCE_SPEAKER ) {
-            ALOGW("setForceUse() invalid config %d for FOR_MEDIA", config);
+            ALOGW("setForceUse() invalid config %d for MEDIA", config);
             return BAD_VALUE;
         }
         break;
     case AUDIO_POLICY_FORCE_FOR_RECORD:
         if (config != AUDIO_POLICY_FORCE_BT_SCO && config != AUDIO_POLICY_FORCE_WIRED_ACCESSORY &&
             config != AUDIO_POLICY_FORCE_NONE) {
-            ALOGW("setForceUse() invalid config %d for FOR_RECORD", config);
+            ALOGW("setForceUse() invalid config %d for RECORD", config);
             return BAD_VALUE;
         }
         break;
@@ -105,19 +105,22 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
             config != AUDIO_POLICY_FORCE_WIRED_ACCESSORY &&
             config != AUDIO_POLICY_FORCE_ANALOG_DOCK &&
             config != AUDIO_POLICY_FORCE_DIGITAL_DOCK) {
-            ALOGW("setForceUse() invalid config %d for FOR_DOCK", config);
+            ALOGW("setForceUse() invalid config %d for DOCK", config);
+            return BAD_VALUE;
         }
         break;
     case AUDIO_POLICY_FORCE_FOR_SYSTEM:
         if (config != AUDIO_POLICY_FORCE_NONE &&
             config != AUDIO_POLICY_FORCE_SYSTEM_ENFORCED) {
-            ALOGW("setForceUse() invalid config %d for FOR_SYSTEM", config);
+            ALOGW("setForceUse() invalid config %d for SYSTEM", config);
+            return BAD_VALUE;
         }
         break;
     case AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO:
         if (config != AUDIO_POLICY_FORCE_NONE &&
             config != AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED) {
             ALOGW("setForceUse() invalid config %d for HDMI_SYSTEM_AUDIO", config);
+            return BAD_VALUE;
         }
         break;
     case AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND:
@@ -131,13 +134,13 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
         break;
     case AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING:
         if (config != AUDIO_POLICY_FORCE_BT_SCO && config != AUDIO_POLICY_FORCE_NONE) {
-            ALOGW("setForceUse() invalid config %d for FOR_VIBRATE_RINGING", config);
+            ALOGW("setForceUse() invalid config %d for VIBRATE_RINGING", config);
             return BAD_VALUE;
         }
         break;
     default:
         ALOGW("setForceUse() invalid usage %d", usage);
-        break; // TODO return BAD_VALUE?
+        return BAD_VALUE;
     }
     return EngineBase::setForceUse(usage, config);
 }
@@ -194,6 +197,12 @@ void Engine::filterOutputDevicesForStrategy(legacy_strategy strategy,
             availableOutputDevices.remove(availableOutputDevices.getDevicesFromTypes({
                     AUDIO_DEVICE_OUT_BLUETOOTH_A2DP, AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES,
                     AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER, }));
+        }
+        // If connected to a dock, never use the device speaker for calls
+        if (!availableOutputDevices.getDevicesFromTypes({AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET})
+                .isEmpty()) {
+            availableOutputDevices.remove(
+                    availableOutputDevices.getDevicesFromTypes({AUDIO_DEVICE_OUT_SPEAKER}));
         }
         } break;
     case STRATEGY_ACCESSIBILITY: {
@@ -267,10 +276,15 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
         break;
 
     case STRATEGY_PHONE: {
-        devices = availableOutputDevices.getDevicesFromType(AUDIO_DEVICE_OUT_HEARING_AID);
-        if (!devices.isEmpty()) break;
+        // TODO(b/243670205): remove this logic that gives preference to last removable devices
+        // once a UX decision has been made
         devices = availableOutputDevices.getFirstDevicesFromTypes(
-                        getLastRemovableMediaDevices(GROUP_NONE, {AUDIO_DEVICE_OUT_BLE_HEADSET}));
+                        getLastRemovableMediaDevices(GROUP_NONE, {
+                            // excluding HEARING_AID and BLE_HEADSET because Dialer uses
+                            // setCommunicationDevice to select them explicitly
+                            AUDIO_DEVICE_OUT_HEARING_AID,
+                            AUDIO_DEVICE_OUT_BLE_HEADSET
+                            }));
         if (!devices.isEmpty()) break;
         devices = availableOutputDevices.getFirstDevicesFromTypes({
                 AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET, AUDIO_DEVICE_OUT_EARPIECE});
@@ -449,7 +463,7 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
     }
 
     if (devices.isEmpty()) {
-        ALOGV("%s no device found for strategy %d", __func__, strategy);
+        ALOGI("%s no device found for strategy %d", __func__, strategy);
         sp<DeviceDescriptor> defaultOutputDevice = getApmObserver()->getDefaultOutputDevice();
         if (defaultOutputDevice != nullptr) {
             devices.add(defaultOutputDevice);
@@ -685,6 +699,18 @@ DeviceVector Engine::getPreferredAvailableDevicesForProductStrategy(
     return preferredAvailableDevVec;
 }
 
+DeviceVector Engine::getDisabledDevicesForProductStrategy(
+        const DeviceVector &availableOutputDevices, product_strategy_t strategy) const {
+    DeviceVector disabledDevices = {};
+    AudioDeviceTypeAddrVector disabledDevicesTypeAddr;
+    const status_t status = getDevicesForRoleAndStrategy(
+            strategy, DEVICE_ROLE_DISABLED, disabledDevicesTypeAddr);
+    if (status == NO_ERROR) {
+        disabledDevices =
+                availableOutputDevices.getDevicesFromDeviceTypeAddrVec(disabledDevicesTypeAddr);
+    }
+    return disabledDevices;
+}
 
 DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t strategy) const {
     const SwAudioOutputCollection& outputs = getApmObserver()->getOutputs();
@@ -707,6 +733,11 @@ DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t strategy) c
     if (!preferredAvailableDevVec.isEmpty()) {
         return preferredAvailableDevVec;
     }
+
+    // Remove all disabled devices from the available device list.
+    DeviceVector disabledDevVec =
+            getDisabledDevicesForProductStrategy(availableOutputDevices, strategy);
+    availableOutputDevices.remove(disabledDevVec);
 
     return getDevicesForStrategyInt(legacyStrategy,
                                     availableOutputDevices,
@@ -747,6 +778,7 @@ DeviceVector Engine::getOutputDevicesForStream(audio_stream_type_t stream, bool 
 
 sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_t &attr,
                                                          uid_t uid,
+                                                         audio_session_t session,
                                                          sp<AudioPolicyMix> *mix) const
 {
     const auto &policyMixes = getApmObserver()->getAudioPolicyMixCollection();
@@ -766,9 +798,10 @@ sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_
         return device;
     }
 
-    device = policyMixes.getDeviceAndMixForInputSource(attr.source,
+    device = policyMixes.getDeviceAndMixForInputSource(attr,
                                                        availableInputDevices,
                                                        uid,
+                                                       session,
                                                        mix);
     if (device != nullptr) {
         return device;

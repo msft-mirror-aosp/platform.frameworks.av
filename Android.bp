@@ -57,7 +57,7 @@ aidl_interface {
             min_sdk_version: "29",
             apex_available: [
                 "//apex_available:platform",
-                "com.android.bluetooth",
+                "com.android.btservices",
                 "com.android.media",
                 "com.android.media.swcodec",
             ],
@@ -75,10 +75,10 @@ cc_library_headers {
         "av-types-aidl-cpp",
     ],
     header_libs: [
-        "libaudioclient_aidl_conversion_util",
+        "libaudio_aidl_conversion_common_util_cpp",
     ],
     export_header_lib_headers: [
-        "libaudioclient_aidl_conversion_util",
+        "libaudio_aidl_conversion_common_util_cpp",
     ],
     host_supported: true,
     vendor_available: true,
@@ -86,7 +86,7 @@ cc_library_headers {
     min_sdk_version: "29",
     apex_available: [
         "//apex_available:platform",
-        "com.android.bluetooth",
+        "com.android.btservices",
         "com.android.media",
         "com.android.media.swcodec",
     ],

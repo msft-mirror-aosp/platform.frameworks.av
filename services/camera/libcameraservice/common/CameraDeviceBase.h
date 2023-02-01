@@ -192,7 +192,10 @@ class CameraDeviceBase : public virtual FrameProducer {
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO) = 0;
+            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+            int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+            bool useReadoutTimestamp = false)
+            = 0;
 
     /**
      * Create an output stream of the requested size, format, rotation and
@@ -213,7 +216,10 @@ class CameraDeviceBase : public virtual FrameProducer {
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO) = 0;
+            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+            int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+            bool useReadoutTimestamp = false)
+            = 0;
 
     /**
      * Create an input stream of width, height, and format.
@@ -235,11 +241,13 @@ class CameraDeviceBase : public virtual FrameProducer {
         bool dataSpaceOverridden;
         android_dataspace originalDataSpace;
         int64_t dynamicRangeProfile;
+        int32_t colorSpace;
 
         StreamInfo() : width(0), height(0), format(0), formatOverridden(false), originalFormat(0),
                 dataSpace(HAL_DATASPACE_UNKNOWN), dataSpaceOverridden(false),
                 originalDataSpace(HAL_DATASPACE_UNKNOWN),
-                dynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD){}
+                dynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD),
+                colorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED) {}
         /**
          * Check whether the format matches the current or the original one in case
          * it got overridden.
@@ -434,6 +442,14 @@ class CameraDeviceBase : public virtual FrameProducer {
             camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropValue) = 0;
 
     /**
+     * Set the current behavior for the AUTOFRAMING control when in AUTO.
+     *
+     * The value must be one of the AUTOFRAMING_* values besides AUTO.
+     */
+    virtual status_t setAutoframingAutoBehavior(
+            camera_metadata_enum_android_control_autoframing_t autoframingValue) = 0;
+
+    /**
      * Whether camera muting (producing black-only output) is supported.
      *
      * Calling setCameraMute(true) when this returns false will return an
@@ -449,6 +465,11 @@ class CameraDeviceBase : public virtual FrameProducer {
     virtual status_t setCameraMute(bool enabled) = 0;
 
     /**
+     * Enable/disable camera service watchdog
+     */
+    virtual status_t setCameraServiceWatchdog(bool enabled) = 0;
+
+    /**
      * Get the status tracker of the camera device
      */
     virtual wp<camera3::StatusTracker> getStatusTracker() = 0;
@@ -457,6 +478,15 @@ class CameraDeviceBase : public virtual FrameProducer {
      * Set bitmask for image dump flag
      */
     void setImageDumpMask(int mask) { mImageDumpMask = mask; }
+
+    /**
+     * Set stream use case overrides
+     */
+    void setStreamUseCaseOverrides(const std::vector<int64_t>& useCaseOverrides) {
+          mStreamUseCaseOverrides = useCaseOverrides;
+    }
+
+    void clearStreamUseCaseOverrides() {}
 
     /**
      * The injection camera session to replace the internal camera
@@ -472,6 +502,7 @@ class CameraDeviceBase : public virtual FrameProducer {
 
 protected:
     bool mImageDumpMask = 0;
+    std::vector<int64_t> mStreamUseCaseOverrides;
 };
 
 }; // namespace android

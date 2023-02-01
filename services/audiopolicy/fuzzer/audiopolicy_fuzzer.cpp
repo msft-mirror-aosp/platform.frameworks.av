@@ -259,13 +259,15 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
     *portId = AUDIO_PORT_HANDLE_NONE;
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized;
+    bool isBitPerfect;
 
     // TODO b/182392769: use attribution source util
     AttributionSourceState attributionSource;
     attributionSource.uid = 0;
     attributionSource.token = sp<BBinder>::make();
     if (mManager->getOutputForAttr(&attr, output, AUDIO_SESSION_NONE, &stream, attributionSource,
-            &config, &flags, selectedDeviceId, portId, {}, &outputType, &isSpatialized) != OK) {
+            &config, &flags, selectedDeviceId, portId, {}, &outputType, &isSpatialized,
+            &isBitPerfect) != OK) {
         return false;
     }
     if (*output == AUDIO_IO_HANDLE_NONE || *portId == AUDIO_PORT_HANDLE_NONE) {
@@ -544,10 +546,11 @@ AudioPolicyManagerFuzzerDynamicPolicy::~AudioPolicyManagerFuzzerDynamicPolicy() 
 status_t AudioPolicyManagerFuzzerDynamicPolicy::addPolicyMix(
     int mixType, int mixFlag, audio_devices_t deviceType, std::string mixAddress,
     const audio_config_t &audioConfig, const std::vector<PolicyMixTuple> &rules) {
-    Vector<AudioMixMatchCriterion> myMixMatchCriteria;
+    std::vector<AudioMixMatchCriterion> myMixMatchCriteria;
 
+    myMixMatchCriteria.reserve(rules.size());
     for (const auto &rule : rules) {
-        myMixMatchCriteria.add(
+        myMixMatchCriteria.push_back(
             AudioMixMatchCriterion(std::get<0>(rule), std::get<1>(rule), std::get<2>(rule)));
     }
 

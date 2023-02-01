@@ -414,8 +414,6 @@ private:
     std::map<std::string, std::vector<uint8_t> > mByteArrayProperties;
     std::map<std::string, std::vector<uint8_t> > mReleaseKeysMap;
     std::map<std::vector<uint8_t>, std::string> mPlaybackId;
-    std::map<std::vector<uint8_t>, SecurityLevel> mSecurityLevel
-        GUARDED_BY(mSecurityLevelLock);
     sp<IDrmPluginListener> mListener;
     sp<IDrmPluginListener_V1_2> mListenerV1_2;
     SessionLibrary *mSessionLibrary;
@@ -436,6 +434,8 @@ private:
     DeviceFiles mFileHandle;
     Mutex mSecureStopLock;
     Mutex mSecurityLevelLock;
+    std::map<std::vector<uint8_t>, SecurityLevel> mSecurityLevel
+        GUARDED_BY(mSecurityLevelLock);
 
     CLEARKEY_DISALLOW_COPY_AND_ASSIGN_AND_NEW(DrmPlugin);
 };

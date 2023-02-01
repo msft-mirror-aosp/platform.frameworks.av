@@ -1014,7 +1014,7 @@ void CCodec::configure(const sp<AMessage> &msg) {
             C2StoreFlexiblePixelFormatDescriptorsInfo *pixelFormatInfo = nullptr;
             int vendorSdkVersion = base::GetIntProperty(
                     "ro.vendor.build.version.sdk", android_get_device_api_level());
-            if (vendorSdkVersion >= __ANDROID_API_S__ && mClient->query(
+            if (mClient->query(
                         {},
                         {C2StoreFlexiblePixelFormatDescriptorsInfo::PARAM_TYPE},
                         C2_MAY_BLOCK,
@@ -1075,8 +1075,7 @@ void CCodec::configure(const sp<AMessage> &msg) {
             } else {
                 if ((config->mDomain & Config::IS_ENCODER) || !surface) {
                     if (vendorSdkVersion < __ANDROID_API_S__ &&
-                            (format == COLOR_FormatYUV420Flexible ||
-                             format == COLOR_FormatYUV420Planar ||
+                            (format == COLOR_FormatYUV420Planar ||
                              format == COLOR_FormatYUV420PackedPlanar ||
                              format == COLOR_FormatYUV420SemiPlanar ||
                              format == COLOR_FormatYUV420PackedSemiPlanar)) {
@@ -1869,18 +1868,14 @@ void CCodec::initiateStop() {
         }
         state->set(STOPPING);
     }
-    {
-        Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
-        const std::unique_ptr<Config> &config = *configLocked;
-        if (config->mPushBlankBuffersOnStop) {
-            mChannel->pushBlankBufferToOutputSurface();
-        }
-    }
     mChannel->reset();
-    (new AMessage(kWhatStop, this))->post();
+    bool pushBlankBuffer = mConfig.lock().get()->mPushBlankBuffersOnStop;
+    sp<AMessage> stopMessage(new AMessage(kWhatStop, this));
+    stopMessage->setInt32("pushBlankBuffer", pushBlankBuffer);
+    stopMessage->post();
 }
 
-void CCodec::stop() {
+void CCodec::stop(bool pushBlankBuffer) {
     std::shared_ptr<Codec2Client::Component> comp;
     {
         Mutexed<State>::Locked state(mState);
@@ -1899,6 +1894,7 @@ void CCodec::stop() {
         comp = state->comp;
     }
     status_t err = comp->stop();
+    mChannel->stopUseOutputSurface(pushBlankBuffer);
     if (err != C2_OK) {
         // TODO: convert err into status_t
         mCallback->onError(UNKNOWN_ERROR, ACTION_CODE_FATAL);
@@ -1963,21 +1959,16 @@ void CCodec::initiateRelease(bool sendCallback /* = true */) {
             config->mInputSurfaceDataspace = HAL_DATASPACE_UNKNOWN;
         }
     }
-    {
-        Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
-        const std::unique_ptr<Config> &config = *configLocked;
-        if (config->mPushBlankBuffersOnStop) {
-            mChannel->pushBlankBufferToOutputSurface();
-        }
-    }
 
     mChannel->reset();
+    bool pushBlankBuffer = mConfig.lock().get()->mPushBlankBuffersOnStop;
     // thiz holds strong ref to this while the thread is running.
     sp<CCodec> thiz(this);
-    std::thread([thiz, sendCallback] { thiz->release(sendCallback); }).detach();
+    std::thread([thiz, sendCallback, pushBlankBuffer]
+                { thiz->release(sendCallback, pushBlankBuffer); }).detach();
 }
 
-void CCodec::release(bool sendCallback) {
+void CCodec::release(bool sendCallback, bool pushBlankBuffer) {
     std::shared_ptr<Codec2Client::Component> comp;
     {
         Mutexed<State>::Locked state(mState);
@@ -1992,6 +1983,7 @@ void CCodec::release(bool sendCallback) {
         comp = state->comp;
     }
     comp->release();
+    mChannel->stopUseOutputSurface(pushBlankBuffer);
 
     {
         Mutexed<State>::Locked state(mState);
@@ -2005,6 +1997,7 @@ void CCodec::release(bool sendCallback) {
 }
 
 status_t CCodec::setSurface(const sp<Surface> &surface) {
+    bool pushBlankBuffer = false;
     {
         Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
         const std::unique_ptr<Config> &config = *configLocked;
@@ -2030,8 +2023,9 @@ status_t CCodec::setSurface(const sp<Surface> &surface) {
                 return err;
             }
         }
+        pushBlankBuffer = config->mPushBlankBuffersOnStop;
     }
-    return mChannel->setSurface(surface);
+    return mChannel->setSurface(surface, pushBlankBuffer);
 }
 
 void CCodec::signalFlush() {
@@ -2139,7 +2133,8 @@ void CCodec::signalResume() {
 
     std::map<size_t, sp<MediaCodecBuffer>> clientInputBuffers;
     status_t err = mChannel->prepareInitialInputBuffers(&clientInputBuffers);
-    if (err != OK) {
+    // FIXME(b/237656746)
+    if (err != OK && err != NO_MEMORY) {
         ALOGE("Resume request for Input Buffers failed");
         mCallback->onError(err, ACTION_CODE_FATAL);
         return;
@@ -2329,7 +2324,11 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
         case kWhatStop: {
             // C2Component::stop() should return within 500ms.
             setDeadline(now, 1500ms, "stop");
-            stop();
+            int32_t pushBlankBuffer;
+            if (!msg->findInt32("pushBlankBuffer", &pushBlankBuffer)) {
+                pushBlankBuffer = 0;
+            }
+            stop(static_cast<bool>(pushBlankBuffer));
             break;
         }
         case kWhatFlush: {

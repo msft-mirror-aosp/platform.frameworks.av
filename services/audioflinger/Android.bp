@@ -22,6 +22,11 @@ license {
 cc_library_shared {
     name: "libaudioflinger",
 
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_shared",
+        "latest_android_hardware_audio_core_sounddose_ndk_shared",
+    ],
+
     srcs: [
         "AudioFlinger.cpp",
         "AudioHwDevice.cpp",
@@ -39,7 +44,9 @@ cc_library_shared {
         "FastThread.cpp",
         "FastThreadDumpState.cpp",
         "FastThreadState.cpp",
+        "MelReporter.cpp",
         "NBAIO_Tee.cpp",
+        "PatchCommandThread.cpp",
         "PatchPanel.cpp",
         "PropertyUtils.cpp",
         "SpdifStreamOut.cpp",
@@ -55,12 +62,12 @@ cc_library_shared {
     ],
 
     shared_libs: [
-        "android.media.audio.common.types-V1-cpp",
         "audioflinger-aidl-cpp",
         "audioclient-types-aidl-cpp",
         "av-types-aidl-cpp",
         "effect-aidl-cpp",
         "libaudioclient_aidl_conversion",
+        "libaudioflinger_timing",
         "libaudiofoundation",
         "libaudiohal",
         "libaudioprocessing",
@@ -70,7 +77,9 @@ cc_library_shared {
         "libutils",
         "liblog",
         "libbinder",
+        "libbinder_ndk",
         "libaudioclient",
+        "libaudiomanager",
         "libmedialogservice",
         "libmediametrics",
         "libmediautils",
@@ -78,10 +87,10 @@ cc_library_shared {
         "libnblog",
         "libpermission",
         "libpowermanager",
-        "libmediautils",
         "libmemunreachable",
         "libmedia_helper",
         "libshmemcompat",
+        "libsounddose",
         "libvibrator",
         "packagemanager_aidl-cpp",
     ],
@@ -96,11 +105,13 @@ cc_library_shared {
         "libaaudio_headers",
         "libaudioclient_headers",
         "libaudiohal_headers",
+        "libaudioutils_headers",
         "libmedia_headers",
     ],
 
     export_shared_lib_headers: [
         "libpermission",
+        "android.hardware.audio.core.sounddose-V1-ndk",
     ],
 
     cflags: [
@@ -113,4 +124,9 @@ cc_library_shared {
         integer_overflow: true,
     },
 
+}
+
+cc_library_headers {
+    name: "libaudioflinger_headers",
+    export_include_dirs: ["."],
 }

@@ -83,8 +83,8 @@ AAudioServiceStreamBase::~AAudioServiceStreamBase() {
 }
 
 std::string AAudioServiceStreamBase::dumpHeader() {
-    return std::string(
-            "    T   Handle   UId   Port Run State Format Burst Chan Mask     Capacity");
+    return {"    T   Handle   UId   Port Run State Format Burst Chan Mask     Capacity"
+            " HwFormat HwChan HwRate"};
 }
 
 std::string AAudioServiceStreamBase::dump() const {
@@ -101,6 +101,9 @@ std::string AAudioServiceStreamBase::dump() const {
     result << std::setw(5) << getSamplesPerFrame();
     result << std::setw(8) << std::hex << getChannelMask() << std::dec;
     result << std::setw(9) << getBufferCapacity();
+    result << std::setw(9) << getHardwareFormat();
+    result << std::setw(7) << getHardwareSamplesPerFrame();
+    result << std::setw(7) << getHardwareSampleRate();
 
     return result.str();
 }
@@ -278,7 +281,7 @@ aaudio_result_t AAudioServiceStreamBase::start_l() {
     if (result != AAUDIO_OK) goto error;
 
     // This should happen at the end of the start.
-    sendServiceEvent(AAUDIO_SERVICE_EVENT_STARTED);
+    sendServiceEvent(AAUDIO_SERVICE_EVENT_STARTED, static_cast<int64_t>(mClientHandle));
     setState(AAUDIO_STREAM_STATE_STARTED);
 
     return result;
@@ -435,7 +438,15 @@ void AAudioServiceStreamBase::run() {
             }
         }
         if (isIdle_l() && AudioClock::getNanoseconds() >= standbyTime) {
-            standby_l();
+            aaudio_result_t result = standby_l();
+            if (result != AAUDIO_OK) {
+                // If standby failed because of the function is not implemented, there is no
+                // need to retry. Otherwise, retry standby later.
+                ALOGW("Failed to enter standby, error=%d", result);
+                standbyTime = result == AAUDIO_ERROR_UNIMPLEMENTED
+                        ? std::numeric_limits<int64_t>::max()
+                        : AudioClock::getNanoseconds() + IDLE_TIMEOUT_NANOS;
+            }
         }
 
         if (command != nullptr) {
@@ -465,8 +476,7 @@ void AAudioServiceStreamBase::run() {
                     disconnect_l();
                     break;
                 case REGISTER_AUDIO_THREAD: {
-                    RegisterAudioThreadParam *param =
-                            (RegisterAudioThreadParam *) command->parameter.get();
+                    auto param = (RegisterAudioThreadParam *) command->parameter.get();
                     command->result =
                             param == nullptr ? AAUDIO_ERROR_ILLEGAL_ARGUMENT
                                              : registerAudioThread_l(param->mOwnerPid,
@@ -475,21 +485,20 @@ void AAudioServiceStreamBase::run() {
                 }
                     break;
                 case UNREGISTER_AUDIO_THREAD: {
-                    UnregisterAudioThreadParam *param =
-                            (UnregisterAudioThreadParam *) command->parameter.get();
+                    auto param = (UnregisterAudioThreadParam *) command->parameter.get();
                     command->result =
                             param == nullptr ? AAUDIO_ERROR_ILLEGAL_ARGUMENT
                                              : unregisterAudioThread_l(param->mClientThreadId);
                 }
                     break;
                 case GET_DESCRIPTION: {
-                    GetDescriptionParam *param = (GetDescriptionParam *) command->parameter.get();
+                    auto param = (GetDescriptionParam *) command->parameter.get();
                     command->result = param == nullptr ? AAUDIO_ERROR_ILLEGAL_ARGUMENT
                                                         : getDescription_l(param->mParcelable);
                 }
                     break;
                 case EXIT_STANDBY: {
-                    ExitStandbyParam *param = (ExitStandbyParam *) command->parameter.get();
+                    auto param = (ExitStandbyParam *) command->parameter.get();
                     command->result = param == nullptr ? AAUDIO_ERROR_ILLEGAL_ARGUMENT
                                                        : exitStandby_l(param->mParcelable);
                     standbyTime = AudioClock::getNanoseconds() + IDLE_TIMEOUT_NANOS;

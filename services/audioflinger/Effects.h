@@ -280,8 +280,12 @@ public:
     static bool      isHapticGenerator(const effect_uuid_t* type);
     bool             isHapticGenerator() const;
 
-    status_t         setHapticIntensity(int id, int intensity);
+    status_t         setHapticIntensity(int id, os::HapticScale intensity);
     status_t         setVibratorInfo(const media::AudioVibratorInfo& vibratorInfo);
+
+    status_t         getConfigs(audio_config_base_t* inputCfg,
+                                audio_config_base_t* outputCfg,
+                                bool* isOutput) const;
 
     void             dump(int fd, const Vector<String16>& args);
 
@@ -302,6 +306,8 @@ private:
                 ? EFFECT_BUFFER_ACCESS_WRITE : EFFECT_BUFFER_ACCESS_ACCUMULATE;
     }
 
+    status_t setVolumeInternal(uint32_t *left, uint32_t *right, bool controller);
+
 
     effect_config_t     mConfig;    // input and output audio configuration
     sp<EffectHalInterface> mEffectInterface; // Effect module HAL
@@ -314,6 +320,7 @@ private:
     uint32_t mDisableWaitCnt;       // current process() calls count during disable period.
     bool     mOffloaded;            // effect is currently offloaded to the audio DSP
     bool     mAddedToHal;           // effect has been added to the audio HAL
+    bool     mIsOutput;             // direction of the AF thread
 
 #ifdef FLOAT_EFFECT_CHAIN
     bool    mSupportsFloat;         // effect supports float processing
@@ -370,6 +377,8 @@ public:
                                     int32_t* _aidl_return) override;
     android::binder::Status disconnect() override;
     android::binder::Status getCblk(media::SharedFileRegion* _aidl_return) override;
+    android::binder::Status getConfig(media::EffectConfig* _config,
+                                      int32_t* _aidl_return) override;
 
     sp<Client> client() const { return mClient; }
 
@@ -536,12 +545,15 @@ public:
     // Is this EffectChain compatible with the FAST audio flag.
     bool isFastCompatible() const;
 
+    // Is this EffectChain compatible with the bit-perfect audio flag.
+    bool isBitPerfectCompatible() const;
+
     // isCompatibleWithThread_l() must be called with thread->mLock held
     bool isCompatibleWithThread_l(const sp<ThreadBase>& thread) const;
 
     bool containsHapticGeneratingEffect_l();
 
-    void setHapticIntensity_l(int id, int intensity);
+    void setHapticIntensity_l(int id, os::HapticScale intensity);
 
     sp<EffectCallbackInterface> effectCallback() const { return mEffectCallback; }
     wp<ThreadBase> thread() const { return mEffectCallback->thread(); }

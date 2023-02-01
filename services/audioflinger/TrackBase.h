@@ -109,6 +109,8 @@ public:
 
     virtual bool        isSpatialized() const { return false; }
 
+    virtual bool        isBitPerfect() const { return false; }
+
 #ifdef TEE_SINK
            void         dumpTee(int fd, const std::string &reason) const {
                                 mTee.dump(fd, reason);
@@ -396,6 +398,8 @@ protected:
     int64_t             mLogStartTimeNs = 0;    // Monotonic time at start()
     int64_t             mLogStartFrames = 0;    // Timestamp frames at start()
     double              mLogLatencyMs = 0.;     // Track the last log latency
+
+    bool                mLogForceVolumeUpdate = true; // force volume update to TrackMetrics.
 
     TrackMetrics        mTrackMetrics;
 

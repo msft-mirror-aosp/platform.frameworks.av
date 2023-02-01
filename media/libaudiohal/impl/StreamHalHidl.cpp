@@ -46,9 +46,6 @@ using ReadCommand = ::android::hardware::audio::CORE_TYPES_CPP_VERSION::IStreamI
 using namespace ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION;
 using namespace ::android::hardware::audio::CORE_TYPES_CPP_VERSION;
 
-#define TIME_CHECK() auto TimeCheck = \
-       mediautils::makeTimeCheckStatsForClassMethod(getClassName(), __func__)
-
 StreamHalHidl::StreamHalHidl(std::string_view className, IStream *stream)
         : CoreConversionHelperHidl(className),
           mStream(stream),
@@ -441,7 +438,7 @@ status_t StreamOutHalHidl::selectPresentation(int presentationId, int programId)
 #endif
 
 status_t StreamOutHalHidl::write(const void *buffer, size_t bytes, size_t *written) {
-    TIME_CHECK();
+    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
     if (mStream == 0) return NO_INIT;
     *written = 0;
 
@@ -587,7 +584,7 @@ status_t StreamOutHalHidl::prepareForWriting(size_t bufferSize) {
 }
 
 status_t StreamOutHalHidl::getRenderPosition(uint32_t *dspFrames) {
-    TIME_CHECK();
+    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
     if (mStream == 0) return NO_INIT;
     Result retval;
     Return<void> ret = mStream->getRenderPosition(
@@ -668,7 +665,7 @@ status_t StreamOutHalHidl::flush() {
 }
 
 status_t StreamOutHalHidl::getPresentationPosition(uint64_t *frames, struct timespec *timestamp) {
-    TIME_CHECK();
+    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
     if (mStream == 0) return NO_INIT;
     if (mWriterClient == gettid() && mCommandMQ) {
         return callWriterThread(
@@ -1012,7 +1009,7 @@ status_t StreamInHalHidl::setGain(float gain) {
 }
 
 status_t StreamInHalHidl::read(void *buffer, size_t bytes, size_t *read) {
-    TIME_CHECK();
+    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
     if (mStream == 0) return NO_INIT;
     *read = 0;
 
@@ -1146,7 +1143,7 @@ status_t StreamInHalHidl::getInputFramesLost(uint32_t *framesLost) {
 }
 
 status_t StreamInHalHidl::getCapturePosition(int64_t *frames, int64_t *time) {
-    TIME_CHECK();
+    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
     if (mStream == 0) return NO_INIT;
     if (mReaderClient == gettid() && mCommandMQ) {
         ReadParameters params;

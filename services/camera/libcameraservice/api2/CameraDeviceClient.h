@@ -29,6 +29,7 @@
 #include "common/FrameProcessorBase.h"
 #include "common/Camera2ClientBase.h"
 #include "CompositeStream.h"
+#include "utils/CameraServiceProxyWrapper.h"
 #include "utils/SessionConfigurationUtils.h"
 
 using android::camera3::OutputStreamInfo;
@@ -58,7 +59,8 @@ protected:
             int sensorOrientation,
             int clientPid,
             uid_t clientUid,
-            int servicePid);
+            int servicePid,
+            bool overrideToPortrait);
 
     sp<hardware::camera2::ICameraDeviceCallbacks> mRemoteCallback;
 };
@@ -178,6 +180,7 @@ public:
 
     CameraDeviceClient(const sp<CameraService>& cameraService,
             const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
+            std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
             const String16& clientPackageName,
             bool clientPackageOverride,
             const std::optional<String16>& clientFeatureId,
@@ -187,13 +190,16 @@ public:
             int clientPid,
             uid_t clientUid,
             int servicePid,
-            bool overrideForPerfClass);
+            bool overrideForPerfClass,
+            bool overrideToPortrait);
     virtual ~CameraDeviceClient();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,
             const String8& monitorTags) override;
 
     virtual status_t      setRotateAndCropOverride(uint8_t rotateAndCrop) override;
+
+    virtual status_t      setAutoframingOverride(uint8_t autoframingValue) override;
 
     virtual bool          supportsCameraMute();
     virtual status_t      setCameraMute(bool enabled);
@@ -205,6 +211,11 @@ public:
     virtual status_t      startWatchingTags(const String8 &tags, int out);
     virtual status_t      stopWatchingTags(int out);
     virtual status_t      dumpWatchedEventsToVector(std::vector<std::string> &out);
+
+    virtual status_t      setCameraServiceWatchdog(bool enabled);
+
+    virtual void          setStreamUseCaseOverrides(const std::vector<int64_t>& useCaseOverrides);
+    virtual void          clearStreamUseCaseOverrides() override;
 
     /**
      * Device listener interface

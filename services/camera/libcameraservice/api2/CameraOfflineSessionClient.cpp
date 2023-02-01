@@ -44,7 +44,12 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
     String8 threadName;
     mFrameProcessor = new camera2::FrameProcessorBase(mOfflineSession);
     threadName = String8::format("Offline-%s-FrameProc", mCameraIdStr.string());
-    mFrameProcessor->run(threadName.string());
+    res = mFrameProcessor->run(threadName.string());
+    if (res != OK) {
+        ALOGE("%s: Unable to start frame processor thread: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+        return res;
+    }
 
     mFrameProcessor->registerListener(camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MIN_ID,
                                       camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MAX_ID,
@@ -66,9 +71,17 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
     return OK;
 }
 
+status_t CameraOfflineSessionClient::setCameraServiceWatchdog(bool) {
+    return OK;
+}
+
 status_t CameraOfflineSessionClient::setRotateAndCropOverride(uint8_t /*rotateAndCrop*/) {
     // Since we're not submitting more capture requests, changes to rotateAndCrop override
     // make no difference.
+    return OK;
+}
+
+status_t CameraOfflineSessionClient::setAutoframingOverride(uint8_t) {
     return OK;
 }
 
@@ -79,6 +92,13 @@ bool CameraOfflineSessionClient::supportsCameraMute() {
 
 status_t CameraOfflineSessionClient::setCameraMute(bool) {
     return INVALID_OPERATION;
+}
+
+void CameraOfflineSessionClient::setStreamUseCaseOverrides(
+        const std::vector<int64_t>& /*useCaseOverrides*/) {
+}
+
+void CameraOfflineSessionClient::clearStreamUseCaseOverrides() {
 }
 
 

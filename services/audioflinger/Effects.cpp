@@ -278,8 +278,8 @@ status_t AudioFlinger::EffectBase::updatePolicyState()
         if (!doRegister && !(registered && doEnable)) {
             return NO_ERROR;
         }
-        mPolicyLock.lock();
     }
+    mPolicyLock.lock();
     ALOGV("%s name %s id %d session %d doRegister %d registered %d doEnable %d enabled %d",
         __func__, mDescriptor.name, mId, mSessionId, doRegister, registered, doEnable, enabled);
     if (doRegister) {
@@ -569,7 +569,8 @@ AudioFlinger::EffectModule::EffectModule(const sp<AudioFlinger::EffectCallbackIn
       mMaxDisableWaitCnt(1), // set by configure(), should be >= 1
       mDisableWaitCnt(0),    // set by process() and updateState()
       mOffloaded(false),
-      mAddedToHal(false)
+      mAddedToHal(false),
+      mIsOutput(false)
 #ifdef FLOAT_EFFECT_CHAIN
       , mSupportsFloat(false)
 #endif
@@ -962,6 +963,7 @@ status_t AudioFlinger::EffectModule::configure()
     mConfig.outputCfg.mask = EFFECT_CONFIG_ALL;
     mConfig.inputCfg.buffer.frameCount = callback->frameCount();
     mConfig.outputCfg.buffer.frameCount = mConfig.inputCfg.buffer.frameCount;
+    mIsOutput = callback->isOutput();
 
     ALOGV("configure() %p chain %p buffer %p framecount %zu",
           this, callback->chain().promote().get(),
@@ -980,7 +982,7 @@ status_t AudioFlinger::EffectModule::configure()
 
 #ifdef MULTICHANNEL_EFFECT_CHAIN
     if (status != NO_ERROR &&
-            callback->isOutput() &&
+            mIsOutput &&
             (mConfig.inputCfg.channels != AUDIO_CHANNEL_OUT_STEREO
                     || mConfig.outputCfg.channels != AUDIO_CHANNEL_OUT_STEREO)) {
         // Older effects may require exact STEREO position mask.
@@ -1055,6 +1057,13 @@ status_t AudioFlinger::EffectModule::configure()
                     &buf32,
                     &size,
                     &cmdStatus);
+        }
+
+        if (isVolumeControl()) {
+            // Force initializing the volume as 0 for volume control effect for safer ramping
+            uint32_t left = 0;
+            uint32_t right = 0;
+            setVolumeInternal(&left, &right, true /*controller*/);
         }
     }
 
@@ -1429,23 +1438,24 @@ status_t AudioFlinger::EffectModule::setVolume(uint32_t *left, uint32_t *right, 
             ((mDescriptor.flags & EFFECT_FLAG_VOLUME_MASK) == EFFECT_FLAG_VOLUME_CTRL ||
              (mDescriptor.flags & EFFECT_FLAG_VOLUME_MASK) == EFFECT_FLAG_VOLUME_IND ||
              (mDescriptor.flags & EFFECT_FLAG_VOLUME_MASK) == EFFECT_FLAG_VOLUME_MONITOR)) {
-        uint32_t volume[2];
-        uint32_t *pVolume = NULL;
-        uint32_t size = sizeof(volume);
-        volume[0] = *left;
-        volume[1] = *right;
-        if (controller) {
-            pVolume = volume;
-        }
-        status = mEffectInterface->command(EFFECT_CMD_SET_VOLUME,
-                                           size,
-                                           volume,
-                                           &size,
-                                           pVolume);
-        if (controller && status == NO_ERROR && size == sizeof(volume)) {
-            *left = volume[0];
-            *right = volume[1];
-        }
+        status = setVolumeInternal(left, right, controller);
+    }
+    return status;
+}
+
+status_t AudioFlinger::EffectModule::setVolumeInternal(
+        uint32_t *left, uint32_t *right, bool controller) {
+    uint32_t volume[2] = {*left, *right};
+    uint32_t *pVolume = controller ? volume : nullptr;
+    uint32_t size = sizeof(volume);
+    status_t status = mEffectInterface->command(EFFECT_CMD_SET_VOLUME,
+                                                size,
+                                                volume,
+                                                &size,
+                                                pVolume);
+    if (controller && status == NO_ERROR && size == sizeof(volume)) {
+        *left = volume[0];
+        *right = volume[1];
     }
     return status;
 }
@@ -1587,7 +1597,7 @@ bool AudioFlinger::EffectModule::isHapticGenerator() const {
     return isHapticGenerator(&mDescriptor.type);
 }
 
-status_t AudioFlinger::EffectModule::setHapticIntensity(int id, int intensity)
+status_t AudioFlinger::EffectModule::setHapticIntensity(int id, os::HapticScale intensity)
 {
     if (mStatus != NO_ERROR) {
         return mStatus;
@@ -1603,7 +1613,7 @@ status_t AudioFlinger::EffectModule::setHapticIntensity(int id, int intensity)
     param->vsize = sizeof(int32_t) * 2;
     *(int32_t*)param->data = HG_PARAM_HAPTIC_INTENSITY;
     *((int32_t*)param->data + 1) = id;
-    *((int32_t*)param->data + 2) = intensity;
+    *((int32_t*)param->data + 2) = static_cast<int32_t>(intensity);
     std::vector<uint8_t> response;
     status_t status = command(EFFECT_CMD_SET_PARAM, request, sizeof(int32_t), &response);
     if (status == NO_ERROR) {
@@ -1641,6 +1651,22 @@ status_t AudioFlinger::EffectModule::setVibratorInfo(const media::AudioVibratorI
         status = *reinterpret_cast<const status_t*>(response.data());
     }
     return status;
+}
+
+status_t AudioFlinger::EffectModule::getConfigs(
+        audio_config_base_t* inputCfg, audio_config_base_t* outputCfg, bool* isOutput) const {
+    Mutex::Autolock _l(mLock);
+    if (mConfig.inputCfg.mask == 0 || mConfig.outputCfg.mask == 0) {
+        return NO_INIT;
+    }
+    inputCfg->sample_rate = mConfig.inputCfg.samplingRate;
+    inputCfg->channel_mask = static_cast<audio_channel_mask_t>(mConfig.inputCfg.channels);
+    inputCfg->format = static_cast<audio_format_t>(mConfig.inputCfg.format);
+    outputCfg->sample_rate = mConfig.outputCfg.samplingRate;
+    outputCfg->channel_mask = static_cast<audio_channel_mask_t>(mConfig.outputCfg.channels);
+    outputCfg->format = static_cast<audio_format_t>(mConfig.outputCfg.format);
+    *isOutput = mIsOutput;
+    return NO_ERROR;
 }
 
 static std::string dumpInOutBuffer(bool isInput, const sp<EffectBufferHalInterface> &buffer) {
@@ -1730,12 +1756,20 @@ AudioFlinger::EffectHandle::EffectHandle(const sp<EffectBase>& effect,
     mNotifyFramesProcessed(notifyFramesProcessed)
 {
     ALOGV("constructor %p client %p", this, client.get());
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 
     if (client == 0) {
         return;
     }
     int bufOffset = ((sizeof(effect_param_cblk_t) - 1) / sizeof(int) + 1) * sizeof(int);
-    mCblkMemory = client->heap()->allocate(EFFECT_PARAM_BUFFER_SIZE + bufOffset);
+    mCblkMemory = client->allocator().allocate(mediautils::NamedAllocRequest{
+            {static_cast<size_t>(EFFECT_PARAM_BUFFER_SIZE + bufOffset)},
+            std::string("Effect ID: ")
+                    .append(std::to_string(effect->id()))
+                    .append(" Session ID: ")
+                    .append(std::to_string(static_cast<int>(effect->sessionId())))
+                    .append(" \n")
+            });
     if (mCblkMemory == 0 ||
             (mCblk = static_cast<effect_param_cblk_t *>(mCblkMemory->unsecurePointer())) == NULL) {
         ALOGE("not enough memory for Effect size=%zu", EFFECT_PARAM_BUFFER_SIZE +
@@ -1760,6 +1794,7 @@ BINDER_METHOD_ENTRY(disable) \
 BINDER_METHOD_ENTRY(command) \
 BINDER_METHOD_ENTRY(disconnect) \
 BINDER_METHOD_ENTRY(getCblk) \
+BINDER_METHOD_ENTRY(getConfig) \
 
 // singleton for Binder Method Statistics for IEffect
 mediautils::MethodStatistics<int>& getIEffectStatistics() {
@@ -1790,7 +1825,7 @@ status_t AudioFlinger::EffectHandle::onTransact(
         } else {
             getIEffectStatistics().event(code, elapsedMs);
         }
-    }, 0 /* timeoutMs */);
+    }, {} /* timeoutDuration */, {} /* secondChanceDuration */, false /* crashOnTimeout */);
     return BnEffect::onTransact(code, data, reply, flags);
 }
 
@@ -1802,6 +1837,13 @@ status_t AudioFlinger::EffectHandle::initCheck()
 #define RETURN(code) \
   *_aidl_return = (code); \
   return Status::ok();
+
+#define VALUE_OR_RETURN_STATUS_AS_OUT(exp)              \
+    ({                                                  \
+        auto _tmp = (exp);                              \
+        if (!_tmp.ok()) { RETURN(_tmp.error()); }       \
+        std::move(_tmp.value());                        \
+    })
 
 Status AudioFlinger::EffectHandle::enable(int32_t* _aidl_return)
 {
@@ -1912,6 +1954,32 @@ void AudioFlinger::EffectHandle::disconnect(bool unpinIfLast)
 Status AudioFlinger::EffectHandle::getCblk(media::SharedFileRegion* _aidl_return) {
     LOG_ALWAYS_FATAL_IF(!convertIMemoryToSharedFileRegion(mCblkMemory, _aidl_return));
     return Status::ok();
+}
+
+Status AudioFlinger::EffectHandle::getConfig(
+        media::EffectConfig* _config, int32_t* _aidl_return) {
+    AutoMutex _l(mLock);
+    sp<EffectBase> effect = mEffect.promote();
+    if (effect == nullptr || mDisconnected) {
+        RETURN(DEAD_OBJECT);
+    }
+    sp<EffectModule> effectModule = effect->asEffectModule();
+    if (effectModule == nullptr) {
+        RETURN(INVALID_OPERATION);
+    }
+    audio_config_base_t inputCfg = AUDIO_CONFIG_BASE_INITIALIZER;
+    audio_config_base_t outputCfg = AUDIO_CONFIG_BASE_INITIALIZER;
+    bool isOutput;
+    status_t status = effectModule->getConfigs(&inputCfg, &outputCfg, &isOutput);
+    if (status == NO_ERROR) {
+        constexpr bool isInput = false; // effects always use 'OUT' channel masks.
+        _config->inputCfg = VALUE_OR_RETURN_STATUS_AS_OUT(
+                legacy2aidl_audio_config_base_t_AudioConfigBase(inputCfg, isInput));
+        _config->outputCfg = VALUE_OR_RETURN_STATUS_AS_OUT(
+                legacy2aidl_audio_config_base_t_AudioConfigBase(outputCfg, isInput));
+        _config->isOnInputStream = !isOutput;
+    }
+    RETURN(status);
 }
 
 Status AudioFlinger::EffectHandle::command(int32_t cmdCode,
@@ -2609,7 +2677,7 @@ bool AudioFlinger::EffectChain::containsHapticGeneratingEffect_l()
     return false;
 }
 
-void AudioFlinger::EffectChain::setHapticIntensity_l(int id, int intensity)
+void AudioFlinger::EffectChain::setHapticIntensity_l(int id, os::HapticScale intensity)
 {
     Mutex::Autolock _l(mLock);
     for (size_t i = 0; i < mEffects.size(); ++i) {
@@ -2893,6 +2961,9 @@ void AudioFlinger::EffectChain::checkOutputFlagCompatibility(audio_output_flags_
     if ((*flags & AUDIO_OUTPUT_FLAG_FAST) != 0 && !isFastCompatible()) {
         *flags = (audio_output_flags_t)(*flags & ~AUDIO_OUTPUT_FLAG_FAST);
     }
+    if ((*flags & AUDIO_OUTPUT_FLAG_BIT_PERFECT) != 0 && !isBitPerfectCompatible()) {
+        *flags = (audio_output_flags_t)(*flags & ~AUDIO_OUTPUT_FLAG_BIT_PERFECT);
+    }
 }
 
 void AudioFlinger::EffectChain::checkInputFlagCompatibility(audio_input_flags_t *flags) const
@@ -2919,6 +2990,18 @@ bool AudioFlinger::EffectChain::isRawCompatible() const
 
 bool AudioFlinger::EffectChain::isFastCompatible() const
 {
+    Mutex::Autolock _l(mLock);
+    for (const auto &effect : mEffects) {
+        if (effect->isProcessImplemented()
+                && effect->isImplementationSoftware()) {
+            return false;
+        }
+    }
+    // Allow effects without processing or hw accelerated effects.
+    return true;
+}
+
+bool AudioFlinger::EffectChain::isBitPerfectCompatible() const {
     Mutex::Autolock _l(mLock);
     for (const auto &effect : mEffects) {
         if (effect->isProcessImplemented()

@@ -44,7 +44,7 @@ class AAudioServiceEndpointMMAP
 public:
     explicit AAudioServiceEndpointMMAP(android::AAudioService &audioService);
 
-    virtual ~AAudioServiceEndpointMMAP() = default;
+    ~AAudioServiceEndpointMMAP() override = default;
 
     std::string dump() const override;
 
@@ -77,8 +77,7 @@ public:
     // -------------- Callback functions for MmapStreamCallback ---------------------
     void onTearDown(audio_port_handle_t portHandle) override;
 
-    void onVolumeChanged(audio_channel_mask_t channels,
-                         android::Vector<float> values) override;
+    void onVolumeChanged(float volume) override;
 
     void onRoutingChanged(audio_port_handle_t portHandle) override;
     // ------------------------------------------------------------------------------
@@ -93,7 +92,7 @@ public:
 
 private:
 
-    aaudio_result_t openWithFormat(audio_format_t audioFormat);
+    aaudio_result_t openWithFormat(audio_format_t audioFormat, audio_format_t* nextFormatToTry);
 
     aaudio_result_t createMmapBuffer(android::base::unique_fd* fileDescriptor);
 
