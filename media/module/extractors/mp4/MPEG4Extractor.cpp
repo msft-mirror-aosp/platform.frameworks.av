@@ -394,6 +394,15 @@ static const char *FourCC2MIME(uint32_t fourcc) {
             return MEDIA_MIMETYPE_AUDIO_MPEGH_MHA1;
         case FOURCC("mhm1"):
             return MEDIA_MIMETYPE_AUDIO_MPEGH_MHM1;
+        case FOURCC("dtsc"):
+            return MEDIA_MIMETYPE_AUDIO_DTS;
+        case FOURCC("dtse"):
+        case FOURCC("dtsh"):
+            return MEDIA_MIMETYPE_AUDIO_DTS_HD;
+        case FOURCC("dtsl"):
+            return MEDIA_MIMETYPE_AUDIO_DTS_HD_MA;
+        case FOURCC("dtsx"):
+            return MEDIA_MIMETYPE_AUDIO_DTS_UHD_P2;
         default:
             ALOGW("Unknown fourcc: %c%c%c%c",
                    (fourcc >> 24) & 0xff,
@@ -1804,6 +1813,11 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
         case 0x6D730055: // "ms U" mp3 audio
         case FOURCC("mha1"):
         case FOURCC("mhm1"):
+        case FOURCC("dtsc"):
+        case FOURCC("dtse"):
+        case FOURCC("dtsh"):
+        case FOURCC("dtsl"):
+        case FOURCC("dtsx"):
         {
             if (mIsQT && depth >= 1 && mPath[depth - 1] == FOURCC("wave")) {
 
@@ -5908,12 +5922,18 @@ status_t MPEG4Source::parseTrackFragmentRun(off64_t offset, off64_t size) {
             return -EINVAL;
         }
 
-        int32_t dataOffsetDelta;
-        if (!mDataSource->getUInt32(offset, (uint32_t*)&dataOffsetDelta)) {
+        uint32_t dataOffsetDelta;
+        if (!mDataSource->getUInt32(offset, &dataOffsetDelta)) {
             return ERROR_MALFORMED;
         }
 
-        dataOffset = mTrackFragmentHeaderInfo.mBaseDataOffset + dataOffsetDelta;
+        if (__builtin_add_overflow(
+                mTrackFragmentHeaderInfo.mBaseDataOffset, dataOffsetDelta, &dataOffset)) {
+            ALOGW("b/232242894 mBaseDataOffset(%" PRIu64 ") + dataOffsetDelta(%u) overflows uint64",
+                    mTrackFragmentHeaderInfo.mBaseDataOffset, dataOffsetDelta);
+            android_errorWriteLog(0x534e4554, "232242894");
+            return ERROR_MALFORMED;
+        }
 
         offset += 4;
         size -= 4;
@@ -6047,7 +6067,12 @@ status_t MPEG4Source::parseTrackFragmentRun(off64_t offset, off64_t size) {
             return NO_MEMORY;
         }
 
-        dataOffset += sampleSize;
+        if (__builtin_add_overflow(dataOffset, sampleSize, &dataOffset)) {
+            ALOGW("b/232242894 dataOffset(%" PRIu64 ") + sampleSize(%u) overflows uint64",
+                    dataOffset, sampleSize);
+            android_errorWriteLog(0x534e4554, "232242894");
+            return ERROR_MALFORMED;
+        }
     }
 
     mTrackFragmentHeaderInfo.mDataOffset = dataOffset;
@@ -6312,7 +6337,7 @@ media_status_t MPEG4Source::read(
 
         err = mBufferGroup->acquire_buffer(&mBuffer);
 
-        if (err != OK) {
+        if (err != OK || mBuffer == nullptr) {
             CHECK(mBuffer == NULL);
             return AMEDIA_ERROR_UNKNOWN;
         }
@@ -6712,7 +6737,7 @@ media_status_t MPEG4Source::fragmentedRead(
         const Sample *smpl = &mCurrentSamples[mCurrentSampleIndex];
         offset = smpl->offset;
         size = smpl->size;
-        cts = mCurrentTime + smpl->compositionOffset;
+        cts = (int64_t)mCurrentTime + (int64_t)smpl->compositionOffset;
 
         if (mElstInitialEmptyEditTicks > 0) {
             cts += mElstInitialEmptyEditTicks;

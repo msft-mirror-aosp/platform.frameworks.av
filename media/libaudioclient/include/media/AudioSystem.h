@@ -28,6 +28,7 @@
 #include <android/media/BnAudioPolicyServiceClient.h>
 #include <android/media/INativeSpatializerCallback.h>
 #include <android/media/ISpatializer.h>
+#include <android/media/MicrophoneInfoFw.h>
 #include <android/media/audio/common/AudioMMapPolicyInfo.h>
 #include <android/media/audio/common/AudioMMapPolicyType.h>
 #include <android/media/audio/common/AudioPort.h>
@@ -38,7 +39,6 @@
 #include <media/AudioProductStrategy.h>
 #include <media/AudioVolumeGroup.h>
 #include <media/AudioIoDescriptor.h>
-#include <media/MicrophoneInfo.h>
 #include <system/audio.h>
 #include <system/audio_effect.h>
 #include <system/audio_policy.h>
@@ -428,7 +428,7 @@ public:
     static float    getStreamVolumeDB(
             audio_stream_type_t stream, int index, audio_devices_t device);
 
-    static status_t getMicrophones(std::vector<media::MicrophoneInfo> *microphones);
+    static status_t getMicrophones(std::vector<media::MicrophoneInfoFw> *microphones);
 
     static status_t getHwOffloadFormatsSupportedForBluetoothMedia(
                                     audio_devices_t device, std::vector<audio_format_t> *formats);
@@ -575,6 +575,12 @@ public:
     static status_t getSupportedLatencyModes(audio_io_handle_t output,
             std::vector<audio_latency_mode_t>* modes);
 
+    static status_t setBluetoothVariableLatencyEnabled(bool enabled);
+
+    static status_t isBluetoothVariableLatencyEnabled(bool *enabled);
+
+    static status_t supportsBluetoothVariableLatency(bool *support);
+
     // A listener for capture state changes.
     class CaptureStateListener : public virtual RefBase {
     public:
@@ -705,7 +711,8 @@ private:
                 const media::AudioIoDescriptor& ioDesc) override;
 
         binder::Status onSupportedLatencyModesChanged(
-                int output, const std::vector<media::LatencyMode>& latencyModes) override;
+                int output,
+                const std::vector<media::audio::common::AudioLatencyMode>& latencyModes) override;
 
         status_t addAudioDeviceCallback(const wp<AudioDeviceCallback>& callback,
                                                audio_io_handle_t audioIo,

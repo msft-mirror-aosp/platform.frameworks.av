@@ -39,6 +39,7 @@
 #include <utils/Log.h>
 #include <utils/Trace.h>
 #include <binder/Parcel.h>
+#include <media/audiohal/AudioHalVersionInfo.h>
 #include <media/audiohal/DeviceHalInterface.h>
 #include <media/audiohal/DevicesFactoryHalInterface.h>
 #include <media/audiohal/EffectsFactoryHalInterface.h>
@@ -106,13 +107,15 @@
 
 namespace android {
 
-#define MAX_AAUDIO_PROPERTY_DEVICE_HAL_VERSION 7.1
-
 using ::android::base::StringPrintf;
 using media::IEffectClient;
 using media::audio::common::AudioMMapPolicyInfo;
 using media::audio::common::AudioMMapPolicyType;
 using android::content::AttributionSourceState;
+using android::detail::AudioHalVersionInfo;
+
+static const AudioHalVersionInfo kMaxAAudioPropertyDeviceHalVersion =
+        AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 1);
 
 static const char kDeadlockedString[] = "AudioFlinger may be deadlocked\n";
 static const char kHardwareLockedString[] = "Hardware lock is taken\n";
@@ -228,7 +231,9 @@ BINDER_METHOD_ENTRY(getAAudioHardwareBurstMinUsec) \
 BINDER_METHOD_ENTRY(setDeviceConnectedState) \
 BINDER_METHOD_ENTRY(setRequestedLatencyMode) \
 BINDER_METHOD_ENTRY(getSupportedLatencyModes) \
-
+BINDER_METHOD_ENTRY(setBluetoothVariableLatencyEnabled) \
+BINDER_METHOD_ENTRY(isBluetoothVariableLatencyEnabled) \
+BINDER_METHOD_ENTRY(supportsBluetoothVariableLatency) \
 
 // singleton for Binder Method Statistics for IAudioFlinger
 static auto& getIAudioFlingerStatistics() {
@@ -283,7 +288,6 @@ AttributionSourceState AudioFlinger::checkAttributionSourcePackage(
                 return opPackageLegacy == package; }) == packages.end()) {
             ALOGW("The package name(%s) provided does not correspond to the uid %d",
                     attributionSource.packageName.value_or("").c_str(), attributionSource.uid);
-            checkedAttributionSource.packageName = std::optional<std::string>();
         }
     }
     return checkedAttributionSource;
@@ -323,7 +327,8 @@ AudioFlinger::AudioFlinger()
       mGlobalEffectEnableTime(0),
       mPatchPanel(this),
       mDeviceEffectManager(this),
-      mSystemReady(false)
+      mSystemReady(false),
+      mBluetoothLatencyModesEnabled(true)
 {
     // Move the audio session unique ID generator start base as time passes to limit risk of
     // generating the same ID again after an audioserver restart.
@@ -399,7 +404,7 @@ void AudioFlinger::onFirstRef()
     mDevicesFactoryHalCallback = new DevicesFactoryHalCallbackImpl;
     mDevicesFactoryHal->setCallbackOnce(mDevicesFactoryHalCallback);
 
-    if (mDevicesFactoryHal->getHalVersion() <= MAX_AAUDIO_PROPERTY_DEVICE_HAL_VERSION) {
+    if (mDevicesFactoryHal->getHalVersion() <= kMaxAAudioPropertyDeviceHalVersion) {
         mAAudioBurstsPerBuffer = getAAudioMixerBurstCountFromSystemProperty();
         mAAudioHwBurstMinMicros = getAAudioHardwareBurstMinUsecFromSystemProperty();
     }
@@ -445,7 +450,7 @@ status_t AudioFlinger::getMmapPolicyInfos(
         *policyInfos = it->second;
         return NO_ERROR;
     }
-    if (mDevicesFactoryHal->getHalVersion() > MAX_AAUDIO_PROPERTY_DEVICE_HAL_VERSION) {
+    if (mDevicesFactoryHal->getHalVersion() > kMaxAAudioPropertyDeviceHalVersion) {
         AutoMutex lock(mHardwareLock);
         for (size_t i = 0; i < mAudioHwDevs.size(); ++i) {
             AudioHwDevice *dev = mAudioHwDevs.valueAt(i);
@@ -582,6 +587,33 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
     audio_io_handle_t io = AUDIO_IO_HANDLE_NONE;
     audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE;
     audio_attributes_t localAttr = *attr;
+
+    // TODO b/182392553: refactor or make clearer
+    pid_t clientPid =
+        VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_pid_t(client.attributionSource.pid));
+    bool updatePid = (clientPid == (pid_t)-1);
+    const uid_t callingUid = IPCThreadState::self()->getCallingUid();
+
+    AttributionSourceState adjAttributionSource = client.attributionSource;
+    if (!isAudioServerOrMediaServerOrSystemServerOrRootUid(callingUid)) {
+        uid_t clientUid =
+            VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_uid_t(client.attributionSource.uid));
+        ALOGW_IF(clientUid != callingUid,
+                "%s uid %d tried to pass itself off as %d",
+                __FUNCTION__, callingUid, clientUid);
+        adjAttributionSource.uid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(callingUid));
+        updatePid = true;
+    }
+    if (updatePid) {
+        const pid_t callingPid = IPCThreadState::self()->getCallingPid();
+        ALOGW_IF(clientPid != (pid_t)-1 && clientPid != callingPid,
+                 "%s uid %d pid %d tried to pass itself off as pid %d",
+                 __func__, callingUid, callingPid, clientPid);
+        adjAttributionSource.pid = VALUE_OR_RETURN_STATUS(legacy2aidl_pid_t_int32_t(callingPid));
+    }
+    adjAttributionSource = AudioFlinger::checkAttributionSourcePackage(
+            adjAttributionSource);
+
     if (direction == MmapStreamInterface::DIRECTION_OUTPUT) {
         audio_config_t fullConfig = AUDIO_CONFIG_INITIALIZER;
         fullConfig.sample_rate = config->sample_rate;
@@ -591,7 +623,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         bool isSpatialized;
         ret = AudioSystem::getOutputForAttr(&localAttr, &io,
                                             actualSessionId,
-                                            &streamType, client.attributionSource,
+                                            &streamType, adjAttributionSource,
                                             &fullConfig,
                                             (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ |
                                                     AUDIO_OUTPUT_FLAG_DIRECT),
@@ -602,7 +634,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         ret = AudioSystem::getInputForAttr(&localAttr, &io,
                                               RECORD_RIID_INVALID,
                                               actualSessionId,
-                                              client.attributionSource,
+                                              adjAttributionSource,
                                               config,
                                               AUDIO_INPUT_FLAG_MMAP_NOIRQ, deviceId, &portId);
     }
@@ -1051,7 +1083,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
     audio_attributes_t localAttr = input.attr;
 
     AttributionSourceState adjAttributionSource = input.clientInfo.attributionSource;
-    if (!isAudioServerOrMediaServerUid(callingUid)) {
+    if (!isAudioServerOrMediaServerOrSystemServerOrRootUid(callingUid)) {
         ALOGW_IF(clientUid != callingUid,
                 "%s uid %d tried to pass itself off as %d",
                 __FUNCTION__, callingUid, clientUid);
@@ -1067,6 +1099,8 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
         clientPid = callingPid;
         adjAttributionSource.pid = VALUE_OR_RETURN_STATUS(legacy2aidl_pid_t_int32_t(callingPid));
     }
+    adjAttributionSource = AudioFlinger::checkAttributionSourcePackage(
+            adjAttributionSource);
 
     audio_session_t sessionId = input.sessionId;
     if (sessionId == AUDIO_SESSION_ALLOCATE) {
@@ -1612,6 +1646,44 @@ status_t AudioFlinger::getSupportedLatencyModes(audio_io_handle_t output,
     return thread->getSupportedLatencyModes(modes);
 }
 
+status_t AudioFlinger::setBluetoothVariableLatencyEnabled(bool enabled) {
+    Mutex::Autolock _l(mLock);
+    status_t status = INVALID_OPERATION;
+    for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
+        // Success if at least one PlaybackThread supports Bluetooth latency modes
+        if (mPlaybackThreads.valueAt(i)->setBluetoothVariableLatencyEnabled(enabled) == NO_ERROR) {
+            status = NO_ERROR;
+        }
+    }
+    if (status == NO_ERROR) {
+        mBluetoothLatencyModesEnabled.store(enabled);
+    }
+    return status;
+}
+
+status_t AudioFlinger::isBluetoothVariableLatencyEnabled(bool *enabled) {
+    if (enabled == nullptr) {
+        return BAD_VALUE;
+    }
+    *enabled = mBluetoothLatencyModesEnabled.load();
+    return NO_ERROR;
+}
+
+status_t AudioFlinger::supportsBluetoothVariableLatency(bool* support) {
+    if (support == nullptr) {
+        return BAD_VALUE;
+    }
+    Mutex::Autolock _l(mLock);
+    *support = false;
+    for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
+        if (mAudioHwDevs.valueAt(i)->supportsBluetoothVariableLatency()) {
+             *support = true;
+             break;
+        }
+    }
+    return NO_ERROR;
+}
+
 status_t AudioFlinger::setStreamMute(audio_stream_type_t stream, bool muted)
 {
     // check calling permissions
@@ -2114,9 +2186,9 @@ void AudioFlinger::ioConfigChanged(audio_io_config_event_t event,
 void AudioFlinger::onSupportedLatencyModesChanged(
         audio_io_handle_t output, const std::vector<audio_latency_mode_t>& modes) {
     int32_t outputAidl = VALUE_OR_FATAL(legacy2aidl_audio_io_handle_t_int32_t(output));
-    std::vector<media::LatencyMode> modesAidl = VALUE_OR_FATAL(
-                convertContainer<std::vector<media::LatencyMode>>(modes,
-                        legacy2aidl_audio_latency_mode_t_LatencyMode));
+    std::vector<media::audio::common::AudioLatencyMode> modesAidl = VALUE_OR_FATAL(
+                convertContainer<std::vector<media::audio::common::AudioLatencyMode>>(
+                        modes, legacy2aidl_audio_latency_mode_t_AudioLatencyMode));
 
     Mutex::Autolock _l(mClientLock);
     size_t size = mNotificationClients.size();
@@ -2273,7 +2345,7 @@ status_t AudioFlinger::createRecord(const media::CreateRecordRequest& _input,
     const uid_t callingUid = IPCThreadState::self()->getCallingUid();
     const uid_t currentUid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(
            adjAttributionSource.uid));
-    if (!isAudioServerOrMediaServerUid(callingUid)) {
+    if (!isAudioServerOrMediaServerOrSystemServerOrRootUid(callingUid)) {
         ALOGW_IF(currentUid != callingUid,
                 "%s uid %d tried to pass itself off as %d",
                 __FUNCTION__, callingUid, currentUid);
@@ -2289,7 +2361,8 @@ status_t AudioFlinger::createRecord(const media::CreateRecordRequest& _input,
                  __func__, callingUid, callingPid, currentPid);
         adjAttributionSource.pid = VALUE_OR_RETURN_STATUS(legacy2aidl_pid_t_int32_t(callingPid));
     }
-
+    adjAttributionSource = AudioFlinger::checkAttributionSourcePackage(
+            adjAttributionSource);
     // we don't yet support anything other than linear PCM
     if (!audio_is_valid_format(input.config.format) || !audio_is_linear_pcm(input.config.format)) {
         ALOGE("createRecord() invalid format %#x", input.config.format);
@@ -2512,6 +2585,13 @@ audio_module_handle_t AudioFlinger::loadHwModule_l(const char *name)
         flags = static_cast<AudioHwDevice::Flags>(flags | AudioHwDevice::AHWD_IS_INSERT);
     }
 
+
+    if (bool supports = false;
+            dev->supportsBluetoothVariableLatency(&supports) == NO_ERROR && supports) {
+        flags = static_cast<AudioHwDevice::Flags>(flags |
+                AudioHwDevice::AHWD_SUPPORTS_BT_LATENCY_MODES);
+    }
+
     audio_module_handle_t handle = (audio_module_handle_t) nextUniqueId(AUDIO_UNIQUE_ID_USE_MODULE);
     AudioHwDevice *audioDevice = new AudioHwDevice(handle, name, dev, flags);
     if (strcmp(name, AUDIO_HARDWARE_MODULE_ID_PRIMARY) == 0) {
@@ -2521,7 +2601,7 @@ audio_module_handle_t AudioFlinger::loadHwModule_l(const char *name)
         mHardwareStatus = AUDIO_HW_IDLE;
     }
 
-    if (mDevicesFactoryHal->getHalVersion() > MAX_AAUDIO_PROPERTY_DEVICE_HAL_VERSION) {
+    if (mDevicesFactoryHal->getHalVersion() > kMaxAAudioPropertyDeviceHalVersion) {
         if (int32_t mixerBursts = dev->getAAudioMixerBurstCount();
             mixerBursts > 0 && mixerBursts > mAAudioBurstsPerBuffer) {
             mAAudioBurstsPerBuffer = mixerBursts;
@@ -2719,20 +2799,25 @@ status_t AudioFlinger::systemReady()
     return NO_ERROR;
 }
 
-status_t AudioFlinger::getMicrophones(std::vector<media::MicrophoneInfo> *microphones)
+status_t AudioFlinger::getMicrophones(std::vector<media::MicrophoneInfoFw> *microphones)
 {
     AutoMutex lock(mHardwareLock);
     status_t status = INVALID_OPERATION;
 
     for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
-        std::vector<media::MicrophoneInfo> mics;
+        std::vector<audio_microphone_characteristic_t> mics;
         AudioHwDevice *dev = mAudioHwDevs.valueAt(i);
         mHardwareStatus = AUDIO_HW_GET_MICROPHONES;
         status_t devStatus = dev->hwDevice()->getMicrophones(&mics);
         mHardwareStatus = AUDIO_HW_IDLE;
         if (devStatus == NO_ERROR) {
-            microphones->insert(microphones->begin(), mics.begin(), mics.end());
             // report success if at least one HW module supports the function.
+            std::transform(mics.begin(), mics.end(), std::back_inserter(*microphones), [](auto& mic)
+            {
+                auto microphone =
+                        legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(mic);
+                return microphone.ok() ? microphone.value() : media::MicrophoneInfoFw{};
+            });
             status = NO_ERROR;
         }
     }
@@ -2862,6 +2947,7 @@ sp<AudioFlinger::ThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t mo
             if (thread->isMsdDevice()) {
                 thread->setDownStreamPatch(&patch);
             }
+            thread->setBluetoothVariableLatencyEnabled(mBluetoothLatencyModesEnabled.load());
             return thread;
         }
     }
@@ -3914,7 +4000,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
     const uid_t callingUid = IPCThreadState::self()->getCallingUid();
     adjAttributionSource.uid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(callingUid));
     pid_t currentPid = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_pid_t(adjAttributionSource.pid));
-    if (currentPid == -1 || !isAudioServerOrMediaServerUid(callingUid)) {
+    if (currentPid == -1 || !isAudioServerOrMediaServerOrSystemServerOrRootUid(callingUid)) {
         const pid_t callingPid = IPCThreadState::self()->getCallingPid();
         ALOGW_IF(currentPid != -1 && currentPid != callingPid,
                  "%s uid %d pid %d tried to pass itself off as pid %d",
@@ -3922,6 +4008,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
         adjAttributionSource.pid = VALUE_OR_RETURN_STATUS(legacy2aidl_pid_t_int32_t(callingPid));
         currentPid = callingPid;
     }
+    adjAttributionSource = AudioFlinger::checkAttributionSourcePackage(adjAttributionSource);
 
     ALOGV("createEffect pid %d, effectClient %p, priority %d, sessionId %d, io %d, factory %p",
           adjAttributionSource.pid, effectClient.get(), priority, sessionId, io,
@@ -4557,7 +4644,10 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         case TransactionCode::SYSTEM_READY:
         case TransactionCode::SET_AUDIO_HAL_PIDS:
         case TransactionCode::SET_VIBRATOR_INFOS:
-        case TransactionCode::UPDATE_SECONDARY_OUTPUTS: {
+        case TransactionCode::UPDATE_SECONDARY_OUTPUTS:
+        case TransactionCode::SET_BLUETOOTH_VARIABLE_LATENCY_ENABLED:
+        case TransactionCode::IS_BLUETOOTH_VARIABLE_LATENCY_ENABLED:
+        case TransactionCode::SUPPORTS_BLUETOOTH_VARIABLE_LATENCY: {
             if (!isServiceUid(IPCThreadState::self()->getCallingUid())) {
                 ALOGW("%s: transaction %d received from PID %d unauthorized UID %d",
                       __func__, code, IPCThreadState::self()->getCallingPid(),
@@ -4610,7 +4700,9 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         } else {
             getIAudioFlingerStatistics().event(code, elapsedMs);
         }
-    });
+    }, mediautils::TimeCheck::kDefaultTimeoutDuration,
+    mediautils::TimeCheck::kDefaultSecondChanceDuration,
+    true /* crashOnTimeout */);
 
     // Make sure we connect to Audio Policy Service before calling into AudioFlinger:
     //  - AudioFlinger can call into Audio Policy Service with its global mutex held

@@ -269,6 +269,23 @@ static std::string patchSourcesToString(const struct audio_patch *patch)
     return ss.str();
 }
 
+static std::string toString(audio_latency_mode_t mode) {
+    // We convert to the AIDL type to print (eventually the legacy type will be removed).
+    const auto result = legacy2aidl_audio_latency_mode_t_AudioLatencyMode(mode);
+    return result.has_value() ? media::audio::common::toString(*result) : "UNKNOWN";
+}
+
+// Could be made a template, but other toString overloads for std::vector are confused.
+static std::string toString(const std::vector<audio_latency_mode_t>& elements) {
+    std::string s("{ ");
+    for (const auto& e : elements) {
+        s.append(toString(e));
+        s.append(" ");
+    }
+    s.append("}");
+    return s;
+}
+
 static pthread_once_t sFastTrackMultiplierOnce = PTHREAD_ONCE_INIT;
 
 static void sFastTrackMultiplierInit()
@@ -2046,7 +2063,8 @@ AudioFlinger::PlaybackThread::PlaybackThread(const sp<AudioFlinger>& audioFlinge
         mHwSupportsPause(false), mHwPaused(false), mFlushPending(false),
         mLeftVolFloat(-1.0), mRightVolFloat(-1.0),
         mDownStreamPatch{},
-        mIsTimestampAdvancing(kMinimumTimeBetweenTimestampChecksNs)
+        mIsTimestampAdvancing(kMinimumTimeBetweenTimestampChecksNs),
+        mBluetoothLatencyModesEnabled(true)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioOut_%X", id);
     mNBLogWriter = audioFlinger->newWriter_l(kLogSize, mThreadName);
@@ -2122,9 +2140,19 @@ void AudioFlinger::PlaybackThread::onFirstRef()
     if (!isStreamInitialized()) {
         ALOGE("The stream is not open yet"); // This should not happen.
     } else {
-        // setEventCallback will need a strong pointer as a parameter. Calling it
-        // here instead of constructor of PlaybackThread so that the onFirstRef
-        // callback would not be made on an incompletely constructed object.
+        // Callbacks take strong or weak pointers as a parameter.
+        // Since PlaybackThread passes itself as a callback handler, it can only
+        // be done outside of the constructor. Creating weak and especially strong
+        // pointers to a refcounted object in its own constructor is strongly
+        // discouraged, see comments in system/core/libutils/include/utils/RefBase.h.
+        // Even if a function takes a weak pointer, it is possible that it will
+        // need to convert it to a strong pointer down the line.
+        if (mOutput->flags & AUDIO_OUTPUT_FLAG_NON_BLOCKING &&
+                mOutput->stream->setCallback(this) == OK) {
+            mUseAsyncWrite = true;
+            mCallbackThread = new AudioFlinger::AsyncCallbackThread(this);
+        }
+
         if (mOutput->stream->setEventCallback(this) != OK) {
             ALOGD("Failed to add event callback");
         }
@@ -2891,7 +2919,14 @@ void AudioFlinger::PlaybackThread::onError()
 void AudioFlinger::PlaybackThread::onCodecFormatChanged(
         const std::basic_string<uint8_t>& metadataBs)
 {
-    std::thread([this, metadataBs]() {
+    wp<AudioFlinger::PlaybackThread> weakPointerThis = this;
+    std::thread([this, metadataBs, weakPointerThis]() {
+            sp<AudioFlinger::PlaybackThread> playbackThread = weakPointerThis.promote();
+            if (playbackThread == nullptr) {
+                ALOGW("PlaybackThread was destroyed, skip codec format change event");
+                return;
+            }
+
             audio_utils::metadata::Data metadata =
                     audio_utils::metadata::dataFromByteString(metadataBs);
             if (metadata.empty()) {
@@ -2980,13 +3015,6 @@ void AudioFlinger::PlaybackThread::readOutputParameters_l()
     if (hasMixer() && (mFrameCount & 15)) {
         ALOGW("HAL output buffer size is %zu frames but AudioMixer requires multiples of 16 frames",
                 mFrameCount);
-    }
-
-    if (mOutput->flags & AUDIO_OUTPUT_FLAG_NON_BLOCKING) {
-        if (mOutput->stream->setCallback(this) == OK) {
-            mUseAsyncWrite = true;
-            mCallbackThread = new AudioFlinger::AsyncCallbackThread(this);
-        }
     }
 
     mHwSupportsPause = false;
@@ -3152,10 +3180,7 @@ void AudioFlinger::PlaybackThread::updateMetadata_l()
     auto backInserter = std::back_inserter(metadata.tracks);
     for (const sp<Track> &track : mActiveTracks) {
         // No track is invalid as this is called after prepareTrack_l in the same critical section
-        // Do not forward metadata for PatchTrack with unspecified stream type
-        if (track->streamType() != AUDIO_STREAM_PATCH) {
-            track->copyMetadataTo(backInserter);
-        }
+        track->copyMetadataTo(backInserter);
     }
     sendMetadataToBackend_l(metadata);
 }
@@ -3513,9 +3538,9 @@ status_t AudioFlinger::PlaybackThread::addEffectChain_l(const sp<EffectChain>& c
             if (result != OK) return result;
 
 #ifdef FLOAT_EFFECT_CHAIN
-            buffer = halInBuffer->audioBuffer()->f32;
+            buffer = halInBuffer ? halInBuffer->audioBuffer()->f32 : buffer;
 #else
-            buffer = halInBuffer->audioBuffer()->s16;
+            buffer = halInBuffer ? halInBuffer->audioBuffer()->s16 : buffer;
 #endif
             ALOGV("addEffectChain_l() creating new input buffer %p session %d",
                     buffer, session);
@@ -3544,7 +3569,8 @@ status_t AudioFlinger::PlaybackThread::addEffectChain_l(const sp<EffectChain>& c
         halOutBuffer = halInBuffer;
         ALOGV("addEffectChain_l() %p on thread %p for session %d", chain.get(), this, session);
         if (!audio_is_global_session(session)) {
-            buffer = reinterpret_cast<effect_buffer_t*>(halInBuffer->externalData());
+            buffer = halInBuffer ? reinterpret_cast<effect_buffer_t*>(halInBuffer->externalData())
+                                 : buffer;
             // Only one effect chain can be present in direct output thread and it uses
             // the sink buffer as input
             if (mType != DIRECT) {
@@ -3556,9 +3582,9 @@ status_t AudioFlinger::PlaybackThread::addEffectChain_l(const sp<EffectChain>& c
                         &halInBuffer);
                 if (result != OK) return result;
 #ifdef FLOAT_EFFECT_CHAIN
-                buffer = halInBuffer->audioBuffer()->f32;
+                buffer = halInBuffer ? halInBuffer->audioBuffer()->f32 : buffer;
 #else
-                buffer = halInBuffer->audioBuffer()->s16;
+                buffer = halInBuffer ? halInBuffer->audioBuffer()->s16 : buffer;
 #endif
                 ALOGV("addEffectChain_l() creating new input buffer %p session %d",
                         buffer, session);
@@ -3985,19 +4011,24 @@ bool AudioFlinger::PlaybackThread::threadLoop()
                 void *buffer = mEffectBufferValid ? mEffectBuffer : mSinkBuffer;
                 audio_format_t format = mEffectBufferValid ? mEffectBufferFormat : mFormat;
 
-                // mono blend occurs for mixer threads only (not direct or offloaded)
-                // and is handled here if we're going directly to the sink.
-                if (requireMonoBlend() && !mEffectBufferValid) {
-                    mono_blend(mMixerBuffer, mMixerBufferFormat, mChannelCount, mNormalFrameCount,
-                               true /*limit*/);
-                }
+                // Apply mono blending and balancing if the effect buffer is not valid. Otherwise,
+                // do these processes after effects are applied.
+                if (!mEffectBufferValid) {
+                    // mono blend occurs for mixer threads only (not direct or offloaded)
+                    // and is handled here if we're going directly to the sink.
+                    if (requireMonoBlend()) {
+                        mono_blend(mMixerBuffer, mMixerBufferFormat, mChannelCount,
+                                mNormalFrameCount, true /*limit*/);
+                    }
 
-                if (!hasFastMixer()) {
-                    // Balance must take effect after mono conversion.
-                    // We do it here if there is no FastMixer.
-                    // mBalance detects zero balance within the class for speed (not needed here).
-                    mBalance.setBalance(mMasterBalance.load());
-                    mBalance.process((float *)mMixerBuffer, mNormalFrameCount);
+                    if (!hasFastMixer()) {
+                        // Balance must take effect after mono conversion.
+                        // We do it here if there is no FastMixer.
+                        // mBalance detects zero balance within the class for speed
+                        // (not needed here).
+                        mBalance.setBalance(mMasterBalance.load());
+                        mBalance.process((float *)mMixerBuffer, mNormalFrameCount);
+                    }
                 }
 
                 memcpy_by_audio_format(buffer, format, mMixerBuffer, mMixerBufferFormat,
@@ -4100,10 +4131,19 @@ bool AudioFlinger::PlaybackThread::threadLoop()
                                        mEffectBufferFormat,
                                        mNormalFrameCount * mHapticChannelCount);
             }
-
-            memcpy_by_audio_format(mSinkBuffer, mFormat, effectBuffer, mEffectBufferFormat,
-                    mNormalFrameCount * (mChannelCount + mHapticChannelCount));
-
+            const size_t framesToCopy = mNormalFrameCount * (mChannelCount + mHapticChannelCount);
+            if (mFormat == AUDIO_FORMAT_PCM_FLOAT &&
+                    mEffectBufferFormat == AUDIO_FORMAT_PCM_FLOAT) {
+                // Clamp PCM float values more than this distance from 0 to insulate
+                // a HAL which doesn't handle NaN correctly.
+                static constexpr float HAL_FLOAT_SAMPLE_LIMIT = 2.0f;
+                memcpy_to_float_from_float_with_clamping(static_cast<float*>(mSinkBuffer),
+                        static_cast<const float*>(effectBuffer),
+                        framesToCopy, HAL_FLOAT_SAMPLE_LIMIT /* absMax */);
+            } else {
+                memcpy_by_audio_format(mSinkBuffer, mFormat,
+                        effectBuffer, mEffectBufferFormat, framesToCopy);
+            }
             // The sample data is partially interleaved when haptic channels exist,
             // we need to adjust channels here.
             if (mHapticChannelCount > 0) {
@@ -7310,6 +7350,17 @@ void AudioFlinger::SpatializerThread::onFirstRef() {
     if (status != INVALID_OPERATION) {
         updateHalSupportedLatencyModes_l();
     }
+
+    const pid_t tid = getTid();
+    if (tid == -1) {
+        // Unusual: PlaybackThread::onFirstRef() should set the threadLoop running.
+        ALOGW("%s: Cannot update Spatializer mixer thread priority, not running", __func__);
+    } else {
+        const int priorityBoost = requestSpatializerPriority(getpid(), tid);
+        if (priorityBoost > 0) {
+            stream()->setHalThreadPriority(priorityBoost);
+        }
+    }
 }
 
 status_t AudioFlinger::SpatializerThread::createAudioPatch_l(const struct audio_patch *patch,
@@ -7322,10 +7373,13 @@ status_t AudioFlinger::SpatializerThread::createAudioPatch_l(const struct audio_
 
 void AudioFlinger::SpatializerThread::updateHalSupportedLatencyModes_l() {
     std::vector<audio_latency_mode_t> latencyModes;
-    if (mOutput->stream->getRecommendedLatencyModes(&latencyModes) != NO_ERROR) {
+    const status_t status = mOutput->stream->getRecommendedLatencyModes(&latencyModes);
+    if (status != NO_ERROR) {
         latencyModes.clear();
     }
     if (latencyModes != mSupportedLatencyModes) {
+        ALOGD("%s: thread(%d) status %d supported latency modes: %s",
+            __func__, mId, status, toString(latencyModes).c_str());
         mSupportedLatencyModes.swap(latencyModes);
         sendHalLatencyModesChangedEvent_l();
     }
@@ -7365,6 +7419,8 @@ void AudioFlinger::SpatializerThread::setHalLatencyMode_l() {
 
     if (latencyMode != mSetLatencyMode) {
         status_t status = mOutput->stream->setLatencyMode(latencyMode);
+        ALOGD("%s: thread(%d) setLatencyMode(%s) returned %d",
+                __func__, mId, toString(latencyMode).c_str(), status);
         if (status == NO_ERROR) {
             mSetLatencyMode = latencyMode;
         }
@@ -7387,6 +7443,15 @@ status_t AudioFlinger::SpatializerThread::getSupportedLatencyModes(
     }
     Mutex::Autolock _l(mLock);
     *modes = mSupportedLatencyModes;
+    return NO_ERROR;
+}
+
+status_t AudioFlinger::PlaybackThread::setBluetoothVariableLatencyEnabled(bool enabled) {
+    if (mOutput == nullptr || mOutput->audioHwDev == nullptr
+            || !mOutput->audioHwDev->supportsBluetoothVariableLatency()) {
+        return INVALID_OPERATION;
+    }
+    mBluetoothLatencyModesEnabled.store(enabled);
     return NO_ERROR;
 }
 
@@ -7446,6 +7511,8 @@ void AudioFlinger::SpatializerThread::onRecommendedLatencyModeChanged(
         std::vector<audio_latency_mode_t> modes) {
     Mutex::Autolock _l(mLock);
     if (modes != mSupportedLatencyModes) {
+        ALOGD("%s: thread(%d) supported latency modes: %s",
+            __func__, mId, toString(modes).c_str());
         mSupportedLatencyModes.swap(modes);
         sendHalLatencyModesChangedEvent_l();
     }
@@ -7522,10 +7589,11 @@ AudioFlinger::RecordThread::RecordThread(const sp<AudioFlinger>& audioFlinger,
         ALOGV("%p kUseFastCapture = Always, initFastCapture = true", this);
         break;
     case FastCapture_Static:
-        initFastCapture = (mFrameCount * 1000) / mSampleRate < kMinNormalCaptureBufferSizeMs;
-        ALOGV("%p kUseFastCapture = Static, (%lld * 1000) / %u vs %u, initFastCapture = %d",
-                this, (long long)mFrameCount, mSampleRate, kMinNormalCaptureBufferSizeMs,
-                initFastCapture);
+        initFastCapture = !mIsMsdDevice // Disable fast capture for MSD BUS devices.
+                && (mFrameCount * 1000) / mSampleRate < kMinNormalCaptureBufferSizeMs;
+        ALOGV("%p kUseFastCapture = Static, (%lld * 1000) / %u vs %u, initFastCapture = %d "
+                "mIsMsdDevice = %d", this, (long long)mFrameCount, mSampleRate,
+                kMinNormalCaptureBufferSizeMs, initFastCapture, mIsMsdDevice);
         break;
     // case FastCapture_Dynamic:
     }
@@ -8304,8 +8372,6 @@ sp<AudioFlinger::RecordThread::RecordTrack> AudioFlinger::RecordThread::createRe
     audio_input_flags_t inputFlags = mInput->flags;
     audio_input_flags_t requestedFlags = *flags;
     uint32_t sampleRate;
-    AttributionSourceState checkedAttributionSource = AudioFlinger::checkAttributionSourcePackage(
-            attributionSource);
 
     lStatus = initCheck();
     if (lStatus != NO_ERROR) {
@@ -8320,7 +8386,7 @@ sp<AudioFlinger::RecordThread::RecordTrack> AudioFlinger::RecordThread::createRe
     }
 
     if (maxSharedAudioHistoryMs != 0) {
-        if (!captureHotwordAllowed(checkedAttributionSource)) {
+        if (!captureHotwordAllowed(attributionSource)) {
             lStatus = PERMISSION_DENIED;
             goto Exit;
         }
@@ -8441,16 +8507,16 @@ sp<AudioFlinger::RecordThread::RecordTrack> AudioFlinger::RecordThread::createRe
         Mutex::Autolock _l(mLock);
         int32_t startFrames = -1;
         if (!mSharedAudioPackageName.empty()
-                && mSharedAudioPackageName == checkedAttributionSource.packageName
+                && mSharedAudioPackageName == attributionSource.packageName
                 && mSharedAudioSessionId == sessionId
-                && captureHotwordAllowed(checkedAttributionSource)) {
+                && captureHotwordAllowed(attributionSource)) {
             startFrames = mSharedAudioStartFrames;
         }
 
         track = new RecordTrack(this, client, attr, sampleRate,
                       format, channelMask, frameCount,
                       nullptr /* buffer */, (size_t)0 /* bufferSize */, sessionId, creatorPid,
-                      checkedAttributionSource, *flags, TrackBase::TYPE_DEFAULT, portId,
+                      attributionSource, *flags, TrackBase::TYPE_DEFAULT, portId,
                       startFrames);
 
         lStatus = track->initCheck();
@@ -8659,7 +8725,7 @@ status_t AudioFlinger::RecordThread::setSyncEvent(const sp<SyncEvent>& event __u
 }
 
 status_t AudioFlinger::RecordThread::getActiveMicrophones(
-        std::vector<media::MicrophoneInfo>* activeMicrophones)
+        std::vector<media::MicrophoneInfoFw>* activeMicrophones)
 {
     ALOGV("RecordThread::getActiveMicrophones");
     AutoMutex _l(mLock);

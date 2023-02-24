@@ -334,6 +334,7 @@ AudioFlinger::TrackHandle::TrackHandle(const sp<AudioFlinger::PlaybackThread::Tr
     : BnAudioTrack(),
       mTrack(track)
 {
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 }
 
 AudioFlinger::TrackHandle::~TrackHandle() {
@@ -438,7 +439,8 @@ Status AudioFlinger::TrackHandle::getVolumeShaperState(
     return Status::ok();
 }
 
-Status AudioFlinger::TrackHandle::getDualMonoMode(media::AudioDualMonoMode* _aidl_return)
+Status AudioFlinger::TrackHandle::getDualMonoMode(
+        media::audio::common::AudioDualMonoMode* _aidl_return)
 {
     audio_dual_mono_mode_t mode = AUDIO_DUAL_MONO_MODE_OFF;
     const status_t status = mTrack->getDualMonoMode(&mode)
@@ -451,7 +453,7 @@ Status AudioFlinger::TrackHandle::getDualMonoMode(media::AudioDualMonoMode* _aid
 }
 
 Status AudioFlinger::TrackHandle::setDualMonoMode(
-        media::AudioDualMonoMode mode)
+        media::audio::common::AudioDualMonoMode mode)
 {
     const auto localMonoMode = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioDualMonoMode_audio_dual_mono_mode_t(mode));
@@ -475,7 +477,7 @@ Status AudioFlinger::TrackHandle::setAudioDescriptionMixLevel(float leveldB)
 }
 
 Status AudioFlinger::TrackHandle::getPlaybackRateParameters(
-        media::AudioPlaybackRate* _aidl_return)
+        media::audio::common::AudioPlaybackRate* _aidl_return)
 {
     audio_playback_rate_t localPlaybackRate{};
     status_t status = mTrack->getPlaybackRateParameters(&localPlaybackRate)
@@ -488,7 +490,7 @@ Status AudioFlinger::TrackHandle::getPlaybackRateParameters(
 }
 
 Status AudioFlinger::TrackHandle::setPlaybackRateParameters(
-        const media::AudioPlaybackRate& playbackRate)
+        const media::audio::common::AudioPlaybackRate& playbackRate)
 {
     const audio_playback_rate_t localPlaybackRate = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPlaybackRate_audio_playback_rate_t(playbackRate));
@@ -529,10 +531,7 @@ AudioFlinger::PlaybackThread::OpPlayAudioMonitor::createIfNeeded(
             id, attr.flags);
         return nullptr;
     }
-
-    AttributionSourceState checkedAttributionSource = AudioFlinger::checkAttributionSourcePackage(
-            attributionSource);
-    return new OpPlayAudioMonitor(checkedAttributionSource, attr.usage, id);
+    return new OpPlayAudioMonitor(attributionSource, attr.usage, id);
 }
 
 AudioFlinger::PlaybackThread::OpPlayAudioMonitor::OpPlayAudioMonitor(
@@ -1094,12 +1093,22 @@ status_t AudioFlinger::PlaybackThread::Track::start(AudioSystem::sync_event_t ev
                     __func__, mId, (int)mThreadIoHandle);
         }
 
-        // states to reset position info for non-offloaded/direct tracks
-        if (!isOffloaded() && !isDirect()
+        PlaybackThread *playbackThread = (PlaybackThread *)thread.get();
+
+        // states to reset position info for pcm tracks
+        if (audio_is_linear_pcm(mFormat)
                 && (state == IDLE || state == STOPPED || state == FLUSHED)) {
             mFrameMap.reset();
+
+            if (!isFastTrack() && (isDirect() || isOffloaded())) {
+                // Start point of track -> sink frame map. If the HAL returns a
+                // frame position smaller than the first written frame in
+                // updateTrackFrameInfo, the timestamp can be interpolated
+                // instead of using a larger value.
+                mFrameMap.push(mAudioTrackServerProxy->framesReleased(),
+                               playbackThread->framesWritten());
+            }
         }
-        PlaybackThread *playbackThread = (PlaybackThread *)thread.get();
         if (isFastTrack()) {
             // refresh fast track underruns on start because that field is never cleared
             // by the fast mixer; furthermore, the same track can be recycled, i.e. start
@@ -1123,6 +1132,7 @@ status_t AudioFlinger::PlaybackThread::Track::start(AudioSystem::sync_event_t ev
                     .mPosition[ExtendedTimestamp::LOCATION_KERNEL];
             mLogLatencyMs = 0.;
         }
+        mLogForceVolumeUpdate = true;  // at least one volume logged for metrics when starting.
 
         if (status == NO_ERROR || status == ALREADY_EXISTS) {
             // for streaming tracks, remove the buffer read stop limit.
@@ -1394,12 +1404,21 @@ void AudioFlinger::PlaybackThread::Track::setFinalVolume(float volume)
     if (mFinalVolume != volume) { // Compare to an epsilon if too many meaningless updates
         mFinalVolume = volume;
         setMetadataHasChanged();
-        mTrackMetrics.logVolume(volume);
+        mLogForceVolumeUpdate = true;
+    }
+    if (mLogForceVolumeUpdate) {
+        mLogForceVolumeUpdate = false;
+        mTrackMetrics.logVolume(mFinalVolume);
     }
 }
 
 void AudioFlinger::PlaybackThread::Track::copyMetadataTo(MetadataInserter& backInserter) const
 {
+    // Do not forward metadata for PatchTrack with unspecified stream type
+    if (mStreamType == AUDIO_STREAM_PATCH) {
+        return;
+    }
+
     playback_track_metadata_v7_t metadata;
     metadata.base = {
             .usage = mAttr.usage,
@@ -2307,6 +2326,7 @@ AudioFlinger::RecordHandle::RecordHandle(
     : BnAudioRecord(),
     mRecordTrack(recordTrack)
 {
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 }
 
 AudioFlinger::RecordHandle::~RecordHandle() {
@@ -2332,15 +2352,9 @@ void AudioFlinger::RecordHandle::stop_nonvirtual() {
 }
 
 binder::Status AudioFlinger::RecordHandle::getActiveMicrophones(
-        std::vector<media::MicrophoneInfoData>* activeMicrophones) {
+        std::vector<media::MicrophoneInfoFw>* activeMicrophones) {
     ALOGV("%s()", __func__);
-    std::vector<media::MicrophoneInfo> mics;
-    status_t status = mRecordTrack->getActiveMicrophones(&mics);
-    activeMicrophones->resize(mics.size());
-    for (size_t i = 0; status == OK && i < mics.size(); ++i) {
-       status = mics[i].writeToParcelable(&activeMicrophones->at(i));
-    }
-    return binderStatusFromStatusT(status);
+    return binderStatusFromStatusT(mRecordTrack->getActiveMicrophones(activeMicrophones));
 }
 
 binder::Status AudioFlinger::RecordHandle::setPreferredMicrophoneDirection(
@@ -2660,7 +2674,7 @@ void AudioFlinger::RecordThread::RecordTrack::updateTrackFrameInfo(
 }
 
 status_t AudioFlinger::RecordThread::RecordTrack::getActiveMicrophones(
-        std::vector<media::MicrophoneInfo>* activeMicrophones)
+        std::vector<media::MicrophoneInfoFw>* activeMicrophones)
 {
     sp<ThreadBase> thread = mThread.promote();
     if (thread != 0) {

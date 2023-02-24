@@ -12,19 +12,35 @@ filegroup {
     srcs: [
         "CoreConversionHelperHidl.cpp",
         "DeviceHalHidl.cpp",
+        "DevicesFactoryHalEntry.cpp",
         "DevicesFactoryHalHidl.cpp",
         "StreamHalHidl.cpp",
     ],
 }
 
 filegroup {
-    name: "audio_effect_hal_client_sources",
+    name: "audio_effect_hidl_hal_client_sources",
     srcs: [
         "EffectBufferHalHidl.cpp",
         "EffectConversionHelperHidl.cpp",
         "EffectHalHidl.cpp",
         "EffectsFactoryHalHidl.cpp",
     ],
+}
+
+cc_defaults {
+    name: "libaudiohal_hidl_default",
+    shared_libs: [
+        "android.hardware.audio.common-util",
+        "android.hidl.allocator@1.0",
+        "android.hidl.memory@1.0",
+        "libaudiohal_deathhandler",
+        "libhidlbase",
+        "libhidlmemory",
+    ],
+    header_libs: [
+        "android.hardware.audio.common.util@all-versions",
+    ]
 }
 
 cc_defaults {
@@ -37,30 +53,27 @@ cc_defaults {
         "-fvisibility=hidden",
     ],
     shared_libs: [
-        "android.hardware.audio.common-util",
-        "android.hidl.allocator@1.0",
-        "android.hidl.memory@1.0",
+        "audioclient-types-aidl-cpp",
         "av-types-aidl-cpp",
+        "libaudioclient_aidl_conversion",
         "libaudiofoundation",
-        "libaudiohal_deathhandler",
         "libaudioutils",
         "libbase",
         "libbinder",
         "libcutils",
         "libfmq",
         "libhardware",
-        "libhidlbase",
-        "libhidlmemory",
         "liblog",
         "libmedia_helper",
         "libmediautils",
         "libutils",
-        "audioclient-types-aidl-cpp",
     ],
     header_libs: [
-        "android.hardware.audio.common.util@all-versions",
         "libaudioclient_headers",
         "libaudiohal_headers"
+    ],
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_export_shared",
     ],
 
     export_shared_lib_headers: [
@@ -70,11 +83,14 @@ cc_defaults {
 
 cc_library_shared {
     name: "libaudiohal@4.0",
-    defaults: ["libaudiohal_default"],
+    defaults: [
+        "libaudiohal_default",
+        "libaudiohal_hidl_default"
+    ],
     srcs: [
         ":audio_core_hal_client_sources",
-        ":audio_effect_hal_client_sources",
-        "EffectsFactoryHalHidlEntry.cpp",
+        ":audio_effect_hidl_hal_client_sources",
+        "EffectsFactoryHalEntry.cpp",
     ],
     shared_libs: [
         "android.hardware.audio.common@4.0",
@@ -93,11 +109,14 @@ cc_library_shared {
 
 cc_library_shared {
     name: "libaudiohal@5.0",
-    defaults: ["libaudiohal_default"],
+    defaults: [
+        "libaudiohal_default",
+        "libaudiohal_hidl_default"
+    ],
     srcs: [
         ":audio_core_hal_client_sources",
-        ":audio_effect_hal_client_sources",
-        "EffectsFactoryHalHidlEntry.cpp",
+        ":audio_effect_hidl_hal_client_sources",
+        "EffectsFactoryHalEntry.cpp",
     ],
     shared_libs: [
         "android.hardware.audio.common@5.0",
@@ -116,11 +135,14 @@ cc_library_shared {
 
 cc_library_shared {
     name: "libaudiohal@6.0",
-    defaults: ["libaudiohal_default"],
+    defaults: [
+        "libaudiohal_default",
+        "libaudiohal_hidl_default"
+    ],
     srcs: [
         ":audio_core_hal_client_sources",
-        ":audio_effect_hal_client_sources",
-        "EffectsFactoryHalHidlEntry.cpp",
+        ":audio_effect_hidl_hal_client_sources",
+        "EffectsFactoryHalEntry.cpp",
     ],
     shared_libs: [
         "android.hardware.audio.common@6.0",
@@ -139,9 +161,12 @@ cc_library_shared {
 
 cc_library_static {
     name: "libaudiohal.effect@7.0",
-    defaults: ["libaudiohal_default"],
+    defaults: [
+        "libaudiohal_default",
+        "libaudiohal_hidl_default"
+    ],
     srcs: [
-        ":audio_effect_hal_client_sources",
+        ":audio_effect_hidl_hal_client_sources",
     ],
     static_libs: [
         "android.hardware.audio.common@7.0",
@@ -158,10 +183,13 @@ cc_library_static {
 
 cc_library_shared {
     name: "libaudiohal@7.0",
-    defaults: ["libaudiohal_default"],
+    defaults: [
+        "libaudiohal_default",
+        "libaudiohal_hidl_default"
+    ],
     srcs: [
         ":audio_core_hal_client_sources",
-        "EffectsFactoryHalHidlEntry.cpp",
+        "EffectsFactoryHalEntry.cpp",
     ],
     static_libs: [
         "android.hardware.audio.common@7.0",
@@ -182,10 +210,13 @@ cc_library_shared {
 
 cc_library_shared {
     name: "libaudiohal@7.1",
-    defaults: ["libaudiohal_default"],
+    defaults: [
+        "libaudiohal_default",
+        "libaudiohal_hidl_default"
+    ],
     srcs: [
         ":audio_core_hal_client_sources",
-        "EffectsFactoryHalHidlEntry.cpp",
+        "EffectsFactoryHalEntry.cpp",
     ],
     static_libs: [
         "android.hardware.audio.common@7.0",
@@ -206,4 +237,61 @@ cc_library_shared {
         "-DCORE_TYPES_MINOR_VERSION=0",
         "-include common/all-versions/VersionMacro.h",
     ]
+}
+
+cc_library_shared {
+    name: "libaudiohal@aidl",
+    defaults: [
+        "libaudiohal_default",
+        "latest_android_hardware_audio_common_ndk_shared",
+        "latest_android_hardware_audio_core_ndk_shared",
+        "latest_android_hardware_audio_effect_ndk_shared",
+        "latest_android_media_audio_common_types_ndk_shared",
+    ],
+    srcs: [
+        "DeviceHalAidl.cpp",
+        "DevicesFactoryHalEntry.cpp",
+        "DevicesFactoryHalAidl.cpp",
+        "EffectConversionHelperAidl.cpp",
+        "EffectBufferHalAidl.cpp",
+        "EffectHalAidl.cpp",
+        "effectsAidlConversion/AidlConversionAec.cpp",
+        "effectsAidlConversion/AidlConversionAgc2.cpp",
+        "effectsAidlConversion/AidlConversionBassBoost.cpp",
+        "effectsAidlConversion/AidlConversionDownmix.cpp",
+        "effectsAidlConversion/AidlConversionDynamicsProcessing.cpp",
+        "effectsAidlConversion/AidlConversionEnvReverb.cpp",
+        "effectsAidlConversion/AidlConversionEq.cpp",
+        "effectsAidlConversion/AidlConversionHapticGenerator.cpp",
+        "effectsAidlConversion/AidlConversionLoudnessEnhancer.cpp",
+        "effectsAidlConversion/AidlConversionNoiseSuppression.cpp",
+        "effectsAidlConversion/AidlConversionPresetReverb.cpp",
+        "effectsAidlConversion/AidlConversionSpatializer.cpp",
+        "effectsAidlConversion/AidlConversionVendorExtension.cpp",
+        "effectsAidlConversion/AidlConversionVirtualizer.cpp",
+        "effectsAidlConversion/AidlConversionVisualizer.cpp",
+        "EffectsFactoryHalAidl.cpp",
+        "EffectsFactoryHalEntry.cpp",
+        "StreamHalAidl.cpp",
+    ],
+    static_libs: [
+        "android.hardware.common-V2-ndk",
+        "android.hardware.common.fmq-V1-ndk",
+    ],
+    shared_libs: [
+        "libbinder_ndk",
+        "libaudio_aidl_conversion_common_ndk",
+        "libaudio_aidl_conversion_effect_ndk",
+        "libaudioaidlcommon",
+    ],
+    header_libs: [
+        "libaudio_system_headers",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wthread-safety",
+        "-DBACKEND_NDK",
+    ],
 }

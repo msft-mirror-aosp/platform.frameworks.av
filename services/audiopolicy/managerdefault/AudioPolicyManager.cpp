@@ -68,16 +68,6 @@ using content::AttributionSourceState;
 // media / notification / system volume.
 constexpr float IN_CALL_EARPIECE_HEADROOM_DB = 3.f;
 
-// Compressed formats for MSD module, ordered from most preferred to least preferred.
-static const std::vector<audio_format_t> msdCompressedFormatsOrder = {{
-        AUDIO_FORMAT_IEC60958, AUDIO_FORMAT_MAT_2_1, AUDIO_FORMAT_MAT_2_0, AUDIO_FORMAT_E_AC3,
-        AUDIO_FORMAT_AC3, AUDIO_FORMAT_PCM_16_BIT }};
-// Channel masks for MSD module, 3D > 2D > 1D ordering (most preferred to least preferred).
-static const std::vector<audio_channel_mask_t> msdSurroundChannelMasksOrder = {{
-        AUDIO_CHANNEL_OUT_3POINT1POINT2, AUDIO_CHANNEL_OUT_3POINT0POINT2,
-        AUDIO_CHANNEL_OUT_2POINT1POINT2, AUDIO_CHANNEL_OUT_2POINT0POINT2,
-        AUDIO_CHANNEL_OUT_5POINT1, AUDIO_CHANNEL_OUT_STEREO }};
-
 template <typename T>
 bool operator== (const SortedVector<T> &left, const SortedVector<T> &right)
 {
@@ -114,7 +104,7 @@ status_t AudioPolicyManager::setDeviceConnectionState(audio_devices_t device,
                                                       const char* device_address,
                                                       const char* device_name,
                                                       audio_format_t encodedFormat) {
-    media::AudioPort aidlPort;
+    media::AudioPortFw aidlPort;
     if (status_t status = deviceToAudioPort(device, device_address, device_name, &aidlPort);
         status == OK) {
         return setDeviceConnectionState(state, aidlPort.hal, encodedFormat);
@@ -172,7 +162,7 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(audio_devices_t deviceT
                                                          const char* device_address,
                                                          const char* device_name,
                                                          audio_format_t encodedFormat) {
-    media::AudioPort aidlPort;
+    media::AudioPortFw aidlPort;
     if (status_t status = deviceToAudioPort(deviceType, device_address, device_name, &aidlPort);
         status == OK) {
         return setDeviceConnectionStateInt(state, aidlPort.hal, encodedFormat);
@@ -454,7 +444,7 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
 status_t AudioPolicyManager::deviceToAudioPort(audio_devices_t device, const char* device_address,
                                                const char* device_name,
-                                               media::AudioPort* aidlPort) {
+                                               media::AudioPortFw* aidlPort) {
     DeviceDescriptorBase devDescr(device, device_address);
     devDescr.setName(device_name);
     return devDescr.writeToParcelable(aidlPort);
@@ -606,7 +596,10 @@ status_t AudioPolicyManager::getHwOffloadFormatsSupportedForBluetoothMedia(
         audioDeviceSet = getAudioDeviceOutAllA2dpSet();
         break;
     case AUDIO_DEVICE_OUT_BLE_HEADSET:
-        audioDeviceSet = getAudioDeviceOutAllBleSet();
+        audioDeviceSet = getAudioDeviceOutLeAudioUnicastSet();
+        break;
+    case AUDIO_DEVICE_OUT_BLE_BROADCAST:
+        audioDeviceSet = getAudioDeviceOutLeAudioBroadcastSet();
         break;
     default:
         ALOGE("%s() device type 0x%08x not supported", __func__, device);
@@ -1037,7 +1030,7 @@ sp<IOProfile> AudioPolicyManager::searchCompatibleProfileHwModules (
 
              // when searching for direct outputs, if several profiles are compatible, give priority
              // to one with offload capability
-             if (profile != 0 && 
+             if (profile != 0 &&
                  ((curProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) == 0)) {
                 continue;
              }
@@ -1644,10 +1637,28 @@ status_t AudioPolicyManager::getBestMsdConfig(bool hwAvSync,
         const AudioProfileVector &sourceProfiles, const AudioProfileVector &sinkProfiles,
         audio_port_config *sourceConfig, audio_port_config *sinkConfig) const
 {
+    // Compressed formats for MSD module, ordered from most preferred to least preferred.
+    static const std::vector<audio_format_t> formatsOrder = {{
+            AUDIO_FORMAT_IEC60958, AUDIO_FORMAT_MAT_2_1, AUDIO_FORMAT_MAT_2_0, AUDIO_FORMAT_E_AC3,
+            AUDIO_FORMAT_AC3, AUDIO_FORMAT_PCM_16_BIT }};
+    static const std::vector<audio_channel_mask_t> channelMasksOrder = [](){
+        // Channel position masks for MSD module, 3D > 2D > 1D ordering (most preferred to least
+        // preferred).
+        std::vector<audio_channel_mask_t> masks = {{
+            AUDIO_CHANNEL_OUT_3POINT1POINT2, AUDIO_CHANNEL_OUT_3POINT0POINT2,
+            AUDIO_CHANNEL_OUT_2POINT1POINT2, AUDIO_CHANNEL_OUT_2POINT0POINT2,
+            AUDIO_CHANNEL_OUT_5POINT1, AUDIO_CHANNEL_OUT_STEREO }};
+        // insert index masks (higher counts most preferred) as preferred over position masks
+        for (int i = 1; i <= AUDIO_CHANNEL_COUNT_MAX; i++) {
+            masks.insert(
+                    masks.begin(), audio_channel_mask_for_index_assignment_from_count(i));
+        }
+        return masks;
+    }();
+
     struct audio_config_base bestSinkConfig;
-    status_t result = findBestMatchingOutputConfig(sourceProfiles, sinkProfiles,
-            msdCompressedFormatsOrder, msdSurroundChannelMasksOrder,
-            true /*preferHigherSamplingRates*/, bestSinkConfig);
+    status_t result = findBestMatchingOutputConfig(sourceProfiles, sinkProfiles, formatsOrder,
+            channelMasksOrder, true /*preferHigherSamplingRates*/, bestSinkConfig);
     if (result != NO_ERROR) {
         ALOGD("%s() no matching config found for sink, hwAvSync: %d",
                 __func__, hwAvSync);
@@ -1669,7 +1680,10 @@ status_t AudioPolicyManager::getBestMsdConfig(bool hwAvSync,
     }
     sourceConfig->sample_rate = bestSinkConfig.sample_rate;
     // Specify exact channel mask to prevent guessing by bit count in PatchPanel.
-    sourceConfig->channel_mask = audio_channel_mask_out_to_in(bestSinkConfig.channel_mask);
+    sourceConfig->channel_mask =
+            audio_channel_mask_get_representation(bestSinkConfig.channel_mask)
+            == AUDIO_CHANNEL_REPRESENTATION_INDEX ?
+            bestSinkConfig.channel_mask : audio_channel_mask_out_to_in(bestSinkConfig.channel_mask);
     sourceConfig->format = bestSinkConfig.format;
     // Copy input stream directly without any processing (e.g. resampling).
     sourceConfig->flags.input = static_cast<audio_input_flags_t>(
@@ -1884,7 +1898,8 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
     //    (see b/200293124, the incorrect selection of AUDIO_OUTPUT_FLAG_VOIP_RX).
     // 3: the output supporting the exact channel mask
     // 4: the output with a higher channel count than requested
-    // 5: the output with a higher sampling rate than requested
+    // 5: the output with the highest sampling rate if the requested sample rate is
+    //    greater than default sampling rate
     // 6: the output with the highest number of requested performance flags
     // 7: the output with the bit depth the closest to the requested one
     // 8: the primary output
@@ -1944,8 +1959,7 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         }
 
         // sampling rate match
-        if (samplingRate > SAMPLE_RATE_HZ_DEFAULT &&
-                samplingRate <= outputDesc->getSamplingRate()) {
+        if (samplingRate > SAMPLE_RATE_HZ_DEFAULT) {
             currentMatchCriteria[4] = outputDesc->getSamplingRate();
         }
 
@@ -4100,7 +4114,6 @@ status_t AudioPolicyManager::getDirectProfilesForAttributes(const audio_attribut
     if (mEffects.isNonOffloadableEffectEnabled()) {
         return OK;
     }
-
     AudioDeviceTypeAddrVector devices;
     status_t status = getDevicesForAttributes(*attr, &devices, false /* forVolume */);
     if (status != OK) {
@@ -5604,6 +5617,17 @@ status_t AudioPolicyManager::initialize() {
         return status;
     }
 
+    // If microphones address is empty, set it according to device type
+    for (size_t i = 0; i < mInputDevicesAll.size(); i++) {
+        if (mInputDevicesAll[i]->address().empty()) {
+            if (mInputDevicesAll[i]->type() == AUDIO_DEVICE_IN_BUILTIN_MIC) {
+                mInputDevicesAll[i]->setAddress(AUDIO_BOTTOM_MICROPHONE_ADDRESS);
+            } else if (mInputDevicesAll[i]->type() == AUDIO_DEVICE_IN_BACK_MIC) {
+                mInputDevicesAll[i]->setAddress(AUDIO_BACK_MICROPHONE_ADDRESS);
+            }
+        }
+    }
+
     mEngine->updateDeviceSelectionCache();
     mCommunnicationStrategy = mEngine->getProductStrategyForAttributes(
         mEngine->getAttributesForStreamType(AUDIO_STREAM_VOICE_CALL));
@@ -5618,17 +5642,6 @@ status_t AudioPolicyManager::initialize() {
                  mDefaultOutputDevice->toString().c_str());
         status = NO_INIT;
     }
-    // If microphones address is empty, set it according to device type
-    for (size_t i = 0; i < mAvailableInputDevices.size(); i++) {
-        if (mAvailableInputDevices[i]->address().empty()) {
-            if (mAvailableInputDevices[i]->type() == AUDIO_DEVICE_IN_BUILTIN_MIC) {
-                mAvailableInputDevices[i]->setAddress(AUDIO_BOTTOM_MICROPHONE_ADDRESS);
-            } else if (mAvailableInputDevices[i]->type() == AUDIO_DEVICE_IN_BACK_MIC) {
-                mAvailableInputDevices[i]->setAddress(AUDIO_BACK_MICROPHONE_ADDRESS);
-            }
-        }
-    }
-
     ALOGW_IF(mPrimaryOutput == nullptr, "The policy configuration does not declare a primary output");
 
     // Silence ALOGV statements

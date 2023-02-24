@@ -34,6 +34,7 @@
 #include <media/stagefright/foundation/AMessage.h>
 #include <media/MediaMetricsItem.h>
 #include <media/ShmemCompat.h>
+#include <mediautils/SchedulingPolicyService.h>
 #include <mediautils/ServiceUtilities.h>
 #include <utils/Thread.h>
 
@@ -111,6 +112,14 @@ public:
     };
 
     void onMessageReceived(const sp<AMessage> &msg) override {
+        // No ALooper method to get the tid so update
+        // Spatializer priority on the first message received.
+        std::call_once(mPrioritySetFlag, [](){
+            const pid_t pid = getpid();
+            const pid_t tid = gettid();
+            (void)requestSpatializerPriority(pid, tid);
+        });
+
         sp<Spatializer> spatializer = mSpatializer.promote();
         if (spatializer == nullptr) {
             ALOGW("%s: Cannot promote spatializer", __func__);
@@ -163,6 +172,7 @@ public:
     }
 private:
     wp<Spatializer> mSpatializer;
+    std::once_flag mPrioritySetFlag;
 };
 
 const std::vector<const char *> Spatializer::sHeadPoseKeys = {
@@ -255,6 +265,7 @@ Spatializer::Spatializer(effect_descriptor_t engineDescriptor, SpatializerPolicy
     : mEngineDescriptor(engineDescriptor),
       mPolicyCallback(callback) {
     ALOGV("%s", __func__);
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 }
 
 void Spatializer::onFirstRef() {
@@ -263,7 +274,7 @@ void Spatializer::onFirstRef() {
     mLooper->start(
             /*runOnCallingThread*/false,
             /*canCallJava*/       false,
-            PRIORITY_AUDIO);
+            PRIORITY_URGENT_AUDIO);
 
     mHandler = new EngineCallbackHandler(this);
     mLooper->registerHandler(mHandler);
@@ -963,7 +974,10 @@ void Spatializer::checkSensorsState_l() {
         }
     }
     if (mOutput != AUDIO_IO_HANDLE_NONE && supportsSetLatencyMode) {
-        AudioSystem::setRequestedLatencyMode(mOutput, requestedLatencyMode);
+        const status_t status =
+                AudioSystem::setRequestedLatencyMode(mOutput, requestedLatencyMode);
+        ALOGD("%s: setRequestedLatencyMode for output thread(%d) to %s returned %d",
+                __func__, mOutput, toString(requestedLatencyMode).c_str(), status);
     }
 }
 

@@ -42,6 +42,7 @@ using android::base::StringAppendF;
 
 // Identifier to use for our event queue on the loop.
 // The number 19 is arbitrary, only useful if using multiple objects on the same looper.
+// Note: Instead of a fixed number, the SensorEventQueue's fd could be used instead.
 constexpr int kIdent = 19;
 
 static inline Looper* ALooper_to_Looper(ALooper* alooper) {
@@ -60,7 +61,8 @@ class EventQueueGuard {
     EventQueueGuard(const sp<SensorEventQueue>& queue, Looper* looper) : mQueue(queue) {
         mQueue->looper = Looper_to_ALooper(looper);
         mQueue->requestAdditionalInfo = false;
-        looper->addFd(mQueue->getFd(), kIdent, ALOOPER_EVENT_INPUT, nullptr, nullptr);
+        looper->addFd(mQueue->getFd(), kIdent, ALOOPER_EVENT_INPUT,
+                nullptr /* callback */, nullptr /* data */);
     }
 
     ~EventQueueGuard() {
@@ -75,7 +77,7 @@ class EventQueueGuard {
     [[nodiscard]] SensorEventQueue* get() const { return mQueue.get(); }
 
   private:
-    sp<SensorEventQueue> mQueue;
+    const sp<SensorEventQueue> mQueue;
 };
 
 /**
@@ -95,10 +97,7 @@ class SensorEnableGuard {
         }
     }
 
-    SensorEnableGuard(const SensorEnableGuard&) = delete;
-    SensorEnableGuard& operator=(const SensorEnableGuard&) = delete;
-
-    // Enable moving.
+    // Enable move and delete default copy-ctor/copy-assignment.
     SensorEnableGuard(SensorEnableGuard&& other) : mQueue(other.mQueue), mSensor(other.mSensor) {
         other.mSensor = SensorPoseProvider::INVALID_HANDLE;
     }
@@ -122,6 +121,7 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
     ~SensorPoseProviderImpl() override {
         // Disable all active sensors.
         mEnabledSensors.clear();
+        mQuit = true;
         mLooper->wake();
         mThread.join();
     }
@@ -130,7 +130,7 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
         // Figure out the sensor's data format.
         DataFormat format = getSensorFormat(sensor);
         if (format == DataFormat::kUnknown) {
-            ALOGE("Unknown format for sensor %" PRId32, sensor);
+            ALOGE("%s: Unknown format for sensor %" PRId32, __func__, sensor);
             return false;
         }
 
@@ -144,17 +144,19 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
 
         // Enable the sensor.
         if (mQueue->enableSensor(sensor, samplingPeriod.count(), 0, 0)) {
-            ALOGE("Failed to enable sensor");
+            ALOGE("%s: Failed to enable sensor %" PRId32, __func__, sensor);
             std::lock_guard lock(mMutex);
             mEnabledSensorsExtra.erase(sensor);
             return false;
         }
 
-        mEnabledSensors.emplace(sensor, SensorEnableGuard(mQueue.get(), sensor));
+        mEnabledSensors.emplace(sensor, SensorEnableGuard(mQueue, sensor));
+        ALOGD("%s: Sensor %" PRId32 " started", __func__, sensor);
         return true;
     }
 
     void stopSensor(int handle) override {
+        ALOGD("%s: Sensor %" PRId32 " stopped", __func__, handle);
         mEnabledSensors.erase(handle);
         std::lock_guard lock(mMutex);
         mEnabledSensorsExtra.erase(handle);
@@ -217,13 +219,14 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
         std::optional<int32_t> discontinuityCount;
     };
 
+    bool mQuit = false;
     sp<Looper> mLooper;
     Listener* const mListener;
     SensorManager* const mSensorManager;
     std::timed_mutex mMutex;
+    sp<SensorEventQueue> mQueue;
     std::map<int32_t, SensorEnableGuard> mEnabledSensors;
     std::map<int32_t, SensorExtra> mEnabledSensorsExtra GUARDED_BY(mMutex);
-    sp<SensorEventQueue> mQueue;
 
     // We must do some of the initialization operations on the worker thread, because the API relies
     // on the thread-local looper. In addition, as a matter of convenience, we store some of the
@@ -244,7 +247,13 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
     bool waitInitFinished() { return mInitPromise.get_future().get(); }
 
     void threadFunc() {
-        // Obtain looper.
+        // Name our std::thread to help identification.  As is, canCallJava == false.
+        androidSetThreadName("SensorPoseProvider-looper");
+
+        // Run at the highest non-realtime priority.
+        androidSetThreadPriority(gettid(), PRIORITY_URGENT_AUDIO);
+
+        // The looper is started on the created std::thread.
         mLooper = Looper::prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
 
         // Create event queue.
@@ -260,20 +269,28 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
 
         initFinished(true);
 
-        while (true) {
-            int ret = mLooper->pollOnce(-1 /* no timeout */, nullptr, nullptr, nullptr);
+        while (!mQuit) {
+            const int ret = mLooper->pollOnce(-1 /* no timeout */, nullptr /* outFd */,
+                    nullptr /* outEvents */, nullptr /* outData */);
 
             switch (ret) {
                 case ALOOPER_POLL_WAKE:
-                    // Normal way to exit.
-                    return;
+                    // Continue to see if mQuit flag is set.
+                    // This can be spurious (due to bugreport being taken).
+                    continue;
 
                 case kIdent:
                     // Possible events on our queue.
                     break;
 
                 default:
-                    ALOGE("Unexpected status out of Looper::pollOnce: %d", ret);
+                    // Besides WAKE and kIdent, there should be no timeouts, callbacks,
+                    // ALOOPER_POLL_ERROR, or other events.
+                    // Exit now to avoid high frequency log spam on error,
+                    // e.g. if the fd becomes invalid (b/31093485).
+                    ALOGE("%s: Unexpected status out of Looper::pollOnce: %d", __func__, ret);
+                    mQuit = true;
+                    continue;
             }
 
             // Process an event.
@@ -285,7 +302,8 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
             ssize_t size = mQueue->filterEvents(&event, actual);
 
             if (size < 0 || size > 1) {
-                ALOGE("Unexpected return value from SensorEventQueue::filterEvents: %zd", size);
+                ALOGE("%s: Unexpected return value from SensorEventQueue::filterEvents: %zd",
+                        __func__, size);
                 break;
             }
             if (size == 0) {
@@ -295,6 +313,7 @@ class SensorPoseProviderImpl : public SensorPoseProvider {
 
             handleEvent(event);
         }
+        ALOGD("%s: Exiting sensor event loop", __func__);
     }
 
     void handleEvent(const ASensorEvent& event) {
