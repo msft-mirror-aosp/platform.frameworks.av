@@ -29,6 +29,11 @@ using binder::Status;
 status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const String8&) {
     ATRACE_CALL();
 
+    if (mFrameProcessor.get() != nullptr) {
+        // Already initialized
+        return OK;
+    }
+
     // Verify ops permissions
     auto res = startCameraOps();
     if (res != OK) {
@@ -63,6 +68,10 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
         mCompositeStreamMap.valueAt(i)->switchToOffline();
     }
 
+    return OK;
+}
+
+status_t CameraOfflineSessionClient::setCameraServiceWatchdog(bool) {
     return OK;
 }
 

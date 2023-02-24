@@ -388,7 +388,7 @@ HidlProviderInfo::startProviderInterface() {
                   __FUNCTION__,
                   mProviderName.c_str(),
                   linked.description().c_str());
-              mManager->removeProvider(mProviderName);
+              mManager->removeProvider(mProviderInstance);
               return nullptr;
             } else if (!linked) {
               ALOGW("%s: Unable to link to provider '%s' death notifications",
@@ -653,6 +653,11 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
             &mCameraCharacteristics, &mSupportNativeZoomRatio);
     if (OK != res) {
         ALOGE("%s: Unable to override zoomRatio related tags: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+    }
+    res = addReadoutTimestampTag(/*readoutTimestampSupported*/false);
+    if (OK != res) {
+        ALOGE("%s: Unable to add sensorReadoutTimestamp tag: %s (%d)",
                 __FUNCTION__, strerror(-res), res);
     }
 

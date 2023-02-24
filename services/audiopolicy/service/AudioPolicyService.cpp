@@ -202,6 +202,7 @@ AudioPolicyService::AudioPolicyService()
       mCaptureStateNotifier(false),
       mCreateAudioPolicyManager(createAudioPolicyManager),
       mDestroyAudioPolicyManager(destroyAudioPolicyManager) {
+      setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 }
 
 void AudioPolicyService::loadAudioPolicyManager()
@@ -1347,7 +1348,9 @@ status_t AudioPolicyService::onTransact(
         } else {
             getIAudioPolicyServiceStatistics().event(code, elapsedMs);
         }
-    });
+    }, mediautils::TimeCheck::kDefaultTimeoutDuration,
+    mediautils::TimeCheck::kDefaultSecondChanceDuration,
+    true /* crashOnTimeout */);
 
     switch (code) {
         case SHELL_COMMAND_TRANSACTION: {

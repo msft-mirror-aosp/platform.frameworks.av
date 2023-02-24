@@ -944,8 +944,8 @@ binder::Status CameraDeviceClient::createStream(
     std::vector<int> surfaceIds;
     bool isDepthCompositeStream =
             camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0]);
-    bool isHeicCompisiteStream = camera3::HeicCompositeStream::isHeicCompositeStream(surfaces[0]);
-    if (isDepthCompositeStream || isHeicCompisiteStream) {
+    bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(surfaces[0]);
+    if (isDepthCompositeStream || isHeicCompositeStream) {
         sp<CompositeStream> compositeStream;
         if (isDepthCompositeStream) {
             compositeStream = new camera3::DepthCompositeStream(mDevice, getRemoteCallback());
@@ -1730,6 +1730,10 @@ binder::Status CameraDeviceClient::getGlobalAudioRestriction(/*out*/ int32_t* ou
     return binder::Status::ok();
 }
 
+status_t CameraDeviceClient::setCameraServiceWatchdog(bool enabled) {
+    return mDevice->setCameraServiceWatchdog(enabled);
+}
+
 status_t CameraDeviceClient::setRotateAndCropOverride(uint8_t rotateAndCrop) {
     if (rotateAndCrop > ANDROID_SCALER_ROTATE_AND_CROP_AUTO) return BAD_VALUE;
 
@@ -1847,6 +1851,10 @@ binder::Status CameraDeviceClient::switchToOffline(
         mCompositeStreamMap.clear();
         mInputStream = {false, 0, 0, 0, 0};
     } else {
+        // In case we failed to register the offline client, ensure that it still initialized
+        // so that all failing requests can return back correctly once the object is released.
+        offlineClient->initialize(nullptr /*cameraProviderManager*/, String8()/*monitorTags*/);
+
         switch(ret) {
             case BAD_VALUE:
                 return STATUS_ERROR_FMT(CameraService::ERROR_ILLEGAL_ARGUMENT,

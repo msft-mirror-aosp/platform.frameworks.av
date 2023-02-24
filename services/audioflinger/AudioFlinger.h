@@ -274,7 +274,7 @@ public:
             bool isAudioPolicyReady() const { return mAudioPolicyReady.load(); }
 
 
-    virtual status_t getMicrophones(std::vector<media::MicrophoneInfo> *microphones);
+    virtual status_t getMicrophones(std::vector<media::MicrophoneInfoFw> *microphones);
 
     virtual status_t setAudioHalPids(const std::vector<pid_t>& pids);
 
@@ -298,6 +298,12 @@ public:
 
     virtual status_t getSupportedLatencyModes(audio_io_handle_t output,
             std::vector<audio_latency_mode_t>* modes);
+
+    virtual status_t setBluetoothVariableLatencyEnabled(bool enabled);
+
+    virtual status_t isBluetoothVariableLatencyEnabled(bool* enabled);
+
+    virtual status_t supportsBluetoothVariableLatency(bool* support);
 
     status_t onTransactWrapper(TransactionCode code, const Parcel& data, uint32_t flags,
         const std::function<status_t()>& delegate) override;
@@ -678,14 +684,16 @@ using effect_buffer_t = int16_t;
         binder::Status getVolumeShaperState(
                 int32_t id,
                 std::optional<media::VolumeShaperState>* _aidl_return) override;
-        binder::Status getDualMonoMode(media::AudioDualMonoMode* _aidl_return) override;
-        binder::Status setDualMonoMode(media::AudioDualMonoMode mode) override;
+        binder::Status getDualMonoMode(
+                media::audio::common::AudioDualMonoMode* _aidl_return) override;
+        binder::Status setDualMonoMode(
+                media::audio::common::AudioDualMonoMode mode) override;
         binder::Status getAudioDescriptionMixLevel(float* _aidl_return) override;
         binder::Status setAudioDescriptionMixLevel(float leveldB) override;
         binder::Status getPlaybackRateParameters(
-                media::AudioPlaybackRate* _aidl_return) override;
+                media::audio::common::AudioPlaybackRate* _aidl_return) override;
         binder::Status setPlaybackRateParameters(
-                const media::AudioPlaybackRate& playbackRate) override;
+                const media::audio::common::AudioPlaybackRate& playbackRate) override;
 
     private:
         const sp<PlaybackThread::Track> mTrack;
@@ -700,7 +708,7 @@ using effect_buffer_t = int16_t;
                 int /*audio_session_t*/ triggerSession);
         virtual binder::Status   stop();
         virtual binder::Status   getActiveMicrophones(
-                std::vector<media::MicrophoneInfoData>* activeMicrophones);
+                std::vector<media::MicrophoneInfoFw>* activeMicrophones);
         virtual binder::Status   setPreferredMicrophoneDirection(
                 int /*audio_microphone_direction_t*/ direction);
         virtual binder::Status   setPreferredMicrophoneFieldDimension(float zoom);
@@ -1029,6 +1037,9 @@ private:
              std::vector<media::audio::common::AudioMMapPolicyInfo>> mPolicyInfos;
     int32_t mAAudioBurstsPerBuffer = 0;
     int32_t mAAudioHwBurstMinMicros = 0;
+
+    // Bluetooth Variable latency control logic is enabled or disabled
+    std::atomic_bool mBluetoothLatencyModesEnabled;
 };
 
 #undef INCLUDING_FROM_AUDIOFLINGER_H

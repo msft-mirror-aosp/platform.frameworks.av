@@ -33,7 +33,7 @@
 #include <mediautils/MemoryLeakTrackUtil.h>
 #include <memunreachable/memunreachable.h>
 #include <private/android_filesystem_config.h> // UID
-#include <statslog.h>
+#include <stats_media_metrics.h>
 
 #include <set>
 
@@ -511,6 +511,8 @@ bool MediaMetricsService::isContentValid(const mediametrics::Item *item, bool is
     const std::string &key = item->getKey();
     if (startsWith(key, "audio.")) return true;
     if (startsWith(key, "drm.vendor.")) return true;
+    if (startsWith(key, "mediadrm.")) return true;
+
     // the list of allowedKey uses statsd_handlers
     // in iface_statsd.cpp as reference
     // drmmanager is from a trusted uid, therefore not needed here
@@ -546,7 +548,7 @@ void MediaMetricsService::registerStatsdCallbacksIfNeeded()
     if (mStatsdRegistered.test_and_set()) {
         return;
     }
-    auto tag = android::util::MEDIA_DRM_ACTIVITY_INFO;
+    auto tag = stats::media_metrics::MEDIA_DRM_ACTIVITY_INFO;
     auto cb = MediaMetricsService::pullAtomCallback;
     AStatsManager_setPullAtomCallback(tag, /* metadata */ nullptr, cb, this);
 }
@@ -564,7 +566,7 @@ bool MediaMetricsService::isPullable(const std::string &key)
 std::string MediaMetricsService::atomTagToKey(int32_t atomTag)
 {
     switch (atomTag) {
-    case android::util::MEDIA_DRM_ACTIVITY_INFO:
+    case stats::media_metrics::MEDIA_DRM_ACTIVITY_INFO:
         return "mediadrm";
     }
     return {};

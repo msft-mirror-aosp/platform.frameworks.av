@@ -1086,6 +1086,8 @@ public:
                     return INVALID_OPERATION;
                 }
 
+    virtual     status_t setBluetoothVariableLatencyEnabled(bool enabled);
+
 protected:
     // updated by readOutputParameters_l()
     size_t                          mNormalFrameCount;  // normal mixer and effects
@@ -1172,7 +1174,7 @@ protected:
     volatile int32_t                mSuspended;
 
     int64_t                         mBytesWritten;
-    int64_t                         mFramesWritten; // not reset on standby
+    std::atomic<int64_t>            mFramesWritten; // not reset on standby
     int64_t                         mLastFramesWritten = -1; // track changes in timestamp
                                                              // server frames written.
     int64_t                         mSuspendedFrames; // not reset on standby
@@ -1386,6 +1388,7 @@ public:
     virtual     bool        hasFastMixer() const = 0;
     virtual     FastTrackUnderruns getFastTrackUnderruns(size_t fastIndex __unused) const
                                 { FastTrackUnderruns dummy; return dummy; }
+                const std::atomic<int64_t>& framesWritten() const { return mFramesWritten; }
 
 protected:
                 // accessed by both binder threads and within threadLoop(), lock on mutex needed
@@ -1435,6 +1438,9 @@ protected:
     virtual     void flushHw_l() {
                     mIsTimestampAdvancing.clear();
                 }
+
+        // Bluetooth Variable latency control logic is enabled or disabled for this thread
+        std::atomic_bool mBluetoothLatencyModesEnabled;
 };
 
 class MixerThread : public PlaybackThread {
@@ -1935,7 +1941,8 @@ public:
             // Sets the UID records silence
             void        setRecordSilenced(audio_port_handle_t portId, bool silenced);
 
-            status_t    getActiveMicrophones(std::vector<media::MicrophoneInfo>* activeMicrophones);
+            status_t    getActiveMicrophones(
+                    std::vector<media::MicrophoneInfoFw>* activeMicrophones);
 
             status_t    setPreferredMicrophoneDirection(audio_microphone_direction_t direction);
             status_t    setPreferredMicrophoneFieldDimension(float zoom);

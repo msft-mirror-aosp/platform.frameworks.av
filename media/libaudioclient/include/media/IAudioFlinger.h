@@ -32,7 +32,6 @@
 #include <system/audio_effect.h>
 #include <system/audio_policy.h>
 #include <utils/String8.h>
-#include <media/MicrophoneInfo.h>
 #include <map>
 #include <string>
 #include <vector>
@@ -339,7 +338,7 @@ public:
     virtual size_t frameCountHAL(audio_io_handle_t ioHandle) const = 0;
 
     /* List available microphones and their characteristics */
-    virtual status_t getMicrophones(std::vector<media::MicrophoneInfo> *microphones) = 0;
+    virtual status_t getMicrophones(std::vector<media::MicrophoneInfoFw> *microphones) = 0;
 
     virtual status_t setAudioHalPids(const std::vector<pid_t>& pids) = 0;
 
@@ -367,6 +366,11 @@ public:
     virtual status_t getSupportedLatencyModes(audio_io_handle_t output,
             std::vector<audio_latency_mode_t>* modes) = 0;
 
+    virtual status_t setBluetoothVariableLatencyEnabled(bool enabled) = 0;
+
+    virtual status_t isBluetoothVariableLatencyEnabled(bool* enabled) = 0;
+
+    virtual status_t supportsBluetoothVariableLatency(bool* support) = 0;
 };
 
 /**
@@ -458,7 +462,7 @@ public:
     status_t audioPolicyReady() override;
 
     size_t frameCountHAL(audio_io_handle_t ioHandle) const override;
-    status_t getMicrophones(std::vector<media::MicrophoneInfo>* microphones) override;
+    status_t getMicrophones(std::vector<media::MicrophoneInfoFw>* microphones) override;
     status_t setAudioHalPids(const std::vector<pid_t>& pids) override;
     status_t setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos) override;
     status_t updateSecondaryOutputs(
@@ -473,6 +477,9 @@ public:
             audio_latency_mode_t mode) override;
     status_t getSupportedLatencyModes(
             audio_io_handle_t output, std::vector<audio_latency_mode_t>* modes) override;
+    status_t setBluetoothVariableLatencyEnabled(bool enabled) override;
+    status_t isBluetoothVariableLatencyEnabled(bool* enabled) override;
+    status_t supportsBluetoothVariableLatency(bool* support) override;
 
 private:
     const sp<media::IAudioFlingerService> mDelegate;
@@ -564,6 +571,12 @@ public:
             SET_DEVICE_CONNECTED_STATE = media::BnAudioFlingerService::TRANSACTION_setDeviceConnectedState,
             SET_REQUESTED_LATENCY_MODE = media::BnAudioFlingerService::TRANSACTION_setRequestedLatencyMode,
             GET_SUPPORTED_LATENCY_MODES = media::BnAudioFlingerService::TRANSACTION_getSupportedLatencyModes,
+            SET_BLUETOOTH_VARIABLE_LATENCY_ENABLED =
+                    media::BnAudioFlingerService::TRANSACTION_setBluetoothVariableLatencyEnabled,
+            IS_BLUETOOTH_VARIABLE_LATENCY_ENABLED =
+                    media::BnAudioFlingerService::TRANSACTION_isBluetoothVariableLatencyEnabled,
+            SUPPORTS_BLUETOOTH_VARIABLE_LATENCY =
+                    media::BnAudioFlingerService::TRANSACTION_supportsBluetoothVariableLatency,
         };
 
     protected:
@@ -664,17 +677,17 @@ public:
     Status getPrimaryOutputSamplingRate(int32_t* _aidl_return) override;
     Status getPrimaryOutputFrameCount(int64_t* _aidl_return) override;
     Status setLowRamDevice(bool isLowRamDevice, int64_t totalMemory) override;
-    Status getAudioPort(const media::AudioPort& port, media::AudioPort* _aidl_return) override;
-    Status createAudioPatch(const media::AudioPatch& patch, int32_t* _aidl_return) override;
+    Status getAudioPort(const media::AudioPortFw& port, media::AudioPortFw* _aidl_return) override;
+    Status createAudioPatch(const media::AudioPatchFw& patch, int32_t* _aidl_return) override;
     Status releaseAudioPatch(int32_t handle) override;
     Status listAudioPatches(int32_t maxCount,
-                            std::vector<media::AudioPatch>* _aidl_return) override;
-    Status setAudioPortConfig(const media::AudioPortConfig& config) override;
+                            std::vector<media::AudioPatchFw>* _aidl_return) override;
+    Status setAudioPortConfig(const media::AudioPortConfigFw& config) override;
     Status getAudioHwSyncForSession(int32_t sessionId, int32_t* _aidl_return) override;
     Status systemReady() override;
     Status audioPolicyReady() override;
     Status frameCountHAL(int32_t ioHandle, int64_t* _aidl_return) override;
-    Status getMicrophones(std::vector<media::MicrophoneInfoData>* _aidl_return) override;
+    Status getMicrophones(std::vector<media::MicrophoneInfoFw>* _aidl_return) override;
     Status setAudioHalPids(const std::vector<int32_t>& pids) override;
     Status setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos) override;
     Status updateSecondaryOutputs(
@@ -684,10 +697,14 @@ public:
             std::vector<media::audio::common::AudioMMapPolicyInfo> *_aidl_return) override;
     Status getAAudioMixerBurstCount(int32_t* _aidl_return) override;
     Status getAAudioHardwareBurstMinUsec(int32_t* _aidl_return) override;
-    Status setDeviceConnectedState(const media::AudioPort& port, bool connected) override;
-    Status setRequestedLatencyMode(int output, media::LatencyMode mode) override;
+    Status setDeviceConnectedState(const media::AudioPortFw& port, bool connected) override;
+    Status setRequestedLatencyMode(
+            int output, media::audio::common::AudioLatencyMode mode) override;
     Status getSupportedLatencyModes(int output,
-            std::vector<media::LatencyMode>* _aidl_return) override;
+            std::vector<media::audio::common::AudioLatencyMode>* _aidl_return) override;
+    Status setBluetoothVariableLatencyEnabled(bool enabled) override;
+    Status isBluetoothVariableLatencyEnabled(bool* enabled) override;
+    Status supportsBluetoothVariableLatency(bool* support) override;
 private:
     const sp<AudioFlingerServerAdapter::Delegate> mDelegate;
 };

@@ -1756,6 +1756,7 @@ AudioFlinger::EffectHandle::EffectHandle(const sp<EffectBase>& effect,
     mNotifyFramesProcessed(notifyFramesProcessed)
 {
     ALOGV("constructor %p client %p", this, client.get());
+    setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
 
     if (client == 0) {
         return;
@@ -1817,7 +1818,7 @@ status_t AudioFlinger::EffectHandle::onTransact(
         } else {
             getIEffectStatistics().event(code, elapsedMs);
         }
-    }, 0 /* timeoutMs */);
+    }, {} /* timeoutDuration */, {} /* secondChanceDuration */, false /* crashOnTimeout */);
     return BnEffect::onTransact(code, data, reply, flags);
 }
 
