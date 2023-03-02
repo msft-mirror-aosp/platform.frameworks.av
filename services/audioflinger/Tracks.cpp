@@ -531,10 +531,7 @@ AudioFlinger::PlaybackThread::OpPlayAudioMonitor::createIfNeeded(
             id, attr.flags);
         return nullptr;
     }
-
-    AttributionSourceState checkedAttributionSource = AudioFlinger::checkAttributionSourcePackage(
-            attributionSource);
-    return new OpPlayAudioMonitor(checkedAttributionSource, attr.usage, id);
+    return new OpPlayAudioMonitor(attributionSource, attr.usage, id);
 }
 
 AudioFlinger::PlaybackThread::OpPlayAudioMonitor::OpPlayAudioMonitor(
@@ -2355,15 +2352,9 @@ void AudioFlinger::RecordHandle::stop_nonvirtual() {
 }
 
 binder::Status AudioFlinger::RecordHandle::getActiveMicrophones(
-        std::vector<media::MicrophoneInfoData>* activeMicrophones) {
+        std::vector<media::MicrophoneInfoFw>* activeMicrophones) {
     ALOGV("%s()", __func__);
-    std::vector<media::MicrophoneInfo> mics;
-    status_t status = mRecordTrack->getActiveMicrophones(&mics);
-    activeMicrophones->resize(mics.size());
-    for (size_t i = 0; status == OK && i < mics.size(); ++i) {
-       status = mics[i].writeToParcelable(&activeMicrophones->at(i));
-    }
-    return binderStatusFromStatusT(status);
+    return binderStatusFromStatusT(mRecordTrack->getActiveMicrophones(activeMicrophones));
 }
 
 binder::Status AudioFlinger::RecordHandle::setPreferredMicrophoneDirection(
@@ -2683,7 +2674,7 @@ void AudioFlinger::RecordThread::RecordTrack::updateTrackFrameInfo(
 }
 
 status_t AudioFlinger::RecordThread::RecordTrack::getActiveMicrophones(
-        std::vector<media::MicrophoneInfo>* activeMicrophones)
+        std::vector<media::MicrophoneInfoFw>* activeMicrophones)
 {
     sp<ThreadBase> thread = mThread.promote();
     if (thread != 0) {
