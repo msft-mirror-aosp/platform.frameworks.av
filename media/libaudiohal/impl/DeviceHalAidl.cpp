@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <forward_list>
 
+#include <aidl/android/hardware/audio/core/BnStreamCallback.h>
+#include <aidl/android/hardware/audio/core/BnStreamOutEventCallback.h>
 #include <aidl/android/hardware/audio/core/StreamDescriptor.h>
 #include <error/expected_utils.h>
 #include <media/AidlConversionCppNdk.h>
@@ -37,11 +39,13 @@ using aidl::android::media::audio::common::AudioDevice;
 using aidl::android::media::audio::common::AudioDeviceType;
 using aidl::android::media::audio::common::AudioInputFlags;
 using aidl::android::media::audio::common::AudioIoFlags;
+using aidl::android::media::audio::common::AudioLatencyMode;
 using aidl::android::media::audio::common::AudioMode;
 using aidl::android::media::audio::common::AudioOutputFlags;
 using aidl::android::media::audio::common::AudioPort;
 using aidl::android::media::audio::common::AudioPortConfig;
 using aidl::android::media::audio::common::AudioPortDeviceExt;
+using aidl::android::media::audio::common::AudioPortMixExt;
 using aidl::android::media::audio::common::AudioPortExt;
 using aidl::android::media::audio::common::AudioSource;
 using aidl::android::media::audio::common::Int;
@@ -298,6 +302,123 @@ status_t DeviceHalAidl::prepareToOpenStream(
     return OK;
 }
 
+namespace {
+
+class StreamCallbackBase {
+  protected:
+    explicit StreamCallbackBase(const sp<CallbackBroker>& broker) : mBroker(broker) {}
+  public:
+    void* getCookie() const { return mCookie; }
+    void setCookie(void* cookie) { mCookie = cookie; }
+    sp<CallbackBroker> getBroker() const {
+        if (void* cookie = mCookie; cookie != nullptr) return mBroker.promote();
+        return nullptr;
+    }
+  private:
+    const wp<CallbackBroker> mBroker;
+    std::atomic<void*> mCookie;
+};
+
+template<class C>
+class StreamCallbackBaseHelper {
+  protected:
+    explicit StreamCallbackBaseHelper(const StreamCallbackBase& base) : mBase(base) {}
+    sp<C> getCb(const sp<CallbackBroker>& broker, void* cookie);
+    using CbRef = const sp<C>&;
+    ndk::ScopedAStatus runCb(const std::function<void(CbRef cb)>& f) {
+        if (auto cb = getCb(mBase.getBroker(), mBase.getCookie()); cb != nullptr) f(cb);
+        return ndk::ScopedAStatus::ok();
+    }
+  private:
+    const StreamCallbackBase& mBase;
+};
+
+template<>
+sp<StreamOutHalInterfaceCallback> StreamCallbackBaseHelper<StreamOutHalInterfaceCallback>::getCb(
+        const sp<CallbackBroker>& broker, void* cookie) {
+    if (broker != nullptr) return broker->getStreamOutCallback(cookie);
+    return nullptr;
+}
+
+template<>
+sp<StreamOutHalInterfaceEventCallback>
+StreamCallbackBaseHelper<StreamOutHalInterfaceEventCallback>::getCb(
+        const sp<CallbackBroker>& broker, void* cookie) {
+    if (broker != nullptr) return broker->getStreamOutEventCallback(cookie);
+    return nullptr;
+}
+
+template<>
+sp<StreamOutHalInterfaceLatencyModeCallback>
+StreamCallbackBaseHelper<StreamOutHalInterfaceLatencyModeCallback>::getCb(
+        const sp<CallbackBroker>& broker, void* cookie) {
+    if (broker != nullptr) return broker->getStreamOutLatencyModeCallback(cookie);
+    return nullptr;
+}
+
+/*
+Note on the callback ownership.
+
+In the Binder ownership model, the server implementation is kept alive
+as long as there is any client (proxy object) alive. This is done by
+incrementing the refcount of the server-side object by the Binder framework.
+When it detects that the last client is gone, it decrements the refcount back.
+
+Thus, it is not needed to keep any references to StreamCallback on our
+side (after we have sent an instance to the client), because we are
+the server-side. The callback object will be kept alive as long as the HAL server
+holds a strong ref to IStreamCallback proxy.
+*/
+
+class OutputStreamCallbackAidl : public StreamCallbackBase,
+                             public StreamCallbackBaseHelper<StreamOutHalInterfaceCallback>,
+                             public ::aidl::android::hardware::audio::core::BnStreamCallback {
+  public:
+    explicit OutputStreamCallbackAidl(const sp<CallbackBroker>& broker)
+            : StreamCallbackBase(broker),
+              StreamCallbackBaseHelper<StreamOutHalInterfaceCallback>(
+                      *static_cast<StreamCallbackBase*>(this)) {}
+    ndk::ScopedAStatus onTransferReady() override {
+        return runCb([](CbRef cb) { cb->onWriteReady(); });
+    }
+    ndk::ScopedAStatus onError() override {
+        return runCb([](CbRef cb) { cb->onError(); });
+    }
+    ndk::ScopedAStatus onDrainReady() override {
+        return runCb([](CbRef cb) { cb->onDrainReady(); });
+    }
+};
+
+class OutputStreamEventCallbackAidl :
+            public StreamCallbackBase,
+            public StreamCallbackBaseHelper<StreamOutHalInterfaceEventCallback>,
+            public StreamCallbackBaseHelper<StreamOutHalInterfaceLatencyModeCallback>,
+            public ::aidl::android::hardware::audio::core::BnStreamOutEventCallback {
+  public:
+    explicit OutputStreamEventCallbackAidl(const sp<CallbackBroker>& broker)
+            : StreamCallbackBase(broker),
+              StreamCallbackBaseHelper<StreamOutHalInterfaceEventCallback>(
+                      *static_cast<StreamCallbackBase*>(this)),
+              StreamCallbackBaseHelper<StreamOutHalInterfaceLatencyModeCallback>(
+                      *static_cast<StreamCallbackBase*>(this)) {}
+    ndk::ScopedAStatus onCodecFormatChanged(const std::vector<uint8_t>& in_audioMetadata) override {
+        std::basic_string<uint8_t> halMetadata(in_audioMetadata.begin(), in_audioMetadata.end());
+        return StreamCallbackBaseHelper<StreamOutHalInterfaceEventCallback>::runCb(
+                [&halMetadata](auto cb) { cb->onCodecFormatChanged(halMetadata); });
+    }
+    ndk::ScopedAStatus onRecommendedLatencyModeChanged(
+            const std::vector<AudioLatencyMode>& in_modes) override {
+        auto halModes = VALUE_OR_FATAL(
+                ::aidl::android::convertContainer<std::vector<audio_latency_mode_t>>(
+                        in_modes,
+                        ::aidl::android::aidl2legacy_AudioLatencyMode_audio_latency_mode_t));
+        return StreamCallbackBaseHelper<StreamOutHalInterfaceLatencyModeCallback>::runCb(
+                [&halModes](auto cb) { cb->onRecommendedLatencyModeChanged(halModes); });
+    }
+};
+
+}  // namespace
+
 status_t DeviceHalAidl::openOutputStream(
         audio_io_handle_t handle, audio_devices_t devices,
         audio_output_flags_t flags, struct audio_config* config,
@@ -325,18 +446,36 @@ status_t DeviceHalAidl::openOutputStream(
                     &cleanups, &aidlConfig, &mixPortConfig, &nominalLatency));
     ::aidl::android::hardware::audio::core::IModule::OpenOutputStreamArguments args;
     args.portConfigId = mixPortConfig.id;
-    args.offloadInfo = aidlConfig.offloadInfo;
+    const bool isOffload = isBitPositionFlagSet(
+            aidlOutputFlags, AudioOutputFlags::COMPRESS_OFFLOAD);
+    std::shared_ptr<OutputStreamCallbackAidl> streamCb;
+    if (isOffload) {
+        streamCb = ndk::SharedRefBase::make<OutputStreamCallbackAidl>(this);
+    }
+    auto eventCb = ndk::SharedRefBase::make<OutputStreamEventCallbackAidl>(this);
+    if (isOffload) {
+        args.offloadInfo = aidlConfig.offloadInfo;
+        args.callback = streamCb;
+    }
     args.bufferSizeFrames = aidlConfig.frameCount;
+    args.eventCallback = eventCb;
     ::aidl::android::hardware::audio::core::IModule::OpenOutputStreamReturn ret;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->openOutputStream(args, &ret)));
-    StreamContextAidl context(ret.desc);
+    StreamContextAidl context(ret.desc, isOffload);
     if (!context.isValid()) {
         ALOGE("%s: Failed to created a valid stream context from the descriptor: %s",
                 __func__, ret.desc.toString().c_str());
         return NO_INIT;
     }
     *outStream = sp<StreamOutHalAidl>::make(*config, std::move(context), nominalLatency,
-            std::move(ret.stream));
+            std::move(ret.stream), this /*callbackBroker*/);
+    void* cbCookie = (*outStream).get();
+    {
+        std::lock_guard l(mLock);
+        mCallbacks.emplace(cbCookie, Callbacks{});
+    }
+    if (streamCb) streamCb->setCookie(cbCookie);
+    eventCb->setCookie(cbCookie);
     cleanups.disarmAll();
     return OK;
 }
@@ -382,7 +521,7 @@ status_t DeviceHalAidl::openInputStream(
     args.bufferSizeFrames = aidlConfig.frameCount;
     ::aidl::android::hardware::audio::core::IModule::OpenInputStreamReturn ret;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->openInputStream(args, &ret)));
-    StreamContextAidl context(ret.desc);
+    StreamContextAidl context(ret.desc, false /*isAsynchronous*/);
     if (!context.isValid()) {
         ALOGE("%s: Failed to created a valid stream context from the descriptor: %s",
                 __func__, ret.desc.toString().c_str());
@@ -411,8 +550,19 @@ status_t DeviceHalAidl::createAudioPatch(unsigned int num_sources,
         sources == nullptr || sinks == nullptr || patch == nullptr) {
         return BAD_VALUE;
     }
-    // Note that the patch handle (*patch) is provided by the framework.
-    // In tests it's possible that its value is AUDIO_PATCH_HANDLE_NONE.
+    // When the patch handle (*patch) is AUDIO_PATCH_HANDLE_NONE, it means
+    // the framework wants to create a new patch. The handle has to be generated
+    // by the HAL. Since handles generated this way can only be unique within
+    // a HAL module, the framework generates a globally unique handle, and maps
+    // it on the <HAL module, patch handle> pair.
+    // When the patch handle is set, it meant the framework intends to update
+    // an existing patch.
+    //
+    // This behavior corresponds to HAL module behavior, with the only difference
+    // that the HAL module uses `int32_t` for patch IDs. The following assert ensures
+    // that both the framework and the HAL use the same value for "no ID":
+    static_assert(AUDIO_PATCH_HANDLE_NONE == 0);
+    int32_t halPatchId = static_cast<int32_t>(*patch);
 
     // Upon conversion, mix port configs contain audio configuration, while
     // device port configs contain device address. This data is used to find
@@ -435,17 +585,12 @@ status_t DeviceHalAidl::createAudioPatch(unsigned int num_sources,
                                 sinks[i], isInput, 0)));
     }
     Cleanups cleanups;
-    auto existingPatchIt = mPatches.end();
-    auto fwkHandlesIt = *patch != AUDIO_PATCH_HANDLE_NONE ?
-            mFwkHandles.find(*patch) : mFwkHandles.end();
+    auto existingPatchIt = halPatchId != 0 ? mPatches.find(halPatchId): mPatches.end();
     AudioPatch aidlPatch;
-    if (fwkHandlesIt != mFwkHandles.end()) {
-        existingPatchIt = mPatches.find(fwkHandlesIt->second);
-        if (existingPatchIt != mPatches.end()) {
-            aidlPatch = existingPatchIt->second;
-            aidlPatch.sourcePortConfigIds.clear();
-            aidlPatch.sinkPortConfigIds.clear();
-        }
+    if (existingPatchIt != mPatches.end()) {
+        aidlPatch = existingPatchIt->second;
+        aidlPatch.sourcePortConfigIds.clear();
+        aidlPatch.sinkPortConfigIds.clear();
     }
     ALOGD("%s: sources: %s, sinks: %s",
             __func__, ::android::internal::ToString(aidlSources).c_str(),
@@ -473,20 +618,8 @@ status_t DeviceHalAidl::createAudioPatch(unsigned int num_sources,
         bool created = false;
         RETURN_STATUS_IF_ERROR(findOrCreatePatch(aidlPatch, &aidlPatch, &created));
         // Since no cleanup of the patch is needed, 'created' is ignored.
-        if (fwkHandlesIt != mFwkHandles.end()) {
-            fwkHandlesIt->second = aidlPatch.id;
-            // Patch handle (*patch) stays the same.
-        } else {
-            if (*patch == AUDIO_PATCH_HANDLE_NONE) {
-                // This isn't good as the module can't provide a handle which is really unique.
-                // However, this situation should only happen in tests.
-                *patch = aidlPatch.id;
-                LOG_ALWAYS_FATAL_IF(mFwkHandles.count(*patch) > 0,
-                        "%s: patch id %d clashes with another framework patch handle",
-                        __func__, *patch);
-            }
-            mFwkHandles.emplace(*patch, aidlPatch.id);
-        }
+        halPatchId = aidlPatch.id;
+        *patch = static_cast<audio_patch_handle_t>(halPatchId);
     }
     cleanups.disarmAll();
     return OK;
@@ -496,12 +629,18 @@ status_t DeviceHalAidl::releaseAudioPatch(audio_patch_handle_t patch) {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mModule) return NO_INIT;
-    auto idMapIt = mFwkHandles.find(patch);
-    if (idMapIt == mFwkHandles.end()) {
+    static_assert(AUDIO_PATCH_HANDLE_NONE == 0);
+    if (patch == AUDIO_PATCH_HANDLE_NONE) {
         return BAD_VALUE;
     }
-    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->resetAudioPatch(idMapIt->second)));
-    mFwkHandles.erase(idMapIt);
+    int32_t halPatchId = static_cast<int32_t>(patch);
+    auto patchIt = mPatches.find(halPatchId);
+    if (patchIt == mPatches.end()) {
+        ALOGE("%s: patch with id %d not found", __func__, halPatchId);
+        return BAD_VALUE;
+    }
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->resetAudioPatch(halPatchId)));
+    mPatches.erase(patchIt);
     return OK;
 }
 
@@ -606,22 +745,27 @@ bool DeviceHalAidl::audioDeviceMatches(const AudioDevice& device, const AudioPor
     return p.ext.get<AudioPortExt::Tag::device>().device == device;
 }
 
-status_t DeviceHalAidl::createPortConfig(const AudioPortConfig& requestedPortConfig,
-        AudioPortConfig* appliedPortConfig) {
+status_t DeviceHalAidl::createPortConfig(
+        const AudioPortConfig& requestedPortConfig, PortConfigs::iterator* result) {
     TIME_CHECK();
+    AudioPortConfig appliedPortConfig;
     bool applied = false;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->setAudioPortConfig(
-                            requestedPortConfig, appliedPortConfig, &applied)));
+                            requestedPortConfig, &appliedPortConfig, &applied)));
     if (!applied) {
         RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->setAudioPortConfig(
-                                *appliedPortConfig, appliedPortConfig, &applied)));
+                                appliedPortConfig, &appliedPortConfig, &applied)));
         if (!applied) {
             ALOGE("%s: module %s did not apply suggested config %s",
-                    __func__, mInstance.c_str(), appliedPortConfig->toString().c_str());
+                    __func__, mInstance.c_str(), appliedPortConfig.toString().c_str());
             return NO_INIT;
         }
     }
-    mPortConfigs.emplace(appliedPortConfig->id, *appliedPortConfig);
+    auto id = appliedPortConfig.id;
+    auto [it, inserted] = mPortConfigs.emplace(std::move(id), std::move(appliedPortConfig));
+    LOG_ALWAYS_FATAL_IF(!inserted, "%s: port config with id %d already exists",
+            __func__, it->first);
+    *result = it;
     return OK;
 }
 
@@ -668,10 +812,7 @@ status_t DeviceHalAidl::findOrCreatePortConfig(const AudioDevice& device,
         }
         AudioPortConfig requestedPortConfig;
         requestedPortConfig.portId = portsIt->first;
-        AudioPortConfig appliedPortConfig;
-        RETURN_STATUS_IF_ERROR(createPortConfig(requestedPortConfig, &appliedPortConfig));
-        portConfigIt = mPortConfigs.insert(
-                mPortConfigs.end(), std::make_pair(appliedPortConfig.id, appliedPortConfig));
+        RETURN_STATUS_IF_ERROR(createPortConfig(requestedPortConfig, &portConfigIt));
         *created = true;
     } else {
         *created = false;
@@ -683,23 +824,40 @@ status_t DeviceHalAidl::findOrCreatePortConfig(const AudioDevice& device,
 status_t DeviceHalAidl::findOrCreatePortConfig(
         const AudioConfig& config, const std::optional<AudioIoFlags>& flags, int32_t ioHandle,
         AudioPortConfig* portConfig, bool* created) {
+    // These flags get removed one by one in this order when retrying port finding.
+    static const std::vector<AudioInputFlags> kOptionalInputFlags{
+        AudioInputFlags::FAST, AudioInputFlags::RAW };
     auto portConfigIt = findPortConfig(config, flags, ioHandle);
     if (portConfigIt == mPortConfigs.end() && flags.has_value()) {
-        auto portsIt = findPort(config, flags.value());
+        auto optionalInputFlagsIt = kOptionalInputFlags.begin();
+        AudioIoFlags matchFlags = flags.value();
+        auto portsIt = findPort(config, matchFlags);
+        while (portsIt == mPorts.end() && matchFlags.getTag() == AudioIoFlags::Tag::input
+                && optionalInputFlagsIt != kOptionalInputFlags.end()) {
+            if (!isBitPositionFlagSet(
+                            matchFlags.get<AudioIoFlags::Tag::input>(), *optionalInputFlagsIt)) {
+                ++optionalInputFlagsIt;
+                continue;
+            }
+            matchFlags.set<AudioIoFlags::Tag::input>(matchFlags.get<AudioIoFlags::Tag::input>() &
+                    ~makeBitPositionFlagMask(*optionalInputFlagsIt++));
+            portsIt = findPort(config, matchFlags);
+            ALOGI("%s: mix port for config %s, flags %s was not found in the module %s, "
+                    "retried with flags %s", __func__, config.toString().c_str(),
+                    flags.value().toString().c_str(), mInstance.c_str(),
+                    matchFlags.toString().c_str());
+        }
         if (portsIt == mPorts.end()) {
             ALOGE("%s: mix port for config %s, flags %s is not found in the module %s",
-                    __func__, config.toString().c_str(), flags.value().toString().c_str(),
+                    __func__, config.toString().c_str(), matchFlags.toString().c_str(),
                     mInstance.c_str());
             return BAD_VALUE;
         }
         AudioPortConfig requestedPortConfig;
         requestedPortConfig.portId = portsIt->first;
         setPortConfigFromConfig(&requestedPortConfig, config);
-        AudioPortConfig appliedPortConfig;
-        RETURN_STATUS_IF_ERROR(createPortConfig(requestedPortConfig, &appliedPortConfig));
-        appliedPortConfig.ext.get<AudioPortExt::Tag::mix>().handle = ioHandle;
-        portConfigIt = mPortConfigs.insert(
-                mPortConfigs.end(), std::make_pair(appliedPortConfig.id, appliedPortConfig));
+        requestedPortConfig.ext = AudioPortMixExt{ .handle = ioHandle };
+        RETURN_STATUS_IF_ERROR(createPortConfig(requestedPortConfig, &portConfigIt));
         *created = true;
     } else if (!flags.has_value()) {
         ALOGW("%s: mix port config for %s, handle %d not found in the module %s, "
@@ -761,12 +919,10 @@ DeviceHalAidl::Ports::iterator DeviceHalAidl::findPort(const AudioDevice& device
 
 DeviceHalAidl::Ports::iterator DeviceHalAidl::findPort(
             const AudioConfig& config, const AudioIoFlags& flags) {
-    using Tag = AudioPortExt::Tag;
-    AudioIoFlags matchFlags = flags;
     auto matcher = [&](const auto& pair) {
         const auto& p = pair.second;
-        return p.ext.getTag() == Tag::mix &&
-                p.flags == matchFlags &&
+        return p.ext.getTag() == AudioPortExt::Tag::mix &&
+                p.flags == flags &&
                 std::find_if(p.profiles.begin(), p.profiles.end(),
                         [&](const auto& prof) {
                             return prof.format == config.base.format &&
@@ -775,15 +931,7 @@ DeviceHalAidl::Ports::iterator DeviceHalAidl::findPort(
                                     std::find(prof.sampleRates.begin(), prof.sampleRates.end(),
                                             config.base.sampleRate) != prof.sampleRates.end();
                         }) != p.profiles.end(); };
-    auto it = std::find_if(mPorts.begin(), mPorts.end(), matcher);
-    if (it == mPorts.end() && flags.getTag() == AudioIoFlags::Tag::input &&
-            isBitPositionFlagSet(flags.get<AudioIoFlags::Tag::input>(), AudioInputFlags::FAST)) {
-        // "Fast" input is not a mandatory flag, try without it.
-        matchFlags.set<AudioIoFlags::Tag::input>(flags.get<AudioIoFlags::Tag::input>() &
-                ~makeBitPositionFlagMask(AudioInputFlags::FAST));
-        it = std::find_if(mPorts.begin(), mPorts.end(), matcher);
-    }
-    return it;
+    return std::find_if(mPorts.begin(), mPorts.end(), matcher);
 }
 
 DeviceHalAidl::PortConfigs::iterator DeviceHalAidl::findPortConfig(const AudioDevice& device) {
@@ -860,6 +1008,57 @@ void DeviceHalAidl::resetPortConfig(int32_t portConfigId) {
         return;
     }
     ALOGE("%s: port config id %d not found", __func__, portConfigId);
+}
+
+void DeviceHalAidl::clearCallbacks(void* cookie) {
+    std::lock_guard l(mLock);
+    mCallbacks.erase(cookie);
+}
+
+sp<StreamOutHalInterfaceCallback> DeviceHalAidl::getStreamOutCallback(void* cookie) {
+    return getCallbackImpl(cookie, &Callbacks::out);
+}
+
+void DeviceHalAidl::setStreamOutCallback(
+        void* cookie, const sp<StreamOutHalInterfaceCallback>& cb) {
+    setCallbackImpl(cookie, &Callbacks::out, cb);
+}
+
+sp<StreamOutHalInterfaceEventCallback> DeviceHalAidl::getStreamOutEventCallback(
+        void* cookie) {
+    return getCallbackImpl(cookie, &Callbacks::event);
+}
+
+void DeviceHalAidl::setStreamOutEventCallback(
+        void* cookie, const sp<StreamOutHalInterfaceEventCallback>& cb) {
+    setCallbackImpl(cookie, &Callbacks::event, cb);
+}
+
+sp<StreamOutHalInterfaceLatencyModeCallback> DeviceHalAidl::getStreamOutLatencyModeCallback(
+        void* cookie) {
+    return getCallbackImpl(cookie, &Callbacks::latency);
+}
+
+void DeviceHalAidl::setStreamOutLatencyModeCallback(
+        void* cookie, const sp<StreamOutHalInterfaceLatencyModeCallback>& cb) {
+    setCallbackImpl(cookie, &Callbacks::latency, cb);
+}
+
+template<class C>
+sp<C> DeviceHalAidl::getCallbackImpl(void* cookie, wp<C> DeviceHalAidl::Callbacks::* field) {
+    std::lock_guard l(mLock);
+    if (auto it = mCallbacks.find(cookie); it != mCallbacks.end()) {
+        return ((it->second).*field).promote();
+    }
+    return nullptr;
+}
+template<class C>
+void DeviceHalAidl::setCallbackImpl(
+        void* cookie, wp<C> DeviceHalAidl::Callbacks::* field, const sp<C>& cb) {
+    std::lock_guard l(mLock);
+    if (auto it = mCallbacks.find(cookie); it != mCallbacks.end()) {
+        (it->second).*field = cb;
+    }
 }
 
 } // namespace android
