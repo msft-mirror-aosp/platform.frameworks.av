@@ -20,14 +20,15 @@
 #include <algorithm>
 #include <cstdint>
 
-#include <aidl/android/hardware/audio/core/BnStreamCallback.h>
 #include <audio_utils/clock.h>
+#include <media/AidlConversionUtil.h>
 #include <mediautils/TimeCheck.h>
 #include <utils/Log.h>
 
 #include "DeviceHalAidl.h"
 #include "StreamHalAidl.h"
 
+using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::core::IStreamCommon;
 using ::aidl::android::hardware::audio::core::IStreamIn;
 using ::aidl::android::hardware::audio::core::IStreamOut;
@@ -173,10 +174,17 @@ status_t StreamHalAidl::standby() {
             FALLTHROUGH_INTENDED;
         case StreamDescriptor::State::PAUSED:
         case StreamDescriptor::State::DRAIN_PAUSED:
-            return flush();
+            if (mIsInput) return flush();
+            if (status_t status = flush(&reply); status != OK) return status;
+            if (reply.state != StreamDescriptor::State::IDLE) {
+                ALOGE("%s: unexpected stream state: %s (expected IDLE)",
+                        __func__, toString(reply.state).c_str());
+                return INVALID_OPERATION;
+            }
+            FALLTHROUGH_INTENDED;
         case StreamDescriptor::State::IDLE:
             if (status_t status = sendCommand(makeHalCommand<HalCommand::Tag::standby>(),
-                            &reply); status != OK) {
+                            &reply, true /*safeFromNonWorkerThread*/); status != OK) {
                 return status;
             }
             if (reply.state != StreamDescriptor::State::STANDBY) {
@@ -253,7 +261,7 @@ status_t StreamHalAidl::getXruns(int32_t *frames) {
 
 status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred) {
     ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
-    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+    // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!mStream || mContext.getDataMQ() == nullptr) return NO_INIT;
     mWorkerTid.store(gettid(), std::memory_order_release);
     // Switch the stream into an active state if needed.
@@ -287,13 +295,14 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
     if (status_t status = sendCommand(burst, &reply); status != OK) {
         return status;
     }
+    *transferred = reply.fmqByteCount;
     if (mIsInput) {
-        *transferred = reply.fmqByteCount;
         LOG_ALWAYS_FATAL_IF(*transferred > bytes,
                 "%s: HAL module read %zu bytes, which exceeds requested count %zu",
                 __func__, *transferred, bytes);
-        if (!mContext.getDataMQ()->read(static_cast<int8_t*>(buffer), *transferred)) {
-            ALOGE("%s: failed to read %zu bytes to data MQ", __func__, *transferred);
+        if (auto toRead = mContext.getDataMQ()->availableToRead();
+                toRead != 0 && !mContext.getDataMQ()->read(static_cast<int8_t*>(buffer), toRead)) {
+            ALOGE("%s: failed to read %zu bytes to data MQ", __func__, toRead);
             return NOT_ENOUGH_DATA;
         }
     }
@@ -316,6 +325,26 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
     if (mIsInput) {
         return sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), reply);
     } else {
+        if (mContext.isAsynchronous()) {
+            // Handle pause-flush-resume sequence. 'flush' from PAUSED goes to
+            // IDLE. We move here from IDLE to ACTIVE (same as 'start' from PAUSED).
+            const auto state = getState();
+            if (state == StreamDescriptor::State::IDLE) {
+                StreamDescriptor::Reply localReply{};
+                StreamDescriptor::Reply* innerReply = reply ?: &localReply;
+                if (status_t status =
+                        sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), innerReply);
+                        status != OK) {
+                    return status;
+                }
+                if (innerReply->state != StreamDescriptor::State::ACTIVE) {
+                    ALOGE("%s: unexpected stream state: %s (expected ACTIVE)",
+                            __func__, toString(innerReply->state).c_str());
+                    return INVALID_OPERATION;
+                }
+                return OK;
+            }
+        }
         return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
     }
 }
@@ -327,7 +356,8 @@ status_t StreamHalAidl::drain(bool earlyNotify, StreamDescriptor::Reply* reply) 
     return sendCommand(makeHalCommand<HalCommand::Tag::drain>(
                     mIsInput ? StreamDescriptor::DrainMode::DRAIN_UNSPECIFIED :
                     earlyNotify ? StreamDescriptor::DrainMode::DRAIN_EARLY_NOTIFY :
-                    StreamDescriptor::DrainMode::DRAIN_ALL), reply);
+                    StreamDescriptor::DrainMode::DRAIN_ALL), reply,
+                    true /*safeFromNonWorkerThread*/);
 }
 
 status_t StreamHalAidl::flush(StreamDescriptor::Reply* reply) {
@@ -397,7 +427,7 @@ status_t StreamHalAidl::sendCommand(
         const ::aidl::android::hardware::audio::core::StreamDescriptor::Command &command,
         ::aidl::android::hardware::audio::core::StreamDescriptor::Reply* reply,
         bool safeFromNonWorkerThread) {
-    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+    // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!safeFromNonWorkerThread) {
         const pid_t workerTid = mWorkerTid.load(std::memory_order_acquire);
         LOG_ALWAYS_FATAL_IF(workerTid != gettid(),
@@ -448,53 +478,27 @@ status_t StreamHalAidl::updateCountersIfNeeded(
     return OK;
 }
 
-namespace {
-
-/* Notes on callback ownership.
-
-This is how Binder ownership model looks like. The server implementation
-is owned by Binder framework (via sp<>). Proxies are owned by clients.
-When the last proxy disappears, Binder framework releases the server impl.
-
-Thus, it is not needed to keep any references to StreamCallback (this is
-the server impl) -- it will live as long as HAL server holds a strong ref to
-IStreamCallback proxy.
-
-The callback only keeps a weak reference to the stream. The stream is owned
-by AudioFlinger.
-
-*/
-
-class StreamCallback : public ::aidl::android::hardware::audio::core::BnStreamCallback {
-    ndk::ScopedAStatus onTransferReady() override {
-        return ndk::ScopedAStatus::ok();
-    }
-    ndk::ScopedAStatus onError() override {
-        return ndk::ScopedAStatus::ok();
-    }
-    ndk::ScopedAStatus onDrainReady() override {
-        return ndk::ScopedAStatus::ok();
-    }
-};
-
-}  // namespace
-
 StreamOutHalAidl::StreamOutHalAidl(
         const audio_config& config, StreamContextAidl&& context, int32_t nominalLatency,
-        const std::shared_ptr<IStreamOut>& stream)
+        const std::shared_ptr<IStreamOut>& stream, const sp<CallbackBroker>& callbackBroker)
         : StreamHalAidl("StreamOutHalAidl", false /*isInput*/, config, nominalLatency,
                 std::move(context), getStreamCommon(stream)),
-          mStream(stream) {}
+          mStream(stream), mCallbackBroker(callbackBroker) {}
+
+StreamOutHalAidl::~StreamOutHalAidl() {
+    if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
+        broker->clearCallbacks(this);
+    }
+}
 
 status_t StreamOutHalAidl::getLatency(uint32_t *latency) {
     return StreamHalAidl::getLatency(latency);
 }
 
-status_t StreamOutHalAidl::setVolume(float left __unused, float right __unused) {
+status_t StreamOutHalAidl::setVolume(float left, float right) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return statusTFromBinderStatus(mStream->setHwVolume({left, right}));
 }
 
 status_t StreamOutHalAidl::selectPresentation(int presentationId __unused, int programId __unused) {
@@ -529,10 +533,22 @@ status_t StreamOutHalAidl::getNextWriteTimestamp(int64_t *timestamp __unused) {
     return INVALID_OPERATION;
 }
 
-status_t StreamOutHalAidl::setCallback(wp<StreamOutHalInterfaceCallback> callback __unused) {
+status_t StreamOutHalAidl::setCallback(wp<StreamOutHalInterfaceCallback> callback) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    if (!mContext.isAsynchronous()) {
+        ALOGE("%s: the callback is intended for asynchronous streams only", __func__);
+        return INVALID_OPERATION;
+    }
+    if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
+        if (auto cb = callback.promote(); cb != nullptr) {
+            broker->setStreamOutCallback(this, cb);
+        } else {
+            // It is expected that the framework never passes a null pointer.
+            // In the AIDL model callbacks can't be "unregistered".
+            LOG_ALWAYS_FATAL("%s: received an expired or null callback pointer", __func__);
+        }
+    }
     return OK;
 }
 
@@ -627,7 +643,7 @@ status_t StreamOutHalAidl::getPlaybackRateParameters(
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return BAD_VALUE;
 }
 
 status_t StreamOutHalAidl::setPlaybackRateParameters(
@@ -635,26 +651,18 @@ status_t StreamOutHalAidl::setPlaybackRateParameters(
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return BAD_VALUE;
 }
 
 status_t StreamOutHalAidl::setEventCallback(
-        const sp<StreamOutHalInterfaceEventCallback>& callback __unused) {
+        const sp<StreamOutHalInterfaceEventCallback>& callback) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
+        broker->setStreamOutEventCallback(this, callback);
+    }
     return OK;
 }
-
-namespace {
-
-struct StreamOutEventCallback {
-    StreamOutEventCallback(const wp<StreamOutHalAidl>& stream) : mStream(stream) {}
-  private:
-    wp<StreamOutHalAidl> mStream;
-};
-
-}  // namespace
 
 status_t StreamOutHalAidl::setLatencyMode(audio_latency_mode_t mode __unused) {
     TIME_CHECK();
@@ -672,47 +680,14 @@ status_t StreamOutHalAidl::getRecommendedLatencyModes(
 };
 
 status_t StreamOutHalAidl::setLatencyModeCallback(
-        const sp<StreamOutHalInterfaceLatencyModeCallback>& callback __unused) {
+        const sp<StreamOutHalInterfaceLatencyModeCallback>& callback) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
+        broker->setStreamOutLatencyModeCallback(this, callback);
+    }
     return OK;
 };
-
-void StreamOutHalAidl::onWriteReady() {
-    sp<StreamOutHalInterfaceCallback> callback = mCallback.load().promote();
-    if (callback == 0) return;
-    ALOGV("asyncCallback onWriteReady");
-    callback->onWriteReady();
-}
-
-void StreamOutHalAidl::onDrainReady() {
-    sp<StreamOutHalInterfaceCallback> callback = mCallback.load().promote();
-    if (callback == 0) return;
-    ALOGV("asyncCallback onDrainReady");
-    callback->onDrainReady();
-}
-
-void StreamOutHalAidl::onError() {
-    sp<StreamOutHalInterfaceCallback> callback = mCallback.load().promote();
-    if (callback == 0) return;
-    ALOGV("asyncCallback onError");
-    callback->onError();
-}
-
-void StreamOutHalAidl::onCodecFormatChanged(const std::basic_string<uint8_t>& metadataBs __unused) {
-    sp<StreamOutHalInterfaceEventCallback> callback = mEventCallback.load().promote();
-    if (callback == nullptr) return;
-    ALOGV("asyncCodecFormatCallback %s", __func__);
-    callback->onCodecFormatChanged(metadataBs);
-}
-
-void StreamOutHalAidl::onRecommendedLatencyModeChanged(
-        const std::vector<audio_latency_mode_t>& modes __unused) {
-    sp<StreamOutHalInterfaceLatencyModeCallback> callback = mLatencyModeCallback.load().promote();
-    if (callback == nullptr) return;
-    callback->onRecommendedLatencyModeChanged(modes);
-}
 
 status_t StreamOutHalAidl::exit() {
     return StreamHalAidl::exit();
@@ -759,7 +734,7 @@ status_t StreamInHalAidl::getCapturePosition(int64_t *frames, int64_t *time) {
 }
 
 status_t StreamInHalAidl::getActiveMicrophones(
-        std::vector<media::MicrophoneInfo> *microphones __unused) {
+        std::vector<media::MicrophoneInfoFw> *microphones __unused) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     ALOGE("%s not implemented yet", __func__);
