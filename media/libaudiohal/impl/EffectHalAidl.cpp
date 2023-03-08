@@ -14,9 +14,11 @@
  * limitations under the License.
  */
 
-#include <memory>
+#include <cstddef>
 #define LOG_TAG "EffectHalAidl"
 //#define LOG_NDEBUG 0
+
+#include <memory>
 
 #include <error/expected_utils.h>
 #include <media/AidlConversionCppNdk.h>
@@ -25,26 +27,29 @@
 #include <media/audiohal/AudioEffectUuid.h>
 #include <media/EffectsFactoryApi.h>
 #include <mediautils/TimeCheck.h>
+#include <system/audio.h>
 #include <utils/Log.h>
-
-#include <system/audio_effects/effect_aec.h>
-#include <system/audio_effects/effect_downmix.h>
-#include <system/audio_effects/effect_dynamicsprocessing.h>
-#include <system/audio_effects/effect_hapticgenerator.h>
-#include <system/audio_effects/effect_ns.h>
-#include <system/audio_effects/effect_spatializer.h>
-#include <system/audio_effects/effect_visualizer.h>
 
 #include "EffectHalAidl.h"
 
-#include <system/audio.h>
 #include <aidl/android/hardware/audio/effect/IEffect.h>
 
 #include "effectsAidlConversion/AidlConversionAec.h"
+#include "effectsAidlConversion/AidlConversionAgc1.h"
 #include "effectsAidlConversion/AidlConversionAgc2.h"
 #include "effectsAidlConversion/AidlConversionBassBoost.h"
 #include "effectsAidlConversion/AidlConversionDownmix.h"
 #include "effectsAidlConversion/AidlConversionDynamicsProcessing.h"
+#include "effectsAidlConversion/AidlConversionEnvReverb.h"
+#include "effectsAidlConversion/AidlConversionEq.h"
+#include "effectsAidlConversion/AidlConversionHapticGenerator.h"
+#include "effectsAidlConversion/AidlConversionLoudnessEnhancer.h"
+#include "effectsAidlConversion/AidlConversionNoiseSuppression.h"
+#include "effectsAidlConversion/AidlConversionPresetReverb.h"
+#include "effectsAidlConversion/AidlConversionSpatializer.h"
+#include "effectsAidlConversion/AidlConversionVendorExtension.h"
+#include "effectsAidlConversion/AidlConversionVirtualizer.h"
+#include "effectsAidlConversion/AidlConversionVisualizer.h"
 
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::CommandId;
@@ -81,10 +86,14 @@ status_t EffectHalAidl::createAidlConversion(
         int32_t sessionId, int32_t ioId,
         const ::aidl::android::hardware::audio::effect::Descriptor& desc) {
     const auto& typeUuid = desc.common.id.type;
+    ALOGI("%s create UUID %s", __func__, typeUuid.toString().c_str());
     if (typeUuid == kAcousticEchoCancelerTypeUUID) {
         mConversion =
                 std::make_unique<android::effect::AidlConversionAec>(effect, sessionId, ioId, desc);
-    } else if (typeUuid == kAutomaticGainControlTypeUUID) {
+    } else if (typeUuid == kAutomaticGainControl1TypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionAgc1>(effect, sessionId, ioId,
+                                                                            desc);
+    } else if (typeUuid == kAutomaticGainControl2TypeUUID) {
         mConversion = std::make_unique<android::effect::AidlConversionAgc2>(effect, sessionId, ioId,
                                                                             desc);
     } else if (typeUuid == kBassBoostTypeUUID) {
@@ -96,33 +105,87 @@ status_t EffectHalAidl::createAidlConversion(
     } else if (typeUuid == kDynamicsProcessingTypeUUID) {
         mConversion =
                 std::make_unique<android::effect::AidlConversionDp>(effect, sessionId, ioId, desc);
+    } else if (typeUuid == kEnvReverbTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionEnvReverb>(effect, sessionId,
+                                                                                 ioId, desc);
+    } else if (typeUuid == kEqualizerTypeUUID) {
+        mConversion =
+                std::make_unique<android::effect::AidlConversionEq>(effect, sessionId, ioId, desc);
+    } else if (typeUuid == kHapticGeneratorTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionHapticGenerator>(
+                effect, sessionId, ioId, desc);
+    } else if (typeUuid == kLoudnessEnhancerTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionLoudnessEnhancer>(
+                effect, sessionId, ioId, desc);
+    } else if (typeUuid == kNoiseSuppressionTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionNoiseSuppression>(
+                effect, sessionId, ioId, desc);
+    } else if (typeUuid == kPresetReverbTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionPresetReverb>(
+                effect, sessionId, ioId, desc);
+    } else if (typeUuid == kSpatializerTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionSpatializer>(
+                effect, sessionId, ioId, desc);
+    } else if (typeUuid == kVirtualizerTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionVirtualizer>(
+                effect, sessionId, ioId, desc);
+    } else if (typeUuid == kVisualizerTypeUUID) {
+        mConversion = std::make_unique<android::effect::AidlConversionVisualizer>(effect, sessionId,
+                                                                                  ioId, desc);
     } else {
-        ALOGE("%s effect not implemented yet, UUID type: %s", __func__,
-              typeUuid.toString().c_str());
-        return BAD_VALUE;
+        // For unknown UUID, use vendor extension implementation
+        mConversion = std::make_unique<android::effect::AidlConversionVendorExtension>(
+                effect, sessionId, ioId, desc);
     }
     return OK;
 }
 
 status_t EffectHalAidl::setInBuffer(const sp<EffectBufferHalInterface>& buffer) {
-    if (buffer == nullptr) {
-        return BAD_VALUE;
-    }
-    ALOGW("%s not implemented yet", __func__);
+    mInBuffer = buffer;
     return OK;
 }
 
 status_t EffectHalAidl::setOutBuffer(const sp<EffectBufferHalInterface>& buffer) {
-    if (buffer == nullptr) {
-        return BAD_VALUE;
-    }
-    ALOGW("%s not implemented yet", __func__);
+    mOutBuffer = buffer;
     return OK;
 }
 
+
+// write to input FMQ here, wait for statusMQ STATUS_OK, and read from output FMQ
 status_t EffectHalAidl::process() {
-    ALOGW("%s not implemented yet", __func__);
-    // write to input FMQ here, and wait for statusMQ STATUS_OK
+    size_t available = mInputQ->availableToWrite();
+    size_t floatsToWrite = std::min(available, mInBuffer->getSize() / sizeof(float));
+    if (floatsToWrite == 0) {
+        ALOGW("%s not able to write, floats in buffer %zu, space in FMQ %zu", __func__,
+              mInBuffer->getSize() / sizeof(float), available);
+        return INVALID_OPERATION;
+    }
+    if (!mInputQ->write((float*)mInBuffer->ptr(), floatsToWrite)) {
+        ALOGW("%s failed to write %zu into inputQ", __func__, floatsToWrite);
+        return INVALID_OPERATION;
+    }
+
+    IEffect::Status retStatus{};
+    if (!mStatusQ->readBlocking(&retStatus, 1) || retStatus.status != OK ||
+        (size_t)retStatus.fmqConsumed != floatsToWrite || retStatus.fmqProduced == 0) {
+        ALOGW("%s read status failed: %s", __func__, retStatus.toString().c_str());
+        return INVALID_OPERATION;
+    }
+
+    available = mOutputQ->availableToRead();
+    size_t floatsToRead = std::min(available, mOutBuffer->getSize() / sizeof(float));
+    if (floatsToRead == 0) {
+        ALOGW("%s not able to read, buffer space %zu, floats in FMQ %zu", __func__,
+              mOutBuffer->getSize() / sizeof(float), available);
+        return INVALID_OPERATION;
+    }
+    if (!mOutputQ->read((float*)mOutBuffer->ptr(), floatsToRead)) {
+        ALOGW("%s failed to read %zu from outputQ", __func__, floatsToRead);
+        return INVALID_OPERATION;
+    }
+
+    ALOGD("%s %s consumed %zu produced %zu", __func__, mDesc.common.name.c_str(), floatsToWrite,
+          floatsToRead);
     return OK;
 }
 
@@ -134,14 +197,32 @@ status_t EffectHalAidl::processReverse() {
 
 status_t EffectHalAidl::command(uint32_t cmdCode, uint32_t cmdSize, void* pCmdData,
                                 uint32_t* replySize, void* pReplyData) {
-    return mConversion
-                   ? mConversion->handleCommand(cmdCode, cmdSize, pCmdData, replySize, pReplyData)
-                   : INVALID_OPERATION;
+    TIME_CHECK();
+    if (!mConversion) {
+        ALOGE("%s can not handle command %d when conversion not exist", __func__, cmdCode);
+        return INVALID_OPERATION;
+    }
+
+    status_t ret = mConversion->handleCommand(cmdCode, cmdSize, pCmdData, replySize, pReplyData);
+    // update FMQs when effect open successfully
+    if (ret == OK && cmdCode == EFFECT_CMD_INIT) {
+        const auto& retParam = mConversion->getEffectReturnParam();
+        mStatusQ = std::make_unique<StatusMQ>(retParam.statusMQ);
+        mInputQ = std::make_unique<DataMQ>(retParam.inputDataMQ);
+        mOutputQ = std::make_unique<DataMQ>(retParam.outputDataMQ);
+        if (!mStatusQ->isValid() || !mInputQ->isValid() || !mOutputQ->isValid()) {
+            ALOGE("%s return with invalid FMQ", __func__);
+            return NO_INIT;
+        }
+    }
+
+    return ret;
 }
 
 status_t EffectHalAidl::getDescriptor(effect_descriptor_t* pDescriptor) {
-    ALOGW("%s %p", __func__, pDescriptor);
+    TIME_CHECK();
     if (pDescriptor == nullptr) {
+        ALOGE("%s null descriptor pointer", __func__);
         return BAD_VALUE;
     }
     Descriptor aidlDesc;
@@ -153,12 +234,13 @@ status_t EffectHalAidl::getDescriptor(effect_descriptor_t* pDescriptor) {
 }
 
 status_t EffectHalAidl::close() {
+    TIME_CHECK();
     return statusTFromBinderStatus(mEffect->close());
 }
 
 status_t EffectHalAidl::dump(int fd) {
-    ALOGW("%s not implemented yet, fd %d", __func__, fd);
-    return OK;
+    TIME_CHECK();
+    return mEffect->dump(fd, nullptr, 0);
 }
 
 } // namespace effect

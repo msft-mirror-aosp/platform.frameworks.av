@@ -21,8 +21,10 @@
 //#define LOG_NDEBUG 0
 
 #include <error/expected_utils.h>
+#include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionNdk.h>
 #include <media/AidlConversionEffect.h>
+#include <system/audio_effects/effect_visualizer.h>
 
 #include <utils/Log.h>
 
@@ -34,8 +36,11 @@ namespace effect {
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::CommandId;
 using ::aidl::android::hardware::audio::effect::Descriptor;
+using ::aidl::android::hardware::audio::effect::Flags;
 using ::aidl::android::hardware::audio::effect::Parameter;
 using ::aidl::android::media::audio::common::AudioDeviceDescription;
+using ::aidl::android::media::audio::common::AudioMode;
+using ::aidl::android::media::audio::common::AudioSource;
 using android::effect::utils::EffectParamReader;
 using android::effect::utils::EffectParamWriter;
 
@@ -51,16 +56,23 @@ const std::map<uint32_t /* effect_command_e */, EffectConversionHelperAidl::Comm
                 {EFFECT_CMD_RESET, &EffectConversionHelperAidl::handleReset},
                 {EFFECT_CMD_ENABLE, &EffectConversionHelperAidl::handleEnable},
                 {EFFECT_CMD_DISABLE, &EffectConversionHelperAidl::handleDisable},
+                {EFFECT_CMD_SET_AUDIO_SOURCE, &EffectConversionHelperAidl::handleSetAudioSource},
                 {EFFECT_CMD_SET_DEVICE, &EffectConversionHelperAidl::handleSetDevice},
                 {EFFECT_CMD_SET_INPUT_DEVICE, &EffectConversionHelperAidl::handleSetDevice},
                 {EFFECT_CMD_SET_VOLUME, &EffectConversionHelperAidl::handleSetVolume},
                 {EFFECT_CMD_OFFLOAD, &EffectConversionHelperAidl::handleSetOffload},
-                {EFFECT_CMD_FIRST_PROPRIETARY, &EffectConversionHelperAidl::handleFirstPriority}};
+                // Only visualizer support these commands, reuse of EFFECT_CMD_FIRST_PROPRIETARY
+                {VISUALIZER_CMD_CAPTURE, &EffectConversionHelperAidl::handleVisualizerCapture},
+                {VISUALIZER_CMD_MEASURE, &EffectConversionHelperAidl::handleVisualizerMeasure}};
 
 EffectConversionHelperAidl::EffectConversionHelperAidl(
         std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
         int32_t sessionId, int32_t ioId, const Descriptor& desc)
-    : mSessionId(sessionId), mIoId(ioId), mDesc(desc), mEffect(std::move(effect)) {
+    : mSessionId(sessionId),
+      mIoId(ioId),
+      mDesc(desc),
+      mEffect(std::move(effect)),
+      mIsInputStream(mDesc.common.flags.type == Flags::Type::PRE_PROC) {
     mCommon.session = sessionId;
     mCommon.ioHandle = ioId;
     mCommon.input = mCommon.output = kDefaultAudioConfig;
@@ -101,7 +113,10 @@ status_t EffectConversionHelperAidl::handleSetParameter(uint32_t cmdSize, const 
         return BAD_VALUE;
     }
 
-    return *(status_t*)pReplyData = setParameter(reader);
+    status_t ret = setParameter(reader);
+    EffectParamWriter writer(*(effect_param_t*)pReplyData);
+    writer.setStatus(ret);
+    return *(status_t*)pReplyData = ret;
 }
 
 status_t EffectConversionHelperAidl::handleGetParameter(uint32_t cmdSize, const void* pCmdData,
@@ -111,10 +126,8 @@ status_t EffectConversionHelperAidl::handleGetParameter(uint32_t cmdSize, const 
     }
 
     const auto reader = EffectParamReader(*(effect_param_t*)pCmdData);
-    if (!reader.validateCmdSize(cmdSize) ||
-        *replySize < sizeof(effect_param_t) + reader.getParameterSize()) {
-        ALOGE("%s illegal param %s, replySize %u", __func__, reader.toString().c_str(),
-              *replySize);
+    if (*replySize < sizeof(effect_param_t) + reader.getParameterSize()) {
+        ALOGE("%s illegal param %s, replySize %u", __func__, reader.toString().c_str(), *replySize);
         return BAD_VALUE;
     }
 
@@ -123,7 +136,11 @@ status_t EffectConversionHelperAidl::handleGetParameter(uint32_t cmdSize, const 
     auto writer = EffectParamWriter(*(effect_param_t*)pReplyData);
     status_t ret = getParameter(writer);
     writer.finishValueWrite();
+    writer.setStatus(ret);
     *replySize = writer.getTotalSize();
+    if (ret != OK) {
+        ALOGE("%s error ret %d, %s", __func__, ret, writer.toString().c_str());
+    }
     return ret;
 }
 
@@ -131,25 +148,28 @@ status_t EffectConversionHelperAidl::handleSetConfig(uint32_t cmdSize, const voi
                                                      uint32_t* replySize, void* pReplyData) {
     if (!replySize || *replySize != sizeof(int) || !pReplyData ||
         cmdSize != sizeof(effect_config_t)) {
+        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
+              pReplyData);
         return BAD_VALUE;
     }
 
-    const auto& legacyConfig = static_cast<const effect_config_t*>(pCmdData);
-    // already open, apply latest settings
-    Parameter::Common common;
-    common.input.base =
-            VALUE_OR_RETURN_STATUS(::aidl::android::legacy2aidl_buffer_config_t_AudioConfigBase(
-                    legacyConfig->inputCfg, true /* isInput */));
-    common.output.base =
-            VALUE_OR_RETURN_STATUS(::aidl::android::legacy2aidl_buffer_config_t_AudioConfigBase(
-                    legacyConfig->outputCfg, false /* isInput */));
-    common.session = mSessionId;
-    common.ioHandle = mIoId;
-    // TODO: add access mode support
-    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
-            mEffect->setParameter(Parameter::make<Parameter::common>(common))));
-    mCommon = common;
-    return *static_cast<int32_t*>(pReplyData) = OK;
+    effect_config_t* config = (effect_config_t*)pCmdData;
+    Parameter::Common aidlCommon = {
+            .session = mSessionId,
+            .ioHandle = mIoId,
+            .input = {.base = VALUE_OR_RETURN_STATUS(
+                              ::aidl::android::legacy2aidl_buffer_config_t_AudioConfigBase(
+                                      config->inputCfg, mIsInputStream))},
+            .output = {.base = VALUE_OR_RETURN_STATUS(
+                               ::aidl::android::legacy2aidl_buffer_config_t_AudioConfigBase(
+                                       config->outputCfg, mIsInputStream))}};
+
+    Parameter aidlParam = UNION_MAKE(Parameter, common, aidlCommon);
+
+    status_t ret = statusTFromBinderStatus(mEffect->setParameter(aidlParam));
+    EffectParamWriter writer(*(effect_param_t*)pReplyData);
+    writer.setStatus(ret);
+    return ret;
 }
 
 status_t EffectConversionHelperAidl::handleGetConfig(uint32_t cmdSize __unused,
@@ -178,7 +198,7 @@ status_t EffectConversionHelperAidl::handleGetConfig(uint32_t cmdSize __unused,
 status_t EffectConversionHelperAidl::handleReset(uint32_t cmdSize __unused,
                                                  const void* pCmdData __unused, uint32_t* replySize,
                                                  void* pReplyData) {
-    if (!replySize || *replySize != sizeof(effect_config_t) || !pReplyData) {
+    if (!replySize || !pReplyData) {
         ALOGE("%s parameter invalid %p %p", __func__, replySize, pReplyData);
         return BAD_VALUE;
     }
@@ -187,9 +207,9 @@ status_t EffectConversionHelperAidl::handleReset(uint32_t cmdSize __unused,
 }
 
 status_t EffectConversionHelperAidl::handleEnable(uint32_t cmdSize __unused,
-                                                 const void* pCmdData __unused, uint32_t* replySize,
-                                                 void* pReplyData) {
-    if (!replySize || *replySize != sizeof(effect_config_t) || !pReplyData) {
+                                                  const void* pCmdData __unused,
+                                                  uint32_t* replySize, void* pReplyData) {
+    if (!replySize || !pReplyData) {
         ALOGE("%s parameter invalid %p %p", __func__, replySize, pReplyData);
         return BAD_VALUE;
     }
@@ -200,7 +220,7 @@ status_t EffectConversionHelperAidl::handleEnable(uint32_t cmdSize __unused,
 status_t EffectConversionHelperAidl::handleDisable(uint32_t cmdSize __unused,
                                                    const void* pCmdData __unused,
                                                    uint32_t* replySize, void* pReplyData) {
-    if (!replySize || *replySize != sizeof(effect_config_t) || !pReplyData) {
+    if (!replySize || !pReplyData) {
         ALOGE("%s parameter invalid %p %p", __func__, replySize, pReplyData);
         return BAD_VALUE;
     }
@@ -208,10 +228,40 @@ status_t EffectConversionHelperAidl::handleDisable(uint32_t cmdSize __unused,
     return statusTFromBinderStatus(mEffect->command(CommandId::STOP));
 }
 
+status_t EffectConversionHelperAidl::handleSetAudioSource(uint32_t cmdSize, const void* pCmdData,
+                                                          uint32_t* replySize, void* pReplyData) {
+    if (cmdSize != sizeof(uint32_t) || !pCmdData || !replySize || !pReplyData) {
+        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
+              pReplyData);
+        return BAD_VALUE;
+    }
+
+    audio_source_t source = *(audio_source_t*)pCmdData;
+    AudioSource aidlSource =
+            VALUE_OR_RETURN_STATUS(::aidl::android::legacy2aidl_audio_source_t_AudioSource(source));
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+            mEffect->setParameter(Parameter::make<Parameter::source>(aidlSource))));
+    return *static_cast<int32_t*>(pReplyData) = OK;
+}
+
+status_t EffectConversionHelperAidl::handleSetAudioMode(uint32_t cmdSize, const void* pCmdData,
+                                                        uint32_t* replySize, void* pReplyData) {
+    if (cmdSize != sizeof(uint32_t) || !pCmdData || !replySize || !pReplyData) {
+        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
+              pReplyData);
+        return BAD_VALUE;
+    }
+    audio_mode_t mode = *(audio_mode_t *)pCmdData;
+    AudioMode aidlMode =
+            VALUE_OR_RETURN_STATUS(::aidl::android::legacy2aidl_audio_mode_t_AudioMode(mode));
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+            mEffect->setParameter(Parameter::make<Parameter::mode>(aidlMode))));
+    return *static_cast<int32_t*>(pReplyData) = OK;
+}
+
 status_t EffectConversionHelperAidl::handleSetDevice(uint32_t cmdSize, const void* pCmdData,
                                                      uint32_t* replySize, void* pReplyData) {
-    if (cmdSize != sizeof(uint32_t) || !pCmdData || !replySize ||
-        *replySize != sizeof(effect_config_t) || !pReplyData) {
+    if (cmdSize != sizeof(uint32_t) || !pCmdData || !replySize || !pReplyData) {
         ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
               pReplyData);
         return BAD_VALUE;
@@ -223,26 +273,23 @@ status_t EffectConversionHelperAidl::handleSetDevice(uint32_t cmdSize, const voi
             mEffect->setParameter(Parameter::make<Parameter::deviceDescription>(aidlDevices))));
     return *static_cast<int32_t*>(pReplyData) = OK;
 }
-
 status_t EffectConversionHelperAidl::handleSetVolume(uint32_t cmdSize, const void* pCmdData,
-                                                     uint32_t* replySize, void* pReplyData) {
-    if (cmdSize != 2 * sizeof(uint32_t) || !pCmdData || !replySize ||
-        *replySize != sizeof(effect_config_t) || !pReplyData) {
-        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
-              pReplyData);
+                                                     uint32_t* replySize __unused,
+                                                     void* pReplyData __unused) {
+    if (cmdSize != 2 * sizeof(uint32_t) || !pCmdData) {
+        ALOGE("%s parameter invalid %u %p", __func__, cmdSize, pCmdData);
         return BAD_VALUE;
     }
     Parameter::VolumeStereo volume = {.left = (float)(*(uint32_t*)pCmdData) / (1 << 24),
                                       .right = (float)(*(uint32_t*)pCmdData + 1) / (1 << 24)};
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
             mEffect->setParameter(Parameter::make<Parameter::volumeStereo>(volume))));
-    return *static_cast<int32_t*>(pReplyData) = OK;
+    return OK;
 }
 
 status_t EffectConversionHelperAidl::handleSetOffload(uint32_t cmdSize, const void* pCmdData,
                                                       uint32_t* replySize, void* pReplyData) {
-    if (cmdSize < sizeof(effect_offload_param_t) || !pCmdData || !replySize ||
-        *replySize != sizeof(effect_config_t) || !pReplyData) {
+    if (cmdSize < sizeof(effect_offload_param_t) || !pCmdData || !replySize || !pReplyData) {
         ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
               pReplyData);
         return BAD_VALUE;
@@ -251,16 +298,44 @@ status_t EffectConversionHelperAidl::handleSetOffload(uint32_t cmdSize, const vo
     return *static_cast<int32_t*>(pReplyData) = OK;
 }
 
-status_t EffectConversionHelperAidl::handleFirstPriority(uint32_t cmdSize __unused,
-                                                         const void* pCmdData __unused,
-                                                         uint32_t* replySize, void* pReplyData) {
-    if (!replySize || *replySize != sizeof(effect_config_t) || !pReplyData) {
+status_t EffectConversionHelperAidl::handleVisualizerCapture(uint32_t cmdSize __unused,
+                                                             const void* pCmdData __unused,
+                                                             uint32_t* replySize,
+                                                             void* pReplyData) {
+    if (!replySize || !pReplyData) {
         ALOGE("%s parameter invalid %p %p", __func__, replySize, pReplyData);
         return BAD_VALUE;
     }
 
-    // TODO to be implemented
-    return OK;
+    const auto& uuid = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::aidl2legacy_AudioUuid_audio_uuid_t(mDesc.common.id.type));
+    if (0 != memcmp(&uuid, SL_IID_VISUALIZATION, sizeof(effect_uuid_t))) {
+        ALOGE("%s visualizer command not supported by %s", __func__,
+              mDesc.common.id.toString().c_str());
+        return BAD_VALUE;
+    }
+
+    return visualizerCapture(replySize, pReplyData);
+}
+
+status_t EffectConversionHelperAidl::handleVisualizerMeasure(uint32_t cmdSize __unused,
+                                                             const void* pCmdData __unused,
+                                                             uint32_t* replySize,
+                                                             void* pReplyData) {
+    if (!replySize || !pReplyData) {
+        ALOGE("%s parameter invalid %p %p", __func__, replySize, pReplyData);
+        return BAD_VALUE;
+    }
+
+    const auto& uuid = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::aidl2legacy_AudioUuid_audio_uuid_t(mDesc.common.id.type));
+    if (0 != memcmp(&uuid, SL_IID_VISUALIZATION, sizeof(effect_uuid_t))) {
+        ALOGE("%s visualizer command not supported by %s", __func__,
+              mDesc.common.id.toString().c_str());
+        return BAD_VALUE;
+    }
+
+    return visualizerMeasure(replySize, pReplyData);
 }
 
 }  // namespace effect

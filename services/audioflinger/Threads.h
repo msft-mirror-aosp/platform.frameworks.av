@@ -576,6 +576,9 @@ public:
 
     virtual     bool isStreamInitialized() = 0;
 
+    virtual     void startMelComputation_l(const sp<audio_utils::MelProcessor>& processor);
+    virtual     void stopMelComputation_l();
+
 protected:
 
                 // entry describing an effect being suspended in mSuspendedSessions keyed vector
@@ -1110,8 +1113,8 @@ public:
                     return INVALID_OPERATION;
                 }
 
-                void startMelComputation(const sp<audio_utils::MelProcessor>& processor);
-                void stopMelComputation();
+                void startMelComputation_l(const sp<audio_utils::MelProcessor>& processor) override;
+                void stopMelComputation_l() override;
 
 protected:
     // updated by readOutputParameters_l()
@@ -1215,8 +1218,6 @@ protected:
     audio_channel_mask_t            mMixerChannelMask = AUDIO_CHANNEL_NONE;
 
 private:
-    mediautils::atomic_sp<audio_utils::MelProcessor> mMelProcessor;
-
     // mMasterMute is in both PlaybackThread and in AudioFlinger.  When a
     // PlaybackThread needs to find out if master-muted, it checks it's local
     // copy rather than the one in AudioFlinger.  This optimization saves a lock.
@@ -1982,7 +1983,8 @@ public:
             // Sets the UID records silence
             void        setRecordSilenced(audio_port_handle_t portId, bool silenced);
 
-            status_t    getActiveMicrophones(std::vector<media::MicrophoneInfo>* activeMicrophones);
+            status_t    getActiveMicrophones(
+                    std::vector<media::MicrophoneInfoFw>* activeMicrophones);
 
             status_t    setPreferredMicrophoneDirection(audio_microphone_direction_t direction);
             status_t    setPreferredMicrophoneFieldDimension(float zoom);
@@ -2129,6 +2131,7 @@ class MmapThread : public ThreadBase
     status_t stop(audio_port_handle_t handle);
     status_t standby();
     virtual status_t getExternalPosition(uint64_t *position, int64_t *timeNaos) = 0;
+    virtual status_t reportData(const void* buffer, size_t frameCount);
 
     // RefBase
     virtual     void        onFirstRef();
@@ -2271,6 +2274,11 @@ public:
                                 return !(mOutput == nullptr || mOutput->stream == nullptr);
                             }
 
+                status_t    reportData(const void* buffer, size_t frameCount) override;
+
+                void startMelComputation_l(const sp<audio_utils::MelProcessor>& processor) override;
+                void stopMelComputation_l() override;
+
 protected:
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
 
@@ -2280,6 +2288,8 @@ protected:
                 bool                        mMasterMute;
                 bool                        mStreamMute;
                 AudioStreamOut*             mOutput;
+
+                mediautils::atomic_sp<audio_utils::MelProcessor> mMelProcessor;
 };
 
 class MmapCaptureThread : public MmapThread
