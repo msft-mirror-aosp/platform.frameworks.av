@@ -21,8 +21,11 @@
 #include <cstdint>
 
 #include <audio_utils/clock.h>
+#include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionUtil.h>
+#include <media/AudioParameter.h>
 #include <mediautils/TimeCheck.h>
+#include <system/audio.h>
 #include <utils/Log.h>
 
 #include "DeviceHalAidl.h"
@@ -33,6 +36,7 @@ using ::aidl::android::hardware::audio::core::IStreamCommon;
 using ::aidl::android::hardware::audio::core::IStreamIn;
 using ::aidl::android::hardware::audio::core::IStreamOut;
 using ::aidl::android::hardware::audio::core::StreamDescriptor;
+using ::aidl::android::legacy2aidl_audio_channel_mask_t_AudioChannelLayout;
 
 namespace android {
 
@@ -261,7 +265,7 @@ status_t StreamHalAidl::getXruns(int32_t *frames) {
 
 status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred) {
     ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
-    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+    // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!mStream || mContext.getDataMQ() == nullptr) return NO_INIT;
     mWorkerTid.store(gettid(), std::memory_order_release);
     // Switch the stream into an active state if needed.
@@ -325,6 +329,26 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
     if (mIsInput) {
         return sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), reply);
     } else {
+        if (mContext.isAsynchronous()) {
+            // Handle pause-flush-resume sequence. 'flush' from PAUSED goes to
+            // IDLE. We move here from IDLE to ACTIVE (same as 'start' from PAUSED).
+            const auto state = getState();
+            if (state == StreamDescriptor::State::IDLE) {
+                StreamDescriptor::Reply localReply{};
+                StreamDescriptor::Reply* innerReply = reply ?: &localReply;
+                if (status_t status =
+                        sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), innerReply);
+                        status != OK) {
+                    return status;
+                }
+                if (innerReply->state != StreamDescriptor::State::ACTIVE) {
+                    ALOGE("%s: unexpected stream state: %s (expected ACTIVE)",
+                            __func__, toString(innerReply->state).c_str());
+                    return INVALID_OPERATION;
+                }
+                return OK;
+            }
+        }
         return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
     }
 }
@@ -407,7 +431,7 @@ status_t StreamHalAidl::sendCommand(
         const ::aidl::android::hardware::audio::core::StreamDescriptor::Command &command,
         ::aidl::android::hardware::audio::core::StreamDescriptor::Reply* reply,
         bool safeFromNonWorkerThread) {
-    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+    // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!safeFromNonWorkerThread) {
         const pid_t workerTid = mWorkerTid.load(std::memory_order_acquire);
         LOG_ALWAYS_FATAL_IF(workerTid != gettid(),
@@ -463,12 +487,31 @@ StreamOutHalAidl::StreamOutHalAidl(
         const std::shared_ptr<IStreamOut>& stream, const sp<CallbackBroker>& callbackBroker)
         : StreamHalAidl("StreamOutHalAidl", false /*isInput*/, config, nominalLatency,
                 std::move(context), getStreamCommon(stream)),
-          mStream(stream), mCallbackBroker(callbackBroker) {}
+          mStream(stream), mCallbackBroker(callbackBroker) {
+    // Initialize the offload metadata
+    mOffloadMetadata.sampleRate = static_cast<int32_t>(config.sample_rate);
+    mOffloadMetadata.channelMask = VALUE_OR_FATAL(
+            legacy2aidl_audio_channel_mask_t_AudioChannelLayout(config.channel_mask, false));
+    mOffloadMetadata.averageBitRatePerSecond = static_cast<int32_t>(config.offload_info.bit_rate);
+}
 
 StreamOutHalAidl::~StreamOutHalAidl() {
     if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
         broker->clearCallbacks(this);
     }
+}
+
+status_t StreamOutHalAidl::setParameters(const String8& kvPairs) {
+    if (!mStream) return NO_INIT;
+
+    AudioParameter parameters(kvPairs);
+    ALOGD("%s parameters: %s", __func__, parameters.toString().c_str());
+
+    if (filterAndUpdateOffloadMetadata(parameters) != OK) {
+        ALOGW("%s filtering or updating offload metadata gets failed", __func__);
+    }
+
+    return StreamHalAidl::setParameters(parameters.toString());
 }
 
 status_t StreamOutHalAidl::getLatency(uint32_t *latency) {
@@ -516,6 +559,10 @@ status_t StreamOutHalAidl::getNextWriteTimestamp(int64_t *timestamp __unused) {
 status_t StreamOutHalAidl::setCallback(wp<StreamOutHalInterfaceCallback> callback) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
+    if (!mContext.isAsynchronous()) {
+        ALOGE("%s: the callback is intended for asynchronous streams only", __func__);
+        return INVALID_OPERATION;
+    }
     if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
         if (auto cb = callback.promote(); cb != nullptr) {
             broker->setStreamOutCallback(this, cb);
@@ -667,6 +714,78 @@ status_t StreamOutHalAidl::setLatencyModeCallback(
 
 status_t StreamOutHalAidl::exit() {
     return StreamHalAidl::exit();
+}
+
+status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parameters) {
+    TIME_CHECK();
+
+    if (parameters.containsKey(String8(AudioParameter::keyOffloadCodecAverageBitRate)) ||
+            parameters.containsKey(String8(AudioParameter::keyOffloadCodecSampleRate)) ||
+            parameters.containsKey(String8(AudioParameter::keyOffloadCodecChannels)) ||
+            parameters.containsKey(String8(AudioParameter::keyOffloadCodecDelaySamples)) ||
+            parameters.containsKey(String8(AudioParameter::keyOffloadCodecPaddingSamples))) {
+        int value = 0;
+        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecAverageBitRate), value)
+                == NO_ERROR) {
+            if (value <= 0) {
+                return BAD_VALUE;
+            }
+            mOffloadMetadata.averageBitRatePerSecond = value;
+            parameters.remove(String8(AudioParameter::keyOffloadCodecAverageBitRate));
+        }
+
+        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecSampleRate), value)
+                == NO_ERROR) {
+            if (value <= 0) {
+                return BAD_VALUE;
+            }
+            mOffloadMetadata.sampleRate = value;
+            parameters.remove(String8(AudioParameter::keyOffloadCodecSampleRate));
+        }
+
+        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecChannels), value)
+                == NO_ERROR) {
+            if (value <= 0) {
+                return BAD_VALUE;
+            }
+            audio_channel_mask_t channel_mask =
+                    audio_channel_out_mask_from_count(static_cast<uint32_t>(value));
+            if (channel_mask == AUDIO_CHANNEL_INVALID) {
+                return BAD_VALUE;
+            }
+            mOffloadMetadata.channelMask =
+                    VALUE_OR_RETURN_STATUS(legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
+                        channel_mask, false));
+            parameters.remove(String8(AudioParameter::keyOffloadCodecChannels));
+        }
+
+        // The legacy keys are misnamed. The delay and padding are in frame.
+        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecDelaySamples), value)
+                == NO_ERROR) {
+            if (value < 0) {
+                return BAD_VALUE;
+            }
+            mOffloadMetadata.delayFrames = value;
+            parameters.remove(String8(AudioParameter::keyOffloadCodecDelaySamples));
+        }
+
+        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecPaddingSamples), value)
+                == NO_ERROR) {
+            if (value < 0) {
+                return BAD_VALUE;
+            }
+            mOffloadMetadata.paddingFrames = value;
+            parameters.remove(String8(AudioParameter::keyOffloadCodecPaddingSamples));
+        }
+
+        ALOGD("%s set offload metadata %s", __func__, mOffloadMetadata.toString().c_str());
+        status_t status = statusTFromBinderStatus(mStream->updateOffloadMetadata(mOffloadMetadata));
+        if (status != OK) {
+            ALOGE("%s: updateOffloadMetadata failed %d", __func__, status);
+            return status;
+        }
+    }
+    return OK;
 }
 
 StreamInHalAidl::StreamInHalAidl(

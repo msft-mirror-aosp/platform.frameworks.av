@@ -30,12 +30,18 @@ class EffectConversionHelperAidl {
     status_t handleCommand(uint32_t cmdCode, uint32_t cmdSize, void* pCmdData, uint32_t* replySize,
                            void* pReplyData);
     virtual ~EffectConversionHelperAidl() {}
+    const ::aidl::android::hardware::audio::effect::IEffect::OpenEffectReturn&
+    getEffectReturnParam() const {
+        return mOpenReturn;
+    }
 
   protected:
     const int32_t mSessionId;
     const int32_t mIoId;
     const ::aidl::android::hardware::audio::effect::Descriptor mDesc;
     const std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> mEffect;
+    // whether the effect is instantiated on an input stream
+    const bool mIsInputStream;
     ::aidl::android::hardware::audio::effect::IEffect::OpenEffectReturn mOpenReturn;
     ::aidl::android::hardware::audio::effect::Parameter::Common mCommon;
 
@@ -92,8 +98,6 @@ class EffectConversionHelperAidl {
                              void* pReplyData);
     status_t handleSetOffload(uint32_t cmdSize, const void* pCmdData, uint32_t* replySize,
                               void* pReplyData);
-    status_t handleFirstPriority(uint32_t cmdSize, const void* pCmdData, uint32_t* replySize,
-                                 void* pReplyData);
     status_t handleVisualizerCapture(uint32_t cmdSize, const void* pCmdData, uint32_t* replySize,
                                      void* pReplyData);
     status_t handleVisualizerMeasure(uint32_t cmdSize, const void* pCmdData, uint32_t* replySize,

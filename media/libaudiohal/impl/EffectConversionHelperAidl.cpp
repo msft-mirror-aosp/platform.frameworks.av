@@ -36,6 +36,7 @@ namespace effect {
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::CommandId;
 using ::aidl::android::hardware::audio::effect::Descriptor;
+using ::aidl::android::hardware::audio::effect::Flags;
 using ::aidl::android::hardware::audio::effect::Parameter;
 using ::aidl::android::media::audio::common::AudioDeviceDescription;
 using ::aidl::android::media::audio::common::AudioMode;
@@ -60,15 +61,18 @@ const std::map<uint32_t /* effect_command_e */, EffectConversionHelperAidl::Comm
                 {EFFECT_CMD_SET_INPUT_DEVICE, &EffectConversionHelperAidl::handleSetDevice},
                 {EFFECT_CMD_SET_VOLUME, &EffectConversionHelperAidl::handleSetVolume},
                 {EFFECT_CMD_OFFLOAD, &EffectConversionHelperAidl::handleSetOffload},
-                {EFFECT_CMD_FIRST_PROPRIETARY, &EffectConversionHelperAidl::handleFirstPriority},
-                // Only visualizer support these commands
+                // Only visualizer support these commands, reuse of EFFECT_CMD_FIRST_PROPRIETARY
                 {VISUALIZER_CMD_CAPTURE, &EffectConversionHelperAidl::handleVisualizerCapture},
                 {VISUALIZER_CMD_MEASURE, &EffectConversionHelperAidl::handleVisualizerMeasure}};
 
 EffectConversionHelperAidl::EffectConversionHelperAidl(
         std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
         int32_t sessionId, int32_t ioId, const Descriptor& desc)
-    : mSessionId(sessionId), mIoId(ioId), mDesc(desc), mEffect(std::move(effect)) {
+    : mSessionId(sessionId),
+      mIoId(ioId),
+      mDesc(desc),
+      mEffect(std::move(effect)),
+      mIsInputStream(mDesc.common.flags.type == Flags::Type::PRE_PROC) {
     mCommon.session = sessionId;
     mCommon.ioHandle = ioId;
     mCommon.input = mCommon.output = kDefaultAudioConfig;
@@ -140,16 +144,32 @@ status_t EffectConversionHelperAidl::handleGetParameter(uint32_t cmdSize, const 
     return ret;
 }
 
-status_t EffectConversionHelperAidl::handleSetConfig(uint32_t cmdSize,
-                                                     const void* pCmdData __unused,
+status_t EffectConversionHelperAidl::handleSetConfig(uint32_t cmdSize, const void* pCmdData,
                                                      uint32_t* replySize, void* pReplyData) {
     if (!replySize || *replySize != sizeof(int) || !pReplyData ||
         cmdSize != sizeof(effect_config_t)) {
+        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
+              pReplyData);
         return BAD_VALUE;
     }
 
-    // TODO: need to implement setConfig with setParameter(common)
-    return *static_cast<int32_t*>(pReplyData) = OK;
+    effect_config_t* config = (effect_config_t*)pCmdData;
+    Parameter::Common aidlCommon = {
+            .session = mSessionId,
+            .ioHandle = mIoId,
+            .input = {.base = VALUE_OR_RETURN_STATUS(
+                              ::aidl::android::legacy2aidl_buffer_config_t_AudioConfigBase(
+                                      config->inputCfg, mIsInputStream))},
+            .output = {.base = VALUE_OR_RETURN_STATUS(
+                               ::aidl::android::legacy2aidl_buffer_config_t_AudioConfigBase(
+                                       config->outputCfg, mIsInputStream))}};
+
+    Parameter aidlParam = UNION_MAKE(Parameter, common, aidlCommon);
+
+    status_t ret = statusTFromBinderStatus(mEffect->setParameter(aidlParam));
+    EffectParamWriter writer(*(effect_param_t*)pReplyData);
+    writer.setStatus(ret);
+    return ret;
 }
 
 status_t EffectConversionHelperAidl::handleGetConfig(uint32_t cmdSize __unused,
@@ -254,17 +274,17 @@ status_t EffectConversionHelperAidl::handleSetDevice(uint32_t cmdSize, const voi
     return *static_cast<int32_t*>(pReplyData) = OK;
 }
 status_t EffectConversionHelperAidl::handleSetVolume(uint32_t cmdSize, const void* pCmdData,
-                                                     uint32_t* replySize, void* pReplyData) {
-    if (cmdSize != 2 * sizeof(uint32_t) || !pCmdData || !replySize || !pReplyData) {
-        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
-              pReplyData);
+                                                     uint32_t* replySize __unused,
+                                                     void* pReplyData __unused) {
+    if (cmdSize != 2 * sizeof(uint32_t) || !pCmdData) {
+        ALOGE("%s parameter invalid %u %p", __func__, cmdSize, pCmdData);
         return BAD_VALUE;
     }
     Parameter::VolumeStereo volume = {.left = (float)(*(uint32_t*)pCmdData) / (1 << 24),
                                       .right = (float)(*(uint32_t*)pCmdData + 1) / (1 << 24)};
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
             mEffect->setParameter(Parameter::make<Parameter::volumeStereo>(volume))));
-    return *static_cast<int32_t*>(pReplyData) = OK;
+    return OK;
 }
 
 status_t EffectConversionHelperAidl::handleSetOffload(uint32_t cmdSize, const void* pCmdData,
@@ -276,18 +296,6 @@ status_t EffectConversionHelperAidl::handleSetOffload(uint32_t cmdSize, const vo
     }
     // TODO: handle this after effectproxy implemented in libaudiohal
     return *static_cast<int32_t*>(pReplyData) = OK;
-}
-
-status_t EffectConversionHelperAidl::handleFirstPriority(uint32_t cmdSize __unused,
-                                                         const void* pCmdData __unused,
-                                                         uint32_t* replySize, void* pReplyData) {
-    if (!replySize || !pReplyData) {
-        ALOGE("%s parameter invalid %p %p", __func__, replySize, pReplyData);
-        return BAD_VALUE;
-    }
-
-    // TODO to be implemented
-    return OK;
 }
 
 status_t EffectConversionHelperAidl::handleVisualizerCapture(uint32_t cmdSize __unused,
