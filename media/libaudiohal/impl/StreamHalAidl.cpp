@@ -21,7 +21,9 @@
 #include <cstdint>
 
 #include <audio_utils/clock.h>
+#include <media/AidlConversion.h>
 #include <media/AidlConversionCppNdk.h>
+#include <media/AidlConversionNdk.h>
 #include <media/AidlConversionUtil.h>
 #include <media/AudioParameter.h>
 #include <mediautils/TimeCheck.h>
@@ -32,11 +34,13 @@
 #include "StreamHalAidl.h"
 
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
+using ::aidl::android::hardware::audio::common::PlaybackTrackMetadata;
+using ::aidl::android::hardware::audio::common::RecordTrackMetadata;
 using ::aidl::android::hardware::audio::core::IStreamCommon;
 using ::aidl::android::hardware::audio::core::IStreamIn;
 using ::aidl::android::hardware::audio::core::IStreamOut;
 using ::aidl::android::hardware::audio::core::StreamDescriptor;
-using ::aidl::android::legacy2aidl_audio_channel_mask_t_AudioChannelLayout;
+using ::aidl::android::media::audio::common::MicrophoneDynamicInfo;
 
 namespace android {
 
@@ -116,11 +120,45 @@ status_t StreamHalAidl::getAudioProperties(audio_config_base_t *configBase) {
     return OK;
 }
 
-status_t StreamHalAidl::setParameters(const String8& kvPairs __unused) {
-    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
+namespace {
+
+// 'action' must accept a value of type 'T' and return 'status_t'.
+// The function returns 'true' if the parameter was found, and the action has succeeded.
+// The function returns 'false' if the parameter was not found.
+// Any errors get propagated, if there are errors it means the parameter was found.
+template<typename T, typename F>
+error::Result<bool> filterOutAndProcessParameter(
+        AudioParameter& parameters, const String8& key, const F& action) {
+    if (parameters.containsKey(key)) {
+        T value;
+        status_t status = parameters.get(key, value);
+        if (status == OK) {
+            parameters.remove(key);
+            status = action(value);
+            if (status == OK) return true;
+        }
+        return base::unexpected(status);
+    }
+    return false;
+}
+
+}  // namespace
+
+status_t StreamHalAidl::setParameters(const String8& kvPairs) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+
+    AudioParameter parameters(kvPairs);
+    ALOGD("%s: parameters: %s", __func__, parameters.toString().c_str());
+
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                    parameters, String8(AudioParameter::keyStreamHwAvSync),
+            [&](int hwAvSyncId) {
+                return statusTFromBinderStatus(mStream->updateHwAvSyncId(hwAvSyncId));
+            }));
+
+    ALOGW_IF(parameters.size() != 0, "%s: unknown parameters, ignored: %s",
+            __func__, parameters.toString().c_str());
     return OK;
 }
 
@@ -482,6 +520,17 @@ status_t StreamHalAidl::updateCountersIfNeeded(
     return OK;
 }
 
+// static
+ConversionResult<::aidl::android::hardware::audio::common::SourceMetadata>
+StreamOutHalAidl::legacy2aidl_SourceMetadata(const StreamOutHalInterface::SourceMetadata& legacy) {
+    ::aidl::android::hardware::audio::common::SourceMetadata aidl;
+    aidl.tracks = VALUE_OR_RETURN(
+            ::aidl::android::convertContainer<std::vector<PlaybackTrackMetadata>>(
+                    legacy.tracks,
+                    ::aidl::android::legacy2aidl_playback_track_metadata_v7_PlaybackTrackMetadata));
+    return aidl;
+}
+
 StreamOutHalAidl::StreamOutHalAidl(
         const audio_config& config, StreamContextAidl&& context, int32_t nominalLatency,
         const std::shared_ptr<IStreamOut>& stream, const sp<CallbackBroker>& callbackBroker)
@@ -491,7 +540,8 @@ StreamOutHalAidl::StreamOutHalAidl(
     // Initialize the offload metadata
     mOffloadMetadata.sampleRate = static_cast<int32_t>(config.sample_rate);
     mOffloadMetadata.channelMask = VALUE_OR_FATAL(
-            legacy2aidl_audio_channel_mask_t_AudioChannelLayout(config.channel_mask, false));
+            ::aidl::android::legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
+                    config.channel_mask, false));
     mOffloadMetadata.averageBitRatePerSecond = static_cast<int32_t>(config.offload_info.bit_rate);
 }
 
@@ -507,8 +557,8 @@ status_t StreamOutHalAidl::setParameters(const String8& kvPairs) {
     AudioParameter parameters(kvPairs);
     ALOGD("%s parameters: %s", __func__, parameters.toString().c_str());
 
-    if (filterAndUpdateOffloadMetadata(parameters) != OK) {
-        ALOGW("%s filtering or updating offload metadata gets failed", __func__);
+    if (status_t status = filterAndUpdateOffloadMetadata(parameters); status != OK) {
+        ALOGW("%s filtering or updating offload metadata failed: %d", __func__, status);
     }
 
     return StreamHalAidl::setParameters(parameters.toString());
@@ -626,11 +676,12 @@ status_t StreamOutHalAidl::getPresentationPosition(uint64_t *frames, struct time
 }
 
 status_t StreamOutHalAidl::updateSourceMetadata(
-        const StreamOutHalInterface::SourceMetadata& sourceMetadata __unused) {
+        const StreamOutHalInterface::SourceMetadata& sourceMetadata) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    ::aidl::android::hardware::audio::common::SourceMetadata aidlMetadata =
+              VALUE_OR_RETURN_STATUS(legacy2aidl_SourceMetadata(sourceMetadata));
+    return statusTFromBinderStatus(mStream->updateMetadata(aidlMetadata));
 }
 
 status_t StreamOutHalAidl::getDualMonoMode(audio_dual_mono_mode_t* mode __unused) {
@@ -718,69 +769,57 @@ status_t StreamOutHalAidl::exit() {
 
 status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parameters) {
     TIME_CHECK();
-
-    if (parameters.containsKey(String8(AudioParameter::keyOffloadCodecAverageBitRate)) ||
-            parameters.containsKey(String8(AudioParameter::keyOffloadCodecSampleRate)) ||
-            parameters.containsKey(String8(AudioParameter::keyOffloadCodecChannels)) ||
-            parameters.containsKey(String8(AudioParameter::keyOffloadCodecDelaySamples)) ||
-            parameters.containsKey(String8(AudioParameter::keyOffloadCodecPaddingSamples))) {
-        int value = 0;
-        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecAverageBitRate), value)
-                == NO_ERROR) {
-            if (value <= 0) {
-                return BAD_VALUE;
-            }
-            mOffloadMetadata.averageBitRatePerSecond = value;
-            parameters.remove(String8(AudioParameter::keyOffloadCodecAverageBitRate));
-        }
-
-        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecSampleRate), value)
-                == NO_ERROR) {
-            if (value <= 0) {
-                return BAD_VALUE;
-            }
-            mOffloadMetadata.sampleRate = value;
-            parameters.remove(String8(AudioParameter::keyOffloadCodecSampleRate));
-        }
-
-        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecChannels), value)
-                == NO_ERROR) {
-            if (value <= 0) {
-                return BAD_VALUE;
-            }
-            audio_channel_mask_t channel_mask =
-                    audio_channel_out_mask_from_count(static_cast<uint32_t>(value));
-            if (channel_mask == AUDIO_CHANNEL_INVALID) {
-                return BAD_VALUE;
-            }
-            mOffloadMetadata.channelMask =
-                    VALUE_OR_RETURN_STATUS(legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
-                        channel_mask, false));
-            parameters.remove(String8(AudioParameter::keyOffloadCodecChannels));
-        }
-
-        // The legacy keys are misnamed. The delay and padding are in frame.
-        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecDelaySamples), value)
-                == NO_ERROR) {
-            if (value < 0) {
-                return BAD_VALUE;
-            }
-            mOffloadMetadata.delayFrames = value;
-            parameters.remove(String8(AudioParameter::keyOffloadCodecDelaySamples));
-        }
-
-        if (parameters.getInt(String8(AudioParameter::keyOffloadCodecPaddingSamples), value)
-                == NO_ERROR) {
-            if (value < 0) {
-                return BAD_VALUE;
-            }
-            mOffloadMetadata.paddingFrames = value;
-            parameters.remove(String8(AudioParameter::keyOffloadCodecPaddingSamples));
-        }
-
+    bool updateMetadata = false;
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecAverageBitRate),
+                [&](int value) {
+                    return value > 0 ?
+                            mOffloadMetadata.averageBitRatePerSecond = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecSampleRate),
+                [&](int value) {
+                    return value > 0 ? mOffloadMetadata.sampleRate = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecChannels),
+                [&](int value) -> status_t {
+                    if (value > 0) {
+                        audio_channel_mask_t channel_mask = audio_channel_out_mask_from_count(
+                                static_cast<uint32_t>(value));
+                        if (channel_mask == AUDIO_CHANNEL_INVALID) return BAD_VALUE;
+                        mOffloadMetadata.channelMask = VALUE_OR_RETURN_STATUS(
+                                ::aidl::android::legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
+                                        channel_mask, false /*isInput*/));
+                    }
+                    return BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecDelaySamples),
+                [&](int value) {
+                    // The legacy keys are misnamed, the value is in frames.
+                    return value > 0 ? mOffloadMetadata.delayFrames = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecPaddingSamples),
+                [&](int value) {
+                    // The legacy keys are misnamed, the value is in frames.
+                    return value > 0 ? mOffloadMetadata.paddingFrames = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (updateMetadata) {
         ALOGD("%s set offload metadata %s", __func__, mOffloadMetadata.toString().c_str());
-        status_t status = statusTFromBinderStatus(mStream->updateOffloadMetadata(mOffloadMetadata));
-        if (status != OK) {
+        if (status_t status = statusTFromBinderStatus(
+                        mStream->updateOffloadMetadata(mOffloadMetadata)); status != OK) {
             ALOGE("%s: updateOffloadMetadata failed %d", __func__, status);
             return status;
         }
@@ -788,12 +827,23 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
     return OK;
 }
 
+// static
+ConversionResult<::aidl::android::hardware::audio::common::SinkMetadata>
+StreamInHalAidl::legacy2aidl_SinkMetadata(const StreamInHalInterface::SinkMetadata& legacy) {
+    ::aidl::android::hardware::audio::common::SinkMetadata aidl;
+    aidl.tracks = VALUE_OR_RETURN(
+            ::aidl::android::convertContainer<std::vector<RecordTrackMetadata>>(
+                    legacy.tracks,
+                    ::aidl::android::legacy2aidl_record_track_metadata_v7_RecordTrackMetadata));
+    return aidl;
+}
+
 StreamInHalAidl::StreamInHalAidl(
         const audio_config& config, StreamContextAidl&& context, int32_t nominalLatency,
-        const std::shared_ptr<IStreamIn>& stream)
+        const std::shared_ptr<IStreamIn>& stream, const sp<MicrophoneInfoProvider>& micInfoProvider)
         : StreamHalAidl("StreamInHalAidl", true /*isInput*/, config, nominalLatency,
                 std::move(context), getStreamCommon(stream)),
-          mStream(stream) {}
+          mStream(stream), mMicInfoProvider(micInfoProvider) {}
 
 status_t StreamInHalAidl::setGain(float gain __unused) {
     TIME_CHECK();
@@ -828,20 +878,48 @@ status_t StreamInHalAidl::getCapturePosition(int64_t *frames, int64_t *time) {
     return getObservablePosition(frames, time);
 }
 
-status_t StreamInHalAidl::getActiveMicrophones(
-        std::vector<media::MicrophoneInfoFw> *microphones __unused) {
+status_t StreamInHalAidl::getActiveMicrophones(std::vector<media::MicrophoneInfoFw> *microphones) {
+    if (!microphones) {
+        return BAD_VALUE;
+    }
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    sp<MicrophoneInfoProvider> micInfoProvider = mMicInfoProvider.promote();
+    if (!micInfoProvider) return NO_INIT;
+    auto staticInfo = micInfoProvider->getMicrophoneInfo();
+    if (!staticInfo) return INVALID_OPERATION;
+    std::vector<MicrophoneDynamicInfo> dynamicInfo;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mStream->getActiveMicrophones(&dynamicInfo)));
+    std::vector<media::MicrophoneInfoFw> result;
+    result.reserve(dynamicInfo.size());
+    for (const auto& d : dynamicInfo) {
+        const auto staticInfoIt = std::find_if(staticInfo->begin(), staticInfo->end(),
+                [&](const auto& s) { return s.id == d.id; });
+        if (staticInfoIt != staticInfo->end()) {
+            // Convert into the c++ backend type from the ndk backend type via the legacy structure.
+            audio_microphone_characteristic_t legacy = VALUE_OR_RETURN_STATUS(
+                    ::aidl::android::aidl2legacy_MicrophoneInfos_audio_microphone_characteristic_t(
+                            *staticInfoIt, d));
+            media::MicrophoneInfoFw info = VALUE_OR_RETURN_STATUS(
+                    ::android::legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(
+                            legacy));
+            // Note: info.portId is not filled because it's a bit of framework info.
+            result.push_back(std::move(info));
+        } else {
+            ALOGE("%s: no static info for active microphone with id '%s'", __func__, d.id.c_str());
+        }
+    }
+    *microphones = std::move(result);
     return OK;
 }
 
 status_t StreamInHalAidl::updateSinkMetadata(
-        const StreamInHalInterface::SinkMetadata& sinkMetadata  __unused) {
+        const StreamInHalInterface::SinkMetadata& sinkMetadata) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    ::aidl::android::hardware::audio::common::SinkMetadata aidlMetadata =
+              VALUE_OR_RETURN_STATUS(legacy2aidl_SinkMetadata(sinkMetadata));
+    return statusTFromBinderStatus(mStream->updateMetadata(aidlMetadata));
 }
 
 status_t StreamInHalAidl::setPreferredMicrophoneDirection(
