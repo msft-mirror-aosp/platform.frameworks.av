@@ -56,8 +56,16 @@ class CallbackBroker : public virtual RefBase {
             void* cookie, const sp<StreamOutHalInterfaceLatencyModeCallback>&) = 0;
 };
 
+class MicrophoneInfoProvider : public virtual RefBase {
+  public:
+    using Info = std::vector<::aidl::android::media::audio::common::MicrophoneInfo>;
+    virtual ~MicrophoneInfoProvider() = default;
+    // Returns a nullptr if the HAL does not support microphone info retrieval.
+    virtual Info const* getMicrophoneInfo() = 0;
+};
+
 class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
-                      public CallbackBroker {
+                      public CallbackBroker, public MicrophoneInfoProvider {
   public:
     // Sets the value of 'devices' to a bitmask of 1 or more values of audio_devices_t.
     status_t getSupportedDevices(uint32_t *devices) override;
@@ -158,6 +166,11 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
         wp<StreamOutHalInterfaceEventCallback> event;
         wp<StreamOutHalInterfaceLatencyModeCallback> latency;
     };
+    struct Microphones {
+        enum Status { UNKNOWN, NOT_SUPPORTED, QUERIED };
+        Status status = Status::UNKNOWN;
+        MicrophoneInfoProvider::Info info;
+    };
     using Patches = std::map<int32_t /*patch ID*/,
             ::aidl::android::hardware::audio::core::AudioPatch>;
     using PortConfigs = std::map<int32_t /*port config ID*/,
@@ -195,6 +208,7 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
             const ::aidl::android::media::audio::common::AudioConfig& config,
             const std::optional<::aidl::android::media::audio::common::AudioIoFlags>& flags,
             int32_t ioHandle,
+            ::aidl::android::media::audio::common::AudioSource aidlSource,
             ::aidl::android::media::audio::common::AudioPortConfig* portConfig, bool* created);
     status_t findOrCreatePortConfig(
         const ::aidl::android::media::audio::common::AudioPortConfig& requestedPortConfig,
@@ -218,6 +232,7 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
         int32_t aidlHandle,
         const ::aidl::android::media::audio::common::AudioDevice& aidlDevice,
         const ::aidl::android::media::audio::common::AudioIoFlags& aidlFlags,
+        ::aidl::android::media::audio::common::AudioSource aidlSource,
         struct audio_config* config,
         Cleanups* cleanups,
         ::aidl::android::media::audio::common::AudioConfig* aidlConfig,
@@ -241,6 +256,9 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     template<class C> sp<C> getCallbackImpl(void* cookie, wp<C> Callbacks::* field);
     template<class C> void setCallbackImpl(void* cookie, wp<C> Callbacks::* field, const sp<C>& cb);
 
+    // MicrophoneInfoProvider implementation
+    MicrophoneInfoProvider::Info const* getMicrophoneInfo() override;
+
     const std::string mInstance;
     const std::shared_ptr<::aidl::android::hardware::audio::core::IModule> mModule;
     Ports mPorts;
@@ -248,6 +266,7 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     int32_t mDefaultOutputPortId = -1;
     PortConfigs mPortConfigs;
     Patches mPatches;
+    Microphones mMicrophones;
     std::mutex mLock;
     std::map<void*, Callbacks> mCallbacks GUARDED_BY(mLock);
 };
