@@ -199,7 +199,6 @@ struct AMessage : public RefBase {
     };
 
     size_t countEntries() const;
-    static size_t maxAllowedEntries();
     const char *getEntryNameAt(size_t index, Type *type) const;
 
     /**

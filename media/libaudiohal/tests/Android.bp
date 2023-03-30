@@ -20,12 +20,18 @@ package {
     default_applicable_licenses: ["frameworks_av_license"],
 }
 
-cc_defaults {
-    name: "AudioHalTestDefaults",
+cc_test {
+    name: "EffectsFactoryHalInterfaceTest",
     test_suites: ["device-tests"],
+
+    srcs: [
+        "EffectsFactoryHalInterface_test.cpp",
+    ],
+
     defaults: [
         "latest_android_media_audio_common_types_ndk_shared",
     ],
+
     cflags: [
         "-Wall",
         "-Wextra",
@@ -42,31 +48,8 @@ cc_defaults {
         "libutils",
         "libvibrator",
     ],
-}
 
-cc_test {
-    name: "EffectsFactoryHalInterfaceTest",
-    srcs: ["EffectsFactoryHalInterface_test.cpp"],
-    defaults: ["AudioHalTestDefaults"],
-    header_libs: ["libaudiohal_headers"],
-}
-
-cc_test {
-    name: "EffectProxyTest",
-    srcs: [
-        "EffectProxy_test.cpp",
-        ":audio_effectproxy_src_files",
+    header_libs: [
+        "libaudiohal_headers",
     ],
-    defaults: [
-        "AudioHalTestDefaults",
-        "latest_android_hardware_audio_effect_ndk_shared",
-        "libaudiohal_default",
-        "use_libaidlvintf_gtest_helper_static",
-    ],
-    shared_libs: [
-        "android.hardware.common.fmq-V1-ndk",
-        "libbinder_ndk",
-        "libfmq",
-    ],
-    header_libs: ["libaudiohalimpl_headers"],
 }

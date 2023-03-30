@@ -19,7 +19,6 @@
 #include <utils/Errors.h>
 
 #include <aidl/android/hardware/audio/effect/BpEffect.h>
-#include <fmq/AidlMessageQueue.h>
 #include <system/audio_effect.h>
 #include <system/audio_effects/audio_effects_utils.h>
 
@@ -31,15 +30,10 @@ class EffectConversionHelperAidl {
     status_t handleCommand(uint32_t cmdCode, uint32_t cmdSize, void* pCmdData, uint32_t* replySize,
                            void* pReplyData);
     virtual ~EffectConversionHelperAidl() {}
-
-    using StatusMQ = ::android::AidlMessageQueue<
-            ::aidl::android::hardware::audio::effect::IEffect::Status,
-            ::aidl::android::hardware::common::fmq::SynchronizedReadWrite>;
-    using DataMQ = ::android::AidlMessageQueue<
-            float, ::aidl::android::hardware::common::fmq::SynchronizedReadWrite>;
-    std::shared_ptr<StatusMQ> getStatusMQ() { return mStatusQ; }
-    std::shared_ptr<DataMQ> getInputMQ() { return mInputQ; }
-    std::shared_ptr<DataMQ> getOutputMQ() { return mOutputQ; }
+    const ::aidl::android::hardware::audio::effect::IEffect::OpenEffectReturn&
+    getEffectReturnParam() const {
+        return mOpenReturn;
+    }
 
   protected:
     const int32_t mSessionId;
@@ -48,6 +42,7 @@ class EffectConversionHelperAidl {
     const std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> mEffect;
     // whether the effect is instantiated on an input stream
     const bool mIsInputStream;
+    ::aidl::android::hardware::audio::effect::IEffect::OpenEffectReturn mOpenReturn;
     ::aidl::android::hardware::audio::effect::Parameter::Common mCommon;
 
     EffectConversionHelperAidl(
@@ -64,7 +59,6 @@ class EffectConversionHelperAidl {
     const aidl::android::media::audio::common::AudioFormatDescription kDefaultFormatDescription = {
             .type = aidl::android::media::audio::common::AudioFormatType::PCM,
             .pcm = aidl::android::media::audio::common::PcmType::FLOAT_32_BIT};
-    const bool mIsProxyEffect;
 
     static constexpr int kDefaultframeCount = 0x100;
 
@@ -81,9 +75,6 @@ class EffectConversionHelperAidl {
                                                                    uint32_t* /* replySize */,
                                                                    void* /* pReplyData */);
     static const std::map<uint32_t /* effect_command_e */, CommandHandler> mCommandHandlerMap;
-    // data and status FMQ
-    std::shared_ptr<StatusMQ> mStatusQ = nullptr;
-    std::shared_ptr<DataMQ> mInputQ = nullptr, mOutputQ = nullptr;
 
     status_t handleInit(uint32_t cmdSize, const void* pCmdData, uint32_t* replySize,
                         void* pReplyData);
