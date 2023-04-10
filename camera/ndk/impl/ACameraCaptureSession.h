@@ -75,6 +75,17 @@ struct ACaptureSessionOutputContainer {
 };
 
 /**
+ * Capture session state callbacks used in {@link ACameraDevice_setPrepareCallbacks}
+ */
+typedef struct ACameraCaptureSession_prepareCallbacks {
+    /// optional application context. This will be passed in the context
+    /// parameter of the {@link onWindowPrepared} callback.
+    void*                               context;
+
+    ACameraCaptureSession_prepareCallback onWindowPrepared;
+} ACameraCaptureSession_prepareCallbacks;
+
+/**
  * ACameraCaptureSession opaque struct definition
  * Leave outside of android namespace because it's NDK struct
  */
@@ -130,6 +141,14 @@ struct ACameraCaptureSession : public RefBase {
 
     camera_status_t updateOutputConfiguration(ACaptureSessionOutput *output);
 
+    void setWindowPreparedCallback(void *context,
+            ACameraCaptureSession_prepareCallback cb) {
+        Mutex::Autolock _l(mSessionLock);
+        mPreparedCb.context = context;
+        mPreparedCb.onWindowPrepared = cb;
+    }
+    camera_status_t prepare(ACameraWindowType *window);
+
     ACameraDevice* getDevice();
 
   private:
@@ -156,6 +175,7 @@ struct ACameraCaptureSession : public RefBase {
 
     bool  mIsClosed = false;
     bool  mClosedByApp = false;
+    ACameraCaptureSession_prepareCallbacks mPreparedCb;
     Mutex mSessionLock;
 };
 

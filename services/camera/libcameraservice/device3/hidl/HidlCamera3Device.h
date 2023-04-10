@@ -84,9 +84,6 @@ class HidlCamera3Device :
             const hardware::hidl_vec<
                     hardware::camera::device::V3_2::StreamBuffer>& buffers) override;
 
-    // Handle one notify message
-    void notify(const hardware::camera::device::V3_2::NotifyMsg& msg);
-
     status_t switchToOffline(const std::vector<int32_t>& streamsToKeep,
             /*out*/ sp<CameraOfflineSessionBase>* session) override;
 
@@ -113,7 +110,8 @@ class HidlCamera3Device :
 
         virtual status_t configureStreams(const camera_metadata_t *sessionParams,
                 /*inout*/ camera_stream_configuration_t *config,
-                const std::vector<uint32_t>& bufferSizes) override;
+                const std::vector<uint32_t>& bufferSizes,
+                int64_t logId) override;
 
         // The injection camera configures the streams to hal.
         virtual status_t configureInjectedStreams(

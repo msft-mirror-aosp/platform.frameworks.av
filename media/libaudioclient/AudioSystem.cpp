@@ -264,6 +264,12 @@ status_t AudioSystem::setMode(audio_mode_t mode) {
     return af->setMode(mode);
 }
 
+status_t AudioSystem::setSimulateDeviceConnections(bool enabled) {
+    const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
+    if (af == 0) return PERMISSION_DENIED;
+    return af->setSimulateDeviceConnections(enabled);
+}
+
 status_t AudioSystem::setParameters(audio_io_handle_t ioHandle, const String8& keyValuePairs) {
     const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
@@ -1576,6 +1582,15 @@ status_t AudioSystem::listAudioPorts(audio_port_role_t role,
     return OK;
 }
 
+status_t AudioSystem::listDeclaredDevicePorts(media::AudioPortRole role,
+                                              std::vector<media::AudioPortFw>* result) {
+    if (result == nullptr) return BAD_VALUE;
+    const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
+    if (aps == 0) return PERMISSION_DENIED;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(aps->listDeclaredDevicePorts(role, result)));
+    return OK;
+}
+
 status_t AudioSystem::getAudioPort(struct audio_port_v7* port) {
     if (port == nullptr) {
         return BAD_VALUE;
@@ -1936,7 +1951,7 @@ AudioSystem::getStreamVolumeDB(audio_stream_type_t stream, int index, audio_devi
     return result.value_or(NAN);
 }
 
-status_t AudioSystem::getMicrophones(std::vector<media::MicrophoneInfo>* microphones) {
+status_t AudioSystem::getMicrophones(std::vector<media::MicrophoneInfoFw>* microphones) {
     const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
     return af->getMicrophones(microphones);
@@ -2136,8 +2151,7 @@ audio_stream_type_t AudioSystem::attributesToStreamType(const audio_attributes_t
         if (strategy.getId() == psId) {
             auto attrVect = strategy.getVolumeGroupAttributes();
             auto iter = std::find_if(begin(attrVect), end(attrVect), [&attr](const auto& refAttr) {
-                return AudioProductStrategy::attributesMatches(
-                        refAttr.getAttributes(), attr);
+                return refAttr.matchesScore(attr) > 0;
             });
             if (iter != end(attrVect)) {
                 return iter->getStreamType();

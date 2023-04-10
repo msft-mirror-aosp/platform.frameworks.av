@@ -33,6 +33,7 @@
 #include <android/media/AudioTimestampInternal.h>
 #include <android/media/AudioUniqueIdUse.h>
 #include <android/media/EffectDescriptor.h>
+#include <android/media/MicrophoneInfoFw.h>
 #include <android/media/TrackSecondaryOutputInfo.h>
 
 #include <android/media/SharedFileRegion.h>
@@ -88,10 +89,11 @@ aidl2legacy_int32_t_audio_port_config_session_ext(int32_t aidl);
 ConversionResult<int32_t> legacy2aidl_audio_port_config_session_ext_AudioPortConfigSessionExt(
         const audio_port_config_session_ext& legacy);
 
+// portId needs to be set when dealing with the HAL.
 ConversionResult<audio_port_config> aidl2legacy_AudioPortConfigFw_audio_port_config(
-        const media::AudioPortConfigFw& aidl);
+        const media::AudioPortConfigFw& aidl, int32_t* aidlPortId = nullptr);
 ConversionResult<media::AudioPortConfigFw> legacy2aidl_audio_port_config_AudioPortConfigFw(
-        const audio_port_config& legacy);
+        const audio_port_config& legacy, int32_t portId = 0);
 
 ConversionResult<struct audio_patch> aidl2legacy_AudioPatchFw_audio_patch(
         const media::AudioPatchFw& aidl);
@@ -196,5 +198,12 @@ legacy2aidl_audio_direct_mode_t_AudioDirectMode(audio_direct_mode_t legacy);
 
 ConversionResult<audio_direct_mode_t> aidl2legacy_int32_t_audio_direct_mode_t_mask(int32_t aidl);
 ConversionResult<int32_t> legacy2aidl_audio_direct_mode_t_int32_t_mask(audio_direct_mode_t legacy);
+
+ConversionResult<audio_microphone_characteristic_t>
+aidl2legacy_MicrophoneInfoFw_audio_microphone_characteristic_t(
+        const media::MicrophoneInfoFw& aidl);
+ConversionResult<media::MicrophoneInfoFw>
+legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(
+        const audio_microphone_characteristic_t& legacy);
 
 }  // namespace android

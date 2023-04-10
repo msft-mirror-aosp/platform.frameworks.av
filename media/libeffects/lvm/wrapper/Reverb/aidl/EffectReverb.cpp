@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "ReverbTypes.h"
 #define LOG_TAG "EffectReverb"
 #include <Utils.h>
 #include <algorithm>
@@ -30,17 +31,19 @@
 
 using aidl::android::hardware::audio::effect::Descriptor;
 using aidl::android::hardware::audio::effect::EffectReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidAuxEnvReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidAuxPresetReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidInsertEnvReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidInsertPresetReverb;
 using aidl::android::hardware::audio::effect::IEffect;
-using aidl::android::hardware::audio::effect::kAuxEnvReverbImplUUID;
-using aidl::android::hardware::audio::effect::kAuxPresetReverbImplUUID;
-using aidl::android::hardware::audio::effect::kInsertEnvReverbImplUUID;
-using aidl::android::hardware::audio::effect::kInsertPresetReverbImplUUID;
 using aidl::android::hardware::audio::effect::State;
 using aidl::android::media::audio::common::AudioUuid;
 
 bool isReverbUuidSupported(const AudioUuid* uuid) {
-    return (*uuid == kAuxEnvReverbImplUUID || *uuid == kInsertEnvReverbImplUUID ||
-            *uuid == kAuxPresetReverbImplUUID || *uuid == kInsertPresetReverbImplUUID);
+    return (*uuid == getEffectImplUuidAuxEnvReverb() ||
+            *uuid == getEffectImplUuidAuxPresetReverb() ||
+            *uuid == getEffectImplUuidInsertEnvReverb() ||
+            *uuid == getEffectImplUuidInsertPresetReverb());
 }
 
 extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
@@ -60,18 +63,17 @@ extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
 }
 
 extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descriptor* _aidl_return) {
-    if (!in_impl_uuid || !isReverbUuidSupported(in_impl_uuid)) {
+    if (*in_impl_uuid == getEffectImplUuidAuxEnvReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxEnvReverbDesc;
+    } else if (*in_impl_uuid == getEffectImplUuidInsertEnvReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertEnvReverbDesc;
+    } else if (*in_impl_uuid == getEffectImplUuidAuxPresetReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxPresetReverbDesc;
+    } else if (*in_impl_uuid == getEffectImplUuidInsertPresetReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertPresetReverbDesc;
+    } else {
         LOG(ERROR) << __func__ << "uuid not supported";
         return EX_ILLEGAL_ARGUMENT;
-    }
-    if (*in_impl_uuid == kAuxEnvReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxEnvReverbDesc;
-    } else if (*in_impl_uuid == kInsertEnvReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertEnvReverbDesc;
-    } else if (*in_impl_uuid == kAuxPresetReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxPresetReverbDesc;
-    } else if (*in_impl_uuid == kInsertPresetReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertPresetReverbDesc;
     }
     return EX_NONE;
 }
@@ -80,19 +82,19 @@ namespace aidl::android::hardware::audio::effect {
 
 EffectReverb::EffectReverb(const AudioUuid& uuid) {
     LOG(DEBUG) << __func__ << uuid.toString();
-    if (uuid == kAuxEnvReverbImplUUID) {
+    if (uuid == getEffectImplUuidAuxEnvReverb()) {
         mType = lvm::ReverbEffectType::AUX_ENV;
         mDescriptor = &lvm::kAuxEnvReverbDesc;
         mEffectName = &lvm::kAuxEnvReverbEffectName;
-    } else if (uuid == kInsertEnvReverbImplUUID) {
+    } else if (uuid == getEffectImplUuidInsertEnvReverb()) {
         mType = lvm::ReverbEffectType::INSERT_ENV;
         mDescriptor = &lvm::kInsertEnvReverbDesc;
         mEffectName = &lvm::kInsertEnvReverbEffectName;
-    } else if (uuid == kAuxPresetReverbImplUUID) {
+    } else if (uuid == getEffectImplUuidAuxPresetReverb()) {
         mType = lvm::ReverbEffectType::AUX_PRESET;
         mDescriptor = &lvm::kAuxPresetReverbDesc;
         mEffectName = &lvm::kAuxPresetReverbEffectName;
-    } else if (uuid == kInsertPresetReverbImplUUID) {
+    } else if (uuid == getEffectImplUuidInsertPresetReverb()) {
         mType = lvm::ReverbEffectType::INSERT_PRESET;
         mDescriptor = &lvm::kInsertPresetReverbDesc;
         mEffectName = &lvm::kInsertPresetReverbEffectName;
@@ -132,6 +134,7 @@ ndk::ScopedAStatus EffectReverb::setParameterSpecific(const Parameter::Specific&
 
 ndk::ScopedAStatus EffectReverb::setParameterPresetReverb(const Parameter::Specific& specific) {
     auto& prParam = specific.get<Parameter::Specific::presetReverb>();
+    RETURN_IF(!inRange(prParam, lvm::kPresetReverbRanges), EX_ILLEGAL_ARGUMENT, "outOfRange");
     auto tag = prParam.getTag();
 
     switch (tag) {
@@ -152,6 +155,7 @@ ndk::ScopedAStatus EffectReverb::setParameterPresetReverb(const Parameter::Speci
 ndk::ScopedAStatus EffectReverb::setParameterEnvironmentalReverb(
         const Parameter::Specific& specific) {
     auto& erParam = specific.get<Parameter::Specific::environmentalReverb>();
+    RETURN_IF(!inRange(erParam, lvm::kEnvReverbRanges), EX_ILLEGAL_ARGUMENT, "outOfRange");
     auto tag = erParam.getTag();
 
     switch (tag) {
@@ -179,6 +183,20 @@ ndk::ScopedAStatus EffectReverb::setParameterEnvironmentalReverb(
                     mContext->setEnvironmentalReverbDecayHfRatio(
                             erParam.get<EnvironmentalReverb::decayHfRatioPm>()) != RetCode::SUCCESS,
                     EX_ILLEGAL_ARGUMENT, "setDecayHfRatioFailed");
+            return ndk::ScopedAStatus::ok();
+        }
+        case EnvironmentalReverb::reflectionsLevelMb: {
+            RETURN_IF(mContext->setReflectionsLevel(
+                              erParam.get<EnvironmentalReverb::reflectionsLevelMb>()) !=
+                              RetCode::SUCCESS,
+                      EX_ILLEGAL_ARGUMENT, "setReflectionsLevelFailed");
+            return ndk::ScopedAStatus::ok();
+        }
+        case EnvironmentalReverb::reflectionsDelayMs: {
+            RETURN_IF(mContext->setReflectionsDelay(
+                              erParam.get<EnvironmentalReverb::reflectionsDelayMs>()) !=
+                              RetCode::SUCCESS,
+                      EX_ILLEGAL_ARGUMENT, "setReflectionsDelayFailed");
             return ndk::ScopedAStatus::ok();
         }
         case EnvironmentalReverb::levelMb: {
@@ -287,6 +305,14 @@ ndk::ScopedAStatus EffectReverb::getParameterEnvironmentalReverb(const Environme
         case EnvironmentalReverb::decayHfRatioPm: {
             erParam.set<EnvironmentalReverb::decayHfRatioPm>(
                     mContext->getEnvironmentalReverbDecayHfRatio());
+            break;
+        }
+        case EnvironmentalReverb::reflectionsLevelMb: {
+            erParam.set<EnvironmentalReverb::reflectionsLevelMb>(mContext->getReflectionsLevel());
+            break;
+        }
+        case EnvironmentalReverb::reflectionsDelayMs: {
+            erParam.set<EnvironmentalReverb::reflectionsDelayMs>(mContext->getReflectionsDelay());
             break;
         }
         case EnvironmentalReverb::levelMb: {

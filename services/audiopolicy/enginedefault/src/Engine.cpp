@@ -166,8 +166,12 @@ void Engine::filterOutputDevicesForStrategy(legacy_strategy strategy,
         //   - cannot route from voice call RX OR
         //   - audio HAL version is < 3.0 and TX device is on the primary HW module
         if (getPhoneState() == AUDIO_MODE_IN_CALL) {
-            audio_devices_t txDevice = getDeviceForInputSource(
-                    AUDIO_SOURCE_VOICE_COMMUNICATION)->type();
+            audio_devices_t txDevice = AUDIO_DEVICE_NONE;
+            sp<DeviceDescriptor> txDeviceDesc =
+                    getDeviceForInputSource(AUDIO_SOURCE_VOICE_COMMUNICATION);
+            if (txDeviceDesc != nullptr) {
+                txDevice = txDeviceDesc->type();
+            }
             sp<AudioOutputDescriptor> primaryOutput = outputs.getPrimaryOutput();
             LOG_ALWAYS_FATAL_IF(primaryOutput == nullptr, "Primary output not found");
             DeviceVector availPrimaryInputDevices =
@@ -287,7 +291,8 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                             }));
         if (!devices.isEmpty()) break;
         devices = availableOutputDevices.getFirstDevicesFromTypes({
-                AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET, AUDIO_DEVICE_OUT_EARPIECE});
+                AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET, AUDIO_DEVICE_OUT_EARPIECE,
+                AUDIO_DEVICE_OUT_SPEAKER});
     } break;
 
     case STRATEGY_SONIFICATION:
@@ -299,7 +304,9 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
 
         if ((strategy == STRATEGY_SONIFICATION) ||
                 (getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) == AUDIO_POLICY_FORCE_SYSTEM_ENFORCED)) {
-            devices = availableOutputDevices.getDevicesFromType(AUDIO_DEVICE_OUT_SPEAKER);
+            // favor dock over speaker when available
+            devices = availableOutputDevices.getFirstDevicesFromTypes({
+                    AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET, AUDIO_DEVICE_OUT_SPEAKER});
         }
 
         // if SCO headset is connected and we are told to use it, play ringtone over
@@ -477,6 +484,37 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
     return devices;
 }
 
+DeviceVector Engine::getPreferredAvailableDevicesForInputSource(
+            const DeviceVector& availableInputDevices, audio_source_t inputSource) const {
+    DeviceVector preferredAvailableDevVec = {};
+    AudioDeviceTypeAddrVector preferredDevices;
+    const status_t status = getDevicesForRoleAndCapturePreset(
+            inputSource, DEVICE_ROLE_PREFERRED, preferredDevices);
+    if (status == NO_ERROR) {
+        // Only use preferred devices when they are all available.
+        preferredAvailableDevVec =
+                availableInputDevices.getDevicesFromDeviceTypeAddrVec(preferredDevices);
+        if (preferredAvailableDevVec.size() == preferredDevices.size()) {
+            ALOGVV("%s using pref device %s for source %u",
+                   __func__, preferredAvailableDevVec.toString().c_str(), inputSource);
+            return preferredAvailableDevVec;
+        }
+    }
+    return preferredAvailableDevVec;
+}
+
+DeviceVector Engine::getDisabledDevicesForInputSource(
+            const DeviceVector& availableInputDevices, audio_source_t inputSource) const {
+    DeviceVector disabledDevices = {};
+    AudioDeviceTypeAddrVector disabledDevicesTypeAddr;
+    const status_t status = getDevicesForRoleAndCapturePreset(
+            inputSource, DEVICE_ROLE_DISABLED, disabledDevicesTypeAddr);
+    if (status == NO_ERROR) {
+        disabledDevices =
+                availableInputDevices.getDevicesFromDeviceTypeAddrVec(disabledDevicesTypeAddr);
+    }
+    return disabledDevices;
+}
 
 sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource) const
 {
@@ -507,6 +545,20 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
             break;
         }
     }
+
+    // Use the preferred device for the input source if it is available.
+    DeviceVector preferredInputDevices = getPreferredAvailableDevicesForInputSource(
+            availableDevices, inputSource);
+    if (!preferredInputDevices.isEmpty()) {
+        // Currently, only support single device for input. The public JAVA API also only
+        // support setting single device as preferred device. In that case, returning the
+        // first device is OK here.
+        return preferredInputDevices[0];
+    }
+    // Remove the disabled device for the input source from the available input device list.
+    DeviceVector disabledInputDevices = getDisabledDevicesForInputSource(
+            availableDevices, inputSource);
+    availableDevices.remove(disabledInputDevices);
 
     audio_devices_t commDeviceType =
         getPreferredDeviceTypeForLegacyStrategy(availableOutputDevices, STRATEGY_PHONE);
@@ -547,22 +599,26 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
             }
         }
         switch (commDeviceType) {
-        case AUDIO_DEVICE_OUT_BLE_HEADSET:
-            device = availableDevices.getDevice(
-                    AUDIO_DEVICE_IN_BLE_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
-            break;
         case AUDIO_DEVICE_OUT_SPEAKER:
             device = availableDevices.getFirstExistingDevice({
                     AUDIO_DEVICE_IN_BACK_MIC, AUDIO_DEVICE_IN_BUILTIN_MIC,
                     AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_USB_HEADSET});
             break;
+        case AUDIO_DEVICE_OUT_BLE_HEADSET:
+            device = availableDevices.getDevice(
+                    AUDIO_DEVICE_IN_BLE_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
+            if (device != nullptr) {
+                break;
+            }
+            ALOGE("%s LE Audio selected for communication but input device not available",
+                    __func__);
+            FALLTHROUGH_INTENDED;
         default:    // FORCE_NONE
             device = availableDevices.getFirstExistingDevice({
                     AUDIO_DEVICE_IN_WIRED_HEADSET, AUDIO_DEVICE_IN_USB_HEADSET,
                     AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BLUETOOTH_BLE,
                     AUDIO_DEVICE_IN_BUILTIN_MIC});
             break;
-
         }
         break;
 
@@ -649,15 +705,9 @@ sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource)
     return device;
 }
 
-void Engine::updateDeviceSelectionCache()
-{
-    for (const auto &iter : getProductStrategies()) {
-        const auto& strategy = iter.second;
-        auto devices = getDevicesForProductStrategy(strategy->getId());
-        mDevicesForStrategies[strategy->getId()] = devices;
-        strategy->setDeviceTypes(devices.types());
-        strategy->setDeviceAddress(devices.getFirstValidAddress().c_str());
-    }
+void Engine::setStrategyDevices(const sp<ProductStrategy>& strategy, const DeviceVector &devices) {
+    strategy->setDeviceTypes(devices.types());
+    strategy->setDeviceAddress(devices.getFirstValidAddress().c_str());
 }
 
 product_strategy_t Engine::getProductStrategyFromLegacy(legacy_strategy legacyStrategy) const {

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <android/content/AttributionSourceState.h>
+#include <android/media/AudioPortFw.h>
 #include <android/media/AudioVibratorInfo.h>
 #include <android/media/BnAudioFlingerClient.h>
 #include <android/media/BnAudioPolicyServiceClient.h>
@@ -31,6 +32,7 @@
 #include <android/media/ISoundDose.h>
 #include <android/media/ISoundDoseCallback.h>
 #include <android/media/ISpatializer.h>
+#include <android/media/MicrophoneInfoFw.h>
 #include <android/media/RecordClientInfo.h>
 #include <android/media/audio/common/AudioConfigBase.h>
 #include <android/media/audio/common/AudioMMapPolicyInfo.h>
@@ -43,7 +45,6 @@
 #include <media/AudioProductStrategy.h>
 #include <media/AudioVolumeGroup.h>
 #include <media/AudioIoDescriptor.h>
-#include <media/MicrophoneInfo.h>
 #include <system/audio.h>
 #include <system/audio_effect.h>
 #include <system/audio_policy.h>
@@ -125,6 +126,9 @@ public:
 
     // set audio mode in audio hardware
     static status_t setMode(audio_mode_t mode);
+
+    // test API: switch HALs into the mode which simulates external device connections
+    static status_t setSimulateDeviceConnections(bool enabled);
 
     // returns true in *state if tracks are active on the specified stream or have been active
     // in the past inPastMs milliseconds
@@ -425,6 +429,9 @@ public:
                                    struct audio_port_v7 *ports,
                                    unsigned int *generation);
 
+    static status_t listDeclaredDevicePorts(media::AudioPortRole role,
+                                            std::vector<media::AudioPortFw>* result);
+
     /* Get attributes for a given audio port. On input, the port
      * only needs the 'id' field to be filled in. */
     static status_t getAudioPort(struct audio_port_v7 *port);
@@ -475,7 +482,7 @@ public:
     static float    getStreamVolumeDB(
             audio_stream_type_t stream, int index, audio_devices_t device);
 
-    static status_t getMicrophones(std::vector<media::MicrophoneInfo> *microphones);
+    static status_t getMicrophones(std::vector<media::MicrophoneInfoFw> *microphones);
 
     static status_t getHwOffloadFormatsSupportedForBluetoothMedia(
                                     audio_devices_t device, std::vector<audio_format_t> *formats);

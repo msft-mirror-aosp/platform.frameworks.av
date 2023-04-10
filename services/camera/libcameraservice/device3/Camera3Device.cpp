@@ -52,15 +52,17 @@
 #include <android/hardware/camera/device/3.7/ICameraInjectionSession.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
 
-#include "utils/CameraTraces.h"
-#include "mediautils/SchedulingPolicyService.h"
-#include "device3/Camera3Device.h"
-#include "device3/Camera3OutputStream.h"
-#include "device3/Camera3InputStream.h"
-#include "device3/Camera3FakeStream.h"
-#include "device3/Camera3SharedOutputStream.h"
 #include "CameraService.h"
+#include "aidl/android/hardware/graphics/common/Dataspace.h"
+#include "aidl/AidlUtils.h"
+#include "device3/Camera3Device.h"
+#include "device3/Camera3FakeStream.h"
+#include "device3/Camera3InputStream.h"
+#include "device3/Camera3OutputStream.h"
+#include "device3/Camera3SharedOutputStream.h"
+#include "mediautils/SchedulingPolicyService.h"
 #include "utils/CameraThreadState.h"
+#include "utils/CameraTraces.h"
 #include "utils/SessionConfigurationUtils.h"
 #include "utils/TraceHFR.h"
 
@@ -79,6 +81,7 @@ Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraS
         mLegacyClient(legacyClient),
         mOperatingMode(NO_MODE),
         mIsConstrainedHighSpeedConfiguration(false),
+        mSupportNativeJpegR(false),
         mStatus(STATUS_UNINITIALIZED),
         mStatusWaiters(0),
         mUsePartialResult(false),
@@ -97,6 +100,9 @@ Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraS
         mNeedFixupMonochromeTags(false),
         mOverrideForPerfClass(overrideForPerfClass),
         mOverrideToPortrait(overrideToPortrait),
+        mRotateAndCropOverride(ANDROID_SCALER_ROTATE_AND_CROP_NONE),
+        mComposerOutput(false),
+        mAutoframingOverride(ANDROID_CONTROL_AUTOFRAMING_OFF),
         mActivePhysicalId("")
 {
     ATRACE_CALL();
@@ -217,7 +223,7 @@ status_t Camera3Device::initializeCommonLocked() {
     mZoomRatioMappers[mId.c_str()] = ZoomRatioMapper(&mDeviceInfo,
             mSupportNativeZoomRatio, usePrecorrectArray);
 
-    if (SessionConfigurationUtils::isUltraHighResolutionSensor(mDeviceInfo)) {
+    if (SessionConfigurationUtils::supportsUltraHighResolutionCapture(mDeviceInfo)) {
         mUHRCropAndMeteringRegionMappers[mId.c_str()] =
                 UHRCropAndMeteringRegionMapper(mDeviceInfo, usePrecorrectArray);
     }
@@ -230,7 +236,7 @@ status_t Camera3Device::initializeCommonLocked() {
     mInjectionMethods = createCamera3DeviceInjectionMethods(this);
 
     /** Start watchdog thread */
-    mCameraServiceWatchdog = new CameraServiceWatchdog();
+    mCameraServiceWatchdog = new CameraServiceWatchdog(mId, mCameraServiceProxyWrapper);
     res = mCameraServiceWatchdog->run("CameraServiceWatchdog");
     if (res != OK) {
         SET_ERR_L("Unable to start camera service watchdog thread: %s (%d)",
@@ -405,7 +411,7 @@ ssize_t Camera3Device::getJpegBufferSize(const CameraMetadata &info, uint32_t wi
     // Get max jpeg size (area-wise) for default sensor pixel mode
     camera3::Size maxDefaultJpegResolution =
             SessionConfigurationUtils::getMaxJpegResolution(info,
-                    /*isUltraHighResolutionSensor*/false);
+                    /*supportsUltraHighResolutionCapture*/false);
     // Get max jpeg size (area-wise) for max resolution sensor pixel mode / 0 if
     // not ultra high res sensor
     camera3::Size uhrMaxJpegResolution =
@@ -498,9 +504,8 @@ ssize_t Camera3Device::getRawOpaqueBufferSize(const CameraMetadata &info, int32_
     return BAD_VALUE;
 }
 
-status_t Camera3Device::dump(int fd, const Vector<String16> &args) {
+status_t Camera3Device::dump(int fd, [[maybe_unused]] const Vector<String16> &args) {
     ATRACE_CALL();
-    (void)args;
 
     // Try to lock, but continue in case of failure (to avoid blocking in
     // deadlocks)
@@ -1363,12 +1368,54 @@ status_t Camera3Device::filterParamsAndConfigureLocked(const CameraMetadata& ses
     set_camera_metadata_vendor_id(meta, mVendorTagId);
     filteredParams.unlock(meta);
     if (availableSessionKeys.count > 0) {
+        bool rotateAndCropSessionKey = false;
+        bool autoframingSessionKey = false;
         for (size_t i = 0; i < availableSessionKeys.count; i++) {
             camera_metadata_ro_entry entry = params.find(
                     availableSessionKeys.data.i32[i]);
             if (entry.count > 0) {
                 filteredParams.update(entry);
             }
+            if (ANDROID_SCALER_ROTATE_AND_CROP == availableSessionKeys.data.i32[i]) {
+                rotateAndCropSessionKey = true;
+            }
+            if (ANDROID_CONTROL_AUTOFRAMING == availableSessionKeys.data.i32[i]) {
+                autoframingSessionKey = true;
+            }
+        }
+
+        if (rotateAndCropSessionKey || autoframingSessionKey) {
+            sp<CaptureRequest> request = new CaptureRequest();
+            PhysicalCameraSettings settingsList;
+            settingsList.metadata = filteredParams;
+            request->mSettingsList.push_back(settingsList);
+
+            if (rotateAndCropSessionKey) {
+                sp<CaptureRequest> request = new CaptureRequest();
+                PhysicalCameraSettings settingsList;
+                settingsList.metadata = filteredParams;
+                request->mSettingsList.push_back(settingsList);
+
+                auto rotateAndCropEntry = filteredParams.find(ANDROID_SCALER_ROTATE_AND_CROP);
+                if (rotateAndCropEntry.count > 0 &&
+                        rotateAndCropEntry.data.u8[0] == ANDROID_SCALER_ROTATE_AND_CROP_AUTO) {
+                    request->mRotateAndCropAuto = true;
+                } else {
+                    request->mRotateAndCropAuto = false;
+                }
+
+                overrideAutoRotateAndCrop(request, mOverrideToPortrait, mRotateAndCropOverride);
+            }
+
+            if (autoframingSessionKey) {
+                auto autoframingEntry = filteredParams.find(ANDROID_CONTROL_AUTOFRAMING);
+                if (autoframingEntry.count > 0 &&
+                        autoframingEntry.data.u8[0] == ANDROID_CONTROL_AUTOFRAMING_AUTO) {
+                    overrideAutoframing(request, mAutoframingOverride);
+                }
+            }
+
+            filteredParams = request->mSettingsList.begin()->metadata;
         }
     }
 
@@ -1896,7 +1943,7 @@ void Camera3Device::notifyStatus(bool idle) {
                     streamUseCase = camera3Stream->getStreamUseCase();
                 }
                 streamStats.emplace_back(stream->getWidth(), stream->getHeight(),
-                    stream->getFormat(), streamMaxPreviewFps, stream->getDataSpace(), usage,
+                    stream->getOriginalFormat(), streamMaxPreviewFps, stream->getDataSpace(), usage,
                     stream->getMaxHalBuffers(),
                     stream->getMaxTotalBuffers() - stream->getMaxHalBuffers(),
                     stream->getDynamicRangeProfile(), streamUseCase,
@@ -2397,7 +2444,7 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
     }
 
     mGroupIdPhysicalCameraMap.clear();
-    bool composerSurfacePresent = false;
+    mComposerOutput = false;
     for (size_t i = 0; i < mOutputStreams.size(); i++) {
 
         // Don't configure bidi streams twice, nor add them twice to the list
@@ -2420,7 +2467,10 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
         if (outputStream->format == HAL_PIXEL_FORMAT_BLOB) {
             size_t k = i + ((mInputStream != nullptr) ? 1 : 0); // Input stream if present should
                                                                 // always occupy the initial entry.
-            if (outputStream->data_space == HAL_DATASPACE_V0_JFIF) {
+            if ((outputStream->data_space == HAL_DATASPACE_V0_JFIF) ||
+                    (outputStream->data_space ==
+                     static_cast<android_dataspace_t>(
+                         aidl::android::hardware::graphics::common::Dataspace::JPEG_R))) {
                 bufferSizes[k] = static_cast<uint32_t>(
                         getJpegBufferSize(infoPhysical(String8(outputStream->physical_camera_id)),
                                 outputStream->width, outputStream->height));
@@ -2440,7 +2490,7 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
         }
 
         if (outputStream->usage & GraphicBuffer::USAGE_HW_COMPOSER) {
-            composerSurfacePresent = true;
+            mComposerOutput = true;
         }
     }
 
@@ -2450,8 +2500,9 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
     // max_buffers, usage, and priv fields, as well as data_space and format
     // fields for IMPLEMENTATION_DEFINED formats.
 
+    int64_t logId = mCameraServiceProxyWrapper->getCurrentLogIdForCamera(mId);
     const camera_metadata_t *sessionBuffer = sessionParams.getAndLock();
-    res = mInterface->configureStreams(sessionBuffer, &config, bufferSizes);
+    res = mInterface->configureStreams(sessionBuffer, &config, bufferSizes, logId);
     sessionParams.unlock(sessionBuffer);
 
     if (res == BAD_VALUE) {
@@ -2509,7 +2560,7 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
         }
     }
 
-    mRequestThread->setComposerSurface(composerSurfacePresent);
+    mRequestThread->setComposerSurface(mComposerOutput);
 
     // Request thread needs to know to avoid using repeat-last-settings protocol
     // across configure_streams() calls
@@ -2946,6 +2997,7 @@ Camera3Device::RequestThread::RequestThread(wp<Camera3Device> parent,
         mSupportCameraMute(supportCameraMute),
         mOverrideToPortrait(overrideToPortrait) {
     mStatusId = statusTracker->addComponent("RequestThread");
+    mVndkVersion = property_get_int32("ro.vndk.version", __ANDROID_API_FUTURE__);
 }
 
 Camera3Device::RequestThread::~RequestThread() {}
@@ -3463,6 +3515,17 @@ bool Camera3Device::RequestThread::threadLoop() {
         latestRequestId = NAME_NOT_FOUND;
     }
 
+    for (size_t i = 0; i < mNextRequests.size(); i++) {
+        auto& nextRequest = mNextRequests.editItemAt(i);
+        sp<CaptureRequest> captureRequest = nextRequest.captureRequest;
+        // Do not override rotate&crop for stream configurations that include
+        // SurfaceViews(HW_COMPOSER) output, unless mOverrideToPortrait is set.
+        // The display rotation there will be compensated by NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY
+        captureRequest->mRotateAndCropChanged = (mComposerOutput && !mOverrideToPortrait) ? false :
+            overrideAutoRotateAndCrop(captureRequest);
+        captureRequest->mAutoframingChanged = overrideAutoframing(captureRequest);
+    }
+
     // 'mNextRequests' will at this point contain either a set of HFR batched requests
     //  or a single request from streaming or burst. In either case the first element
     //  should contain the latest camera settings that we need to check for any session
@@ -3612,19 +3675,15 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
         bool triggersMixedIn = (triggerCount > 0 || mPrevTriggers > 0);
         mPrevTriggers = triggerCount;
 
-        // Do not override rotate&crop for stream configurations that include
-        // SurfaceViews(HW_COMPOSER) output, unless mOverrideToPortrait is set.
-        // The display rotation there will be compensated by NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY
-        bool rotateAndCropChanged = (mComposerOutput && !mOverrideToPortrait) ? false :
-            overrideAutoRotateAndCrop(captureRequest);
-        bool autoframingChanged = overrideAutoframing(captureRequest);
         bool testPatternChanged = overrideTestPattern(captureRequest);
 
         // If the request is the same as last, or we had triggers now or last time or
         // changing overrides this time
         bool newRequest =
-                (mPrevRequest != captureRequest || triggersMixedIn || rotateAndCropChanged ||
-                         autoframingChanged || testPatternChanged) &&
+                (mPrevRequest != captureRequest || triggersMixedIn ||
+                         captureRequest->mRotateAndCropChanged ||
+                         captureRequest->mAutoframingChanged ||
+                         testPatternChanged) &&
                 // Request settings are all the same within one batch, so only treat the first
                 // request in a batch as new
                 !(batchedRequest && i > 0);
@@ -3739,6 +3798,17 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                             }
                         }
                         captureRequest->mRotationAndCropUpdated = true;
+                    }
+
+                    for (it = captureRequest->mSettingsList.begin();
+                            it != captureRequest->mSettingsList.end(); it++) {
+                        res = hardware::cameraservice::utils::conversion::aidl::filterVndkKeys(
+                                mVndkVersion, it->metadata, false /*isStatic*/);
+                        if (res != OK) {
+                            SET_ERR("RequestThread: Failed during VNDK filter of capture requests "
+                                    "%d: %s (%d)", halRequest->frame_number, strerror(-res), res);
+                            return INVALID_OPERATION;
+                        }
                     }
                 }
             }
@@ -4088,9 +4158,6 @@ status_t Camera3Device::RequestThread::setRotateAndCropAutoBehavior(
         camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropValue) {
     ATRACE_CALL();
     Mutex::Autolock l(mTriggerMutex);
-    if (rotateAndCropValue == ANDROID_SCALER_ROTATE_AND_CROP_AUTO) {
-        return BAD_VALUE;
-    }
     mRotateAndCropOverride = rotateAndCropValue;
     return OK;
 }
@@ -4099,9 +4166,6 @@ status_t Camera3Device::RequestThread::setAutoframingAutoBehaviour(
         camera_metadata_enum_android_control_autoframing_t autoframingValue) {
     ATRACE_CALL();
     Mutex::Autolock l(mTriggerMutex);
-    if (autoframingValue == ANDROID_CONTROL_AUTOFRAMING_AUTO) {
-        return BAD_VALUE;
-    }
     mAutoframingOverride = autoframingValue;
     return OK;
 }
@@ -4176,6 +4240,12 @@ void Camera3Device::clearStreamUseCaseOverrides() {
     Mutex::Autolock il(mInterfaceLock);
     Mutex::Autolock l(mLock);
     mStreamUseCaseOverrides.clear();
+}
+
+bool Camera3Device::hasDeviceError() {
+    Mutex::Autolock il(mInterfaceLock);
+    Mutex::Autolock l(mLock);
+    return mStatus == STATUS_ERROR;
 }
 
 void Camera3Device::RequestThread::cleanUpFailedRequests(bool sendRequestError) {
@@ -4683,13 +4753,20 @@ status_t Camera3Device::RequestThread::addFakeTriggerIds(
     return OK;
 }
 
-bool Camera3Device::RequestThread::overrideAutoRotateAndCrop(
-        const sp<CaptureRequest> &request) {
+bool Camera3Device::RequestThread::overrideAutoRotateAndCrop(const sp<CaptureRequest> &request) {
+    ATRACE_CALL();
+    Mutex::Autolock l(mTriggerMutex);
+    return Camera3Device::overrideAutoRotateAndCrop(request, this->mOverrideToPortrait,
+            this->mRotateAndCropOverride);
+}
+
+bool Camera3Device::overrideAutoRotateAndCrop(const sp<CaptureRequest> &request,
+        bool overrideToPortrait,
+        camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropOverride) {
     ATRACE_CALL();
 
-    if (mOverrideToPortrait) {
-        Mutex::Autolock l(mTriggerMutex);
-        uint8_t rotateAndCrop_u8 = mRotateAndCropOverride;
+    if (overrideToPortrait) {
+        uint8_t rotateAndCrop_u8 = rotateAndCropOverride;
         CameraMetadata &metadata = request->mSettingsList.begin()->metadata;
         metadata.update(ANDROID_SCALER_ROTATE_AND_CROP,
                 &rotateAndCrop_u8, 1);
@@ -4697,24 +4774,44 @@ bool Camera3Device::RequestThread::overrideAutoRotateAndCrop(
     }
 
     if (request->mRotateAndCropAuto) {
-        Mutex::Autolock l(mTriggerMutex);
         CameraMetadata &metadata = request->mSettingsList.begin()->metadata;
 
         auto rotateAndCropEntry = metadata.find(ANDROID_SCALER_ROTATE_AND_CROP);
         if (rotateAndCropEntry.count > 0) {
-            if (rotateAndCropEntry.data.u8[0] == mRotateAndCropOverride) {
+            if (rotateAndCropEntry.data.u8[0] == rotateAndCropOverride) {
                 return false;
             } else {
-                rotateAndCropEntry.data.u8[0] = mRotateAndCropOverride;
+                rotateAndCropEntry.data.u8[0] = rotateAndCropOverride;
                 return true;
             }
         } else {
-            uint8_t rotateAndCrop_u8 = mRotateAndCropOverride;
-            metadata.update(ANDROID_SCALER_ROTATE_AND_CROP,
-                    &rotateAndCrop_u8, 1);
+            uint8_t rotateAndCrop_u8 = rotateAndCropOverride;
+            metadata.update(ANDROID_SCALER_ROTATE_AND_CROP, &rotateAndCrop_u8, 1);
             return true;
         }
     }
+
+    return false;
+}
+
+bool Camera3Device::overrideAutoframing(const sp<CaptureRequest> &request /*out*/,
+        camera_metadata_enum_android_control_autoframing_t autoframingOverride) {
+    CameraMetadata &metadata = request->mSettingsList.begin()->metadata;
+    auto autoframingEntry = metadata.find(ANDROID_CONTROL_AUTOFRAMING);
+    if (autoframingEntry.count > 0) {
+        if (autoframingEntry.data.u8[0] == autoframingOverride) {
+            return false;
+        } else {
+            autoframingEntry.data.u8[0] = autoframingOverride;
+            return true;
+        }
+    } else {
+        uint8_t autoframing_u8 = autoframingOverride;
+        metadata.update(ANDROID_CONTROL_AUTOFRAMING,
+                &autoframing_u8, 1);
+        return true;
+    }
+
     return false;
 }
 
@@ -4723,23 +4820,9 @@ bool Camera3Device::RequestThread::overrideAutoframing(const sp<CaptureRequest> 
 
     if (request->mAutoframingAuto) {
         Mutex::Autolock l(mTriggerMutex);
-        CameraMetadata &metadata = request->mSettingsList.begin()->metadata;
-
-        auto autoframingEntry = metadata.find(ANDROID_CONTROL_AUTOFRAMING);
-        if (autoframingEntry.count > 0) {
-            if (autoframingEntry.data.u8[0] == mAutoframingOverride) {
-                return false;
-            } else {
-                autoframingEntry.data.u8[0] = mAutoframingOverride;
-                return true;
-            }
-        } else {
-            uint8_t autoframing_u8 = mAutoframingOverride;
-            metadata.update(ANDROID_CONTROL_AUTOFRAMING,
-                    &autoframing_u8, 1);
-            return true;
-        }
+        return Camera3Device::overrideAutoframing(request, mAutoframingOverride);
     }
+
     return false;
 }
 
@@ -4874,7 +4957,8 @@ status_t Camera3Device::PreparerThread::prepare(int maxCount, sp<Camera3StreamIn
     }
 
     // queue up the work
-    mPendingStreams.emplace(maxCount, stream);
+    mPendingStreams.push_back(
+            std::tuple<int, sp<camera3::Camera3StreamInterface>>(maxCount, stream));
     ALOGV("%s: Stream %d queued for preparing", __FUNCTION__, stream->getId());
 
     return OK;
@@ -4885,8 +4969,8 @@ void Camera3Device::PreparerThread::pause() {
 
     Mutex::Autolock l(mLock);
 
-    std::unordered_map<int, sp<camera3::Camera3StreamInterface> > pendingStreams;
-    pendingStreams.insert(mPendingStreams.begin(), mPendingStreams.end());
+    std::list<std::tuple<int, sp<camera3::Camera3StreamInterface>>> pendingStreams;
+    pendingStreams.insert(pendingStreams.begin(), mPendingStreams.begin(), mPendingStreams.end());
     sp<camera3::Camera3StreamInterface> currentStream = mCurrentStream;
     int currentMaxCount = mCurrentMaxCount;
     mPendingStreams.clear();
@@ -4907,18 +4991,19 @@ void Camera3Device::PreparerThread::pause() {
     //of the streams in the pending list.
     if (currentStream != nullptr) {
         if (!mCurrentPrepareComplete) {
-            pendingStreams.emplace(currentMaxCount, currentStream);
+            pendingStreams.push_back(std::tuple(currentMaxCount, currentStream));
         }
     }
 
-    mPendingStreams.insert(pendingStreams.begin(), pendingStreams.end());
+    mPendingStreams.insert(mPendingStreams.begin(), pendingStreams.begin(), pendingStreams.end());
     for (const auto& it : mPendingStreams) {
-        it.second->cancelPrepare();
+        std::get<1>(it)->cancelPrepare();
     }
 }
 
 status_t Camera3Device::PreparerThread::resume() {
     ATRACE_CALL();
+    ALOGV("%s: PreparerThread", __FUNCTION__);
     status_t res;
 
     Mutex::Autolock l(mLock);
@@ -4931,10 +5016,10 @@ status_t Camera3Device::PreparerThread::resume() {
 
     auto it = mPendingStreams.begin();
     for (; it != mPendingStreams.end();) {
-        res = it->second->startPrepare(it->first, true /*blockRequest*/);
+        res = std::get<1>(*it)->startPrepare(std::get<0>(*it), true /*blockRequest*/);
         if (res == OK) {
             if (listener != NULL) {
-                listener->notifyPrepared(it->second->getId());
+                listener->notifyPrepared(std::get<1>(*it)->getId());
             }
             it = mPendingStreams.erase(it);
         } else if (res != NOT_ENOUGH_DATA) {
@@ -4968,7 +5053,7 @@ status_t Camera3Device::PreparerThread::clear() {
     Mutex::Autolock l(mLock);
 
     for (const auto& it : mPendingStreams) {
-        it.second->cancelPrepare();
+        std::get<1>(it)->cancelPrepare();
     }
     mPendingStreams.clear();
     mCancelNow = true;
@@ -4999,8 +5084,8 @@ bool Camera3Device::PreparerThread::threadLoop() {
 
             // Get next stream to prepare
             auto it = mPendingStreams.begin();
-            mCurrentStream = it->second;
-            mCurrentMaxCount = it->first;
+            mCurrentMaxCount = std::get<0>(*it);
+            mCurrentStream = std::get<1>(*it);
             mCurrentPrepareComplete = false;
             mPendingStreams.erase(it);
             ATRACE_ASYNC_BEGIN("stream prepare", mCurrentStream->getId());
@@ -5225,6 +5310,10 @@ status_t Camera3Device::setRotateAndCropAutoBehavior(
     if (mRequestThread == nullptr) {
         return INVALID_OPERATION;
     }
+    if (rotateAndCropValue == ANDROID_SCALER_ROTATE_AND_CROP_AUTO) {
+        return BAD_VALUE;
+    }
+    mRotateAndCropOverride = rotateAndCropValue;
     return mRequestThread->setRotateAndCropAutoBehavior(rotateAndCropValue);
 }
 
@@ -5236,6 +5325,10 @@ status_t Camera3Device::setAutoframingAutoBehavior(
     if (mRequestThread == nullptr) {
         return INVALID_OPERATION;
     }
+    if (autoframingValue == ANDROID_CONTROL_AUTOFRAMING_AUTO) {
+        return BAD_VALUE;
+    }
+    mAutoframingOverride = autoframingValue;
     return mRequestThread->setAutoframingAutoBehaviour(autoframingValue);
 }
 

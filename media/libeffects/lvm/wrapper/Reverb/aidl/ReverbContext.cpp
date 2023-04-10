@@ -15,7 +15,9 @@
  */
 
 #include <cstddef>
+
 #define LOG_TAG "ReverbContext"
+#include <android-base/logging.h>
 #include <Utils.h>
 
 #include "ReverbContext.h"
@@ -139,12 +141,6 @@ RetCode ReverbContext::setPresetReverbPreset(const PresetReverb::Presets& preset
 }
 
 RetCode ReverbContext::setEnvironmentalReverbRoomLevel(int roomLevel) {
-    if (roomLevel < lvm::kEnvReverbCap.minRoomLevelMb ||
-        roomLevel > lvm::kEnvReverbCap.maxRoomLevelMb) {
-        LOG(ERROR) << __func__ << " invalid roomLevel: " << roomLevel;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
-
     // Update Control Parameter
     LVREV_ControlParams_st params;
     {
@@ -165,12 +161,6 @@ RetCode ReverbContext::setEnvironmentalReverbRoomLevel(int roomLevel) {
 }
 
 RetCode ReverbContext::setEnvironmentalReverbRoomHfLevel(int roomHfLevel) {
-    if (roomHfLevel < lvm::kEnvReverbCap.minRoomHfLevelMb ||
-        roomHfLevel > lvm::kEnvReverbCap.maxRoomHfLevelMb) {
-        LOG(ERROR) << __func__ << " invalid roomHfLevel: " << roomHfLevel;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
-
     // Update Control Parameter
     LVREV_ControlParams_st params;
     {
@@ -188,10 +178,6 @@ RetCode ReverbContext::setEnvironmentalReverbRoomHfLevel(int roomHfLevel) {
 }
 
 RetCode ReverbContext::setEnvironmentalReverbDecayTime(int decayTime) {
-    if (decayTime < 0 || decayTime > lvm::kEnvReverbCap.maxDecayTimeMs) {
-        LOG(ERROR) << __func__ << " invalid decayTime: " << decayTime;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
     int time = decayTime;
     if (time > lvm::kMaxT60) {
         time = lvm::kMaxT60;
@@ -215,12 +201,6 @@ RetCode ReverbContext::setEnvironmentalReverbDecayTime(int decayTime) {
 }
 
 RetCode ReverbContext::setEnvironmentalReverbDecayHfRatio(int decayHfRatio) {
-    if (decayHfRatio < lvm::kEnvReverbCap.minDecayHfRatioPm ||
-        decayHfRatio > lvm::kEnvReverbCap.maxDecayHfRatioPm) {
-        LOG(ERROR) << __func__ << " invalid decayHfRatio: " << decayHfRatio;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
-
     // Update Control Parameter
     LVREV_ControlParams_st params;
     {
@@ -238,11 +218,6 @@ RetCode ReverbContext::setEnvironmentalReverbDecayHfRatio(int decayHfRatio) {
 }
 
 RetCode ReverbContext::setEnvironmentalReverbLevel(int level) {
-    if (level < lvm::kEnvReverbCap.minLevelMb || level > lvm::kEnvReverbCap.maxLevelMb) {
-        LOG(ERROR) << __func__ << " invalid level: " << level;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
-
     // Update Control Parameter
     LVREV_ControlParams_st params;
     {
@@ -263,20 +238,11 @@ RetCode ReverbContext::setEnvironmentalReverbLevel(int level) {
 }
 
 RetCode ReverbContext::setEnvironmentalReverbDelay(int delay) {
-    if (delay < 0 || delay > lvm::kEnvReverbCap.maxDelayMs) {
-        LOG(ERROR) << __func__ << " invalid delay: " << delay;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
     mDelay = delay;
     return RetCode::SUCCESS;
 }
 
 RetCode ReverbContext::setEnvironmentalReverbDiffusion(int diffusion) {
-    if (diffusion < 0 || diffusion > lvm::kEnvReverbCap.maxDiffusionPm) {
-        LOG(ERROR) << __func__ << " invalid diffusion: " << diffusion;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
-
     // Update Control Parameter
     LVREV_ControlParams_st params;
     {
@@ -294,11 +260,6 @@ RetCode ReverbContext::setEnvironmentalReverbDiffusion(int diffusion) {
 }
 
 RetCode ReverbContext::setEnvironmentalReverbDensity(int density) {
-    if (density < 0 || density > lvm::kEnvReverbCap.maxDensityPm) {
-        LOG(ERROR) << __func__ << " invalid density: " << density;
-        return RetCode::ERROR_ILLEGAL_PARAMETER;
-    }
-
     // Update Control Parameter
     LVREV_ControlParams_st params;
     {
@@ -342,7 +303,7 @@ void ReverbContext::initControlParameter(LVREV_ControlParams_st& params) {
     /* General parameters */
     params.OperatingMode = LVM_MODE_ON;
     params.SampleRate = LVM_FS_44100;
-    params.SourceFormat = (::android::hardware::audio::common::getChannelCount(
+    params.SourceFormat = (::aidl::android::hardware::audio::common::getChannelCount(
                                    mCommon.input.base.channelMask) == 1
                                    ? LVM_MONO
                                    : LVM_STEREO);
@@ -404,10 +365,10 @@ IEffect::Status ReverbContext::lvmProcess(float* in, float* out, int samples) {
     LOG(DEBUG) << __func__ << " start processing";
     std::lock_guard lg(mMutex);
 
-    int channels =
-            ::android::hardware::audio::common::getChannelCount(mCommon.input.base.channelMask);
-    int outChannels =
-            ::android::hardware::audio::common::getChannelCount(mCommon.output.base.channelMask);
+    int channels = ::aidl::android::hardware::audio::common::getChannelCount(
+            mCommon.input.base.channelMask);
+    int outChannels = ::aidl::android::hardware::audio::common::getChannelCount(
+            mCommon.output.base.channelMask);
     int frameCount = mCommon.input.frameCount;
 
     // Reverb only effects the stereo channels in multichannel source.

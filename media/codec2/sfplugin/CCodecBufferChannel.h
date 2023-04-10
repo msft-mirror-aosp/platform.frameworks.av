@@ -18,6 +18,7 @@
 
 #define CCODEC_BUFFER_CHANNEL_H_
 
+#include <deque>
 #include <map>
 #include <memory>
 #include <vector>
@@ -85,9 +86,11 @@ public:
             size_t offset,
             const CryptoPlugin::SubSample *subSamples,
             size_t numSubSamples,
-            const sp<MediaCodecBuffer> &buffer) override;
+            const sp<MediaCodecBuffer> &buffer,
+            AString* errorDetailMsg) override;
     virtual status_t renderOutputBuffer(
             const sp<MediaCodecBuffer> &buffer, int64_t timestampNs) override;
+    virtual void pollForRenderedBuffers() override;
     virtual status_t discardBuffer(const sp<MediaCodecBuffer> &buffer) override;
     virtual void getInputBufferArray(Vector<sp<MediaCodecBuffer>> *array) override;
     virtual void getOutputBufferArray(Vector<sp<MediaCodecBuffer>> *array) override;
@@ -102,7 +105,7 @@ public:
     /**
      * Set output graphic surface for rendering.
      */
-    status_t setSurface(const sp<Surface> &surface);
+    status_t setSurface(const sp<Surface> &surface, bool pushBlankBuffer);
 
     /**
      * Set GraphicBufferSource object from which the component extracts input
@@ -151,8 +154,10 @@ public:
     /**
      * Stop using buffers of the current output surface for other Codec
      * instances to use the surface safely.
+     *
+     * \param pushBlankBuffer[in]       push a blank buffer at the end if true
      */
-    void stopUseOutputSurface();
+    void stopUseOutputSurface(bool pushBlankBuffer);
 
     /**
      * Stop queueing buffers to the component. This object should never queue
@@ -200,11 +205,6 @@ public:
     };
 
     void setMetaMode(MetaMode mode);
-
-    /**
-     * Push a blank buffer to the configured native output surface.
-     */
-    status_t pushBlankBufferToOutputSurface();
 
 private:
     class QueueGuard;
@@ -263,6 +263,14 @@ private:
         bool mRunning;
     };
 
+    struct TrackedFrame {
+        uint64_t number;
+        int64_t mediaTimeUs;
+        int64_t desiredRenderTimeNs;
+        nsecs_t latchTime;
+        sp<Fence> presentFence;
+    };
+
     void feedInputBufferIfAvailable();
     void feedInputBufferIfAvailableInternal();
     status_t queueInputBufferInternal(sp<MediaCodecBuffer> buffer,
@@ -274,6 +282,12 @@ private:
     void sendOutputBuffers();
     void ensureDecryptDestination(size_t size);
     int32_t getHeapSeqNum(const sp<hardware::HidlMemory> &memory);
+
+    void initializeFrameTrackingFor(ANativeWindow * window);
+    void trackReleasedFrame(const IGraphicBufferProducer::QueueBufferOutput& qbo,
+                            int64_t mediaTimeUs, int64_t desiredRenderTimeNs);
+    void processRenderedFrames(const FrameEventHistoryDelta& delta);
+    int64_t getRenderTimeNs(const TrackedFrame& frame);
 
     QueueSync mSync;
     sp<MemoryDealer> mDealer;
@@ -315,6 +329,9 @@ private:
     std::atomic_uint64_t mFirstValidFrameIndex;
 
     sp<MemoryDealer> makeMemoryDealer(size_t heapSize);
+
+    std::deque<TrackedFrame> mTrackedFrames;
+    bool mHasPresentFenceTimes;
 
     struct OutputSurface {
         sp<Surface> surface;

@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+#include <iostream>
+#include <string>
+
 #include <gtest/gtest.h>
 
 #include <media/AidlConversion.h>
@@ -22,18 +25,54 @@
 using namespace android;
 using namespace android::aidl_utils;
 
-using android::media::AudioDirectMode;
+using media::AudioDirectMode;
+using media::AudioPortConfigFw;
+using media::AudioPortDeviceExtSys;
+using media::AudioPortFw;
+using media::AudioPortRole;
+using media::AudioPortType;
 using media::audio::common::AudioChannelLayout;
+using media::audio::common::AudioDevice;
+using media::audio::common::AudioDeviceAddress;
 using media::audio::common::AudioDeviceDescription;
 using media::audio::common::AudioDeviceType;
 using media::audio::common::AudioEncapsulationMetadataType;
 using media::audio::common::AudioEncapsulationType;
 using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioFormatType;
+using media::audio::common::AudioGain;
+using media::audio::common::AudioGainConfig;
 using media::audio::common::AudioGainMode;
+using media::audio::common::AudioIoFlags;
+using media::audio::common::AudioPortDeviceExt;
+using media::audio::common::AudioProfile;
 using media::audio::common::AudioStandard;
 using media::audio::common::ExtraAudioDescriptor;
+using media::audio::common::Int;
+using media::audio::common::MicrophoneDynamicInfo;
+using media::audio::common::MicrophoneInfo;
 using media::audio::common::PcmType;
+
+// Provide value printers for types generated from AIDL
+// They need to be in the same namespace as the types we intend to print
+namespace android::media {
+#define DEFINE_PRINTING_TEMPLATES()                                                               \
+    template <typename P>                                                                         \
+    std::enable_if_t<std::is_base_of_v<::android::Parcelable, P>, std::ostream&> operator<<(      \
+            std::ostream& os, const P& p) {                                                       \
+        return os << p.toString();                                                                \
+    }                                                                                             \
+    template <typename E>                                                                         \
+    std::enable_if_t<std::is_enum_v<E>, std::ostream&> operator<<(std::ostream& os, const E& e) { \
+        return os << toString(e);                                                                 \
+    }
+DEFINE_PRINTING_TEMPLATES();
+
+namespace audio::common {
+DEFINE_PRINTING_TEMPLATES();
+}  // namespace audio::common
+#undef DEFINE_PRINTING_TEMPLATES
+}  // namespace android::media
 
 namespace {
 
@@ -94,6 +133,14 @@ AudioDeviceDescription make_ADD_DefaultIn() {
     return make_AudioDeviceDescription(AudioDeviceType::IN_DEFAULT);
 }
 
+AudioDeviceDescription make_ADD_MicIn() {
+    return make_AudioDeviceDescription(AudioDeviceType::IN_MICROPHONE);
+}
+
+AudioDeviceDescription make_ADD_RSubmixIn() {
+    return make_AudioDeviceDescription(AudioDeviceType::IN_SUBMIX);
+}
+
 AudioDeviceDescription make_ADD_DefaultOut() {
     return make_AudioDeviceDescription(AudioDeviceType::OUT_DEFAULT);
 }
@@ -106,6 +153,39 @@ AudioDeviceDescription make_ADD_WiredHeadset() {
 AudioDeviceDescription make_ADD_BtScoHeadset() {
     return make_AudioDeviceDescription(AudioDeviceType::OUT_HEADSET,
                                        AudioDeviceDescription::CONNECTION_BT_SCO());
+}
+
+AudioDeviceDescription make_ADD_BtA2dpHeadphone() {
+    return make_AudioDeviceDescription(AudioDeviceType::OUT_HEADPHONE,
+                                       AudioDeviceDescription::CONNECTION_BT_A2DP());
+}
+
+AudioDeviceDescription make_ADD_BtLeHeadset() {
+    return make_AudioDeviceDescription(AudioDeviceType::OUT_HEADSET,
+                                       AudioDeviceDescription::CONNECTION_BT_LE());
+}
+
+AudioDeviceDescription make_ADD_BtLeBroadcast() {
+    return make_AudioDeviceDescription(AudioDeviceType::OUT_BROADCAST,
+                                       AudioDeviceDescription::CONNECTION_BT_LE());
+}
+
+AudioDeviceDescription make_ADD_IpV4Device() {
+    return make_AudioDeviceDescription(AudioDeviceType::OUT_DEVICE,
+                                       AudioDeviceDescription::CONNECTION_IP_V4());
+}
+
+AudioDeviceDescription make_ADD_UsbHeadset() {
+    return make_AudioDeviceDescription(AudioDeviceType::OUT_HEADSET,
+                                       AudioDeviceDescription::CONNECTION_USB());
+}
+
+AudioDevice make_AudioDevice(const AudioDeviceDescription& type,
+                             const AudioDeviceAddress& address) {
+    AudioDevice result;
+    result.type = type;
+    result.address = address;
+    return result;
 }
 
 AudioFormatDescription make_AudioFormatDescription(AudioFormatType type) {
@@ -353,6 +433,48 @@ INSTANTIATE_TEST_SUITE_P(AudioDeviceDescriptionRoundTrip, AudioDeviceDescription
                                          make_ADD_DefaultOut(), make_ADD_WiredHeadset(),
                                          make_ADD_BtScoHeadset()));
 
+class AudioDeviceRoundTripTest : public testing::TestWithParam<AudioDevice> {};
+TEST_P(AudioDeviceRoundTripTest, Aidl2Legacy2Aidl) {
+    const auto initial = GetParam();
+    audio_devices_t legacyType;
+    String8 legacyAddress;
+    status_t status = aidl2legacy_AudioDevice_audio_device(initial, &legacyType, &legacyAddress);
+    ASSERT_EQ(OK, status);
+    auto convBack = legacy2aidl_audio_device_AudioDevice(legacyType, legacyAddress);
+    ASSERT_TRUE(convBack.ok());
+    EXPECT_EQ(initial, convBack.value());
+}
+INSTANTIATE_TEST_SUITE_P(
+        AudioDeviceRoundTrip, AudioDeviceRoundTripTest,
+        testing::Values(
+                make_AudioDevice(make_ADD_MicIn(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::id>("bottom")),
+                make_AudioDevice(make_ADD_RSubmixIn(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::id>("1:2-in-3")),
+                // The case of a "blueprint" device port for an external device.
+                make_AudioDevice(make_ADD_BtScoHeadset(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::id>("")),
+                make_AudioDevice(make_ADD_BtScoHeadset(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::mac>(
+                                         std::vector<uint8_t>{1, 2, 3, 4, 5, 6})),
+                // Another "blueprint"
+                make_AudioDevice(make_ADD_BtA2dpHeadphone(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::id>("")),
+                make_AudioDevice(make_ADD_BtA2dpHeadphone(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::mac>(
+                                         std::vector<uint8_t>{1, 2, 3, 4, 5, 6})),
+                make_AudioDevice(make_ADD_BtLeHeadset(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::mac>(
+                                         std::vector<uint8_t>{1, 2, 3, 4, 5, 6})),
+                make_AudioDevice(make_ADD_BtLeBroadcast(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::id>("42")),
+                make_AudioDevice(make_ADD_IpV4Device(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::ipv4>(
+                                         std::vector<uint8_t>{192, 168, 0, 1})),
+                make_AudioDevice(make_ADD_UsbHeadset(),
+                                 AudioDeviceAddress::make<AudioDeviceAddress::Tag::alsa>(
+                                         std::vector<int32_t>{1, 2}))));
+
 class AudioFormatDescriptionRoundTripTest : public testing::TestWithParam<AudioFormatDescription> {
 };
 TEST_P(AudioFormatDescriptionRoundTripTest, Aidl2Legacy2Aidl) {
@@ -366,6 +488,134 @@ TEST_P(AudioFormatDescriptionRoundTripTest, Aidl2Legacy2Aidl) {
 INSTANTIATE_TEST_SUITE_P(AudioFormatDescriptionRoundTrip, AudioFormatDescriptionRoundTripTest,
                          testing::Values(make_AFD_Invalid(), AudioFormatDescription{},
                                          make_AFD_Pcm16Bit()));
+
+AudioPortConfigFw createAudioPortConfigFw(const AudioChannelLayout& layout,
+                                          const AudioFormatDescription& format,
+                                          const AudioDeviceDescription& device) {
+    const bool isInput = device.type < AudioDeviceType::OUT_DEFAULT;
+    AudioPortConfigFw result;
+    result.hal.id = 43;
+    result.hal.portId = 42;
+    Int sr44100;
+    sr44100.value = 44100;
+    result.hal.sampleRate = sr44100;
+    result.hal.channelMask = layout;
+    result.hal.format = format;
+    AudioGainConfig gain;
+    gain.mode = 1 << static_cast<int>(AudioGainMode::JOINT);
+    gain.values = std::vector<int32_t>({100});
+    result.hal.gain = gain;
+    AudioPortDeviceExt ext;
+    AudioDevice audioDevice;
+    audioDevice.type = device;
+    ext.device = audioDevice;
+    result.hal.ext = ext;
+    result.sys.role = isInput ? AudioPortRole::SOURCE : AudioPortRole::SINK;
+    result.sys.type = AudioPortType::DEVICE;
+    AudioPortDeviceExtSys sysDevice;
+    sysDevice.hwModule = 1;
+    result.sys.ext = sysDevice;
+    return result;
+}
+
+using AudioPortConfigParam =
+        std::tuple<AudioChannelLayout, AudioFormatDescription, AudioDeviceDescription>;
+class AudioPortConfigRoundTripTest : public testing::TestWithParam<AudioPortConfigParam> {};
+TEST_P(AudioPortConfigRoundTripTest, Aidl2Legacy2Aidl) {
+    const AudioChannelLayout layout = std::get<0>(GetParam());
+    const AudioFormatDescription format = std::get<1>(GetParam());
+    const AudioDeviceDescription device = std::get<2>(GetParam());
+    const bool isInput = device.type < AudioDeviceType::OUT_DEFAULT;
+    AudioPortConfigFw initial = createAudioPortConfigFw(layout, format, device);
+    {
+        audio_port_config conv{};
+        int32_t portId = -1;
+        status_t status =
+                aidl2legacy_AudioPortConfig_audio_port_config(initial.hal, isInput, &conv, &portId);
+        ASSERT_EQ(OK, status);
+        EXPECT_NE(-1, portId);
+        auto convBack = legacy2aidl_audio_port_config_AudioPortConfig(conv, isInput, portId);
+        ASSERT_TRUE(convBack.ok());
+        EXPECT_EQ(initial.hal, convBack.value());
+    }
+    {
+        int32_t portId = -1;
+        auto conv = aidl2legacy_AudioPortConfigFw_audio_port_config(initial, &portId);
+        ASSERT_TRUE(conv.ok());
+        EXPECT_NE(-1, portId);
+        auto convBack = legacy2aidl_audio_port_config_AudioPortConfigFw(conv.value(), portId);
+        ASSERT_TRUE(convBack.ok());
+        EXPECT_EQ(initial, convBack.value());
+    }
+}
+INSTANTIATE_TEST_SUITE_P(
+        AudioPortConfig, AudioPortConfigRoundTripTest,
+        testing::Combine(testing::Values(make_ACL_Stereo(), make_ACL_ChannelIndex2()),
+                         testing::Values(make_AFD_Pcm16Bit()),
+                         testing::Values(make_ADD_DefaultIn(), make_ADD_DefaultOut(),
+                                         make_ADD_WiredHeadset())));
+
+class AudioPortFwRoundTripTest : public testing::TestWithParam<AudioDeviceDescription> {
+  public:
+    AudioProfile createProfile(const AudioFormatDescription& format,
+                               const std::vector<AudioChannelLayout>& channelMasks,
+                               const std::vector<int32_t>& sampleRates) {
+        AudioProfile profile;
+        profile.format = format;
+        profile.channelMasks = channelMasks;
+        profile.sampleRates = sampleRates;
+        return profile;
+    }
+};
+TEST_P(AudioPortFwRoundTripTest, Aidl2Legacy2Aidl) {
+    const AudioDeviceDescription device = GetParam();
+    const bool isInput = device.type < AudioDeviceType::OUT_DEFAULT;
+    AudioPortFw initial;
+    initial.hal.id = 42;
+    initial.hal.profiles.push_back(createProfile(
+            make_AFD_Pcm16Bit(), {make_ACL_Stereo(), make_ACL_ChannelIndex2()}, {44100, 48000}));
+    if (isInput) {
+        initial.hal.flags = AudioIoFlags::make<AudioIoFlags::Tag::input>(0);
+    } else {
+        initial.hal.flags = AudioIoFlags::make<AudioIoFlags::Tag::output>(0);
+    }
+    AudioGain initialGain;
+    initialGain.mode = 1 << static_cast<int>(AudioGainMode::JOINT);
+    initialGain.channelMask = make_ACL_Stereo();
+    initial.hal.gains.push_back(initialGain);
+    AudioPortDeviceExt initialExt;
+    AudioDevice initialDevice;
+    initialDevice.type = device;
+    initialExt.device = initialDevice;
+    initial.hal.ext = initialExt;
+    {
+        auto conv = aidl2legacy_AudioPort_audio_port_v7(initial.hal, isInput);
+        ASSERT_TRUE(conv.ok());
+        auto convBack = legacy2aidl_audio_port_v7_AudioPort(conv.value(), isInput);
+        ASSERT_TRUE(convBack.ok());
+        EXPECT_EQ(initial.hal, convBack.value());
+    }
+    initial.sys.role = isInput ? AudioPortRole::SOURCE : AudioPortRole::SINK;
+    initial.sys.type = AudioPortType::DEVICE;
+    initial.sys.profiles.resize(initial.hal.profiles.size());
+    initial.sys.gains.resize(initial.hal.gains.size());
+    initial.sys.activeConfig =
+            createAudioPortConfigFw(make_ACL_Stereo(), make_AFD_Pcm16Bit(), device);
+    initial.sys.activeConfig.hal.flags = initial.hal.flags;
+    AudioPortDeviceExtSys initialSysDevice;
+    initialSysDevice.hwModule = 1;
+    initial.sys.ext = initialSysDevice;
+    {
+        auto conv = aidl2legacy_AudioPortFw_audio_port_v7(initial);
+        ASSERT_TRUE(conv.ok());
+        auto convBack = legacy2aidl_audio_port_v7_AudioPortFw(conv.value());
+        ASSERT_TRUE(convBack.ok());
+        EXPECT_EQ(initial, convBack.value());
+    }
+}
+INSTANTIATE_TEST_SUITE_P(AudioPortFw, AudioPortFwRoundTripTest,
+                         testing::Values(make_ADD_DefaultIn(), make_ADD_DefaultOut(),
+                                         make_ADD_WiredHeadset()));
 
 class AudioDirectModeRoundTripTest : public testing::TestWithParam<AudioDirectMode> {};
 TEST_P(AudioDirectModeRoundTripTest, Aidl2Legacy2Aidl) {
@@ -505,3 +755,73 @@ TEST_P(AudioGainTest, Legacy2Aidl2Legacy) {
     }
 }
 INSTANTIATE_TEST_SUITE_P(AudioGain, AudioGainTest, testing::Values(true, false));
+
+TEST(AudioMicrophoneInfoFw, Aidl2Legacy2Aidl) {
+    media::MicrophoneInfoFw initial{};
+    // HALs must return at least 1 element in channelMapping. The zero value is 'UNUSED'.
+    initial.dynamic.channelMapping.resize(1);
+    auto conv = aidl2legacy_MicrophoneInfoFw_audio_microphone_characteristic_t(initial);
+    ASSERT_TRUE(conv.ok());
+    auto convBack = legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(conv.value());
+    ASSERT_TRUE(convBack.ok());
+    EXPECT_EQ(initial, convBack.value());
+}
+
+TEST(AudioMicrophoneInfoFw, UnknownValues) {
+    {
+        media::MicrophoneInfoFw initial;
+        initial.dynamic.channelMapping.resize(1);
+        initial.info.indexInTheGroup = MicrophoneInfo::INDEX_IN_THE_GROUP_UNKNOWN;
+        auto conv = aidl2legacy_MicrophoneInfoFw_audio_microphone_characteristic_t(initial);
+        ASSERT_TRUE(conv.ok());
+        auto convBack =
+                legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(conv.value());
+        ASSERT_TRUE(convBack.ok());
+        EXPECT_EQ(initial, convBack.value());
+    }
+    for (const auto f : {&audio_microphone_characteristic_t::sensitivity,
+                         &audio_microphone_characteristic_t::max_spl,
+                         &audio_microphone_characteristic_t::min_spl}) {
+        audio_microphone_characteristic_t mic{};
+        if (f == &audio_microphone_characteristic_t::sensitivity) {
+            mic.*f = AUDIO_MICROPHONE_SENSITIVITY_UNKNOWN;
+        } else {
+            mic.*f = AUDIO_MICROPHONE_SPL_UNKNOWN;
+        }
+        auto aidl = legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(mic);
+        ASSERT_TRUE(aidl.ok());
+        EXPECT_FALSE(aidl.value().info.sensitivity.has_value());
+    }
+    for (const auto f : {&audio_microphone_characteristic_t::geometric_location,
+                         &audio_microphone_characteristic_t::orientation}) {
+        for (const auto c : {&audio_microphone_coordinate::x, &audio_microphone_coordinate::y,
+                             &audio_microphone_coordinate::z}) {
+            audio_microphone_characteristic_t mic{};
+            mic.*f.*c = AUDIO_MICROPHONE_COORDINATE_UNKNOWN;
+            auto conv = legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(mic);
+            ASSERT_TRUE(conv.ok());
+            const auto& aidl = conv.value();
+            if (f == &audio_microphone_characteristic_t::geometric_location) {
+                EXPECT_FALSE(aidl.info.position.has_value());
+                EXPECT_TRUE(aidl.info.orientation.has_value());
+            } else {
+                EXPECT_TRUE(aidl.info.position.has_value());
+                EXPECT_FALSE(aidl.info.orientation.has_value());
+            }
+        }
+    }
+}
+
+TEST(AudioMicrophoneInfoFw, ChannelMapping) {
+    audio_microphone_characteristic_t mic{};
+    mic.channel_mapping[1] = AUDIO_MICROPHONE_CHANNEL_MAPPING_DIRECT;
+    mic.channel_mapping[3] = AUDIO_MICROPHONE_CHANNEL_MAPPING_PROCESSED;
+    auto conv = legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(mic);
+    ASSERT_TRUE(conv.ok());
+    const auto& aidl = conv.value();
+    EXPECT_EQ(4, aidl.dynamic.channelMapping.size());
+    EXPECT_EQ(MicrophoneDynamicInfo::ChannelMapping::UNUSED, aidl.dynamic.channelMapping[0]);
+    EXPECT_EQ(MicrophoneDynamicInfo::ChannelMapping::DIRECT, aidl.dynamic.channelMapping[1]);
+    EXPECT_EQ(MicrophoneDynamicInfo::ChannelMapping::UNUSED, aidl.dynamic.channelMapping[2]);
+    EXPECT_EQ(MicrophoneDynamicInfo::ChannelMapping::PROCESSED, aidl.dynamic.channelMapping[3]);
+}

@@ -16,67 +16,45 @@
 
 #pragma once
 
-#include <android/binder_auto_utils.h>
-#include <android/binder_manager.h>
-#include <android/binder_process.h>
-
 /**
- * Can only handle conversion between AIDL (NDK backend) and legacy type.
+ * Can only handle conversion between AIDL (NDK backend) and legacy types.
  */
+
+#include <string>
+#include <vector>
+
 #include <hardware/audio_effect.h>
-#include <media/AidlConversionUtil.h>
 #include <system/audio_effect.h>
 
-#include <aidl/android/hardware/audio/effect/IEffect.h>
+#include <aidl/android/hardware/audio/common/PlaybackTrackMetadata.h>
+#include <aidl/android/hardware/audio/common/RecordTrackMetadata.h>
+#include <aidl/android/media/audio/common/AudioConfig.h>
+#include <media/AidlConversionUtil.h>
 
 namespace aidl {
 namespace android {
 
-ConversionResult<::aidl::android::hardware::audio::effect::AcousticEchoCanceler>
-getParameterSpecificAec(const ::aidl::android::hardware::audio::effect::Parameter& aidl);
-
-ConversionResult<uint32_t> aidl2legacy_Flags_Type_uint32(
-        ::aidl::android::hardware::audio::effect::Flags::Type type);
-ConversionResult<uint32_t> aidl2legacy_Flags_Insert_uint32(
-        ::aidl::android::hardware::audio::effect::Flags::Insert insert);
-ConversionResult<uint32_t> aidl2legacy_Flags_Volume_uint32(
-        ::aidl::android::hardware::audio::effect::Flags::Volume volume);
-ConversionResult<uint32_t> aidl2legacy_Flags_HardwareAccelerator_uint32(
-        ::aidl::android::hardware::audio::effect::Flags::HardwareAccelerator hwAcceleratorMode);
-ConversionResult<uint32_t> aidl2legacy_Flags_uint32(
-        const ::aidl::android::hardware::audio::effect::Flags aidl);
-
-ConversionResult<::aidl::android::hardware::audio::effect::Flags::Type>
-legacy2aidl_uint32_Flags_Type(uint32_t legacy);
-ConversionResult<::aidl::android::hardware::audio::effect::Flags::Insert>
-legacy2aidl_uint32_Flags_Insert(uint32_t legacy);
-ConversionResult<::aidl::android::hardware::audio::effect::Flags::Volume>
-legacy2aidl_uint32_Flags_Volume(uint32_t legacy);
-ConversionResult<::aidl::android::hardware::audio::effect::Flags::HardwareAccelerator>
-legacy2aidl_uint32_Flags_HardwareAccelerator(uint32_t legacy);
-ConversionResult<::aidl::android::hardware::audio::effect::Flags> legacy2aidl_uint32_Flags(
-        uint32_t hal);
-
-ConversionResult<effect_descriptor_t> aidl2legacy_Descriptor_effect_descriptor(
-        const ::aidl::android::hardware::audio::effect::Descriptor& aidl);
-ConversionResult<::aidl::android::hardware::audio::effect::Descriptor>
-legacy2aidl_effect_descriptor_Descriptor(const effect_descriptor_t& hal);
-
-ConversionResult<buffer_config_t> aidl2legacy_AudioConfigBase_buffer_config_t(
-        const media::audio::common::AudioConfigBase& aidl, bool isInput);
-ConversionResult<media::audio::common::AudioConfigBase> legacy2aidl_buffer_config_t_AudioConfigBase(
+ConversionResult<buffer_config_t> aidl2legacy_AudioConfig_buffer_config_t(
+        const media::audio::common::AudioConfig& aidl, bool isInput);
+ConversionResult<media::audio::common::AudioConfig> legacy2aidl_buffer_config_t_AudioConfig(
         const buffer_config_t& legacy, bool isInput);
 
-ConversionResult<uint32_t> aidl2legacy_Parameter_uint32_echoDelay(
-        const ::aidl::android::hardware::audio::effect::Parameter& aidl);
-ConversionResult<::aidl::android::hardware::audio::effect::Parameter>
-legacy2aidl_uint32_echoDelay_Parameter(const uint32_t& legacy);
+::android::status_t aidl2legacy_AudioAttributesTags(
+        const std::vector<std::string>& aidl, char* legacy);
+ConversionResult<std::vector<std::string>> legacy2aidl_AudioAttributesTags(const char* legacy);
 
-ConversionResult<uint32_t> aidl2legacy_Parameter_uint32_mobileMode(
-        const ::aidl::android::hardware::audio::effect::Parameter& aidl);
-ConversionResult<::aidl::android::hardware::audio::effect::Parameter>
-legacy2aidl_uint32_mobileMode_Parameter(const uint32_t& legacy);
+ConversionResult<playback_track_metadata_v7>
+aidl2legacy_PlaybackTrackMetadata_playback_track_metadata_v7(
+        const hardware::audio::common::PlaybackTrackMetadata& aidl);
+ConversionResult<hardware::audio::common::PlaybackTrackMetadata>
+legacy2aidl_playback_track_metadata_v7_PlaybackTrackMetadata(
+        const playback_track_metadata_v7& legacy);
 
+ConversionResult<record_track_metadata_v7>
+aidl2legacy_RecordTrackMetadata_record_track_metadata_v7(
+        const hardware::audio::common::RecordTrackMetadata& aidl);
+ConversionResult<hardware::audio::common::RecordTrackMetadata>
+legacy2aidl_record_track_metadata_v7_RecordTrackMetadata(const record_track_metadata_v7& legacy);
 
 }  // namespace android
 }  // namespace aidl

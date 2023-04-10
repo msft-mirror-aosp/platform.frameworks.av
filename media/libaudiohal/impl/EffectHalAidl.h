@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The Android Open Source Project
+ * Copyright (C) 2023 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,11 @@
 
 #pragma once
 
+#include <memory>
+
 #include <aidl/android/hardware/audio/effect/IEffect.h>
+#include <aidl/android/hardware/audio/effect/IFactory.h>
+#include <fmq/AidlMessageQueue.h>
 #include <media/audiohal/EffectHalInterface.h>
 #include <system/audio_effect.h>
 
@@ -25,8 +29,9 @@
 namespace android {
 namespace effect {
 
-class EffectHalAidl : public EffectHalInterface, public EffectConversionHelperAidl {
+class EffectHalAidl : public EffectHalInterface {
   public:
+
     // Set the input buffer.
     status_t setInBuffer(const sp<EffectBufferHalInterface>& buffer) override;
 
@@ -61,23 +66,37 @@ class EffectHalAidl : public EffectHalInterface, public EffectConversionHelperAi
         return mEffect;
     }
 
+    // for TIME_CHECK
+    const std::string getClassName() const { return "EffectHalAidl"; }
+
   private:
     friend class sp<EffectHalAidl>;
 
+    const std::shared_ptr<::aidl::android::hardware::audio::effect::IFactory> mFactory;
+    const std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> mEffect;
     const uint64_t mEffectId;
     const int32_t mSessionId;
     const int32_t mIoId;
-    const std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> mEffect;
     const ::aidl::android::hardware::audio::effect::Descriptor mDesc;
+    const bool mIsProxyEffect;
+
+    std::unique_ptr<EffectConversionHelperAidl> mConversion;
 
     sp<EffectBufferHalInterface> mInBuffer, mOutBuffer;
-    effect_config_t mConfig;
 
+    status_t createAidlConversion(
+            std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
+            int32_t sessionId, int32_t ioId,
+            const ::aidl::android::hardware::audio::effect::Descriptor& desc);
     // Can not be constructed directly by clients.
-    EffectHalAidl(const std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect>& effect,
-                  uint64_t effectId, int32_t sessionId, int32_t ioId,
-                  const ::aidl::android::hardware::audio::effect::Descriptor& desc);
+    EffectHalAidl(
+            const std::shared_ptr<::aidl::android::hardware::audio::effect::IFactory>& factory,
+            const std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect>& effect,
+            uint64_t effectId, int32_t sessionId, int32_t ioId,
+            const ::aidl::android::hardware::audio::effect::Descriptor& desc,
+            bool isProxyEffect);
     bool setEffectReverse(bool reverse);
+    bool needUpdateReturnParam(uint32_t cmdCode);
 
     // The destructor automatically releases the effect.
     virtual ~EffectHalAidl();

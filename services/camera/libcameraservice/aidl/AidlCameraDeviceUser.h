@@ -84,6 +84,7 @@ class AidlCameraDeviceUser final : public SBnCameraDeviceUser {
             MQDescriptor<int8_t, SynchronizedReadWrite>* _aidl_return) override;
     ndk::ScopedAStatus isSessionConfigurationSupported(
             const SSessionConfiguration& in_sessionConfiguration, bool* _aidl_return) override;
+    ndk::ScopedAStatus prepare(int32_t in_streamId) override;
     ndk::ScopedAStatus submitRequestList(const std::vector<SCaptureRequest>& in_requestList,
                                          bool in_isRepeating, SSubmitInfo* _aidl_return) override;
     ndk::ScopedAStatus updateOutputConfiguration(
@@ -108,6 +109,7 @@ class AidlCameraDeviceUser final : public SBnCameraDeviceUser {
     std::shared_ptr<CaptureResultMetadataQueue> mCaptureResultMetadataQueue = nullptr;
     bool mInitSuccess = false;
     int32_t mRequestId = REQUEST_ID_NONE;
+    int mVndkVersion = -1;
 };
 
 } // namespace android::frameworks::cameraservice::device::implementation

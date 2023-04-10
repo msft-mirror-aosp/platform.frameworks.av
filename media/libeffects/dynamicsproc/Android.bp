@@ -54,6 +54,7 @@ cc_defaults {
         "-Wall",
         "-Werror",
     ],
+    relative_install_path: "soundfx",
 }
 
 cc_library_shared {
@@ -73,8 +74,6 @@ cc_library_shared {
         "-O2",
         "-fvisibility=hidden",
     ],
-
-    relative_install_path: "soundfx",
 }
 
 cc_library_shared {
@@ -91,6 +90,10 @@ cc_library_shared {
         "latest_android_hardware_audio_effect_ndk_shared",
         "latest_android_media_audio_common_types_ndk_shared",
         "dynamicsprocessingdefaults",
+    ],
+
+    static_libs: [
+        "libaudioaidlranges",
     ],
 
     visibility: [

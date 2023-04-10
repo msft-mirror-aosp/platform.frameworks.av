@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <stdio.h>
+
 #include <algorithm>
 #include <map>
 #include <utility>
@@ -43,6 +45,9 @@ namespace android {
 
 using ::android::BAD_VALUE;
 using ::android::OK;
+using ::android::String16;
+using ::android::String8;
+using ::android::status_t;
 using ::android::base::unexpected;
 
 using media::audio::common::AudioChannelLayout;
@@ -69,6 +74,8 @@ using media::audio::common::AudioMode;
 using media::audio::common::AudioOffloadInfo;
 using media::audio::common::AudioOutputFlags;
 using media::audio::common::AudioPlaybackRate;
+using media::audio::common::AudioPort;
+using media::audio::common::AudioPortConfig;
 using media::audio::common::AudioPortDeviceExt;
 using media::audio::common::AudioPortExt;
 using media::audio::common::AudioPortMixExt;
@@ -81,6 +88,8 @@ using media::audio::common::AudioUsage;
 using media::audio::common::AudioUuid;
 using media::audio::common::ExtraAudioDescriptor;
 using media::audio::common::Int;
+using media::audio::common::MicrophoneDynamicInfo;
+using media::audio::common::MicrophoneInfo;
 using media::audio::common::PcmType;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -477,6 +486,15 @@ const detail::AudioDevicePairs& getAudioDevicePairs() {
             {
                 AUDIO_DEVICE_IN_ECHO_REFERENCE, make_AudioDeviceDescription(
                         AudioDeviceType::IN_ECHO_REFERENCE)
+            },
+            {
+                AUDIO_DEVICE_IN_REMOTE_SUBMIX, make_AudioDeviceDescription(
+                         AudioDeviceType::IN_SUBMIX)
+            },
+            {
+                AUDIO_DEVICE_OUT_REMOTE_SUBMIX, make_AudioDeviceDescription(
+                        AudioDeviceType::OUT_SUBMIX,
+                        GET_DEVICE_DESC_CONNECTION(VIRTUAL))
             }
         }};
         append_AudioDeviceDescription(pairs,
@@ -494,9 +512,6 @@ const detail::AudioDevicePairs& getAudioDevicePairs() {
                 AUDIO_DEVICE_IN_HDMI, AUDIO_DEVICE_OUT_HDMI,
                 AudioDeviceType::IN_DEVICE, AudioDeviceType::OUT_DEVICE,
                 GET_DEVICE_DESC_CONNECTION(HDMI));
-        append_AudioDeviceDescription(pairs,
-                AUDIO_DEVICE_IN_REMOTE_SUBMIX, AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
-                AudioDeviceType::IN_SUBMIX, AudioDeviceType::OUT_SUBMIX);
         append_AudioDeviceDescription(pairs,
                 AUDIO_DEVICE_IN_ANLG_DOCK_HEADSET, AUDIO_DEVICE_OUT_ANLG_DOCK_HEADSET,
                 AudioDeviceType::IN_DOCK, AudioDeviceType::OUT_DOCK,
@@ -557,7 +572,6 @@ const detail::AudioDevicePairs& getAudioDevicePairs() {
                 GET_DEVICE_DESC_CONNECTION(BT_LE));
         return pairs;
     }();
-#undef GET_DEVICE_DESC_CONNECTION
     return pairs;
 }
 
@@ -985,55 +999,161 @@ ConversionResult<AudioDeviceDescription> legacy2aidl_audio_devices_t_AudioDevice
     }
 }
 
+AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& description) {
+    using Tag = AudioDeviceAddress::Tag;
+    if (std::string connection = description.connection;
+            connection == GET_DEVICE_DESC_CONNECTION(BT_A2DP) ||
+            // Note: BT LE Broadcast uses a "group id".
+            (description.type != AudioDeviceType::OUT_BROADCAST &&
+                    connection == GET_DEVICE_DESC_CONNECTION(BT_LE)) ||
+            connection == GET_DEVICE_DESC_CONNECTION(BT_SCO) ||
+            connection == GET_DEVICE_DESC_CONNECTION(WIRELESS)) {
+        return Tag::mac;
+    } else if (connection == GET_DEVICE_DESC_CONNECTION(IP_V4)) {
+        return Tag::ipv4;
+    } else if (connection == GET_DEVICE_DESC_CONNECTION(USB)) {
+        return Tag::alsa;
+    }
+    return Tag::id;
+}
+
 ::android::status_t aidl2legacy_AudioDevice_audio_device(
         const AudioDevice& aidl,
         audio_devices_t* legacyType, char* legacyAddress) {
-    *legacyType = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_AudioDeviceDescription_audio_devices_t(aidl.type));
-    return aidl2legacy_string(
-                    aidl.address.get<AudioDeviceAddress::id>(),
-                    legacyAddress, AUDIO_DEVICE_MAX_ADDRESS_LEN);
+    std::string stringAddress;
+    RETURN_STATUS_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
+                    aidl, legacyType, &stringAddress));
+    return aidl2legacy_string(stringAddress, legacyAddress, AUDIO_DEVICE_MAX_ADDRESS_LEN);
 }
 
 ::android::status_t aidl2legacy_AudioDevice_audio_device(
         const AudioDevice& aidl,
         audio_devices_t* legacyType, String8* legacyAddress) {
-    *legacyType = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_AudioDeviceDescription_audio_devices_t(aidl.type));
-    *legacyAddress = VALUE_OR_RETURN_STATUS(aidl2legacy_string_view_String8(
-                    aidl.address.get<AudioDeviceAddress::id>()));
+    std::string stringAddress;
+    RETURN_STATUS_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
+                    aidl, legacyType, &stringAddress));
+    *legacyAddress = VALUE_OR_RETURN_STATUS(aidl2legacy_string_view_String8(stringAddress));
     return OK;
 }
 
 ::android::status_t aidl2legacy_AudioDevice_audio_device(
         const AudioDevice& aidl,
         audio_devices_t* legacyType, std::string* legacyAddress) {
+    using Tag = AudioDeviceAddress::Tag;
     *legacyType = VALUE_OR_RETURN_STATUS(
             aidl2legacy_AudioDeviceDescription_audio_devices_t(aidl.type));
-    *legacyAddress = aidl.address.get<AudioDeviceAddress::id>();
+    char addressBuffer[AUDIO_DEVICE_MAX_ADDRESS_LEN]{};
+    // 'aidl.address' can be empty even when the connection type is not.
+    // This happens for device ports that act as "blueprints". In this case
+    // we pass an empty string using the 'id' variant.
+    switch (aidl.address.getTag()) {
+        case Tag::mac: {
+            const std::vector<uint8_t>& mac = aidl.address.get<AudioDeviceAddress::mac>();
+            if (mac.size() != 6) return BAD_VALUE;
+            snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        } break;
+        case Tag::ipv4: {
+            const std::vector<uint8_t>& ipv4 = aidl.address.get<AudioDeviceAddress::ipv4>();
+            if (ipv4.size() != 4) return BAD_VALUE;
+            snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN, "%u.%u.%u.%u",
+                    ipv4[0], ipv4[1], ipv4[2], ipv4[3]);
+        } break;
+        case Tag::ipv6: {
+            const std::vector<int32_t>& ipv6 = aidl.address.get<AudioDeviceAddress::ipv6>();
+            if (ipv6.size() != 8) return BAD_VALUE;
+            snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN,
+                    "%04X:%04X:%04X:%04X:%04X:%04X:%04X:%04X",
+                    ipv6[0], ipv6[1], ipv6[2], ipv6[3], ipv6[4], ipv6[5], ipv6[6], ipv6[7]);
+        } break;
+        case Tag::alsa: {
+            const std::vector<int32_t>& alsa = aidl.address.get<AudioDeviceAddress::alsa>();
+            if (alsa.size() != 2) return BAD_VALUE;
+            snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN, "card=%d;device=%d",
+                    alsa[0], alsa[1]);
+        } break;
+        case Tag::id: {
+            RETURN_STATUS_IF_ERROR(aidl2legacy_string(aidl.address.get<AudioDeviceAddress::id>(),
+                            addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN));
+        } break;
+    }
+    *legacyAddress = addressBuffer;
     return OK;
 }
 
 ConversionResult<AudioDevice> legacy2aidl_audio_device_AudioDevice(
         audio_devices_t legacyType, const char* legacyAddress) {
-    AudioDevice aidl;
-    aidl.type = VALUE_OR_RETURN(
-            legacy2aidl_audio_devices_t_AudioDeviceDescription(legacyType));
-    const std::string aidl_id = VALUE_OR_RETURN(
+    const std::string stringAddress = VALUE_OR_RETURN(
             legacy2aidl_string(legacyAddress, AUDIO_DEVICE_MAX_ADDRESS_LEN));
-    aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::id>(aidl_id);
-    return aidl;
+    return legacy2aidl_audio_device_AudioDevice(legacyType, stringAddress);
 }
 
 ConversionResult<AudioDevice>
 legacy2aidl_audio_device_AudioDevice(
         audio_devices_t legacyType, const String8& legacyAddress) {
+    const std::string stringAddress = VALUE_OR_RETURN(legacy2aidl_String8_string(legacyAddress));
+    return legacy2aidl_audio_device_AudioDevice(legacyType, stringAddress);
+}
+
+ConversionResult<AudioDevice>
+legacy2aidl_audio_device_AudioDevice(
+        audio_devices_t legacyType, const std::string& legacyAddress) {
+    using Tag = AudioDeviceAddress::Tag;
     AudioDevice aidl;
     aidl.type = VALUE_OR_RETURN(
             legacy2aidl_audio_devices_t_AudioDeviceDescription(legacyType));
-    const std::string aidl_id = VALUE_OR_RETURN(
-            legacy2aidl_String8_string(legacyAddress));
-    aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::id>(aidl_id);
+    // 'legacyAddress' can be empty even when the connection type is not.
+    // This happens for device ports that act as "blueprints". In this case
+    // we pass an empty string using the 'id' variant.
+    if (!legacyAddress.empty()) {
+        switch (suggestDeviceAddressTag(aidl.type)) {
+            case Tag::mac: {
+                std::vector<uint8_t> mac(6);
+                int status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
+                        &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+                if (status != mac.size()) {
+                    ALOGE("%s: malformed MAC address: \"%s\"", __func__, legacyAddress.c_str());
+                    return unexpected(BAD_VALUE);
+                }
+                aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::mac>(std::move(mac));
+            } break;
+            case Tag::ipv4: {
+                std::vector<uint8_t> ipv4(4);
+                int status = sscanf(legacyAddress.c_str(), "%hhu.%hhu.%hhu.%hhu",
+                        &ipv4[0], &ipv4[1], &ipv4[2], &ipv4[3]);
+                if (status != ipv4.size()) {
+                    ALOGE("%s: malformed IPv4 address: \"%s\"", __func__, legacyAddress.c_str());
+                    return unexpected(BAD_VALUE);
+                }
+                aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::ipv4>(std::move(ipv4));
+            } break;
+            case Tag::ipv6: {
+                std::vector<int32_t> ipv6(8);
+                int status = sscanf(legacyAddress.c_str(), "%X:%X:%X:%X:%X:%X:%X:%X",
+                        &ipv6[0], &ipv6[1], &ipv6[2], &ipv6[3], &ipv6[4], &ipv6[5], &ipv6[6],
+                        &ipv6[7]);
+                if (status != ipv6.size()) {
+                    ALOGE("%s: malformed IPv6 address: \"%s\"", __func__, legacyAddress.c_str());
+                    return unexpected(BAD_VALUE);
+                }
+                aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::ipv6>(std::move(ipv6));
+            } break;
+            case Tag::alsa: {
+                std::vector<int32_t> alsa(2);
+                int status = sscanf(legacyAddress.c_str(), "card=%d;device=%d", &alsa[0], &alsa[1]);
+                if (status != alsa.size()) {
+                    ALOGE("%s: malformed ALSA address: \"%s\"", __func__, legacyAddress.c_str());
+                    return unexpected(BAD_VALUE);
+                }
+                aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::alsa>(std::move(alsa));
+            } break;
+            case Tag::id: {
+                aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::id>(legacyAddress);
+            } break;
+        }
+    } else {
+        aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::id>(legacyAddress);
+    }
     return aidl;
 }
 
@@ -1768,6 +1888,60 @@ legacy2aidl_audio_offload_info_t_AudioOffloadInfo(const audio_offload_info_t& le
     return aidl;
 }
 
+ConversionResult<AudioPortDirection> portDirection(audio_port_role_t role, audio_port_type_t type) {
+    switch (type) {
+        case AUDIO_PORT_TYPE_NONE:
+        case AUDIO_PORT_TYPE_SESSION:
+            break;  // must be listed  -Werror,-Wswitch
+        case AUDIO_PORT_TYPE_DEVICE:
+            switch (role) {
+                case AUDIO_PORT_ROLE_NONE:
+                     break;  // must be listed  -Werror,-Wswitch
+                case AUDIO_PORT_ROLE_SOURCE:
+                    return AudioPortDirection::INPUT;
+                case AUDIO_PORT_ROLE_SINK:
+                    return AudioPortDirection::OUTPUT;
+            }
+            break;
+        case AUDIO_PORT_TYPE_MIX:
+            switch (role) {
+                case AUDIO_PORT_ROLE_NONE:
+                     break;  // must be listed  -Werror,-Wswitch
+                case AUDIO_PORT_ROLE_SOURCE:
+                    return AudioPortDirection::OUTPUT;
+                case AUDIO_PORT_ROLE_SINK:
+                    return AudioPortDirection::INPUT;
+            }
+            break;
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<audio_port_role_t> portRole(AudioPortDirection direction, audio_port_type_t type) {
+    switch (type) {
+        case AUDIO_PORT_TYPE_NONE:
+        case AUDIO_PORT_TYPE_SESSION:
+            break;  // must be listed  -Werror,-Wswitch
+        case AUDIO_PORT_TYPE_DEVICE:
+            switch (direction) {
+                case AudioPortDirection::INPUT:
+                    return AUDIO_PORT_ROLE_SOURCE;
+                case AudioPortDirection::OUTPUT:
+                    return AUDIO_PORT_ROLE_SINK;
+            }
+            break;
+        case AUDIO_PORT_TYPE_MIX:
+            switch (direction) {
+                case AudioPortDirection::OUTPUT:
+                    return AUDIO_PORT_ROLE_SOURCE;
+                case AudioPortDirection::INPUT:
+                    return AUDIO_PORT_ROLE_SINK;
+            }
+            break;
+    }
+    return unexpected(BAD_VALUE);
+}
+
 ConversionResult<audio_config_t>
 aidl2legacy_AudioConfig_audio_config_t(const AudioConfig& aidl, bool isInput) {
     const audio_config_base_t legacyBase = VALUE_OR_RETURN(
@@ -1909,6 +2083,405 @@ legacy2aidl_AudioEncapsulationMetadataType_mask(uint32_t legacy) {
             legacy, legacy2aidl_audio_encapsulation_metadata_type_t_AudioEncapsulationMetadataType,
             indexToEnum_index<audio_encapsulation_metadata_type_t>,
             enumToMask_index<int32_t, AudioEncapsulationMetadataType>);
+}
+
+ConversionResult<audio_port_config_mix_ext_usecase>
+aidl2legacy_AudioPortMixExtUseCase_audio_port_config_mix_ext_usecase(
+        const AudioPortMixExtUseCase& aidl, bool isInput) {
+    audio_port_config_mix_ext_usecase legacy{};
+    if (aidl.getTag() != AudioPortMixExtUseCase::Tag::unspecified) {
+        if (!isInput) {
+            legacy.stream = VALUE_OR_RETURN(aidl2legacy_AudioStreamType_audio_stream_type_t(
+                            VALUE_OR_RETURN(UNION_GET(aidl, stream))));
+        } else {
+            legacy.source = VALUE_OR_RETURN(aidl2legacy_AudioSource_audio_source_t(
+                            VALUE_OR_RETURN(UNION_GET(aidl, source))));
+        }
+    }
+    return legacy;
+}
+
+ConversionResult<AudioPortMixExtUseCase>
+legacy2aidl_audio_port_config_mix_ext_usecase_AudioPortMixExtUseCase(
+        const audio_port_config_mix_ext_usecase& legacy, bool isInput) {
+    AudioPortMixExtUseCase aidl;
+    if (!isInput) {
+        UNION_SET(aidl, stream, VALUE_OR_RETURN(
+                        legacy2aidl_audio_stream_type_t_AudioStreamType(legacy.stream)));
+    } else {
+        UNION_SET(aidl, source, VALUE_OR_RETURN(
+                        legacy2aidl_audio_source_t_AudioSource(legacy.source)));
+    }
+    return aidl;
+}
+
+ConversionResult<audio_port_config_mix_ext> aidl2legacy_AudioPortMixExt_audio_port_config_mix_ext(
+        const AudioPortMixExt& aidl, bool isInput) {
+    audio_port_config_mix_ext legacy{};
+    legacy.handle = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_io_handle_t(aidl.handle));
+    legacy.usecase = VALUE_OR_RETURN(
+            aidl2legacy_AudioPortMixExtUseCase_audio_port_config_mix_ext_usecase(
+                    aidl.usecase, isInput));
+    return legacy;
+}
+
+ConversionResult<AudioPortMixExt> legacy2aidl_audio_port_config_mix_ext_AudioPortMixExt(
+        const audio_port_config_mix_ext& legacy, bool isInput) {
+    AudioPortMixExt aidl;
+    aidl.handle = VALUE_OR_RETURN(legacy2aidl_audio_io_handle_t_int32_t(legacy.handle));
+    aidl.usecase = VALUE_OR_RETURN(
+            legacy2aidl_audio_port_config_mix_ext_usecase_AudioPortMixExtUseCase(
+                    legacy.usecase, isInput));
+    return aidl;
+}
+
+ConversionResult<audio_port_config_device_ext>
+aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(const AudioPortDeviceExt& aidl) {
+    audio_port_config_device_ext legacy{};
+    RETURN_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
+                    aidl.device, &legacy.type, legacy.address));
+    return legacy;
+}
+
+ConversionResult<AudioPortDeviceExt> legacy2aidl_audio_port_config_device_ext_AudioPortDeviceExt(
+        const audio_port_config_device_ext& legacy) {
+    AudioPortDeviceExt aidl;
+    aidl.device = VALUE_OR_RETURN(
+            legacy2aidl_audio_device_AudioDevice(legacy.type, legacy.address));
+    return aidl;
+}
+
+// This type is unnamed in the original definition, thus we name it here.
+using audio_port_config_ext = decltype(audio_port_config::ext);
+
+status_t aidl2legacy_AudioPortExt_audio_port_config_ext(
+        const AudioPortExt& aidl, bool isInput,
+        audio_port_config_ext* legacy, audio_port_type_t* type) {
+    switch (aidl.getTag()) {
+        case AudioPortExt::Tag::unspecified:
+            // Just verify that the union is empty.
+            VALUE_OR_RETURN_STATUS(UNION_GET(aidl, unspecified));
+            *legacy = {};
+            *type = AUDIO_PORT_TYPE_NONE;
+            return OK;
+        case AudioPortExt::Tag::device:
+            legacy->device = VALUE_OR_RETURN_STATUS(
+                    aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(
+                            VALUE_OR_RETURN_STATUS(UNION_GET(aidl, device))));
+            *type = AUDIO_PORT_TYPE_DEVICE;
+            return OK;
+        case AudioPortExt::Tag::mix:
+            legacy->mix = VALUE_OR_RETURN_STATUS(
+                    aidl2legacy_AudioPortMixExt_audio_port_config_mix_ext(
+                            VALUE_OR_RETURN_STATUS(UNION_GET(aidl, mix)), isInput));
+            *type = AUDIO_PORT_TYPE_MIX;
+            return OK;
+        case AudioPortExt::Tag::session:
+            // This variant is not used in the HAL scenario.
+            legacy->session.session = AUDIO_SESSION_NONE;
+            *type = AUDIO_PORT_TYPE_SESSION;
+            return OK;
+
+    }
+    LOG_ALWAYS_FATAL("Shouldn't get here"); // with -Werror,-Wswitch may compile-time fail
+}
+
+ConversionResult<AudioPortExt> legacy2aidl_audio_port_config_ext_AudioPortExt(
+        const audio_port_config_ext& legacy, audio_port_type_t type, bool isInput) {
+    AudioPortExt aidl;
+    switch (type) {
+        case AUDIO_PORT_TYPE_NONE:
+            UNION_SET(aidl, unspecified, false);
+            return aidl;
+        case AUDIO_PORT_TYPE_DEVICE: {
+            AudioPortDeviceExt device = VALUE_OR_RETURN(
+                    legacy2aidl_audio_port_config_device_ext_AudioPortDeviceExt(legacy.device));
+            UNION_SET(aidl, device, device);
+            return aidl;
+        }
+        case AUDIO_PORT_TYPE_MIX: {
+            AudioPortMixExt mix = VALUE_OR_RETURN(
+                    legacy2aidl_audio_port_config_mix_ext_AudioPortMixExt(legacy.mix, isInput));
+            UNION_SET(aidl, mix, mix);
+            return aidl;
+        }
+        case AUDIO_PORT_TYPE_SESSION:
+            // This variant is not used in the HAL scenario.
+            UNION_SET(aidl, unspecified, false);
+            return aidl;
+    }
+    LOG_ALWAYS_FATAL("Shouldn't get here"); // with -Werror,-Wswitch may compile-time fail
+}
+
+status_t aidl2legacy_AudioPortConfig_audio_port_config(
+        const AudioPortConfig& aidl, bool isInput, audio_port_config* legacy, int32_t* portId) {
+    legacy->id = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_port_handle_t(aidl.id));
+    *portId = aidl.portId;
+    if (aidl.sampleRate.has_value()) {
+        legacy->sample_rate = VALUE_OR_RETURN_STATUS(
+                convertIntegral<unsigned int>(aidl.sampleRate.value().value));
+        legacy->config_mask |= AUDIO_PORT_CONFIG_SAMPLE_RATE;
+    }
+    if (aidl.channelMask.has_value()) {
+        legacy->channel_mask =
+                VALUE_OR_RETURN_STATUS(
+                        aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
+                                aidl.channelMask.value(), isInput));
+        legacy->config_mask |= AUDIO_PORT_CONFIG_CHANNEL_MASK;
+    }
+    if (aidl.format.has_value()) {
+        legacy->format = VALUE_OR_RETURN_STATUS(
+                aidl2legacy_AudioFormatDescription_audio_format_t(aidl.format.value()));
+        legacy->config_mask |= AUDIO_PORT_CONFIG_FORMAT;
+    }
+    if (aidl.gain.has_value()) {
+        legacy->gain = VALUE_OR_RETURN_STATUS(aidl2legacy_AudioGainConfig_audio_gain_config(
+                        aidl.gain.value(), isInput));
+        legacy->config_mask |= AUDIO_PORT_CONFIG_GAIN;
+    }
+    if (aidl.flags.has_value()) {
+        legacy->flags = VALUE_OR_RETURN_STATUS(
+                aidl2legacy_AudioIoFlags_audio_io_flags(aidl.flags.value(), isInput));
+        legacy->config_mask |= AUDIO_PORT_CONFIG_FLAGS;
+    }
+    RETURN_STATUS_IF_ERROR(aidl2legacy_AudioPortExt_audio_port_config_ext(
+                    aidl.ext, isInput, &legacy->ext, &legacy->type));
+    legacy->role = VALUE_OR_RETURN_STATUS(portRole(isInput ?
+                    AudioPortDirection::INPUT : AudioPortDirection::OUTPUT, legacy->type));
+    return OK;
+}
+
+ConversionResult<AudioPortConfig>
+legacy2aidl_audio_port_config_AudioPortConfig(
+        const audio_port_config& legacy, bool isInput, int32_t portId) {
+    AudioPortConfig aidl;
+    aidl.id = VALUE_OR_RETURN(legacy2aidl_audio_port_handle_t_int32_t(legacy.id));
+    aidl.portId = portId;
+    if (legacy.config_mask & AUDIO_PORT_CONFIG_SAMPLE_RATE) {
+        Int aidl_sampleRate;
+        aidl_sampleRate.value = VALUE_OR_RETURN(convertIntegral<int32_t>(legacy.sample_rate));
+        aidl.sampleRate = aidl_sampleRate;
+    }
+    if (legacy.config_mask & AUDIO_PORT_CONFIG_CHANNEL_MASK) {
+        aidl.channelMask = VALUE_OR_RETURN(
+                legacy2aidl_audio_channel_mask_t_AudioChannelLayout(legacy.channel_mask, isInput));
+    }
+    if (legacy.config_mask & AUDIO_PORT_CONFIG_FORMAT) {
+        aidl.format = VALUE_OR_RETURN(
+                legacy2aidl_audio_format_t_AudioFormatDescription(legacy.format));
+    }
+    if (legacy.config_mask & AUDIO_PORT_CONFIG_GAIN) {
+        aidl.gain = VALUE_OR_RETURN(
+                legacy2aidl_audio_gain_config_AudioGainConfig(legacy.gain, isInput));
+    }
+    if (legacy.config_mask & AUDIO_PORT_CONFIG_FLAGS) {
+        aidl.flags = VALUE_OR_RETURN(
+                legacy2aidl_audio_io_flags_AudioIoFlags(legacy.flags, isInput));
+    }
+    aidl.ext = VALUE_OR_RETURN(
+            legacy2aidl_audio_port_config_ext_AudioPortExt(legacy.ext, legacy.type, isInput));
+    return aidl;
+}
+
+ConversionResult<audio_port_mix_ext> aidl2legacy_AudioPortMixExt_audio_port_mix_ext(
+        const AudioPortMixExt& aidl) {
+    audio_port_mix_ext legacy{};
+    legacy.handle = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_io_handle_t(aidl.handle));
+    return legacy;
+}
+
+ConversionResult<AudioPortMixExt> legacy2aidl_audio_port_mix_ext_AudioPortMixExt(
+        const audio_port_mix_ext& legacy) {
+    AudioPortMixExt aidl;
+    aidl.handle = VALUE_OR_RETURN(legacy2aidl_audio_io_handle_t_int32_t(legacy.handle));
+    return aidl;
+}
+
+ConversionResult<audio_port_device_ext>
+aidl2legacy_AudioPortDeviceExt_audio_port_device_ext(const AudioPortDeviceExt& aidl) {
+    audio_port_device_ext legacy{};
+    RETURN_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
+                    aidl.device, &legacy.type, legacy.address));
+    legacy.encapsulation_modes = VALUE_OR_RETURN(
+            aidl2legacy_AudioEncapsulationMode_mask(aidl.encapsulationModes));
+    legacy.encapsulation_metadata_types = VALUE_OR_RETURN(
+            aidl2legacy_AudioEncapsulationMetadataType_mask(
+                    aidl.encapsulationMetadataTypes));
+    return legacy;
+}
+
+ConversionResult<AudioPortDeviceExt> legacy2aidl_audio_port_device_ext_AudioPortDeviceExt(
+        const audio_port_device_ext& legacy) {
+    AudioPortDeviceExt aidl;
+    aidl.device = VALUE_OR_RETURN(
+            legacy2aidl_audio_device_AudioDevice(legacy.type, legacy.address));
+    aidl.encapsulationModes = VALUE_OR_RETURN(
+            legacy2aidl_AudioEncapsulationMode_mask(legacy.encapsulation_modes));
+    aidl.encapsulationMetadataTypes = VALUE_OR_RETURN(
+            legacy2aidl_AudioEncapsulationMetadataType_mask(legacy.encapsulation_metadata_types));
+    return aidl;
+}
+
+// This type is unnamed in the original definition, thus we name it here.
+using audio_port_v7_ext = decltype(audio_port_v7::ext);
+
+status_t aidl2legacy_AudioPortExt_audio_port_v7_ext(
+        const AudioPortExt& aidl, audio_port_v7_ext* legacy, audio_port_type_t* type) {
+    switch (aidl.getTag()) {
+        case AudioPortExt::Tag::unspecified:
+            // Just verify that the union is empty.
+            VALUE_OR_RETURN_STATUS(UNION_GET(aidl, unspecified));
+            *legacy = {};
+            *type = AUDIO_PORT_TYPE_NONE;
+            return OK;
+        case AudioPortExt::Tag::device:
+            legacy->device = VALUE_OR_RETURN_STATUS(
+                    aidl2legacy_AudioPortDeviceExt_audio_port_device_ext(
+                            VALUE_OR_RETURN_STATUS(UNION_GET(aidl, device))));
+            *type = AUDIO_PORT_TYPE_DEVICE;
+            return OK;
+        case AudioPortExt::Tag::mix:
+            legacy->mix = VALUE_OR_RETURN_STATUS(
+                    aidl2legacy_AudioPortMixExt_audio_port_mix_ext(
+                            VALUE_OR_RETURN_STATUS(UNION_GET(aidl, mix))));
+            *type = AUDIO_PORT_TYPE_MIX;
+            return OK;
+        case AudioPortExt::Tag::session:
+            // This variant is not used in the HAL scenario.
+            legacy->session.session = AUDIO_SESSION_NONE;
+            *type = AUDIO_PORT_TYPE_SESSION;
+            return OK;
+
+    }
+    LOG_ALWAYS_FATAL("Shouldn't get here"); // with -Werror,-Wswitch may compile-time fail
+}
+
+ConversionResult<AudioPortExt> legacy2aidl_audio_port_v7_ext_AudioPortExt(
+        const audio_port_v7_ext& legacy, audio_port_type_t type) {
+    AudioPortExt aidl;
+    switch (type) {
+        case AUDIO_PORT_TYPE_NONE:
+            UNION_SET(aidl, unspecified, false);
+            return aidl;
+        case AUDIO_PORT_TYPE_DEVICE: {
+            AudioPortDeviceExt device = VALUE_OR_RETURN(
+                    legacy2aidl_audio_port_device_ext_AudioPortDeviceExt(legacy.device));
+            UNION_SET(aidl, device, device);
+            return aidl;
+        }
+        case AUDIO_PORT_TYPE_MIX: {
+            AudioPortMixExt mix = VALUE_OR_RETURN(
+                    legacy2aidl_audio_port_mix_ext_AudioPortMixExt(legacy.mix));
+            UNION_SET(aidl, mix, mix);
+            return aidl;
+        }
+        case AUDIO_PORT_TYPE_SESSION:
+            // This variant is not used in the HAL scenario.
+            UNION_SET(aidl, unspecified, false);
+            return aidl;
+    }
+    LOG_ALWAYS_FATAL("Shouldn't get here"); // with -Werror,-Wswitch may compile-time fail
+}
+
+ConversionResult<audio_port_v7>
+aidl2legacy_AudioPort_audio_port_v7(const AudioPort& aidl, bool isInput) {
+    audio_port_v7 legacy;
+    legacy.id = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_port_handle_t(aidl.id));
+    RETURN_IF_ERROR(aidl2legacy_string(aidl.name, legacy.name, sizeof(legacy.name)));
+
+    if (aidl.profiles.size() > std::size(legacy.audio_profiles)) {
+        return unexpected(BAD_VALUE);
+    }
+    RETURN_IF_ERROR(convertRange(
+                    aidl.profiles.begin(), aidl.profiles.end(), legacy.audio_profiles,
+                    [isInput](const AudioProfile& p) {
+                        return aidl2legacy_AudioProfile_audio_profile(p, isInput);
+                    }));
+    legacy.num_audio_profiles = aidl.profiles.size();
+
+    if (aidl.extraAudioDescriptors.size() > std::size(legacy.extra_audio_descriptors)) {
+        return unexpected(BAD_VALUE);
+    }
+    RETURN_IF_ERROR(
+            convertRange(
+                    aidl.extraAudioDescriptors.begin(), aidl.extraAudioDescriptors.end(),
+                    legacy.extra_audio_descriptors,
+                    aidl2legacy_ExtraAudioDescriptor_audio_extra_audio_descriptor));
+    legacy.num_extra_audio_descriptors = aidl.extraAudioDescriptors.size();
+
+    if (aidl.gains.size() > std::size(legacy.gains)) {
+        return unexpected(BAD_VALUE);
+    }
+    RETURN_IF_ERROR(convertRange(aidl.gains.begin(), aidl.gains.end(), legacy.gains,
+                                 [isInput](const AudioGain& g) {
+                                     return aidl2legacy_AudioGain_audio_gain(g, isInput);
+                                 }));
+    legacy.num_gains = aidl.gains.size();
+
+    RETURN_IF_ERROR(aidl2legacy_AudioPortExt_audio_port_v7_ext(
+                    aidl.ext, &legacy.ext, &legacy.type));
+    legacy.role = VALUE_OR_RETURN(portRole(
+                    isInput ? AudioPortDirection::INPUT : AudioPortDirection::OUTPUT, legacy.type));
+
+    AudioPortConfig aidlPortConfig;
+    int32_t portId;
+    aidlPortConfig.flags = aidl.flags;
+    aidlPortConfig.ext = aidl.ext;
+    RETURN_IF_ERROR(aidl2legacy_AudioPortConfig_audio_port_config(
+                    aidlPortConfig, isInput, &legacy.active_config, &portId));
+    return legacy;
+}
+
+ConversionResult<AudioPort>
+legacy2aidl_audio_port_v7_AudioPort(const audio_port_v7& legacy, bool isInput) {
+    AudioPort aidl;
+    aidl.id = VALUE_OR_RETURN(legacy2aidl_audio_port_handle_t_int32_t(legacy.id));
+    aidl.name = VALUE_OR_RETURN(legacy2aidl_string(legacy.name, sizeof(legacy.name)));
+
+    if (legacy.num_audio_profiles > std::size(legacy.audio_profiles)) {
+        return unexpected(BAD_VALUE);
+    }
+    RETURN_IF_ERROR(
+            convertRange(legacy.audio_profiles, legacy.audio_profiles + legacy.num_audio_profiles,
+                         std::back_inserter(aidl.profiles),
+                         [isInput](const audio_profile& p) {
+                             return legacy2aidl_audio_profile_AudioProfile(p, isInput);
+                         }));
+
+    if (legacy.num_extra_audio_descriptors > std::size(legacy.extra_audio_descriptors)) {
+        return unexpected(BAD_VALUE);
+    }
+    aidl.profiles.resize(legacy.num_audio_profiles);
+    RETURN_IF_ERROR(
+            convertRange(legacy.extra_audio_descriptors,
+                    legacy.extra_audio_descriptors + legacy.num_extra_audio_descriptors,
+                    std::back_inserter(aidl.extraAudioDescriptors),
+                    legacy2aidl_audio_extra_audio_descriptor_ExtraAudioDescriptor));
+
+    if (legacy.num_gains > std::size(legacy.gains)) {
+        return unexpected(BAD_VALUE);
+    }
+    RETURN_IF_ERROR(
+            convertRange(legacy.gains, legacy.gains + legacy.num_gains,
+                         std::back_inserter(aidl.gains),
+                         [isInput](const audio_gain& g) {
+                             return legacy2aidl_audio_gain_AudioGain(g, isInput);
+                         }));
+    aidl.gains.resize(legacy.num_gains);
+
+    aidl.ext = VALUE_OR_RETURN(
+            legacy2aidl_audio_port_v7_ext_AudioPortExt(legacy.ext, legacy.type));
+
+    AudioPortConfig aidlPortConfig = VALUE_OR_RETURN(legacy2aidl_audio_port_config_AudioPortConfig(
+                    legacy.active_config, isInput, aidl.id));
+    if (aidlPortConfig.flags.has_value()) {
+        aidl.flags = aidlPortConfig.flags.value();
+    } else {
+        aidl.flags = isInput ?
+                AudioIoFlags::make<AudioIoFlags::Tag::input>(0) :
+                AudioIoFlags::make<AudioIoFlags::Tag::output>(0);
+    }
+    return aidl;
 }
 
 ConversionResult<audio_profile>
@@ -2261,6 +2834,10 @@ aidl2legacy_AudioLatencyMode_audio_latency_mode_t(AudioLatencyMode aidl) {
             return AUDIO_LATENCY_MODE_FREE;
         case AudioLatencyMode::LOW:
             return AUDIO_LATENCY_MODE_LOW;
+        case AudioLatencyMode::DYNAMIC_SPATIAL_AUDIO_SOFTWARE:
+            return AUDIO_LATENCY_MODE_DYNAMIC_SPATIAL_AUDIO_SOFTWARE;
+        case AudioLatencyMode::DYNAMIC_SPATIAL_AUDIO_HARDWARE:
+            return AUDIO_LATENCY_MODE_DYNAMIC_SPATIAL_AUDIO_HARDWARE;
     }
     return unexpected(BAD_VALUE);
 }
@@ -2271,11 +2848,291 @@ legacy2aidl_audio_latency_mode_t_AudioLatencyMode(audio_latency_mode_t legacy) {
             return AudioLatencyMode::FREE;
         case AUDIO_LATENCY_MODE_LOW:
             return AudioLatencyMode::LOW;
+        case AUDIO_LATENCY_MODE_DYNAMIC_SPATIAL_AUDIO_SOFTWARE:
+            return AudioLatencyMode::DYNAMIC_SPATIAL_AUDIO_SOFTWARE;
+        case AUDIO_LATENCY_MODE_DYNAMIC_SPATIAL_AUDIO_HARDWARE:
+            return AudioLatencyMode::DYNAMIC_SPATIAL_AUDIO_HARDWARE;
     }
     return unexpected(BAD_VALUE);
 }
 
+ConversionResult<audio_microphone_location_t>
+aidl2legacy_MicrophoneInfoLocation_audio_microphone_location_t(MicrophoneInfo::Location aidl) {
+    switch (aidl) {
+        case MicrophoneInfo::Location::UNKNOWN:
+            return AUDIO_MICROPHONE_LOCATION_UNKNOWN;
+        case MicrophoneInfo::Location::MAINBODY:
+            return AUDIO_MICROPHONE_LOCATION_MAINBODY;
+        case MicrophoneInfo::Location::MAINBODY_MOVABLE:
+            return AUDIO_MICROPHONE_LOCATION_MAINBODY_MOVABLE;
+        case MicrophoneInfo::Location::PERIPHERAL:
+            return AUDIO_MICROPHONE_LOCATION_PERIPHERAL;
+    }
+    return unexpected(BAD_VALUE);
+}
+ConversionResult<MicrophoneInfo::Location>
+legacy2aidl_audio_microphone_location_t_MicrophoneInfoLocation(audio_microphone_location_t legacy) {
+    switch (legacy) {
+        case AUDIO_MICROPHONE_LOCATION_UNKNOWN:
+            return MicrophoneInfo::Location::UNKNOWN;
+        case AUDIO_MICROPHONE_LOCATION_MAINBODY:
+            return MicrophoneInfo::Location::MAINBODY;
+        case AUDIO_MICROPHONE_LOCATION_MAINBODY_MOVABLE:
+            return MicrophoneInfo::Location::MAINBODY_MOVABLE;
+        case AUDIO_MICROPHONE_LOCATION_PERIPHERAL:
+            return MicrophoneInfo::Location::PERIPHERAL;
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<audio_microphone_group_t> aidl2legacy_int32_t_audio_microphone_group_t(
+        int32_t aidl) {
+    return convertReinterpret<audio_microphone_group_t>(aidl);
+}
+
+ConversionResult<int32_t> legacy2aidl_audio_microphone_group_t_int32_t(
+        audio_microphone_group_t legacy) {
+    return convertReinterpret<int32_t>(legacy);
+}
+
+ConversionResult<audio_microphone_directionality_t>
+aidl2legacy_MicrophoneInfoDirectionality_audio_microphone_directionality_t(
+        MicrophoneInfo::Directionality aidl) {
+    switch (aidl) {
+        case MicrophoneInfo::Directionality::UNKNOWN:
+            return AUDIO_MICROPHONE_DIRECTIONALITY_UNKNOWN;
+        case MicrophoneInfo::Directionality::OMNI:
+            return AUDIO_MICROPHONE_DIRECTIONALITY_OMNI;
+        case MicrophoneInfo::Directionality::BI_DIRECTIONAL:
+            return AUDIO_MICROPHONE_DIRECTIONALITY_BI_DIRECTIONAL;
+        case MicrophoneInfo::Directionality::CARDIOID:
+            return AUDIO_MICROPHONE_DIRECTIONALITY_CARDIOID;
+        case MicrophoneInfo::Directionality::HYPER_CARDIOID:
+            return AUDIO_MICROPHONE_DIRECTIONALITY_HYPER_CARDIOID;
+        case MicrophoneInfo::Directionality::SUPER_CARDIOID:
+            return AUDIO_MICROPHONE_DIRECTIONALITY_SUPER_CARDIOID;
+    }
+    return unexpected(BAD_VALUE);
+}
+ConversionResult<MicrophoneInfo::Directionality>
+legacy2aidl_audio_microphone_directionality_t_MicrophoneInfoDirectionality(
+        audio_microphone_directionality_t legacy) {
+    switch (legacy) {
+        case AUDIO_MICROPHONE_DIRECTIONALITY_UNKNOWN:
+            return MicrophoneInfo::Directionality::UNKNOWN;
+        case AUDIO_MICROPHONE_DIRECTIONALITY_OMNI:
+            return MicrophoneInfo::Directionality::OMNI;
+        case AUDIO_MICROPHONE_DIRECTIONALITY_BI_DIRECTIONAL:
+            return MicrophoneInfo::Directionality::BI_DIRECTIONAL;
+        case AUDIO_MICROPHONE_DIRECTIONALITY_CARDIOID:
+            return MicrophoneInfo::Directionality::CARDIOID;
+        case AUDIO_MICROPHONE_DIRECTIONALITY_HYPER_CARDIOID:
+            return MicrophoneInfo::Directionality::HYPER_CARDIOID;
+        case AUDIO_MICROPHONE_DIRECTIONALITY_SUPER_CARDIOID:
+            return MicrophoneInfo::Directionality::SUPER_CARDIOID;
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<audio_microphone_coordinate>
+aidl2legacy_MicrophoneInfoCoordinate_audio_microphone_coordinate(
+        const MicrophoneInfo::Coordinate& aidl) {
+    audio_microphone_coordinate legacy;
+    legacy.x = aidl.x;
+    legacy.y = aidl.y;
+    legacy.z = aidl.z;
+    return legacy;
+}
+ConversionResult<MicrophoneInfo::Coordinate>
+legacy2aidl_audio_microphone_coordinate_MicrophoneInfoCoordinate(
+        const audio_microphone_coordinate& legacy) {
+    MicrophoneInfo::Coordinate aidl;
+    aidl.x = legacy.x;
+    aidl.y = legacy.y;
+    aidl.z = legacy.z;
+    return aidl;
+}
+
+ConversionResult<audio_microphone_channel_mapping_t>
+aidl2legacy_MicrophoneDynamicInfoChannelMapping_audio_microphone_channel_mapping_t(
+        MicrophoneDynamicInfo::ChannelMapping aidl) {
+    switch (aidl) {
+        case MicrophoneDynamicInfo::ChannelMapping::UNUSED:
+            return AUDIO_MICROPHONE_CHANNEL_MAPPING_UNUSED;
+        case MicrophoneDynamicInfo::ChannelMapping::DIRECT:
+            return AUDIO_MICROPHONE_CHANNEL_MAPPING_DIRECT;
+        case MicrophoneDynamicInfo::ChannelMapping::PROCESSED:
+            return AUDIO_MICROPHONE_CHANNEL_MAPPING_PROCESSED;
+    }
+    return unexpected(BAD_VALUE);
+}
+ConversionResult<MicrophoneDynamicInfo::ChannelMapping>
+legacy2aidl_audio_microphone_channel_mapping_t_MicrophoneDynamicInfoChannelMapping(
+        audio_microphone_channel_mapping_t legacy) {
+    switch (legacy) {
+        case AUDIO_MICROPHONE_CHANNEL_MAPPING_UNUSED:
+            return MicrophoneDynamicInfo::ChannelMapping::UNUSED;
+        case AUDIO_MICROPHONE_CHANNEL_MAPPING_DIRECT:
+            return MicrophoneDynamicInfo::ChannelMapping::DIRECT;
+        case AUDIO_MICROPHONE_CHANNEL_MAPPING_PROCESSED:
+            return MicrophoneDynamicInfo::ChannelMapping::PROCESSED;
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<audio_microphone_characteristic_t>
+aidl2legacy_MicrophoneInfos_audio_microphone_characteristic_t(
+        const MicrophoneInfo& aidlInfo, const MicrophoneDynamicInfo& aidlDynamic) {
+    static const audio_microphone_coordinate kCoordinateUnknown = {
+        AUDIO_MICROPHONE_COORDINATE_UNKNOWN, AUDIO_MICROPHONE_COORDINATE_UNKNOWN,
+        AUDIO_MICROPHONE_COORDINATE_UNKNOWN };
+    audio_microphone_characteristic_t legacy{};
+    if (aidlInfo.id != aidlDynamic.id) {
+        return unexpected(BAD_VALUE);
+    }
+    // Note: in the legacy structure, 'device_id' is the mic's ID, 'id' is APM port id.
+    RETURN_IF_ERROR(aidl2legacy_string(aidlInfo.id, legacy.device_id, AUDIO_MICROPHONE_ID_MAX_LEN));
+    RETURN_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
+                    aidlInfo.device, &legacy.device, legacy.address));
+    legacy.location = VALUE_OR_RETURN(
+            aidl2legacy_MicrophoneInfoLocation_audio_microphone_location_t(aidlInfo.location));
+    legacy.group = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_microphone_group_t(aidlInfo.group));
+    // For some reason, the legacy field is unsigned, however in the SDK layer it is signed,
+    // as it is in AIDL. So, use UINT_MAX for INDEX_IN_THE_GROUP_UNKNOWN which is -1.
+    if (aidlInfo.indexInTheGroup != MicrophoneInfo::INDEX_IN_THE_GROUP_UNKNOWN) {
+        legacy.index_in_the_group = VALUE_OR_RETURN(
+                convertReinterpret<unsigned int>(aidlInfo.indexInTheGroup));
+    } else {
+        legacy.index_in_the_group = UINT_MAX;
+    }
+    if (aidlInfo.sensitivity.has_value()) {
+        legacy.sensitivity = aidlInfo.sensitivity.value().leveldBFS;
+        legacy.max_spl = aidlInfo.sensitivity.value().maxSpldB;
+        legacy.min_spl = aidlInfo.sensitivity.value().minSpldB;
+    } else {
+        legacy.sensitivity = AUDIO_MICROPHONE_SENSITIVITY_UNKNOWN;
+        legacy.max_spl = AUDIO_MICROPHONE_SPL_UNKNOWN;
+        legacy.min_spl = AUDIO_MICROPHONE_SPL_UNKNOWN;
+    }
+    legacy.directionality = VALUE_OR_RETURN(
+            aidl2legacy_MicrophoneInfoDirectionality_audio_microphone_directionality_t(
+                    aidlInfo.directionality));
+    if (aidlInfo.frequencyResponse.size() > AUDIO_MICROPHONE_MAX_FREQUENCY_RESPONSES) {
+        return unexpected(BAD_VALUE);
+    }
+    legacy.num_frequency_responses = 0;
+    for (const auto& p: aidlInfo.frequencyResponse) {
+        legacy.frequency_responses[0][legacy.num_frequency_responses] = p.frequencyHz;
+        legacy.frequency_responses[1][legacy.num_frequency_responses++] = p.leveldB;
+    }
+    if (aidlInfo.position.has_value()) {
+        legacy.geometric_location = VALUE_OR_RETURN(
+                aidl2legacy_MicrophoneInfoCoordinate_audio_microphone_coordinate(
+                        aidlInfo.position.value()));
+    } else {
+        legacy.geometric_location = kCoordinateUnknown;
+    }
+    if (aidlInfo.orientation.has_value()) {
+        legacy.orientation = VALUE_OR_RETURN(
+                aidl2legacy_MicrophoneInfoCoordinate_audio_microphone_coordinate(
+                        aidlInfo.orientation.value()));
+    } else {
+        legacy.orientation = kCoordinateUnknown;
+    }
+    if (aidlDynamic.channelMapping.size() > AUDIO_CHANNEL_COUNT_MAX) {
+        return unexpected(BAD_VALUE);
+    }
+    size_t i = 0;
+    for (; i < aidlDynamic.channelMapping.size(); ++i) {
+        legacy.channel_mapping[i] = VALUE_OR_RETURN(
+                aidl2legacy_MicrophoneDynamicInfoChannelMapping_audio_microphone_channel_mapping_t(
+                        aidlDynamic.channelMapping[i]));
+    }
+    for (; i < AUDIO_CHANNEL_COUNT_MAX; ++i) {
+        legacy.channel_mapping[i] = AUDIO_MICROPHONE_CHANNEL_MAPPING_UNUSED;
+    }
+    return legacy;
+}
+
+status_t
+legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfos(
+        const audio_microphone_characteristic_t& legacy,
+        MicrophoneInfo* aidlInfo, MicrophoneDynamicInfo* aidlDynamic) {
+    aidlInfo->id = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_string(legacy.device_id, AUDIO_MICROPHONE_ID_MAX_LEN));
+    aidlDynamic->id = aidlInfo->id;
+    aidlInfo->device = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_device_AudioDevice(
+                    legacy.device, legacy.address));
+    aidlInfo->location = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_microphone_location_t_MicrophoneInfoLocation(legacy.location));
+    aidlInfo->group = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_microphone_group_t_int32_t(legacy.group));
+    // For some reason, the legacy field is unsigned, however in the SDK layer it is signed,
+    // as it is in AIDL. So, use UINT_MAX for INDEX_IN_THE_GROUP_UNKNOWN which is -1.
+    if (legacy.index_in_the_group != UINT_MAX) {
+        aidlInfo->indexInTheGroup = VALUE_OR_RETURN_STATUS(
+                convertReinterpret<int32_t>(legacy.index_in_the_group));
+    } else {
+        aidlInfo->indexInTheGroup = MicrophoneInfo::INDEX_IN_THE_GROUP_UNKNOWN;
+    }
+    if (legacy.sensitivity != AUDIO_MICROPHONE_SENSITIVITY_UNKNOWN &&
+            legacy.max_spl != AUDIO_MICROPHONE_SPL_UNKNOWN &&
+            legacy.min_spl != AUDIO_MICROPHONE_SPL_UNKNOWN) {
+        MicrophoneInfo::Sensitivity sensitivity;
+        sensitivity.leveldBFS = legacy.sensitivity;
+        sensitivity.maxSpldB = legacy.max_spl;
+        sensitivity.minSpldB = legacy.min_spl;
+        aidlInfo->sensitivity = std::move(sensitivity);
+    } else {
+        aidlInfo->sensitivity = {};
+    }
+    aidlInfo->directionality = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_microphone_directionality_t_MicrophoneInfoDirectionality(
+                    legacy.directionality));
+    if (legacy.num_frequency_responses > AUDIO_MICROPHONE_MAX_FREQUENCY_RESPONSES) {
+        return BAD_VALUE;
+    }
+    aidlInfo->frequencyResponse.resize(legacy.num_frequency_responses);
+    for (size_t i = 0; i < legacy.num_frequency_responses; ++i) {
+        aidlInfo->frequencyResponse[i].frequencyHz = legacy.frequency_responses[0][i];
+        aidlInfo->frequencyResponse[i].leveldB = legacy.frequency_responses[1][i];
+    }
+    if (legacy.geometric_location.x != AUDIO_MICROPHONE_COORDINATE_UNKNOWN &&
+            legacy.geometric_location.y != AUDIO_MICROPHONE_COORDINATE_UNKNOWN &&
+            legacy.geometric_location.z != AUDIO_MICROPHONE_COORDINATE_UNKNOWN) {
+        aidlInfo->position = VALUE_OR_RETURN_STATUS(
+                legacy2aidl_audio_microphone_coordinate_MicrophoneInfoCoordinate(
+                        legacy.geometric_location));
+    } else {
+        aidlInfo->position = {};
+    }
+    if (legacy.orientation.x != AUDIO_MICROPHONE_COORDINATE_UNKNOWN &&
+            legacy.orientation.y != AUDIO_MICROPHONE_COORDINATE_UNKNOWN &&
+            legacy.orientation.z != AUDIO_MICROPHONE_COORDINATE_UNKNOWN) {
+        aidlInfo->orientation = VALUE_OR_RETURN_STATUS(
+                legacy2aidl_audio_microphone_coordinate_MicrophoneInfoCoordinate(
+                        legacy.orientation));
+    } else {
+        aidlInfo->orientation = {};
+    }
+    size_t channelsUsed = AUDIO_CHANNEL_COUNT_MAX;
+    while (channelsUsed != 0 &&
+            legacy.channel_mapping[--channelsUsed] == AUDIO_MICROPHONE_CHANNEL_MAPPING_UNUSED) {}
+    // Doing an increment is correct even when channel 0 is 'UNUSED',
+    // that's because AIDL requires to have at least 1 element in the mapping.
+    ++channelsUsed;
+    aidlDynamic->channelMapping.resize(channelsUsed);
+    for (size_t i = 0; i < channelsUsed; ++i) {
+        aidlDynamic->channelMapping[i] = VALUE_OR_RETURN_STATUS(
+                legacy2aidl_audio_microphone_channel_mapping_t_MicrophoneDynamicInfoChannelMapping(
+                        legacy.channel_mapping[i]));
+    }
+    return OK;
+}
+
 }  // namespace android
+
+#undef GET_DEVICE_DESC_CONNECTION
 
 #if defined(BACKEND_NDK)
 }  // aidl

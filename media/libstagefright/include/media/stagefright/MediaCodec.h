@@ -28,6 +28,7 @@
 #include <media/MediaMetrics.h>
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/AHandler.h>
+#include <media/stagefright/CodecErrorLog.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <utils/Vector.h>
 
@@ -39,6 +40,7 @@ namespace aidl {
 namespace android {
 namespace media {
 class MediaResourceParcel;
+class ClientConfigParcel;
 } // media
 } // android
 } // aidl
@@ -55,6 +57,7 @@ struct CodecBase;
 struct CodecParameterDescriptor;
 class IBatteryStats;
 struct ICrypto;
+class CryptoAsync;
 class MediaCodecBuffer;
 class IMemory;
 struct PersistentSurface;
@@ -70,6 +73,7 @@ struct IDescrambler;
 
 using hardware::cas::native::V1_0::IDescrambler;
 using aidl::android::media::MediaResourceParcel;
+using aidl::android::media::ClientConfigParcel;
 
 struct MediaCodec : public AHandler {
     enum Domain {
@@ -82,6 +86,7 @@ struct MediaCodec : public AHandler {
     enum ConfigureFlags {
         CONFIGURE_FLAG_ENCODE           = 1,
         CONFIGURE_FLAG_USE_BLOCK_MODEL  = 2,
+        CONFIGURE_FLAG_USE_CRYPTO_ASYNC = 4,
     };
 
     enum BufferFlags {
@@ -106,6 +111,7 @@ struct MediaCodec : public AHandler {
         CB_ERROR = 3,
         CB_OUTPUT_FORMAT_CHANGED = 4,
         CB_RESOURCE_RECLAIMED = 5,
+        CB_CRYPTO_ERROR = 6,
     };
 
     static const pid_t kNoPid = -1;
@@ -298,6 +304,8 @@ struct MediaCodec : public AHandler {
         T value;
     };
 
+    inline CodecErrorLog &getErrorLog() { return mErrorLog; }
+
 protected:
     virtual ~MediaCodec();
     virtual void onMessageReceived(const sp<AMessage> &msg);
@@ -322,6 +330,7 @@ private:
         RELEASING,
     };
     std::string stateString(State state);
+    std::string apiStateString();
 
     enum {
         kPortIndexInput         = 0,
@@ -376,6 +385,7 @@ private:
         kFlagIsComponentAllocated       = 2048,
         kFlagPushBlankBuffersOnShutdown = 4096,
         kFlagUseBlockModel              = 8192,
+        kFlagUseCryptoAsync             = 16384,
     };
 
     struct BufferInfo {
@@ -438,6 +448,7 @@ private:
 
     Mutex mMetricsLock;
     mediametrics_handle_t mMetricsHandle = 0;
+    bool mMetricsToUpload = false;
     nsecs_t mLifetimeStartNs = 0;
     void initMediametrics();
     void updateMediametrics();
@@ -448,6 +459,8 @@ private:
     constexpr const char *asString(TunnelPeekState state, const char *default_string="?");
     void updateTunnelPeek(const sp<AMessage> &msg);
     void updatePlaybackDuration(const sp<AMessage> &msg);
+
+    inline void initClientConfigParcel(ClientConfigParcel& clientConfig);
 
     sp<AMessage> mOutputFormat;
     sp<AMessage> mInputFormat;
@@ -530,6 +543,8 @@ private:
     bool mCpuBoostRequested;
 
     std::shared_ptr<BufferChannelBase> mBufferChannel;
+    sp<CryptoAsync> mCryptoAsync;
+    sp<ALooper> mCryptoLooper;
 
     std::unique_ptr<PlaybackDurationAccumulator> mPlaybackDurationAccumulator;
     bool mIsSurfaceToScreen;
@@ -583,6 +598,7 @@ private:
 
     void onInputBufferAvailable();
     void onOutputBufferAvailable();
+    void onCryptoError(const sp<AMessage> &msg);
     void onError(status_t err, int32_t actionCode, const char *detail = NULL);
     void onOutputFormatChanged();
 
@@ -638,6 +654,9 @@ private:
     int64_t mIndexOfFirstFrameWhenLowLatencyOn;  // index of the first frame queued
                                                  // when low latency is on
     int64_t mInputBufferCounter;  // number of input buffers queued since last reset/flush
+
+    // A rescheduleable message that periodically polls for rendered buffers
+    sp<AMessage> mMsgPollForRenderedBuffers;
 
     class ReleaseSurface;
     std::unique_ptr<ReleaseSurface> mReleaseSurface;
@@ -695,10 +714,14 @@ private:
     };
 
     Histogram mLatencyHist;
+    // An unique ID for the codec - Used by the metrics.
+    uint64_t mCodecId = 0;
 
     std::function<sp<CodecBase>(const AString &, const char *)> mGetCodecBase;
     std::function<status_t(const AString &, sp<MediaCodecInfo> *)> mGetCodecInfo;
     friend class MediaTestHelper;
+
+    CodecErrorLog mErrorLog;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
 };

@@ -20,6 +20,7 @@
 #include <utility>
 #include <unordered_map>
 #include <set>
+#include <tuple>
 
 #include <utils/Condition.h>
 #include <utils/Errors.h>
@@ -118,6 +119,7 @@ class Camera3Device :
     status_t dumpWatchedEventsToVector(std::vector<std::string> &out) override;
     const CameraMetadata& info() const override;
     const CameraMetadata& infoPhysical(const String8& physicalId) const override;
+    bool supportNativeJpegR() const override { return mSupportNativeJpegR; };
 
     // Capture and setStreamingRequest will configure streams if currently in
     // idle state
@@ -313,6 +315,9 @@ class Camera3Device :
     // Get the status trackeer for the camera device
     wp<camera3::StatusTracker> getStatusTracker() { return mStatusTracker; }
 
+    // Whether the device is in error state
+    bool hasDeviceError();
+
     /**
      * The injection camera session to replace the internal camera
      * session.
@@ -407,7 +412,7 @@ class Camera3Device :
 
         virtual status_t configureStreams(const camera_metadata_t * sessionParams,
                 /*inout*/ camera_stream_configuration_t * config,
-                const std::vector<uint32_t>& bufferSizes) = 0;
+                const std::vector<uint32_t>& bufferSizes, int64_t logId) = 0;
 
         // The injection camera configures the streams to hal.
         virtual status_t configureInjectedStreams(
@@ -539,6 +544,7 @@ class Camera3Device :
 
     CameraMetadata             mDeviceInfo;
     bool                       mSupportNativeZoomRatio;
+    bool                       mSupportNativeJpegR;
     std::unordered_map<std::string, CameraMetadata> mPhysicalDeviceInfoMap;
 
     CameraMetadata             mRequestTemplateCache[CAMERA_TEMPLATE_COUNT];
@@ -621,9 +627,14 @@ class Camera3Device :
         // overriding of ROTATE_AND_CROP value and adjustment of coordinates
         // in several other controls in both the request and the result
         bool                                mRotateAndCropAuto;
+        // Indicates that the ROTATE_AND_CROP value within 'mSettingsList' was modified
+        // irrespective of the original value.
+        bool                                mRotateAndCropChanged = false;
         // Whether this request has AUTOFRAMING_AUTO set, so need to override the AUTOFRAMING value
         // in the capture request.
         bool                                mAutoframingAuto;
+        // Indicates that the auto framing value within 'mSettingsList' was modified
+        bool                                mAutoframingChanged = false;
 
         // Whether this capture request has its zoom ratio set to 1.0x before
         // the framework overrides it for camera HAL consumption.
@@ -812,6 +823,15 @@ class Camera3Device :
      */
     static nsecs_t getMonoToBoottimeOffset();
 
+    // Override rotate_and_crop control if needed
+    static bool    overrideAutoRotateAndCrop(const sp<CaptureRequest> &request /*out*/,
+            bool overrideToPortrait,
+            camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropOverride);
+
+    // Override auto framing control if needed
+    static bool    overrideAutoframing(const sp<CaptureRequest> &request /*out*/,
+            camera_metadata_enum_android_control_autoframing_t autoframingOverride);
+
     struct RequestTrigger {
         // Metadata tag number, e.g. android.control.aePrecaptureTrigger
         uint32_t metadataTag;
@@ -969,7 +989,7 @@ class Camera3Device :
         status_t           addFakeTriggerIds(const sp<CaptureRequest> &request);
 
         // Override rotate_and_crop control if needed; returns true if the current value was changed
-        bool               overrideAutoRotateAndCrop(const sp<CaptureRequest> &request);
+        bool               overrideAutoRotateAndCrop(const sp<CaptureRequest> &request /*out*/);
 
         // Override autoframing control if needed; returns true if the current value was changed
         bool               overrideAutoframing(const sp<CaptureRequest> &request);
@@ -1057,7 +1077,7 @@ class Camera3Device :
 
         wp<NotificationListener> mListener;
 
-        const String8&     mId;       // The camera ID
+        const String8      mId;       // The camera ID
         int                mStatusId; // The RequestThread's component ID for
                                       // status tracking
 
@@ -1131,6 +1151,7 @@ class Camera3Device :
         const bool         mUseHalBufManager;
         const bool         mSupportCameraMute;
         const bool         mOverrideToPortrait;
+        int32_t            mVndkVersion = -1;
     };
 
     virtual sp<RequestThread> createNewRequestThread(wp<Camera3Device> /*parent*/,
@@ -1217,7 +1238,7 @@ class Camera3Device :
         // Guarded by mLock
 
         wp<NotificationListener> mListener;
-        std::unordered_map<int, sp<camera3::Camera3StreamInterface> > mPendingStreams;
+        std::list<std::tuple<int, sp<camera3::Camera3StreamInterface>>> mPendingStreams;
         bool mActive;
         bool mCancelNow;
 
@@ -1412,6 +1433,11 @@ class Camera3Device :
     // Whether the camera framework overrides the device characteristics for
     // app compatibility reasons.
     bool mOverrideToPortrait;
+    camera_metadata_enum_android_scaler_rotate_and_crop_t mRotateAndCropOverride;
+    bool mComposerOutput;
+
+    // Auto framing override value
+    camera_metadata_enum_android_control_autoframing mAutoframingOverride;
 
     // Current active physical id of the logical multi-camera, if any
     std::string mActivePhysicalId;

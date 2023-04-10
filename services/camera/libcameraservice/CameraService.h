@@ -29,6 +29,8 @@
 #include <binder/ActivityManager.h>
 #include <binder/AppOpsManager.h>
 #include <binder/BinderService.h>
+#include <binder/IServiceManager.h>
+#include <binder/IActivityManager.h>
 #include <binder/IAppOpsCallback.h>
 #include <binder/IUidObserver.h>
 #include <hardware/camera.h>
@@ -71,7 +73,8 @@ class CameraService :
     public BinderService<CameraService>,
     public virtual ::android::hardware::BnCameraService,
     public virtual IBinder::DeathRecipient,
-    public virtual CameraProviderManager::StatusListener
+    public virtual CameraProviderManager::StatusListener,
+    public virtual IServiceManager::LocalRegistrationCallback
 {
     friend class BinderService<CameraService>;
     friend class CameraOfflineSessionClient;
@@ -98,8 +101,14 @@ public:
     // Event log ID
     static const int SN_EVENT_LOG_ID = 0x534e4554;
 
+    // Register camera service
+    static void instantiate();
+
     // Implementation of BinderService<T>
     static char const* getServiceName() { return "media.camera"; }
+
+    // Implementation of IServiceManager::LocalRegistrationCallback
+    virtual void onServiceRegistration(const String16& name, const sp<IBinder>& binder) override;
 
                         // Non-null arguments for cameraServiceProxyWrapper should be provided for
                         // testing purposes only.
@@ -145,7 +154,7 @@ public:
     virtual binder::Status     connect(const sp<hardware::ICameraClient>& cameraClient,
             int32_t cameraId, const String16& clientPackageName,
             int32_t clientUid, int clientPid, int targetSdkVersion,
-            bool overrideToPortrait,
+            bool overrideToPortrait, bool forceSlowJpegMode,
             /*out*/
             sp<hardware::ICamera>* device) override;
 
@@ -589,6 +598,20 @@ public:
 
 private:
 
+    // TODO: b/263304156 update this to make use of a death callback for more
+    // robust/fault tolerant logging
+    static const sp<IActivityManager>& getActivityManager() {
+        static const char* kActivityService = "activity";
+        static const auto activityManager = []() -> sp<IActivityManager> {
+            const sp<IServiceManager> sm(defaultServiceManager());
+            if (sm != nullptr) {
+                 return interface_cast<IActivityManager>(sm->checkService(String16(kActivityService)));
+            }
+            return nullptr;
+        }();
+        return activityManager;
+    }
+
     /**
      * Typesafe version of device status, containing both the HAL-layer and the service interface-
      * layer values.
@@ -714,7 +737,10 @@ private:
 
     // Observer for UID lifecycle enforcing that UIDs in idle
     // state cannot use the camera to protect user privacy.
-    class UidPolicy : public BnUidObserver, public virtual IBinder::DeathRecipient {
+    class UidPolicy :
+        public BnUidObserver,
+        public virtual IBinder::DeathRecipient,
+        public virtual IServiceManager::LocalRegistrationCallback {
     public:
         explicit UidPolicy(sp<CameraService> service)
                 : mRegistered(false), mService(service) {}
@@ -739,12 +765,16 @@ private:
         void registerMonitorUid(uid_t uid);
         void unregisterMonitorUid(uid_t uid);
 
+        // Implementation of IServiceManager::LocalRegistrationCallback
+        virtual void onServiceRegistration(const String16& name,
+                        const sp<IBinder>& binder) override;
         // IBinder::DeathRecipient implementation
         virtual void binderDied(const wp<IBinder> &who);
     private:
         bool isUidActiveLocked(uid_t uid, String16 callingPackage);
         int32_t getProcStateLocked(uid_t uid);
         void updateOverrideUid(uid_t uid, String16 callingPackage, bool active, bool insert);
+        void registerWithActivityManager();
 
         struct MonitoredUid {
             int32_t procState;
@@ -764,7 +794,8 @@ private:
     // If sensor privacy is enabled then all apps, including those that are active, should be
     // prevented from accessing the camera.
     class SensorPrivacyPolicy : public hardware::BnSensorPrivacyListener,
-            public virtual IBinder::DeathRecipient {
+            public virtual IBinder::DeathRecipient,
+            public virtual IServiceManager::LocalRegistrationCallback {
         public:
             explicit SensorPrivacyPolicy(wp<CameraService> service)
                     : mService(service), mSensorPrivacyEnabled(false), mRegistered(false) {}
@@ -778,6 +809,9 @@ private:
             binder::Status onSensorPrivacyChanged(int toggleType, int sensor,
                                                   bool enabled);
 
+            // Implementation of IServiceManager::LocalRegistrationCallback
+            virtual void onServiceRegistration(const String16& name,
+                                               const sp<IBinder>& binder) override;
             // IBinder::DeathRecipient implementation
             virtual void binderDied(const wp<IBinder> &who);
 
@@ -789,6 +823,7 @@ private:
             bool mRegistered;
 
             bool hasCameraPrivacyFeature();
+            void registerWithSensorPrivacyManager();
     };
 
     sp<UidPolicy> mUidPolicy;
@@ -868,7 +903,8 @@ private:
             int api1CameraId, const String16& clientPackageNameMaybe, bool systemNativeClient,
             const std::optional<String16>& clientFeatureId, int clientUid, int clientPid,
             apiLevel effectiveApiLevel, bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
-            bool overrideToPortrait, /*out*/sp<CLIENT>& device);
+            bool overrideToPortrait, bool forceSlowJpegMode,
+            /*out*/sp<CLIENT>& device);
 
     // Lock guarding camera service state
     Mutex               mServiceLock;
@@ -1321,7 +1357,8 @@ private:
             const String8& cameraId, int api1CameraId, int facing, int sensorOrientation,
             int clientPid, uid_t clientUid, int servicePid,
             std::pair<int, IPCTransport> deviceVersionAndIPCTransport, apiLevel effectiveApiLevel,
-            bool overrideForPerfClass, bool overrideToPortrait, /*out*/sp<BasicClient>* client);
+            bool overrideForPerfClass, bool overrideToPortrait, bool forceSlowJpegMode,
+            /*out*/sp<BasicClient>* client);
 
     status_t checkCameraAccess(const String16& opPackageName);
 

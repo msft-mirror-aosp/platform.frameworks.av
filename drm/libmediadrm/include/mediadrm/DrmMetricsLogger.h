@@ -25,11 +25,66 @@
 
 namespace android {
 
+// Keep enums in sync with frameworks/proto_logging/stats/enums/media/drm/enums.proto
+
+enum {
+    ENUM_DRM_UNKNOWN = 0,
+    ENUM_DRM_NO_LICENSE = 1,
+    ENUM_DRM_LICENSE_EXPIRED = 2,
+    ENUM_DRM_RESOURCE_BUSY = 3,
+    ENUM_DRM_INSUFFICIENT_OUTPUT_PROTECTION = 4,
+    ENUM_DRM_SESSION_NOT_OPENED = 5,
+    ENUM_DRM_CANNOT_HANDLE = 6,
+    ENUM_DRM_INSUFFICIENT_SECURITY = 7,
+    ENUM_DRM_FRAME_TOO_LARGE = 8,
+    ENUM_DRM_SESSION_LOST_STATE = 9,
+    ENUM_DRM_CERTIFICATE_MALFORMED = 10,
+    ENUM_DRM_CERTIFICATE_MISSING = 11,
+    ENUM_DRM_CRYPTO_LIBRARY = 12,
+    ENUM_DRM_GENERIC_OEM = 13,
+    ENUM_DRM_GENERIC_PLUGIN = 14,
+    ENUM_DRM_INIT_DATA = 15,
+    ENUM_DRM_KEY_NOT_LOADED = 16,
+    ENUM_DRM_LICENSE_PARSE = 17,
+    ENUM_DRM_LICENSE_POLICY = 18,
+    ENUM_DRM_LICENSE_RELEASE = 19,
+    ENUM_DRM_LICENSE_REQUEST_REJECTED = 20,
+    ENUM_DRM_LICENSE_RESTORE = 21,
+    ENUM_DRM_LICENSE_STATE = 22,
+    ENUM_DRM_MEDIA_FRAMEWORK = 23,
+    ENUM_DRM_PROVISIONING_CERTIFICATE = 24,
+    ENUM_DRM_PROVISIONING_CONFIG = 25,
+    ENUM_DRM_PROVISIONING_PARSE = 26,
+    ENUM_DRM_PROVISIONING_REQUEST_REJECTED = 27,
+    ENUM_DRM_PROVISIONING_RETRY = 28,
+    ENUM_DRM_RESOURCE_CONTENTION = 29,
+    ENUM_DRM_SECURE_STOP_RELEASE = 30,
+    ENUM_DRM_STORAGE_READ = 31,
+    ENUM_DRM_STORAGE_WRITE = 32,
+    ENUM_DRM_ZERO_SUBSAMPLES = 33,
+    ENUM_DRM_INVALID_STATE = 34,
+    ENUM_BAD_VALUE = 35,
+    ENUM_DRM_NOT_PROVISIONED = 36,
+    ENUM_DRM_DEVICE_REVOKED = 37,
+    ENUM_DRM_DECRYPT = 38,
+    ENUM_DEAD_OBJECT = 39,
+};
+
+enum {
+    JSecurityLevelUnknown = 0,
+    JSecurityLevelSwSecureCrypto = 1,
+    JSecurityLevelSwSecureDecode = 2,
+    JSecurityLevelHwSecureCrypto = 3,
+    JSecurityLevelHwSecureDecode = 4,
+    JSecurityLevelHwSecureAll = 5,
+    JSecurityLevelMax = 6,
+};
+
 struct SessionContext {
-    int64_t mNonceMsb;
-    int64_t mNonceLsb;
-    int64_t mTargetSecurityLevel;
+    std::string mNonce;
+    DrmPlugin::SecurityLevel mTargetSecurityLevel;
     DrmPlugin::SecurityLevel mActualSecurityLevel;
+    std::string mVersion;
 };
 
 class DrmMetricsLogger : public IDrm {
@@ -40,10 +95,13 @@ class DrmMetricsLogger : public IDrm {
 
     virtual DrmStatus initCheck() const;
 
-    virtual DrmStatus isCryptoSchemeSupported(const uint8_t uuid[16], const String8& mimeType,
-                                              DrmPlugin::SecurityLevel securityLevel, bool* result);
+    virtual DrmStatus isCryptoSchemeSupported(const uint8_t uuid[IDRM_UUID_SIZE],
+                                              const String8& mimeType,
+                                              DrmPlugin::SecurityLevel securityLevel,
+                                              bool* result);
 
-    virtual DrmStatus createPlugin(const uint8_t uuid[16], const String8& appPackageName);
+    virtual DrmStatus createPlugin(const uint8_t uuid[IDRM_UUID_SIZE],
+                                   const String8& appPackageName);
 
     virtual DrmStatus destroyPlugin();
 
@@ -150,12 +208,16 @@ class DrmMetricsLogger : public IDrm {
             const DrmStatus& error_code, const char* api,
             const std::vector<uint8_t>& sessionId = std::vector<uint8_t>()) const;
 
-    DrmStatus checkGetRandom(int64_t* nonce, const char* api);
+    DrmStatus generateNonce(std::string* out, size_t size, const char* api);
 
   private:
+    static const size_t kNonceSize = 16;
+    static const std::map<std::array<int64_t, 2>, std::string> kUuidSchemeMap;
     sp<IDrm> mImpl;
-    int64_t mUuid[2] = {};
-    int64_t mObjNonceMsb, mObjNonceLsb;
+    std::array<int64_t, 2> mUuid;
+    std::string mObjNonce;
+    std::string mScheme;
+    std::string mVersion;
     std::map<std::vector<uint8_t>, SessionContext> mSessionMap;
     mutable std::mutex mSessionMapMutex;
     IDrmFrontend mFrontend;

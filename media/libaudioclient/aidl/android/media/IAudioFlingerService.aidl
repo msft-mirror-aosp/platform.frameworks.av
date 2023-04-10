@@ -37,7 +37,7 @@ import android.media.IAudioRecord;
 import android.media.IAudioTrack;
 import android.media.ISoundDose;
 import android.media.ISoundDoseCallback;
-import android.media.MicrophoneInfoData;
+import android.media.MicrophoneInfoFw;
 import android.media.RenderPosition;
 import android.media.TrackSecondaryOutputInfo;
 import android.media.audio.common.AudioChannelLayout;
@@ -208,7 +208,7 @@ interface IAudioFlingerService {
     long frameCountHAL(int /* audio_io_handle_t */ ioHandle);
 
     /* List available microphones and their characteristics */
-    MicrophoneInfoData[] getMicrophones();
+    MicrophoneInfoFw[] getMicrophones();
 
     void setAudioHalPids(in int[] /* pid_t[] */ pids);
 
@@ -228,6 +228,9 @@ interface IAudioFlingerService {
     int getAAudioHardwareBurstMinUsec();
 
     void setDeviceConnectedState(in AudioPortFw devicePort, boolean connected);
+
+    // Used for tests only. Requires AIDL HAL to work.
+    void setSimulateDeviceConnections(boolean enabled);
 
     /**
      * Requests a given latency mode (See AudioLatencyMode.aidl) on an output stream.

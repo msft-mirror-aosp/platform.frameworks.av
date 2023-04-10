@@ -113,6 +113,8 @@ class CameraDeviceBase : public virtual FrameProducer {
      */
     virtual const CameraMetadata& infoPhysical(const String8& physicalId) const = 0;
 
+    virtual bool supportNativeJpegR() const { return false; };
+
     struct PhysicalCameraSettings {
         std::string cameraId;
         CameraMetadata metadata;
@@ -473,6 +475,11 @@ class CameraDeviceBase : public virtual FrameProducer {
      * Get the status tracker of the camera device
      */
     virtual wp<camera3::StatusTracker> getStatusTracker() = 0;
+
+    /**
+     * If the device is in eror state
+     */
+    virtual bool hasDeviceError() = 0;
 
     /**
      * Set bitmask for image dump flag

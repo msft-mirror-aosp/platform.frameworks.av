@@ -18,9 +18,9 @@
 
 #include <aidl/android/hardware/audio/effect/BnEffect.h>
 
-#include "effect-impl/EffectImpl.h"
-#include "effect-impl/EffectUUID.h"
 #include "DynamicsProcessingContext.h"
+#include "EffectRangeSpecific.h"
+#include "effect-impl/EffectImpl.h"
 
 namespace aidl::android::hardware::audio::effect {
 
@@ -28,7 +28,7 @@ class DynamicsProcessingImpl final : public EffectImpl {
   public:
     static const std::string kEffectName;
     static const Descriptor kDescriptor;
-    static const DynamicsProcessing::Capability kCapability;
+    static const Capability kCapability;
 
     DynamicsProcessingImpl() { LOG(DEBUG) << __func__; }
     ~DynamicsProcessingImpl() {
@@ -55,6 +55,7 @@ class DynamicsProcessingImpl final : public EffectImpl {
     std::shared_ptr<DynamicsProcessingContext> mContext;
     ndk::ScopedAStatus getParameterDynamicsProcessing(const DynamicsProcessing::Tag& tag,
                                                       Parameter::Specific* specific);
+    bool isParamInRange(const Parameter::Specific& specific);
 };
 
 }  // namespace aidl::android::hardware::audio::effect
