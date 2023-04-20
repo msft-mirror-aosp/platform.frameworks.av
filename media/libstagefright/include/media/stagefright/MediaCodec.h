@@ -28,6 +28,7 @@
 #include <media/MediaMetrics.h>
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/AHandler.h>
+#include <media/stagefright/CodecErrorLog.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <utils/Vector.h>
 
@@ -297,6 +298,8 @@ struct MediaCodec : public AHandler {
         T value;
     };
 
+    inline CodecErrorLog &getErrorLog() { return mErrorLog; }
+
 protected:
     virtual ~MediaCodec();
     virtual void onMessageReceived(const sp<AMessage> &msg);
@@ -321,6 +324,7 @@ private:
         RELEASING,
     };
     std::string stateString(State state);
+    std::string apiStateString();
 
     enum {
         kPortIndexInput         = 0,
@@ -457,12 +461,19 @@ private:
     int32_t mRotationDegrees;
     int32_t mAllowFrameDroppingBySurface;
 
-    int32_t mConfigColorTransfer;
-    bool mHDRStaticInfo;
-    bool mHDR10PlusInfo;
-    void updateHDRFormatMetric();
-    hdr_format getHDRFormat(const int32_t profile, const int32_t transfer,
-            const AString &mediaType);
+    enum {
+        kFlagHasHdrStaticInfo   = 1,
+        kFlagHasHdr10PlusInfo   = 2,
+    };
+    uint32_t mHdrInfoFlags;
+    void updateHdrMetrics(bool isConfig);
+    hdr_format getHdrFormat(const AString &mime, const int32_t profile,
+            const int32_t colorTransfer);
+    hdr_format getHdrFormatForEncoder(const AString &mime, const int32_t profile,
+            const int32_t colorTransfer);
+    hdr_format getHdrFormatForDecoder(const AString &mime, const int32_t profile,
+            const int32_t colorTransfer);
+    bool profileSupport10Bits(const AString &mime, const int32_t profile);
 
     // initial create parameters
     AString mInitName;
@@ -622,6 +633,9 @@ private:
                                                  // when low latency is on
     int64_t mInputBufferCounter;  // number of input buffers queued since last reset/flush
 
+    // A rescheduleable message that periodically polls for rendered buffers
+    sp<AMessage> mMsgPollForRenderedBuffers;
+
     class ReleaseSurface;
     std::unique_ptr<ReleaseSurface> mReleaseSurface;
 
@@ -681,6 +695,8 @@ private:
     std::function<sp<CodecBase>(const AString &, const char *)> mGetCodecBase;
     std::function<status_t(const AString &, sp<MediaCodecInfo> *)> mGetCodecInfo;
     friend class MediaTestHelper;
+
+    CodecErrorLog mErrorLog;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
 };
