@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -29,6 +30,7 @@
 #include <utils/Log.h>
 
 #include "EffectConversionHelperAidl.h"
+#include "EffectProxy.h"
 
 namespace android {
 namespace effect {
@@ -36,10 +38,14 @@ namespace effect {
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::CommandId;
 using ::aidl::android::hardware::audio::effect::Descriptor;
+using ::aidl::android::hardware::audio::effect::Flags;
+using ::aidl::android::hardware::audio::effect::IEffect;
 using ::aidl::android::hardware::audio::effect::Parameter;
+using ::aidl::android::hardware::audio::effect::State;
 using ::aidl::android::media::audio::common::AudioDeviceDescription;
 using ::aidl::android::media::audio::common::AudioMode;
 using ::aidl::android::media::audio::common::AudioSource;
+using ::android::hardware::EventFlag;
 using android::effect::utils::EffectParamReader;
 using android::effect::utils::EffectParamWriter;
 
@@ -67,7 +73,13 @@ const std::map<uint32_t /* effect_command_e */, EffectConversionHelperAidl::Comm
 EffectConversionHelperAidl::EffectConversionHelperAidl(
         std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
         int32_t sessionId, int32_t ioId, const Descriptor& desc)
-    : mSessionId(sessionId), mIoId(ioId), mDesc(desc), mEffect(std::move(effect)) {
+    : mSessionId(sessionId),
+      mIoId(ioId),
+      mDesc(desc),
+      mEffect(std::move(effect)),
+      mIsInputStream(mDesc.common.flags.type == Flags::Type::PRE_PROC),
+      mIsProxyEffect(mDesc.common.id.proxy.has_value() &&
+                     mDesc.common.id.proxy.value() == mDesc.common.id.uuid) {
     mCommon.session = sessionId;
     mCommon.ioHandle = ioId;
     mCommon.input = mCommon.output = kDefaultAudioConfig;
@@ -91,8 +103,8 @@ status_t EffectConversionHelperAidl::handleInit(uint32_t cmdSize __unused,
         return BAD_VALUE;
     }
 
-    return *(status_t*)pReplyData =
-                   statusTFromBinderStatus(mEffect->open(mCommon, std::nullopt, &mOpenReturn));
+    // Do nothing for EFFECT_CMD_INIT, call IEffect.open() with EFFECT_CMD_SET_CONFIG
+    return *(status_t*)pReplyData = OK;
 }
 
 status_t EffectConversionHelperAidl::handleSetParameter(uint32_t cmdSize, const void* pCmdData,
@@ -117,6 +129,8 @@ status_t EffectConversionHelperAidl::handleSetParameter(uint32_t cmdSize, const 
 status_t EffectConversionHelperAidl::handleGetParameter(uint32_t cmdSize, const void* pCmdData,
                                                         uint32_t* replySize, void* pReplyData) {
     if (cmdSize < sizeof(effect_param_t) || !pCmdData || !replySize || !pReplyData) {
+        ALOGE("%s illegal cmdSize %u pCmdData %p replySize %p replyData %p", __func__, cmdSize,
+              pCmdData, replySize, pReplyData);
         return BAD_VALUE;
     }
 
@@ -139,15 +153,70 @@ status_t EffectConversionHelperAidl::handleGetParameter(uint32_t cmdSize, const 
     return ret;
 }
 
-status_t EffectConversionHelperAidl::handleSetConfig(uint32_t cmdSize,
-                                                     const void* pCmdData __unused,
+status_t EffectConversionHelperAidl::handleSetConfig(uint32_t cmdSize, const void* pCmdData,
                                                      uint32_t* replySize, void* pReplyData) {
     if (!replySize || *replySize != sizeof(int) || !pReplyData ||
         cmdSize != sizeof(effect_config_t)) {
+        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
+              pReplyData);
         return BAD_VALUE;
     }
 
-    // TODO: need to implement setConfig with setParameter(common)
+    effect_config_t* config = (effect_config_t*)pCmdData;
+    Parameter::Common common = {
+            .input =
+                    VALUE_OR_RETURN_STATUS(::aidl::android::legacy2aidl_buffer_config_t_AudioConfig(
+                            config->inputCfg, mIsInputStream)),
+            .output =
+                    VALUE_OR_RETURN_STATUS(::aidl::android::legacy2aidl_buffer_config_t_AudioConfig(
+                            config->outputCfg, mIsInputStream)),
+            .session = mCommon.session,
+            .ioHandle = mCommon.ioHandle};
+
+    State state;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mEffect->getState(&state)));
+    // in case of buffer/ioHandle re-configure for an opened effect, close it and re-open
+    if (state != State::INIT && mCommon != common) {
+        ALOGI("%s at state %s, closing effect", __func__,
+              android::internal::ToString(state).c_str());
+        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mEffect->close()));
+        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mEffect->getState(&state)));
+        mStatusQ.reset();
+        mInputQ.reset();
+        mOutputQ.reset();
+    }
+
+    if (state == State::INIT) {
+        ALOGI("%s at state %s, opening effect with input %s output %s", __func__,
+              android::internal::ToString(state).c_str(), common.input.toString().c_str(),
+              common.output.toString().c_str());
+        IEffect::OpenEffectReturn openReturn;
+        RETURN_STATUS_IF_ERROR(
+                statusTFromBinderStatus(mEffect->open(common, std::nullopt, &openReturn)));
+
+        if (mIsProxyEffect) {
+            const auto& ret =
+                    std::static_pointer_cast<EffectProxy>(mEffect)->getEffectReturnParam();
+            mStatusQ = std::make_shared<StatusMQ>(ret->statusMQ);
+            mInputQ = std::make_shared<DataMQ>(ret->inputDataMQ);
+            mOutputQ = std::make_shared<DataMQ>(ret->outputDataMQ);
+        } else {
+            mStatusQ = std::make_shared<StatusMQ>(openReturn.statusMQ);
+            mInputQ = std::make_shared<DataMQ>(openReturn.inputDataMQ);
+            mOutputQ = std::make_shared<DataMQ>(openReturn.outputDataMQ);
+        }
+
+        if (status_t status = updateEventFlags(); status != OK) {
+            mEffect->close();
+            return status;
+        }
+        mCommon = common;
+    } else if (mCommon != common) {
+        ALOGI("%s at state %s, setParameter", __func__, android::internal::ToString(state).c_str());
+        Parameter aidlParam = UNION_MAKE(Parameter, common, mCommon);
+        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mEffect->setParameter(aidlParam)));
+    }
+
     return *static_cast<int32_t*>(pReplyData) = OK;
 }
 
@@ -166,11 +235,9 @@ status_t EffectConversionHelperAidl::handleGetConfig(uint32_t cmdSize __unused,
     const auto& common = param.get<Parameter::common>();
     effect_config_t* pConfig = (effect_config_t*)pReplyData;
     pConfig->inputCfg = VALUE_OR_RETURN_STATUS(
-            ::aidl::android::aidl2legacy_AudioConfigBase_buffer_config_t(common.input.base, true));
-    pConfig->outputCfg =
-            VALUE_OR_RETURN_STATUS(::aidl::android::aidl2legacy_AudioConfigBase_buffer_config_t(
-                    common.output.base, false));
-    mCommon = common;
+            ::aidl::android::aidl2legacy_AudioConfig_buffer_config_t(common.input, true));
+    pConfig->outputCfg = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::aidl2legacy_AudioConfig_buffer_config_t(common.output, false));
     return OK;
 }
 
@@ -253,17 +320,17 @@ status_t EffectConversionHelperAidl::handleSetDevice(uint32_t cmdSize, const voi
     return *static_cast<int32_t*>(pReplyData) = OK;
 }
 status_t EffectConversionHelperAidl::handleSetVolume(uint32_t cmdSize, const void* pCmdData,
-                                                     uint32_t* replySize, void* pReplyData) {
-    if (cmdSize != 2 * sizeof(uint32_t) || !pCmdData || !replySize || !pReplyData) {
-        ALOGE("%s parameter invalid %u %p %p %p", __func__, cmdSize, pCmdData, replySize,
-              pReplyData);
+                                                     uint32_t* replySize __unused,
+                                                     void* pReplyData __unused) {
+    if (cmdSize != 2 * sizeof(uint32_t) || !pCmdData) {
+        ALOGE("%s parameter invalid %u %p", __func__, cmdSize, pCmdData);
         return BAD_VALUE;
     }
     Parameter::VolumeStereo volume = {.left = (float)(*(uint32_t*)pCmdData) / (1 << 24),
                                       .right = (float)(*(uint32_t*)pCmdData + 1) / (1 << 24)};
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
             mEffect->setParameter(Parameter::make<Parameter::volumeStereo>(volume))));
-    return *static_cast<int32_t*>(pReplyData) = OK;
+    return OK;
 }
 
 status_t EffectConversionHelperAidl::handleSetOffload(uint32_t cmdSize, const void* pCmdData,
@@ -273,7 +340,21 @@ status_t EffectConversionHelperAidl::handleSetOffload(uint32_t cmdSize, const vo
               pReplyData);
         return BAD_VALUE;
     }
-    // TODO: handle this after effectproxy implemented in libaudiohal
+    effect_offload_param_t* offload = (effect_offload_param_t*)pCmdData;
+    // send to proxy to update active sub-effect
+    if (mIsProxyEffect) {
+        ALOGI("%s offload param offload %s ioHandle %d", __func__,
+              offload->isOffload ? "true" : "false", offload->ioHandle);
+        mCommon.ioHandle = offload->ioHandle;
+        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+                std::static_pointer_cast<EffectProxy>(mEffect)->setOffloadParam(offload)));
+        // update FMQs
+        const auto& ret = std::static_pointer_cast<EffectProxy>(mEffect)->getEffectReturnParam();
+        mStatusQ = std::make_shared<StatusMQ>(ret->statusMQ);
+        mInputQ = std::make_shared<DataMQ>(ret->inputDataMQ);
+        mOutputQ = std::make_shared<DataMQ>(ret->outputDataMQ);
+        RETURN_STATUS_IF_ERROR(updateEventFlags());
+    }
     return *static_cast<int32_t*>(pReplyData) = OK;
 }
 
@@ -315,6 +396,21 @@ status_t EffectConversionHelperAidl::handleVisualizerMeasure(uint32_t cmdSize __
     }
 
     return visualizerMeasure(replySize, pReplyData);
+}
+
+status_t EffectConversionHelperAidl::updateEventFlags() {
+    status_t status = BAD_VALUE;
+    EventFlag* efGroup = nullptr;
+    if (mStatusQ->isValid()) {
+        status = EventFlag::createEventFlag(mStatusQ->getEventFlagWord(), &efGroup);
+        if (status != OK || !efGroup) {
+            ALOGE("%s: create EventFlagGroup failed, ret %d, egGroup %p", __func__, status,
+                  efGroup);
+            status = (status == OK) ? BAD_VALUE : status;
+        }
+    }
+    mEfGroup.reset(efGroup, EventFlagDeleter());
+    return status;
 }
 
 }  // namespace effect

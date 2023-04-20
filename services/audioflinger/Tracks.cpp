@@ -303,7 +303,7 @@ status_t AudioFlinger::ThreadBase::TrackBase::setSyncEvent(const sp<SyncEvent>& 
     return NO_ERROR;
 }
 
-AudioFlinger::ThreadBase::PatchTrackBase::PatchTrackBase(sp<ClientProxy> proxy,
+AudioFlinger::ThreadBase::PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,
                                                          const ThreadBase& thread,
                                                          const Timeout& timeout)
     : mProxy(proxy)
@@ -1298,8 +1298,9 @@ void AudioFlinger::PlaybackThread::Track::flush()
 // must be called with thread lock held
 void AudioFlinger::PlaybackThread::Track::flushAck()
 {
-    if (!isOffloaded() && !isDirect())
+    if (!isOffloaded() && !isDirect()) {
         return;
+    }
 
     // Clear the client ring buffer so that the app can prime the buffer while paused.
     // Otherwise it might not get cleared until playback is resumed and obtainBuffer() is called.
@@ -1479,7 +1480,7 @@ void AudioFlinger::PlaybackThread::Track::copyMetadataTo(MetadataInserter& backI
         }
     }
 
-    metadata.channel_mask = mChannelMask,
+    metadata.channel_mask = mChannelMask;
     strncpy(metadata.tags, mAttr.tags, AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
     *backInserter++ = metadata;
 }
@@ -1812,23 +1813,23 @@ status_t AudioFlinger::PlaybackThread::Track::setPlaybackRateParameters(
 
 //To be called with thread lock held
 bool AudioFlinger::PlaybackThread::Track::isResumePending() {
-
-    if (mState == RESUMING)
+    if (mState == RESUMING) {
         return true;
+    }
     /* Resume is pending if track was stopping before pause was called */
     if (mState == STOPPING_1 &&
-        mResumeToStopping)
+        mResumeToStopping) {
         return true;
+    }
 
     return false;
 }
 
 //To be called with thread lock held
 void AudioFlinger::PlaybackThread::Track::resumeAck() {
-
-
-    if (mState == RESUMING)
+    if (mState == RESUMING) {
         mState = ACTIVE;
+    }
 
     // Other possibility of  pending resume is stopping_1 state
     // Do not update the state from stopping as this prevents
@@ -2016,7 +2017,6 @@ ssize_t AudioFlinger::PlaybackThread::OutputTrack::write(void* data, uint32_t fr
 {
     Buffer *pInBuffer;
     Buffer inBuffer;
-    bool outputBufferFull = false;
     inBuffer.frameCount = frames;
     inBuffer.raw = data;
 
@@ -2046,7 +2046,6 @@ ssize_t AudioFlinger::PlaybackThread::OutputTrack::write(void* data, uint32_t fr
                 ALOGV("%s(%d): thread %d no more output buffers; status %d",
                         __func__, mId,
                         (int)mThreadIoHandle, status);
-                outputBufferFull = true;
                 break;
             }
             uint32_t waitTimeMs = (uint32_t)ns2ms(systemTime() - startTime);
@@ -2096,7 +2095,10 @@ ssize_t AudioFlinger::PlaybackThread::OutputTrack::write(void* data, uint32_t fr
         if (thread != 0 && !thread->standby()) {
             if (mBufferQueue.size() < kMaxOverFlowBuffers) {
                 pInBuffer = new Buffer;
-                pInBuffer->mBuffer = malloc(inBuffer.frameCount * mFrameSize);
+                const size_t bufferSize = inBuffer.frameCount * mFrameSize;
+                pInBuffer->mBuffer = malloc(bufferSize);
+                LOG_ALWAYS_FATAL_IF(pInBuffer->mBuffer == nullptr,
+                        "%s: Unable to malloc size %zu", __func__, bufferSize);
                 pInBuffer->frameCount = inBuffer.frameCount;
                 pInBuffer->raw = pInBuffer->mBuffer;
                 memcpy(pInBuffer->raw, inBuffer.raw, inBuffer.frameCount * mFrameSize);
@@ -2260,7 +2262,7 @@ void AudioFlinger::PlaybackThread::PatchTrack::releaseBuffer(AudioBufferProvider
     buf.mFrameCount = buffer->frameCount;
     buf.mRaw = buffer->raw;
     mPeerProxy->releaseBuffer(&buf);
-    TrackBase::releaseBuffer(buffer);
+    TrackBase::releaseBuffer(buffer); // Note: this is the base class.
 }
 
 status_t AudioFlinger::PlaybackThread::PatchTrack::obtainBuffer(Proxy::Buffer* buffer,
@@ -2737,6 +2739,25 @@ status_t AudioFlinger::RecordThread::RecordTrack::shareAudioHistory(
     }
 }
 
+void AudioFlinger::RecordThread::RecordTrack::copyMetadataTo(MetadataInserter& backInserter) const
+{
+
+    // Do not forward PatchRecord metadata with unspecified audio source
+    if (mAttr.source == AUDIO_SOURCE_DEFAULT) {
+        return;
+    }
+
+    // No track is invalid as this is called after prepareTrack_l in the same critical section
+    record_track_metadata_v7_t metadata;
+    metadata.base = {
+            .source = mAttr.source,
+            .gain = 1, // capture tracks do not have volumes
+    };
+    metadata.channel_mask = mChannelMask;
+    strncpy(metadata.tags, mAttr.tags, AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
+
+    *backInserter++ = metadata;
+}
 
 // ----------------------------------------------------------------------------
 #undef LOG_TAG
@@ -2750,9 +2771,10 @@ AudioFlinger::RecordThread::PatchRecord::PatchRecord(RecordThread *recordThread,
                                                      void *buffer,
                                                      size_t bufferSize,
                                                      audio_input_flags_t flags,
-                                                     const Timeout& timeout)
+                                                     const Timeout& timeout,
+                                                     audio_source_t source)
     :   RecordTrack(recordThread, NULL,
-                audio_attributes_t{} /* currently unused for patch track */,
+                audio_attributes_t{ .source = source } ,
                 sampleRate, format, channelMask, frameCount,
                 buffer, bufferSize, AUDIO_SESSION_NONE, getpid(),
                 audioServerAttributionSource(getpid()), flags, TYPE_PATCH),
@@ -2854,7 +2876,7 @@ static std::unique_ptr<void, decltype(free)*> allocAligned(size_t alignment, siz
 {
     void *ptr = nullptr;
     (void)posix_memalign(&ptr, alignment, size);
-    return std::unique_ptr<void, decltype(free)*>(ptr, free);
+    return {ptr, free};
 }
 
 AudioFlinger::RecordThread::PassthruPatchRecord::PassthruPatchRecord(
@@ -2863,9 +2885,10 @@ AudioFlinger::RecordThread::PassthruPatchRecord::PassthruPatchRecord(
         audio_channel_mask_t channelMask,
         audio_format_t format,
         size_t frameCount,
-        audio_input_flags_t flags)
+        audio_input_flags_t flags,
+        audio_source_t source)
         : PatchRecord(recordThread, sampleRate, channelMask, format, frameCount,
-                nullptr /*buffer*/, 0 /*bufferSize*/, flags),
+                nullptr /*buffer*/, 0 /*bufferSize*/, flags, {} /* timeout */, source),
           mPatchRecordAudioBufferProvider(*this),
           mSinkBuffer(allocAligned(32, mFrameCount * mFrameSize)),
           mStubBuffer(allocAligned(32, mFrameCount * mFrameSize))

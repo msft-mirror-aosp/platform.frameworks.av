@@ -24,7 +24,6 @@
 #include <error/expected_utils.h>
 #include <media/AidlConversionNdk.h>
 #include <media/AidlConversionEffect.h>
-#include <media/audiohal/AudioEffectUuid.h>
 #include <system/audio_effects/effect_visualizer.h>
 
 #include <utils/Log.h>
@@ -34,9 +33,10 @@
 namespace android {
 namespace effect {
 
-using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::getParameterSpecificField;
+using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::Parameter;
+using ::aidl::android::hardware::audio::effect::VendorExtension;
 using ::aidl::android::hardware::audio::effect::Visualizer;
 using ::android::status_t;
 using utils::EffectParamReader;
@@ -72,9 +72,11 @@ status_t AidlConversionVisualizer::setParameter(EffectParamReader& param) {
             break;
         }
         default: {
-            // TODO: implement vendor extension parameters
-            ALOGW("%s unknown param %s", __func__, param.toString().c_str());
-            return BAD_VALUE;
+            // for vendor extension, copy data area to the DefaultExtension, parameter ignored
+            VendorExtension ext = VALUE_OR_RETURN_STATUS(
+                    aidl::android::legacy2aidl_EffectParameterReader_Data_VendorExtension(param));
+            aidlParam = MAKE_SPECIFIC_PARAMETER(Visualizer, visualizer, vendor, ext);
+            break;
         }
     }
     return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
@@ -130,9 +132,7 @@ status_t AidlConversionVisualizer::getParameter(EffectParamWriter& param) {
             return param.writeToValue(&value);
         }
         default: {
-            // TODO: implement vendor extension parameters
-            ALOGW("%s unknown param %s", __func__, param.toString().c_str());
-            return BAD_VALUE;
+            VENDOR_EXTENSION_GET_AND_RETURN(Visualizer, visualizer, param);
         }
     }
 }

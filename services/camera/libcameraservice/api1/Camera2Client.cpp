@@ -61,11 +61,13 @@ Camera2Client::Camera2Client(const sp<CameraService>& cameraService,
         int clientPid,
         uid_t clientUid,
         int servicePid,
-        bool overrideForPerfClass):
+        bool overrideForPerfClass,
+        bool overrideToPortrait):
         Camera2ClientBase(cameraService, cameraClient, clientPackageName,
                 false/*systemNativeClient - since no ndk for api1*/, clientFeatureId,
                 cameraDeviceId, api1CameraId, cameraFacing, sensorOrientation, clientPid,
-                clientUid, servicePid, overrideForPerfClass, /*legacyClient*/ true),
+                clientUid, servicePid, overrideForPerfClass, overrideToPortrait,
+                /*legacyClient*/ true),
         mParameters(api1CameraId, cameraFacing)
 {
     ATRACE_CALL();
@@ -1330,21 +1332,18 @@ bool Camera2Client::recordingEnabledL() {
             || l.mParameters.state == Parameters::VIDEO_SNAPSHOT);
 }
 
-void Camera2Client::releaseRecordingFrame(const sp<IMemory>& mem) {
-    (void)mem;
+void Camera2Client::releaseRecordingFrame([[maybe_unused]] const sp<IMemory>& mem) {
     ATRACE_CALL();
     ALOGW("%s: Not supported in buffer queue mode.", __FUNCTION__);
 }
 
-void Camera2Client::releaseRecordingFrameHandle(native_handle_t *handle) {
-    (void)handle;
+void Camera2Client::releaseRecordingFrameHandle([[maybe_unused]] native_handle_t *handle) {
     ATRACE_CALL();
     ALOGW("%s: Not supported in buffer queue mode.", __FUNCTION__);
 }
 
 void Camera2Client::releaseRecordingFrameHandleBatch(
-        const std::vector<native_handle_t*>& handles) {
-    (void)handles;
+        [[maybe_unused]] const std::vector<native_handle_t*>& handles) {
     ATRACE_CALL();
     ALOGW("%s: Not supported in buffer queue mode.", __FUNCTION__);
 }
