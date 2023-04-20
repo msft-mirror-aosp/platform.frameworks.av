@@ -274,6 +274,7 @@ cc_library_shared {
         "EffectsFactoryHalAidl.cpp",
         "EffectsFactoryHalEntry.cpp",
         "StreamHalAidl.cpp",
+        ":audio_effectproxy_src_files"
     ],
     static_libs: [
         "android.hardware.common-V2-ndk",
@@ -283,6 +284,7 @@ cc_library_shared {
         "libbinder_ndk",
         "libaudio_aidl_conversion_common_cpp",
         "libaudio_aidl_conversion_common_ndk",
+        "libaudio_aidl_conversion_core_ndk",
         "libaudio_aidl_conversion_effect_ndk",
         "libaudioaidlcommon",
     ],
@@ -296,4 +298,9 @@ cc_library_shared {
         "-Wthread-safety",
         "-DBACKEND_CPP_NDK",
     ],
+}
+
+filegroup {
+    name: "audio_effectproxy_src_files",
+    srcs: ["EffectProxy.cpp"],
 }
