@@ -23,7 +23,6 @@
 #include <error/expected_utils.h>
 #include <media/AidlConversionNdk.h>
 #include <media/AidlConversionEffect.h>
-#include <media/audiohal/AudioEffectUuid.h>
 #include <system/audio_effects/effect_downmix.h>
 
 #include <system/audio_effect.h>
@@ -34,9 +33,11 @@
 namespace android {
 namespace effect {
 
+using ::aidl::android::getParameterSpecificField;
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::Downmix;
 using ::aidl::android::hardware::audio::effect::Parameter;
+using ::aidl::android::hardware::audio::effect::VendorExtension;
 using ::android::status_t;
 using utils::EffectParamReader;
 using utils::EffectParamWriter;
@@ -57,8 +58,10 @@ status_t AidlConversionDownmix::setParameter(EffectParamReader& param) {
             break;
         }
         default: {
-            ALOGW("%s unknown param %s", __func__, param.toString().c_str());
-            return BAD_VALUE;
+            // for vendor extension, copy data area to the DefaultExtension, parameter ignored
+            VendorExtension ext = VALUE_OR_RETURN_STATUS(
+                    aidl::android::legacy2aidl_EffectParameterReader_Data_VendorExtension(param));
+            aidlParam = MAKE_SPECIFIC_PARAMETER(Downmix, downmix, vendor, ext);
         }
     }
 
@@ -83,8 +86,7 @@ status_t AidlConversionDownmix::getParameter(EffectParamWriter& param) {
             break;
         }
         default: {
-            ALOGW("%s unknown param %s", __func__, param.toString().c_str());
-            return BAD_VALUE;
+            VENDOR_EXTENSION_GET_AND_RETURN(Downmix, downmix, param);
         }
     }
 

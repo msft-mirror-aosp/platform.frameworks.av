@@ -88,6 +88,12 @@ C2SoftAomEnc::IntfImpl::IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helpe
                          .withSetter(BitrateSetter)
                          .build());
 
+    addParameter(DefineParam(mComplexity, C2_PARAMKEY_COMPLEXITY)
+                         .withDefault(new C2StreamComplexityTuning::output(0u, 0))
+                         .withFields({C2F(mComplexity, value).inRange(0, 5)})
+                         .withSetter(Setter<decltype(*mComplexity)>::NonStrictValueWithNoDeps)
+                         .build());
+
     addParameter(DefineParam(mQuality, C2_PARAMKEY_QUALITY)
                          .withDefault(new C2StreamQualityTuning::output(0u, 80))
                          .withFields({C2F(mQuality, value).inRange(0, 100)})
@@ -306,10 +312,20 @@ static int MapC2QualityToAOMQuality (int c2Quality) {
     return 15 + 35 * (100 - c2Quality) / 100;
 }
 
+static int MapC2ComplexityToAOMSpeed (int c2Complexity) {
+    int mapping[6] = {10, 9, 8, 7, 6, 6};
+    if (c2Complexity > 5 || c2Complexity < 0) {
+        ALOGW("Wrong complexity setting. Falling back to speed 10");
+        return 10;
+    }
+    return mapping[c2Complexity];
+}
+
 aom_codec_err_t C2SoftAomEnc::setupCodecParameters() {
     aom_codec_err_t codec_return = AOM_CODEC_OK;
 
-    codec_return = aom_codec_control(mCodecContext, AOME_SET_CPUUSED, DEFAULT_SPEED);
+    codec_return = aom_codec_control(mCodecContext, AOME_SET_CPUUSED,
+                                     MapC2ComplexityToAOMSpeed(mComplexity->value));
     if (codec_return != AOM_CODEC_OK) goto BailOut;
 
     codec_return = aom_codec_control(mCodecContext, AV1E_SET_ROW_MT, 1);
@@ -461,6 +477,7 @@ status_t C2SoftAomEnc::initEncoder() {
         mRequestSync = mIntf->getRequestSync_l();
         mColorAspects = mIntf->getCodedColorAspects_l();
         mQuality = mIntf->getQuality_l();
+        mComplexity = mIntf->getComplexity_l();
     }
 
 
@@ -481,9 +498,9 @@ status_t C2SoftAomEnc::initEncoder() {
     mCodecInterface = aom_codec_av1_cx();
     if (!mCodecInterface) goto CleanUp;
 
-    ALOGD("AOM: initEncoder. BRMode: %u. KF: %u. QP: %u - %u, 10Bit: %d",
+    ALOGD("AOM: initEncoder. BRMode: %u. KF: %u. QP: %u - %u, 10Bit: %d, comlexity %d",
           (uint32_t)mBitrateControlMode,
-          mIntf->getSyncFramePeriod(), mMinQuantizer, mMaxQuantizer, mIs10Bit);
+          mIntf->getSyncFramePeriod(), mMinQuantizer, mMaxQuantizer, mIs10Bit, mComplexity->value);
 
     mCodecConfiguration = new aom_codec_enc_cfg_t;
     if (!mCodecConfiguration) goto CleanUp;
@@ -799,6 +816,28 @@ void C2SoftAomEnc::process(const std::unique_ptr<C2Work>& work,
             }
             break;
         }
+        case C2PlanarLayout::TYPE_YUVA: {
+            if (mConversionBuffer.size() >= stride * vstride * 3) {
+                uint16_t *dstY, *dstU, *dstV;
+                dstY = (uint16_t*)mConversionBuffer.data();
+                dstU = dstY + stride * vstride;
+                dstV = dstU + (stride * vstride) / 4;
+                convertRGBA1010102ToYUV420Planar16(dstY, dstU, dstV, (uint32_t*)(rView->data()[0]),
+                                                   layout.planes[layout.PLANE_Y].rowInc / 4, stride,
+                                                   vstride, mColorAspects->matrix,
+                                                   mColorAspects->range);
+                aom_img_wrap(&raw_frame, AOM_IMG_FMT_I42016, stride, vstride, mStrideAlign,
+                                mConversionBuffer.data());
+                aom_img_set_rect(&raw_frame, 0, 0, width, height, 0);
+            } else {
+                ALOGE("Conversion buffer is too small: %u x %u for %zu", stride, vstride,
+                        mConversionBuffer.size());
+                work->result = C2_BAD_VALUE;
+                return;
+            }
+            break;
+        }
+
         default:
             ALOGE("Unrecognized plane type: %d", layout.type);
             work->result = C2_BAD_VALUE;

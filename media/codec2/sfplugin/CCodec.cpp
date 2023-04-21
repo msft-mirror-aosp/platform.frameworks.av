@@ -206,12 +206,19 @@ public:
         mNode = new C2OMXNode(comp);
         mOmxNode = new hardware::media::omx::V1_0::utils::TWOmxNode(mNode);
         mNode->setFrameSize(mWidth, mHeight);
-
         // Usage is queried during configure(), so setting it beforehand.
-        OMX_U32 usage = mConfig.mUsage & 0xFFFFFFFF;
-        (void)mNode->setParameter(
-                (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits,
-                &usage, sizeof(usage));
+        // 64 bit set parameter is existing only in C2OMXNode.
+        OMX_U64 usage64 = mConfig.mUsage;
+        status_t res = mNode->setParameter(
+                (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits64,
+                &usage64, sizeof(usage64));
+
+        if (res != OK) {
+            OMX_U32 usage = mConfig.mUsage & 0xFFFFFFFF;
+            (void)mNode->setParameter(
+                    (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits,
+                    &usage, sizeof(usage));
+        }
 
         return GetStatus(mSource->configure(
                 mOmxNode, static_cast<hardware::graphics::common::V1_0::Dataspace>(mDataSpace)));
@@ -876,6 +883,16 @@ void CCodec::configure(const sp<AMessage> &msg) {
                     int32_t pushBlankBuffersOnStop = 0;
                     if (msg->findInt32(KEY_PUSH_BLANK_BUFFERS_ON_STOP, &pushBlankBuffersOnStop)) {
                         config->mPushBlankBuffersOnStop = pushBlankBuffersOnStop == 1;
+                    }
+                    // secure compoment or protected content default with
+                    // "push-blank-buffers-on-shutdown" flag
+                    if (!config->mPushBlankBuffersOnStop) {
+                        int32_t usageProtected;
+                        if (comp->getName().find(".secure") != std::string::npos) {
+                            config->mPushBlankBuffersOnStop = true;
+                        } else if (msg->findInt32("protected", &usageProtected) && usageProtected) {
+                            config->mPushBlankBuffersOnStop = true;
+                        }
                     }
                 }
             }
@@ -2540,17 +2557,6 @@ status_t CCodec::configureTunneledVideoPlayback(
 }
 
 void CCodec::initiateReleaseIfStuck() {
-    std::string name;
-    bool pendingDeadline = false;
-    {
-        Mutexed<NamedTimePoint>::Locked deadline(mDeadline);
-        if (deadline->get() < std::chrono::steady_clock::now()) {
-            name = deadline->getName();
-        }
-        if (deadline->get() != TimePoint::max()) {
-            pendingDeadline = true;
-        }
-    }
     bool tunneled = false;
     bool isMediaTypeKnown = false;
     {
@@ -2587,6 +2593,17 @@ void CCodec::initiateReleaseIfStuck() {
         const std::unique_ptr<Config> &config = *configLocked;
         tunneled = config->mTunneled;
         isMediaTypeKnown = (kKnownMediaTypes.count(config->mCodingMediaType) != 0);
+    }
+    std::string name;
+    bool pendingDeadline = false;
+    {
+        Mutexed<NamedTimePoint>::Locked deadline(mDeadline);
+        if (deadline->get() < std::chrono::steady_clock::now()) {
+            name = deadline->getName();
+        }
+        if (deadline->get() != TimePoint::max()) {
+            pendingDeadline = true;
+        }
     }
     if (!tunneled && isMediaTypeKnown && name.empty()) {
         constexpr std::chrono::steady_clock::duration kWorkDurationThreshold = 3s;

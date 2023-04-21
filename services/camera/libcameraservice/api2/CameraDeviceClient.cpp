@@ -61,7 +61,7 @@ CameraDeviceClientBase::CameraDeviceClientBase(
         bool systemNativeClient,
         const std::optional<String16>& clientFeatureId,
         const String8& cameraId,
-        int api1CameraId,
+        [[maybe_unused]] int api1CameraId,
         int cameraFacing,
         int sensorOrientation,
         int clientPid,
@@ -81,8 +81,6 @@ CameraDeviceClientBase::CameraDeviceClientBase(
             servicePid,
             overrideToPortrait),
     mRemoteCallback(remoteCallback) {
-    // We don't need it for API2 clients, but Camera2ClientBase requires it.
-    (void) api1CameraId;
 }
 
 // Interface used by CameraService
@@ -191,11 +189,11 @@ status_t CameraDeviceClient::initializeImpl(TProviderPtr providerPtr, const Stri
     // Cache physical camera ids corresponding to this device and also the high
     // resolution sensors in this device + physical camera ids
     mProviderManager->isLogicalCamera(mCameraIdStr.string(), &mPhysicalCameraIds);
-    if (isUltraHighResolutionSensor(mCameraIdStr)) {
+    if (supportsUltraHighResolutionCapture(mCameraIdStr)) {
         mHighResolutionSensors.insert(mCameraIdStr.string());
     }
     for (auto &physicalId : mPhysicalCameraIds) {
-        if (isUltraHighResolutionSensor(String8(physicalId.c_str()))) {
+        if (supportsUltraHighResolutionCapture(String8(physicalId.c_str()))) {
             mHighResolutionSensors.insert(physicalId.c_str());
         }
     }
@@ -958,7 +956,8 @@ binder::Status CameraDeviceClient::createStream(
             camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0]);
     bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(surfaces[0]);
     bool isJpegRCompositeStream =
-        camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaces[0]);
+        camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaces[0]) &&
+        !mDevice->supportNativeJpegR();
     if (isDepthCompositeStream || isHeicCompositeStream || isJpegRCompositeStream) {
         sp<CompositeStream> compositeStream;
         if (isDepthCompositeStream) {
@@ -1073,7 +1072,7 @@ binder::Status CameraDeviceClient::createDeferredSurfaceStreamLocked(
             outputConfiguration.getSensorPixelModesUsed();
     if (SessionConfigurationUtils::checkAndOverrideSensorPixelModesUsed(
             sensorPixelModesUsed, format, width, height, getStaticInfo(cameraIdUsed),
-            /*allowRounding*/ false, &overriddenSensorPixelModesUsed) != OK) {
+            &overriddenSensorPixelModesUsed) != OK) {
         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
                 "sensor pixel modes used not valid for deferred stream");
     }
@@ -1790,6 +1789,14 @@ void CameraDeviceClient::clearStreamUseCaseOverrides() {
     mDevice->clearStreamUseCaseOverrides();
 }
 
+bool CameraDeviceClient::supportsZoomOverride() {
+    return mDevice->supportsZoomOverride();
+}
+
+status_t CameraDeviceClient::setZoomOverride(int32_t zoomOverride) {
+    return mDevice->setZoomOverride(zoomOverride);
+}
+
 binder::Status CameraDeviceClient::switchToOffline(
         const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
         const std::vector<int>& offlineOutputIds,
@@ -1843,7 +1850,8 @@ binder::Status CameraDeviceClient::switchToOffline(
             sp<Surface> s = new Surface(gbp, false /*controlledByApp*/);
             isCompositeStream = camera3::DepthCompositeStream::isDepthCompositeStream(s) ||
                 camera3::HeicCompositeStream::isHeicCompositeStream(s) ||
-                camera3::JpegRCompositeStream::isJpegRCompositeStream(s);
+                (camera3::JpegRCompositeStream::isJpegRCompositeStream(s) &&
+                 !mDevice->supportNativeJpegR());
             if (isCompositeStream) {
                 auto compositeIdx = mCompositeStreamMap.indexOfKey(IInterface::asBinder(gbp));
                 if (compositeIdx == NAME_NOT_FOUND) {
@@ -2026,8 +2034,20 @@ void CameraDeviceClient::notifyIdle(
     if (remoteCb != 0) {
         remoteCb->onDeviceIdle();
     }
+
+    std::vector<hardware::CameraStreamStats> fullStreamStats = streamStats;
+    {
+        Mutex::Autolock l(mCompositeLock);
+        for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
+            hardware::CameraStreamStats compositeStats;
+            mCompositeStreamMap.valueAt(i)->getStreamStats(&compositeStats);
+            if (compositeStats.mWidth > 0) {
+                fullStreamStats.push_back(compositeStats);
+            }
+        }
+    }
     Camera2ClientBase::notifyIdleWithUserTag(requestCount, resultErrorCount, deviceError,
-            streamStats, mUserTag, mVideoStabilizationMode);
+            fullStreamStats, mUserTag, mVideoStabilizationMode);
 }
 
 void CameraDeviceClient::notifyShutter(const CaptureResultExtras& resultExtras,
@@ -2247,9 +2267,9 @@ const CameraMetadata &CameraDeviceClient::getStaticInfo(const String8 &cameraId)
     return mDevice->infoPhysical(cameraId);
 }
 
-bool CameraDeviceClient::isUltraHighResolutionSensor(const String8 &cameraId) {
+bool CameraDeviceClient::supportsUltraHighResolutionCapture(const String8 &cameraId) {
     const CameraMetadata &deviceInfo = getStaticInfo(cameraId);
-    return SessionConfigurationUtils::isUltraHighResolutionSensor(deviceInfo);
+    return SessionConfigurationUtils::supportsUltraHighResolutionCapture(deviceInfo);
 }
 
 bool CameraDeviceClient::isSensorPixelModeConsistent(

@@ -164,7 +164,7 @@ public:
 
     class SetParameterConfigEventData : public ConfigEventData {
     public:
-        explicit SetParameterConfigEventData(String8 keyValuePairs) :
+        explicit SetParameterConfigEventData(const String8& keyValuePairs) :
             mKeyValuePairs(keyValuePairs) {}
 
         virtual  void dump(char *buffer, size_t size) {
@@ -176,7 +176,7 @@ public:
 
     class SetParameterConfigEvent : public ConfigEvent {
     public:
-        explicit SetParameterConfigEvent(String8 keyValuePairs) :
+        explicit SetParameterConfigEvent(const String8& keyValuePairs) :
             ConfigEvent(CFG_EVENT_SET_PARAMETER) {
             mData = new SetParameterConfigEventData(keyValuePairs);
             mWaitStatus = true;
@@ -576,6 +576,9 @@ public:
 
     virtual     bool isStreamInitialized() = 0;
 
+    virtual     void startMelComputation_l(const sp<audio_utils::MelProcessor>& processor);
+    virtual     void stopMelComputation_l();
+
 protected:
 
                 // entry describing an effect being suspended in mSuspendedSessions keyed vector
@@ -799,7 +802,7 @@ protected:
                     // ThreadBase thread.
                     void            clear();
                     // periodically called in the threadLoop() to update power state uids.
-                    void            updatePowerState(sp<ThreadBase> thread, bool force = false);
+                    void updatePowerState(const sp<ThreadBase>& thread, bool force = false);
 
                     /** @return true if one or move active tracks was added or removed since the
                      *          last time this function was called or the vector was created.
@@ -1110,8 +1113,8 @@ public:
                     return INVALID_OPERATION;
                 }
 
-                void startMelComputation(const sp<audio_utils::MelProcessor>& processor);
-                void stopMelComputation();
+                void startMelComputation_l(const sp<audio_utils::MelProcessor>& processor) override;
+                void stopMelComputation_l() override;
 
 protected:
     // updated by readOutputParameters_l()
@@ -1215,8 +1218,6 @@ protected:
     audio_channel_mask_t            mMixerChannelMask = AUDIO_CHANNEL_NONE;
 
 private:
-    mediautils::atomic_sp<audio_utils::MelProcessor> mMelProcessor;
-
     // mMasterMute is in both PlaybackThread and in AudioFlinger.  When a
     // PlaybackThread needs to find out if master-muted, it checks it's local
     // copy rather than the one in AudioFlinger.  This optimization saves a lock.
@@ -1290,7 +1291,7 @@ private:
     template <typename T>
     class Tracks {
     public:
-        Tracks(bool saveDeletedTrackIds) :
+        explicit Tracks(bool saveDeletedTrackIds) :
             mSaveDeletedTrackIds(saveDeletedTrackIds) { }
 
         // SortedVector methods
@@ -1319,7 +1320,7 @@ private:
             return mTracks.end();
         }
 
-        size_t          processDeletedTrackIds(std::function<void(int)> f) {
+        size_t          processDeletedTrackIds(const std::function<void(int)>& f) {
             for (const int trackId : mDeletedTrackIds) {
                 f(trackId);
             }
@@ -1441,7 +1442,7 @@ protected:
                 class IsTimestampAdvancing {
                 public:
                     // The timestamp will not be checked any faster than the specified time.
-                    IsTimestampAdvancing(nsecs_t minimumTimeBetweenChecksNs)
+                    explicit IsTimestampAdvancing(nsecs_t minimumTimeBetweenChecksNs)
                         :   mMinimumTimeBetweenChecksNs(minimumTimeBetweenChecksNs)
                     {
                         clear();
@@ -1758,7 +1759,7 @@ protected:
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
 
 private:
-                bool        outputsReady(const SortedVector< sp<OutputTrack> > &outputTracks);
+                bool        outputsReady();
 protected:
     // threadLoop snippets
     virtual     void        threadLoop_mix();
@@ -2107,7 +2108,7 @@ class MmapThread : public ThreadBase
 #include "MmapTracks.h"
 
     MmapThread(const sp<AudioFlinger>& audioFlinger, audio_io_handle_t id,
-               AudioHwDevice *hwDev, sp<StreamHalInterface> stream, bool systemReady,
+               AudioHwDevice *hwDev, const sp<StreamHalInterface>& stream, bool systemReady,
                bool isOut);
     virtual     ~MmapThread();
 
@@ -2130,6 +2131,7 @@ class MmapThread : public ThreadBase
     status_t stop(audio_port_handle_t handle);
     status_t standby();
     virtual status_t getExternalPosition(uint64_t *position, int64_t *timeNaos) = 0;
+    virtual status_t reportData(const void* buffer, size_t frameCount);
 
     // RefBase
     virtual     void        onFirstRef();
@@ -2272,6 +2274,11 @@ public:
                                 return !(mOutput == nullptr || mOutput->stream == nullptr);
                             }
 
+                status_t    reportData(const void* buffer, size_t frameCount) override;
+
+                void startMelComputation_l(const sp<audio_utils::MelProcessor>& processor) override;
+                void stopMelComputation_l() override;
+
 protected:
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
 
@@ -2281,6 +2288,8 @@ protected:
                 bool                        mMasterMute;
                 bool                        mStreamMute;
                 AudioStreamOut*             mOutput;
+
+                mediautils::atomic_sp<audio_utils::MelProcessor> mMelProcessor;
 };
 
 class MmapCaptureThread : public MmapThread

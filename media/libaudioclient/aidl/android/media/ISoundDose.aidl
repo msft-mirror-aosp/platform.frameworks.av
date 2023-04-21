@@ -23,8 +23,8 @@ import android.media.SoundDoseRecord;
  * AudioService#SoundDoseHelper to the audio server
  */
 interface ISoundDose {
-    /** Set a new RS2 value used for momentary exposure warnings. */
-    oneway void setOutputRs2(float rs2Value);
+    /** Set a new RS2 upper bound used for momentary exposure warnings. */
+    oneway void setOutputRs2UpperBound(float rs2Value);
 
     /**
      * Resets the native CSD values. This can happen after a crash in the
@@ -35,11 +35,38 @@ interface ISoundDose {
      */
     oneway void resetCsd(float currentCsd, in SoundDoseRecord[] records);
 
+    /**
+     * Updates the attenuation used for the MEL calculation when the volume is
+     * not applied by the audio framework. This can be the case when for example
+     * the absolute volume is used for a particular device.
+     *
+     * @param attenuationDB the attenuation as a negative value in dB that will
+     *                      be applied for the internal MEL when computing CSD.
+     *                      A value of 0 represents no attenuation for the MELs
+     * @param device        the audio_devices_t type for which we will apply the
+     *                      attenuation
+     */
+    oneway void updateAttenuation(float attenuationDB, int device);
+
+    /**
+     * Disable the calculation of sound dose. This has the effect that no MEL
+     * values will be computed on the framework side. The MEL returned from
+     * the IHalSoundDoseCallbacks will be ignored.
+     * Should only be called once at startup if the AudioService does not
+     * support CSD.
+     */
+    oneway void disableCsd();
+
     /* -------------------------- Test API methods --------------------------
-    /** Get the currently used RS2 value. */
-    float getOutputRs2();
+    /** Get the currently used RS2 upper bound. */
+    float getOutputRs2UpperBound();
     /** Get the current CSD from audioserver. */
     float getCsd();
+    /**
+     * Returns true if the HAL supports the ISoundDose interface. Can be either
+     * as part of IModule or standalon sound dose HAL.
+     */
+    boolean isSoundDoseHalSupported();
     /** Enables/Disables MEL computations from framework. */
     oneway void forceUseFrameworkMel(boolean useFrameworkMel);
     /** Enables/Disables the computation of CSD on all devices. */
