@@ -88,6 +88,12 @@ C2SoftAomEnc::IntfImpl::IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helpe
                          .withSetter(BitrateSetter)
                          .build());
 
+    addParameter(DefineParam(mComplexity, C2_PARAMKEY_COMPLEXITY)
+                         .withDefault(new C2StreamComplexityTuning::output(0u, 0))
+                         .withFields({C2F(mComplexity, value).inRange(0, 5)})
+                         .withSetter(Setter<decltype(*mComplexity)>::NonStrictValueWithNoDeps)
+                         .build());
+
     addParameter(DefineParam(mQuality, C2_PARAMKEY_QUALITY)
                          .withDefault(new C2StreamQualityTuning::output(0u, 80))
                          .withFields({C2F(mQuality, value).inRange(0, 100)})
@@ -306,10 +312,20 @@ static int MapC2QualityToAOMQuality (int c2Quality) {
     return 15 + 35 * (100 - c2Quality) / 100;
 }
 
+static int MapC2ComplexityToAOMSpeed (int c2Complexity) {
+    int mapping[6] = {10, 9, 8, 7, 6, 6};
+    if (c2Complexity > 5 || c2Complexity < 0) {
+        ALOGW("Wrong complexity setting. Falling back to speed 10");
+        return 10;
+    }
+    return mapping[c2Complexity];
+}
+
 aom_codec_err_t C2SoftAomEnc::setupCodecParameters() {
     aom_codec_err_t codec_return = AOM_CODEC_OK;
 
-    codec_return = aom_codec_control(mCodecContext, AOME_SET_CPUUSED, DEFAULT_SPEED);
+    codec_return = aom_codec_control(mCodecContext, AOME_SET_CPUUSED,
+                                     MapC2ComplexityToAOMSpeed(mComplexity->value));
     if (codec_return != AOM_CODEC_OK) goto BailOut;
 
     codec_return = aom_codec_control(mCodecContext, AV1E_SET_ROW_MT, 1);
@@ -461,6 +477,7 @@ status_t C2SoftAomEnc::initEncoder() {
         mRequestSync = mIntf->getRequestSync_l();
         mColorAspects = mIntf->getCodedColorAspects_l();
         mQuality = mIntf->getQuality_l();
+        mComplexity = mIntf->getComplexity_l();
     }
 
 
@@ -481,9 +498,9 @@ status_t C2SoftAomEnc::initEncoder() {
     mCodecInterface = aom_codec_av1_cx();
     if (!mCodecInterface) goto CleanUp;
 
-    ALOGD("AOM: initEncoder. BRMode: %u. KF: %u. QP: %u - %u, 10Bit: %d",
+    ALOGD("AOM: initEncoder. BRMode: %u. KF: %u. QP: %u - %u, 10Bit: %d, comlexity %d",
           (uint32_t)mBitrateControlMode,
-          mIntf->getSyncFramePeriod(), mMinQuantizer, mMaxQuantizer, mIs10Bit);
+          mIntf->getSyncFramePeriod(), mMinQuantizer, mMaxQuantizer, mIs10Bit, mComplexity->value);
 
     mCodecConfiguration = new aom_codec_enc_cfg_t;
     if (!mCodecConfiguration) goto CleanUp;
@@ -525,15 +542,15 @@ status_t C2SoftAomEnc::initEncoder() {
     mCodecConfiguration->kf_max_dist = 3000;
     // Encoder determines optimal key frame placement automatically.
     mCodecConfiguration->kf_mode = AOM_KF_AUTO;
-    // Initial value of the buffer level in ms.
-    mCodecConfiguration->rc_buf_initial_sz = 500;
-    // Amount of data that the encoder should try to maintain in ms.
-    mCodecConfiguration->rc_buf_optimal_sz = 600;
     // The amount of data that may be buffered by the decoding
     // application in ms.
     mCodecConfiguration->rc_buf_sz = 1000;
 
     if (mBitrateControlMode == AOM_CBR) {
+        // Initial value of the buffer level in ms.
+        mCodecConfiguration->rc_buf_initial_sz = 500;
+        // Amount of data that the encoder should try to maintain in ms.
+        mCodecConfiguration->rc_buf_optimal_sz = 600;
         // Maximum amount of bits that can be subtracted from the target
         // bitrate - expressed as percentage of the target bitrate.
         mCodecConfiguration->rc_undershoot_pct = 100;
@@ -546,7 +563,7 @@ status_t C2SoftAomEnc::initEncoder() {
         mCodecConfiguration->rc_undershoot_pct = 100;
         // Maximum amount of bits that can be added to the target
         // bitrate - expressed as percentage of the target bitrate.
-        mCodecConfiguration->rc_overshoot_pct = 25;
+        mCodecConfiguration->rc_overshoot_pct = 100;
     }
 
     if (mIntf->getSyncFramePeriod() >= 0) {
@@ -559,6 +576,12 @@ status_t C2SoftAomEnc::initEncoder() {
     }
     if (mMaxQuantizer > 0) {
         mCodecConfiguration->rc_max_quantizer = mMaxQuantizer;
+    } else {
+        if (mBitrateControlMode == AOM_VBR) {
+            // For VBR we are limiting MaxQP to 52 (down 11 steps) to maintain quality
+            // 52 comes from experiments done on libaom standalone app
+            mCodecConfiguration->rc_max_quantizer = 52;
+        }
     }
 
     mCodecContext = new aom_codec_ctx_t;

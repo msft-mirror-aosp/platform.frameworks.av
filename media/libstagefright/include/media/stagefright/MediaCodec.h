@@ -28,6 +28,7 @@
 #include <media/MediaMetrics.h>
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/AHandler.h>
+#include <media/stagefright/CodecErrorLog.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <utils/Vector.h>
 
@@ -39,6 +40,7 @@ namespace aidl {
 namespace android {
 namespace media {
 class MediaResourceParcel;
+class ClientConfigParcel;
 } // media
 } // android
 } // aidl
@@ -71,6 +73,7 @@ struct IDescrambler;
 
 using hardware::cas::native::V1_0::IDescrambler;
 using aidl::android::media::MediaResourceParcel;
+using aidl::android::media::ClientConfigParcel;
 
 struct MediaCodec : public AHandler {
     enum Domain {
@@ -301,6 +304,8 @@ struct MediaCodec : public AHandler {
         T value;
     };
 
+    inline CodecErrorLog &getErrorLog() { return mErrorLog; }
+
 protected:
     virtual ~MediaCodec();
     virtual void onMessageReceived(const sp<AMessage> &msg);
@@ -325,6 +330,7 @@ private:
         RELEASING,
     };
     std::string stateString(State state);
+    std::string apiStateString();
 
     enum {
         kPortIndexInput         = 0,
@@ -442,16 +448,20 @@ private:
 
     Mutex mMetricsLock;
     mediametrics_handle_t mMetricsHandle = 0;
+    bool mMetricsToUpload = false;
     nsecs_t mLifetimeStartNs = 0;
     void initMediametrics();
     void updateMediametrics();
     void flushMediametrics();
+    void resetMetricsFields();
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
     void onGetMetrics(const sp<AMessage>& msg);
     constexpr const char *asString(TunnelPeekState state, const char *default_string="?");
     void updateTunnelPeek(const sp<AMessage> &msg);
     void updatePlaybackDuration(const sp<AMessage> &msg);
+
+    inline void initClientConfigParcel(ClientConfigParcel& clientConfig);
 
     sp<AMessage> mOutputFormat;
     sp<AMessage> mInputFormat;
@@ -482,6 +492,28 @@ private:
     hdr_format getHdrFormatForDecoder(const AString &mime, const int32_t profile,
             const int32_t colorTransfer);
     bool profileSupport10Bits(const AString &mime, const int32_t profile);
+
+    struct ApiUsageMetrics {
+        bool isArrayMode;
+        enum OperationMode {
+            kUnknownMode = 0,
+            kSynchronousMode = 1,
+            kAsynchronousMode = 2,
+            kBlockMode = 3,
+        };
+        OperationMode operationMode;
+        bool isUsingOutputSurface;
+        struct InputBufferSize {
+            int32_t appMax;  // max size configured by the app
+            int32_t usedMax;  // max size actually used
+            int32_t codecMax;  // max size suggested by the codec
+        } inputBufferSize;
+    } mApiUsageMetrics;
+    struct ReliabilityContextMetrics {
+        int32_t flushCount;
+        int32_t setOutputSurfaceCount;
+        int32_t resolutionChangeCount;
+    } mReliabilityContextMetrics;
 
     // initial create parameters
     AString mInitName;
@@ -646,6 +678,9 @@ private:
                                                  // when low latency is on
     int64_t mInputBufferCounter;  // number of input buffers queued since last reset/flush
 
+    // A rescheduleable message that periodically polls for rendered buffers
+    sp<AMessage> mMsgPollForRenderedBuffers;
+
     class ReleaseSurface;
     std::unique_ptr<ReleaseSurface> mReleaseSurface;
 
@@ -702,10 +737,14 @@ private:
     };
 
     Histogram mLatencyHist;
+    // An unique ID for the codec - Used by the metrics.
+    uint64_t mCodecId = 0;
 
     std::function<sp<CodecBase>(const AString &, const char *)> mGetCodecBase;
     std::function<status_t(const AString &, sp<MediaCodecInfo> *)> mGetCodecInfo;
     friend class MediaTestHelper;
+
+    CodecErrorLog mErrorLog;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
 };

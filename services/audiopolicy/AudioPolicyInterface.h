@@ -17,6 +17,7 @@
 #ifndef ANDROID_AUDIOPOLICY_INTERFACE_H
 #define ANDROID_AUDIOPOLICY_INTERFACE_H
 
+#include <android/media/DeviceConnectedState.h>
 #include <media/AudioCommonTypes.h>
 #include <media/AudioContainers.h>
 #include <media/AudioDeviceTypeAddr.h>
@@ -246,6 +247,8 @@ public:
                                     unsigned int *num_ports,
                                     struct audio_port_v7 *ports,
                                     unsigned int *generation) = 0;
+    virtual status_t listDeclaredDevicePorts(media::AudioPortRole role,
+                                             std::vector<media::AudioPortFw>* result) = 0;
     virtual status_t getAudioPort(struct audio_port_v7 *port) = 0;
     virtual status_t createAudioPatch(const struct audio_patch *patch,
                                        audio_patch_handle_t *handle,
@@ -435,6 +438,8 @@ class AudioPolicyClientInterface
 public:
     virtual ~AudioPolicyClientInterface() {}
 
+    virtual status_t getAudioPolicyConfig(media::AudioPolicyConfig *config) = 0;
+
     //
     // Audio HW module functions
     //
@@ -565,7 +570,8 @@ public:
     virtual status_t updateSecondaryOutputs(
             const TrackSecondaryOutputsMap& trackSecondaryOutputs) = 0;
 
-    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port, bool connected) = 0;
+    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port,
+                                             media::DeviceConnectedState state) = 0;
 
     virtual status_t invalidateTracks(const std::vector<audio_port_handle_t>& portIds) = 0;
 };

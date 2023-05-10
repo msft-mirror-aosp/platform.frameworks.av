@@ -316,6 +316,18 @@ bool CameraProviderManager::supportNativeZoomRatio(const std::string &id) const 
     return deviceInfo->supportNativeZoomRatio();
 }
 
+bool CameraProviderManager::isCompositeJpegRDisabled(const std::string &id) const {
+    std::lock_guard<std::mutex> lock(mInterfaceMutex);
+    return isCompositeJpegRDisabledLocked(id);
+}
+
+bool CameraProviderManager::isCompositeJpegRDisabledLocked(const std::string &id) const {
+    auto deviceInfo = findDeviceInfoLocked(id);
+    if (deviceInfo == nullptr) return false;
+
+    return deviceInfo->isCompositeJpegRDisabled();
+}
+
 status_t CameraProviderManager::getResourceCost(const std::string &id,
         CameraResourceCost* cost) const {
     std::lock_guard<std::mutex> lock(mInterfaceMutex);
@@ -1098,7 +1110,7 @@ bool CameraProviderManager::isConcurrentDynamicRangeCaptureSupported(
 
     for (size_t i = 0; i < entry.count; i += 3) {
         if (entry.data.i64[i] == profile) {
-            if (entry.data.i64[i+1] & concurrentProfile) {
+            if ((entry.data.i64[i+1] == 0) || (entry.data.i64[i+1] & concurrentProfile)) {
                 return true;
             }
         }
@@ -1108,7 +1120,7 @@ bool CameraProviderManager::isConcurrentDynamicRangeCaptureSupported(
 }
 
 status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveJpegRTags(bool maxResolution) {
-    if (kFrameworkJpegRDisabled) {
+    if (kFrameworkJpegRDisabled || mCompositeJpegRDisabled) {
         return OK;
     }
 
@@ -1154,16 +1166,26 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveJpegRTags(bool 
         return OK;
     }
 
+    if (!isConcurrentDynamicRangeCaptureSupported(c,
+                ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_HLG10,
+                ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD) &&
+            !property_get_bool("ro.camera.enableCompositeAPI0JpegR", false)) {
+        // API0, P010 only Jpeg/R support is meant to be used only as a reference due to possible
+        // impact on quality and performance.
+        // This data path will be turned off by default and individual device builds must enable
+        // 'ro.camera.enableCompositeAPI0JpegR' in order to experiment using it.
+        mCompositeJpegRDisabled = true;
+        return OK;
+    }
+
     getSupportedSizes(c, scalerSizesTag,
             static_cast<android_pixel_format_t>(HAL_PIXEL_FORMAT_BLOB), &supportedBlobSizes);
     getSupportedSizes(c, scalerSizesTag,
             static_cast<android_pixel_format_t>(HAL_PIXEL_FORMAT_YCBCR_P010), &supportedP010Sizes);
     auto it = supportedP010Sizes.begin();
     while (it != supportedP010Sizes.end()) {
-        // Resolutions that don't align on 32 pixels are not supported by Jpeg/R.
-        // This can be removed as soon as the encoder restriction is lifted.
-        if ((std::find(supportedBlobSizes.begin(), supportedBlobSizes.end(), *it) ==
-                supportedBlobSizes.end()) || ((std::get<0>(*it) % 32) != 0)) {
+        if (std::find(supportedBlobSizes.begin(), supportedBlobSizes.end(), *it) ==
+                supportedBlobSizes.end()) {
             it = supportedP010Sizes.erase(it);
         } else {
             it++;
@@ -2074,13 +2096,12 @@ sp<CameraProviderManager::StatusListener> CameraProviderManager::getStatusListen
 CameraProviderManager::ProviderInfo::ProviderInfo(
         const std::string &providerName,
         const std::string &providerInstance,
-        CameraProviderManager *manager) :
+        [[maybe_unused]] CameraProviderManager *manager) :
         mProviderName(providerName),
         mProviderInstance(providerInstance),
         mProviderTagid(generateVendorTagId(providerName)),
         mUniqueDeviceCount(0),
         mManager(manager) {
-    (void) mManager;
 }
 
 const std::string& CameraProviderManager::ProviderInfo::getType() const {
@@ -2517,6 +2538,10 @@ void CameraProviderManager::ProviderInfo::DeviceInfo3::notifyDeviceStateChange(i
             (mDeviceStateOrientationMap.find(newState) != mDeviceStateOrientationMap.end())) {
         mCameraCharacteristics.update(ANDROID_SENSOR_ORIENTATION,
                 &mDeviceStateOrientationMap[newState], 1);
+        if (mCameraCharNoPCOverride.get() != nullptr) {
+            mCameraCharNoPCOverride->update(ANDROID_SENSOR_ORIENTATION,
+                &mDeviceStateOrientationMap[newState], 1);
+        }
     }
 }
 

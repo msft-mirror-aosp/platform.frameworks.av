@@ -164,7 +164,7 @@ public:
 
     class SetParameterConfigEventData : public ConfigEventData {
     public:
-        explicit SetParameterConfigEventData(String8 keyValuePairs) :
+        explicit SetParameterConfigEventData(const String8& keyValuePairs) :
             mKeyValuePairs(keyValuePairs) {}
 
         virtual  void dump(char *buffer, size_t size) {
@@ -176,7 +176,7 @@ public:
 
     class SetParameterConfigEvent : public ConfigEvent {
     public:
-        explicit SetParameterConfigEvent(String8 keyValuePairs) :
+        explicit SetParameterConfigEvent(const String8& keyValuePairs) :
             ConfigEvent(CFG_EVENT_SET_PARAMETER) {
             mData = new SetParameterConfigEventData(keyValuePairs);
             mWaitStatus = true;
@@ -802,7 +802,7 @@ protected:
                     // ThreadBase thread.
                     void            clear();
                     // periodically called in the threadLoop() to update power state uids.
-                    void            updatePowerState(sp<ThreadBase> thread, bool force = false);
+                    void updatePowerState(const sp<ThreadBase>& thread, bool force = false);
 
                     /** @return true if one or move active tracks was added or removed since the
                      *          last time this function was called or the vector was created.
@@ -1116,6 +1116,32 @@ public:
                 void startMelComputation_l(const sp<audio_utils::MelProcessor>& processor) override;
                 void stopMelComputation_l() override;
 
+                void setStandby() {
+                    Mutex::Autolock _l(mLock);
+                    setStandby_l();
+                }
+
+                void setStandby_l() {
+                    mStandby = true;
+                    mHalStarted = false;
+                    mKernelPositionOnStandby =
+                        mTimestamp.mPosition[ExtendedTimestamp::LOCATION_KERNEL];
+                }
+
+                bool waitForHalStart() {
+                    Mutex::Autolock _l(mLock);
+                    static const nsecs_t kWaitHalTimeoutNs = seconds(2);
+                    nsecs_t endWaitTimetNs = systemTime() + kWaitHalTimeoutNs;
+                    while (!mHalStarted) {
+                        nsecs_t timeNs = systemTime();
+                        if (timeNs >= endWaitTimetNs) {
+                            break;
+                        }
+                        nsecs_t waitTimeLeftNs = endWaitTimetNs - timeNs;
+                        mWaitHalStartCV.waitRelative(mLock, waitTimeLeftNs);
+                    }
+                    return mHalStarted;
+                }
 protected:
     // updated by readOutputParameters_l()
     size_t                          mNormalFrameCount;  // normal mixer and effects
@@ -1291,7 +1317,7 @@ private:
     template <typename T>
     class Tracks {
     public:
-        Tracks(bool saveDeletedTrackIds) :
+        explicit Tracks(bool saveDeletedTrackIds) :
             mSaveDeletedTrackIds(saveDeletedTrackIds) { }
 
         // SortedVector methods
@@ -1320,7 +1346,7 @@ private:
             return mTracks.end();
         }
 
-        size_t          processDeletedTrackIds(std::function<void(int)> f) {
+        size_t          processDeletedTrackIds(const std::function<void(int)>& f) {
             for (const int trackId : mDeletedTrackIds) {
                 f(trackId);
             }
@@ -1415,6 +1441,14 @@ private:
     // Downstream patch latency, available if mDownstreamLatencyStatMs.getN() > 0.
     audio_utils::Statistics<double> mDownstreamLatencyStatMs{0.999};
 
+    // output stream start detection based on render position returned by the kernel
+    // condition signalled when the output stream has started
+    Condition                mWaitHalStartCV;
+    // true when the output stream render position has moved, reset to false in standby
+    bool                     mHalStarted = false;
+    // last kernel render position saved when entering standby
+    int64_t                  mKernelPositionOnStandby = 0;
+
 public:
     virtual     bool        hasFastMixer() const = 0;
     virtual     FastTrackUnderruns getFastTrackUnderruns(size_t fastIndex __unused) const
@@ -1442,7 +1476,7 @@ protected:
                 class IsTimestampAdvancing {
                 public:
                     // The timestamp will not be checked any faster than the specified time.
-                    IsTimestampAdvancing(nsecs_t minimumTimeBetweenChecksNs)
+                    explicit IsTimestampAdvancing(nsecs_t minimumTimeBetweenChecksNs)
                         :   mMinimumTimeBetweenChecksNs(minimumTimeBetweenChecksNs)
                     {
                         clear();
@@ -1759,7 +1793,7 @@ protected:
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
 
 private:
-                bool        outputsReady(const SortedVector< sp<OutputTrack> > &outputTracks);
+                bool        outputsReady();
 protected:
     // threadLoop snippets
     virtual     void        threadLoop_mix();
@@ -2108,7 +2142,7 @@ class MmapThread : public ThreadBase
 #include "MmapTracks.h"
 
     MmapThread(const sp<AudioFlinger>& audioFlinger, audio_io_handle_t id,
-               AudioHwDevice *hwDev, sp<StreamHalInterface> stream, bool systemReady,
+               AudioHwDevice *hwDev, const sp<StreamHalInterface>& stream, bool systemReady,
                bool isOut);
     virtual     ~MmapThread();
 

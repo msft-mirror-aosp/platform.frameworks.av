@@ -175,6 +175,8 @@ public:
     binder::Status listAudioPorts(media::AudioPortRole role, media::AudioPortType type,
                                   Int* count, std::vector<media::AudioPortFw>* ports,
                                   int32_t* _aidl_return) override;
+    binder::Status listDeclaredDevicePorts(media::AudioPortRole role,
+                                           std::vector<media::AudioPortFw>* _aidl_return) override;
     binder::Status getAudioPort(int portId,
                                 media::AudioPortFw* _aidl_return) override;
     binder::Status createAudioPatch(const media::AudioPatchFw& patch, int32_t handle,
@@ -482,7 +484,7 @@ private:
         void onUidIdle(uid_t uid, bool disabled) override;
         void onUidStateChanged(uid_t uid, int32_t procState, int64_t procStateSeq,
                 int32_t capability) override;
-        void onUidProcAdjChanged(uid_t uid) override;
+        void onUidProcAdjChanged(uid_t uid, int32_t adj) override;
 
         void addOverrideUid(uid_t uid, bool active) { updateOverrideUid(uid, active, true); }
         void removeOverrideUid(uid_t uid) { updateOverrideUid(uid, false, false); }
@@ -733,6 +735,8 @@ private:
         explicit AudioPolicyClient(AudioPolicyService *service) : mAudioPolicyService(service) {}
         virtual ~AudioPolicyClient() {}
 
+        virtual status_t getAudioPolicyConfig(media::AudioPolicyConfig *config);
+
         //
         // Audio HW module functions
         //
@@ -845,7 +849,7 @@ private:
                 const TrackSecondaryOutputsMap& trackSecondaryOutputs) override;
 
         status_t setDeviceConnectedState(
-                const struct audio_port_v7 *port, bool connected) override;
+                const struct audio_port_v7 *port, media::DeviceConnectedState state) override;
 
         status_t invalidateTracks(const std::vector<audio_port_handle_t>& portIds) override;
 
@@ -1068,7 +1072,7 @@ private:
     Mutex mNotificationClientsLock;
     DefaultKeyedVector<int64_t, sp<NotificationClient>> mNotificationClients
         GUARDED_BY(mNotificationClientsLock);
-    // Manage all effects configured in audio_effects.conf
+    // Manage all effects configured in audio_effects.xml
     // never hold AudioPolicyService::mLock when calling AudioPolicyEffects methods as
     // those can call back into AudioPolicyService methods and try to acquire the mutex
     sp<AudioPolicyEffects> mAudioPolicyEffects GUARDED_BY(mLock);

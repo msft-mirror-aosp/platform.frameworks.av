@@ -23,7 +23,6 @@
 #include <error/expected_utils.h>
 #include <media/AidlConversionNdk.h>
 #include <media/AidlConversionEffect.h>
-#include <media/audiohal/AudioEffectUuid.h>
 #include <system/audio_effects/effect_equalizer.h>
 
 #include <utils/Log.h>
@@ -113,20 +112,20 @@ status_t AidlConversionEq::setParameter(EffectParamReader& param) {
     return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
 }
 
-aidl::ConversionResult<Parameter> AidlConversionEq::getAidlParameter(Equalizer::Tag tag) {
+ConversionResult<Parameter> AidlConversionEq::getAidlParameter(Equalizer::Tag tag) {
     Parameter aidlParam;
     Parameter::Id id = MAKE_SPECIFIC_PARAMETER_ID(Equalizer, equalizerTag, tag);
     RETURN_IF_ERROR(statusTFromBinderStatus(mEffect->getParameter(id, &aidlParam)));
     return aidlParam;
 }
 
-aidl::ConversionResult<int32_t> AidlConversionEq::getParameterPreset() {
+ConversionResult<int32_t> AidlConversionEq::getParameterPreset() {
     Parameter aidlParam = VALUE_OR_RETURN_STATUS(getAidlParameter(Equalizer::preset));
     return VALUE_OR_RETURN_STATUS(GET_PARAMETER_SPECIFIC_FIELD(aidlParam, Equalizer, equalizer,
                                                                Equalizer::preset, int32_t));
 }
 
-aidl::ConversionResult<std::string> AidlConversionEq::getParameterPresetName(
+ConversionResult<std::string> AidlConversionEq::getParameterPresetName(
         EffectParamWriter& param) {
     int32_t presetIdx;
     if (OK != param.readFromParameter(&presetIdx)) {

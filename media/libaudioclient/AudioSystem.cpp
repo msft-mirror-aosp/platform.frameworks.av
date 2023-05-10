@@ -264,6 +264,12 @@ status_t AudioSystem::setMode(audio_mode_t mode) {
     return af->setMode(mode);
 }
 
+status_t AudioSystem::setSimulateDeviceConnections(bool enabled) {
+    const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
+    if (af == 0) return PERMISSION_DENIED;
+    return af->setSimulateDeviceConnections(enabled);
+}
+
 status_t AudioSystem::setParameters(audio_io_handle_t ioHandle, const String8& keyValuePairs) {
     const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
@@ -1576,6 +1582,15 @@ status_t AudioSystem::listAudioPorts(audio_port_role_t role,
     return OK;
 }
 
+status_t AudioSystem::listDeclaredDevicePorts(media::AudioPortRole role,
+                                              std::vector<media::AudioPortFw>* result) {
+    if (result == nullptr) return BAD_VALUE;
+    const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
+    if (aps == 0) return PERMISSION_DENIED;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(aps->listDeclaredDevicePorts(role, result)));
+    return OK;
+}
+
 status_t AudioSystem::getAudioPort(struct audio_port_v7* port) {
     if (port == nullptr) {
         return BAD_VALUE;
@@ -2512,6 +2527,14 @@ status_t AudioSystem::supportsBluetoothVariableLatency(
         return PERMISSION_DENIED;
     }
     return af->supportsBluetoothVariableLatency(support);
+}
+
+status_t AudioSystem::getAudioPolicyConfig(media::AudioPolicyConfig *config) {
+    const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
+    if (af == nullptr) {
+        return PERMISSION_DENIED;
+    }
+    return af->getAudioPolicyConfig(config);
 }
 
 class CaptureStateListenerImpl : public media::BnCaptureStateListener,

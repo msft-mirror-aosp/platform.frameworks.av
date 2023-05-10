@@ -46,6 +46,7 @@
 
 #include <system/audio.h>
 #include <system/audio_policy.h>
+#include <AudioPolicyConfig.h>
 #include <AudioPolicyManager.h>
 
 namespace android {
@@ -185,7 +186,10 @@ static auto& getIAudioPolicyServiceStatistics() {
 
 static AudioPolicyInterface* createAudioPolicyManager(AudioPolicyClientInterface *clientInterface)
 {
-    AudioPolicyManager *apm = new AudioPolicyManager(clientInterface);
+    auto config = AudioPolicyConfig::loadFromApmXmlConfigWithFallback();  // This can't fail.
+    AudioPolicyManager *apm = new AudioPolicyManager(
+            config, loadApmEngineLibraryAndCreateEngine(config->getEngineLibraryNameSuffix()),
+            clientInterface);
     status_t status = apm->initialize();
     if (status != NO_ERROR) {
         delete apm;
@@ -259,7 +263,8 @@ void AudioPolicyService::onFirstRef()
     }
 
     // load audio processing modules
-    sp<AudioPolicyEffects> audioPolicyEffects = new AudioPolicyEffects();
+    const sp<EffectsFactoryHalInterface> effectsFactoryHal = EffectsFactoryHalInterface::create();
+    sp<AudioPolicyEffects> audioPolicyEffects = new AudioPolicyEffects(effectsFactoryHal);
     sp<UidPolicy> uidPolicy = new UidPolicy(this);
     sp<SensorPrivacyPolicy> sensorPrivacyPolicy = new SensorPrivacyPolicy(this);
     {
@@ -278,7 +283,7 @@ void AudioPolicyService::onFirstRef()
         AudioDeviceTypeAddrVector devices;
         bool hasSpatializer = mAudioPolicyManager->canBeSpatialized(&attr, nullptr, devices);
         if (hasSpatializer) {
-            mSpatializer = Spatializer::create(this);
+            mSpatializer = Spatializer::create(this, effectsFactoryHal);
         }
         if (mSpatializer == nullptr) {
             // No spatializer created, signal the reason: NO_INIT a failure, OK means intended.
@@ -1694,7 +1699,7 @@ void AudioPolicyService::UidPolicy::onUidStateChanged(uid_t uid,
     }
 }
 
-void AudioPolicyService::UidPolicy::onUidProcAdjChanged(uid_t uid __unused) {
+void AudioPolicyService::UidPolicy::onUidProcAdjChanged(uid_t uid __unused, int32_t adj __unused) {
 }
 
 void AudioPolicyService::UidPolicy::updateOverrideUid(uid_t uid, bool active, bool insert) {

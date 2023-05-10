@@ -24,7 +24,6 @@
 #include <error/expected_utils.h>
 #include <media/AidlConversionNdk.h>
 #include <media/AidlConversionEffect.h>
-#include <media/audiohal/AudioEffectUuid.h>
 #include <system/audio_effects/effect_visualizer.h>
 
 #include <utils/Log.h>
@@ -53,6 +52,7 @@ status_t AidlConversionVisualizer::setParameter(EffectParamReader& param) {
     Parameter aidlParam;
     switch (type) {
         case VISUALIZER_PARAM_CAPTURE_SIZE: {
+            mCaptureSize = value;
             aidlParam = MAKE_SPECIFIC_PARAMETER(Visualizer, visualizer, captureSamples, value);
             break;
         }
