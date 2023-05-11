@@ -1110,7 +1110,7 @@ bool CameraProviderManager::isConcurrentDynamicRangeCaptureSupported(
 
     for (size_t i = 0; i < entry.count; i += 3) {
         if (entry.data.i64[i] == profile) {
-            if (entry.data.i64[i+1] & concurrentProfile) {
+            if ((entry.data.i64[i+1] == 0) || (entry.data.i64[i+1] & concurrentProfile)) {
                 return true;
             }
         }
@@ -1172,10 +1172,8 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveJpegRTags(bool 
             static_cast<android_pixel_format_t>(HAL_PIXEL_FORMAT_YCBCR_P010), &supportedP010Sizes);
     auto it = supportedP010Sizes.begin();
     while (it != supportedP010Sizes.end()) {
-        // Resolutions that don't align on 32 pixels are not supported by Jpeg/R.
-        // This can be removed as soon as the encoder restriction is lifted.
-        if ((std::find(supportedBlobSizes.begin(), supportedBlobSizes.end(), *it) ==
-                supportedBlobSizes.end()) || ((std::get<0>(*it) % 32) != 0)) {
+        if (std::find(supportedBlobSizes.begin(), supportedBlobSizes.end(), *it) ==
+                supportedBlobSizes.end()) {
             it = supportedP010Sizes.erase(it);
         } else {
             it++;
@@ -2528,6 +2526,10 @@ void CameraProviderManager::ProviderInfo::DeviceInfo3::notifyDeviceStateChange(i
             (mDeviceStateOrientationMap.find(newState) != mDeviceStateOrientationMap.end())) {
         mCameraCharacteristics.update(ANDROID_SENSOR_ORIENTATION,
                 &mDeviceStateOrientationMap[newState], 1);
+        if (mCameraCharNoPCOverride.get() != nullptr) {
+            mCameraCharNoPCOverride->update(ANDROID_SENSOR_ORIENTATION,
+                &mDeviceStateOrientationMap[newState], 1);
+        }
     }
 }
 

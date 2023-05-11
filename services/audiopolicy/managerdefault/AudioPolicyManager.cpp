@@ -116,14 +116,13 @@ status_t AudioPolicyManager::setDeviceConnectionState(audio_devices_t device,
 }
 
 void AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
-                                                        audio_policy_dev_state_t state)
+                                                        media::DeviceConnectedState state)
 {
     audio_port_v7 devicePort;
     device->toAudioPort(&devicePort);
-    if (status_t status = mpClientInterface->setDeviceConnectedState(
-                    &devicePort, state == AUDIO_POLICY_DEVICE_STATE_AVAILABLE);
+    if (status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
             status != OK) {
-        ALOGE("Error %d while setting connected state for device %s", status,
+        ALOGE("Error %d while setting connected state for device %s", state,
                 device->getDeviceTypeAddr().toString(false).c_str());
     }
 }
@@ -206,14 +205,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking outputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the outputs...)
-            broadcastDeviceConnectionState(device, state);
+            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
 
             if (checkOutputsForDevice(device, state, outputs) != NO_ERROR) {
                 mAvailableOutputDevices.remove(device);
 
                 mHwModules.cleanUpForDevice(device);
 
-                broadcastDeviceConnectionState(device, AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE);
+                broadcastDeviceConnectionState(device, media::DeviceConnectedState::DISCONNECTED);
                 return INVALID_OPERATION;
             }
 
@@ -235,8 +234,9 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             ALOGV("%s() disconnecting output device %s", __func__, device->toString().c_str());
 
-            // Send Disconnect to HALs
-            broadcastDeviceConnectionState(device, state);
+            // Notify the HAL to prepare to disconnect device
+            broadcastDeviceConnectionState(
+                    device, media::DeviceConnectedState::PREPARE_TO_DISCONNECT);
 
             // remove device from available output devices
             mAvailableOutputDevices.remove(device);
@@ -244,6 +244,9 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
             mOutputs.clearSessionRoutesForDevice(device);
 
             checkOutputsForDevice(device, state, outputs);
+
+            // Send Disconnect to HALs
+            broadcastDeviceConnectionState(device, media::DeviceConnectedState::DISCONNECTED);
 
             // Reset active device codec
             device->setEncodedFormat(AUDIO_FORMAT_DEFAULT);
@@ -384,12 +387,12 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking intputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the inputs...)
-            broadcastDeviceConnectionState(device, state);
+            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
 
             if (checkInputsForDevice(device, state) != NO_ERROR) {
                 mAvailableInputDevices.remove(device);
 
-                broadcastDeviceConnectionState(device, AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE);
+                broadcastDeviceConnectionState(device, media::DeviceConnectedState::DISCONNECTED);
 
                 mHwModules.cleanUpForDevice(device);
 
@@ -407,12 +410,16 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             ALOGV("%s() disconnecting input device %s", __func__, device->toString().c_str());
 
-            // Set Disconnect to HALs
-            broadcastDeviceConnectionState(device, state);
+            // Notify the HAL to prepare to disconnect device
+            broadcastDeviceConnectionState(
+                    device, media::DeviceConnectedState::PREPARE_TO_DISCONNECT);
 
             mAvailableInputDevices.remove(device);
 
             checkInputsForDevice(device, state);
+
+            // Set Disconnect to HALs
+            broadcastDeviceConnectionState(device, media::DeviceConnectedState::DISCONNECTED);
 
             // remove device from mReportedFormatsMap cache
             mReportedFormatsMap.erase(device);
@@ -6471,6 +6478,14 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
     }
 
     if (state == AUDIO_POLICY_DEVICE_STATE_AVAILABLE) {
+        // first call getAudioPort to get the supported attributes from the HAL
+        struct audio_port_v7 port = {};
+        device->toAudioPort(&port);
+        status_t status = mpClientInterface->getAudioPort(&port);
+        if (status == NO_ERROR) {
+            device->importAudioPort(port);
+        }
+
         // look for input profiles that can be routed to this device
         SortedVector< sp<IOProfile> > profiles;
         for (const auto& hwModule : mHwModules) {
@@ -6522,11 +6537,7 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
 
             desc = new AudioInputDescriptor(profile, mpClientInterface);
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
-            status_t status = desc->open(nullptr,
-                                         device,
-                                         AUDIO_SOURCE_MIC,
-                                         AUDIO_INPUT_FLAG_NONE,
-                                         &input);
+            status = desc->open(nullptr, device, AUDIO_SOURCE_MIC, AUDIO_INPUT_FLAG_NONE, &input);
 
             if (status == NO_ERROR) {
                 const String8& address = String8(device->address().c_str());
@@ -8073,12 +8084,17 @@ void AudioPolicyManager::updateAudioProfiles(const sp<DeviceDescriptor>& devDesc
                 ioHandle, String8(AudioParameter::keyStreamSupportedFormats));
         ALOGV("%s: supported formats %d, %s", __FUNCTION__, ioHandle, reply.string());
         AudioParameter repliedParameters(reply);
+        FormatVector formats;
         if (repliedParameters.get(
-                String8(AudioParameter::keyStreamSupportedFormats), reply) != NO_ERROR) {
-            ALOGE("%s: failed to retrieve format, bailing out", __FUNCTION__);
+                String8(AudioParameter::keyStreamSupportedFormats), reply) == NO_ERROR) {
+            formats = formatsFromString(reply.string());
+        } else if (devDesc->hasValidAudioProfile()) {
+            ALOGD("%s: using the device profiles", __func__);
+            formats = devDesc->getAudioProfiles().getSupportedFormats();
+        } else {
+            ALOGE("%s: failed to retrieve format, bailing out", __func__);
             return;
         }
-        FormatVector formats = formatsFromString(reply.string());
         mReportedFormatsMap[devDesc] = formats;
         if (device == AUDIO_DEVICE_OUT_HDMI
                 || isDeviceOfModule(devDesc, AUDIO_HARDWARE_MODULE_ID_MSD)) {
@@ -8088,7 +8104,7 @@ void AudioPolicyManager::updateAudioProfiles(const sp<DeviceDescriptor>& devDesc
     }
 
     for (audio_format_t format : profiles.getSupportedFormats()) {
-        ChannelMaskSet channelMasks;
+        std::optional<ChannelMaskSet> channelMasks;
         SampleRateSet samplingRates;
         AudioParameter requestedParameters;
         requestedParameters.addInt(String8(AudioParameter::keyFormat), format);
@@ -8103,6 +8119,8 @@ void AudioPolicyManager::updateAudioProfiles(const sp<DeviceDescriptor>& devDesc
             if (repliedParameters.get(
                     String8(AudioParameter::keyStreamSupportedSamplingRates), reply) == NO_ERROR) {
                 samplingRates = samplingRatesFromString(reply.string());
+            } else {
+                samplingRates = devDesc->getAudioProfiles().getSampleRatesFor(format);
             }
         }
         if (profiles.hasDynamicChannelsFor(format)) {
@@ -8114,14 +8132,17 @@ void AudioPolicyManager::updateAudioProfiles(const sp<DeviceDescriptor>& devDesc
             if (repliedParameters.get(
                     String8(AudioParameter::keyStreamSupportedChannels), reply) == NO_ERROR) {
                 channelMasks = channelMasksFromString(reply.string());
-                if (device == AUDIO_DEVICE_OUT_HDMI
-                        || isDeviceOfModule(devDesc, AUDIO_HARDWARE_MODULE_ID_MSD)) {
-                    modifySurroundChannelMasks(&channelMasks);
-                }
+            } else {
+                channelMasks = devDesc->getAudioProfiles().getChannelMasksFor(format);
+            }
+            if (channelMasks.has_value() && (device == AUDIO_DEVICE_OUT_HDMI
+                    || isDeviceOfModule(devDesc, AUDIO_HARDWARE_MODULE_ID_MSD))) {
+                modifySurroundChannelMasks(&channelMasks.value());
             }
         }
         addDynamicAudioProfileAndSort(
-                profiles, new AudioProfile(format, channelMasks, samplingRates));
+                profiles, new AudioProfile(
+                        format, channelMasks.value_or(ChannelMaskSet()), samplingRates));
     }
 }
 

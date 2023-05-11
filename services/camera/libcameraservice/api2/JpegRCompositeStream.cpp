@@ -26,7 +26,7 @@
 
 #include "common/CameraProviderManager.h"
 #include <gui/Surface.h>
-#include <jpegrecoverymap/jpegr.h>
+#include <ultrahdr/jpegr.h>
 #include <utils/ExifUtils.h>
 #include <utils/Log.h>
 #include "utils/SessionConfigurationUtils.h"
@@ -292,37 +292,34 @@ status_t JpegRCompositeStream::processInputFrame(nsecs_t ts, const InputFrame &i
     }
 
     size_t actualJpegRSize = 0;
-    jpegrecoverymap::jpegr_uncompressed_struct p010;
-    jpegrecoverymap::jpegr_compressed_struct jpegR;
-    jpegrecoverymap::JpegR jpegREncoder;
+    ultrahdr::jpegr_uncompressed_struct p010;
+    ultrahdr::jpegr_compressed_struct jpegR;
+    ultrahdr::JpegR jpegREncoder;
 
     p010.height = inputFrame.p010Buffer.height;
     p010.width = inputFrame.p010Buffer.width;
-    p010.colorGamut = jpegrecoverymap::jpegr_color_gamut::JPEGR_COLORGAMUT_BT2100;
-    size_t yChannelSizeInByte = p010.width * p010.height * 2;
-    size_t uvChannelSizeInByte = p010.width * p010.height;
-    p010.data = new uint8_t[yChannelSizeInByte + uvChannelSizeInByte];
-    std::unique_ptr<uint8_t[]> p010_data;
-    p010_data.reset(reinterpret_cast<uint8_t*>(p010.data));
-    memcpy((uint8_t*)p010.data, inputFrame.p010Buffer.data, yChannelSizeInByte);
-    memcpy((uint8_t*)p010.data + yChannelSizeInByte, inputFrame.p010Buffer.dataCb,
-           uvChannelSizeInByte);
+    p010.colorGamut = ultrahdr::ultrahdr_color_gamut::ULTRAHDR_COLORGAMUT_BT2100;
+    p010.data = inputFrame.p010Buffer.data;
+    p010.chroma_data = inputFrame.p010Buffer.dataCb;
+    // Strides are expected to be in pixels not bytes
+    p010.luma_stride = inputFrame.p010Buffer.stride / 2;
+    p010.chroma_stride = inputFrame.p010Buffer.chromaStride / 2;
 
     jpegR.data = dstBuffer;
     jpegR.maxLength = maxJpegRBufferSize;
 
-    jpegrecoverymap::jpegr_transfer_function transferFunction;
+    ultrahdr::ultrahdr_transfer_function transferFunction;
     switch (mP010DynamicRange) {
         case ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_HDR10:
         case ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_HDR10_PLUS:
-            transferFunction = jpegrecoverymap::jpegr_transfer_function::JPEGR_TF_PQ;
+            transferFunction = ultrahdr::ultrahdr_transfer_function::ULTRAHDR_TF_PQ;
             break;
         default:
-            transferFunction = jpegrecoverymap::jpegr_transfer_function::JPEGR_TF_HLG;
+            transferFunction = ultrahdr::ultrahdr_transfer_function::ULTRAHDR_TF_HLG;
     }
 
     if (mSupportInternalJpeg) {
-        jpegrecoverymap::jpegr_compressed_struct jpeg;
+        ultrahdr::jpegr_compressed_struct jpeg;
 
         jpeg.data = inputFrame.jpegBuffer.data;
         jpeg.length = android::camera2::JpegProcessor::findJpegSize(inputFrame.jpegBuffer.data,
@@ -334,9 +331,9 @@ status_t JpegRCompositeStream::processInputFrame(nsecs_t ts, const InputFrame &i
         }
 
         if (mOutputColorSpace == ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_DISPLAY_P3) {
-            jpeg.colorGamut = jpegrecoverymap::jpegr_color_gamut::JPEGR_COLORGAMUT_P3;
+            jpeg.colorGamut = ultrahdr::ultrahdr_color_gamut::ULTRAHDR_COLORGAMUT_P3;
         } else {
-            jpeg.colorGamut = jpegrecoverymap::jpegr_color_gamut::JPEGR_COLORGAMUT_BT709;
+            jpeg.colorGamut = ultrahdr::ultrahdr_color_gamut::ULTRAHDR_COLORGAMUT_BT709;
         }
 
         res = jpegREncoder.encodeJPEGR(&p010, &jpeg, transferFunction, &jpegR);
@@ -354,7 +351,7 @@ status_t JpegRCompositeStream::processInputFrame(nsecs_t ts, const InputFrame &i
             ALOGE("%s: Unable to generate App1 buffer", __FUNCTION__);
         }
 
-        jpegrecoverymap::jpegr_exif_struct exif;
+        ultrahdr::jpegr_exif_struct exif;
         exif.data = reinterpret_cast<void*>(const_cast<uint8_t*>(exifBuffer));
         exif.length = exifBufferSize;
 
@@ -367,7 +364,6 @@ status_t JpegRCompositeStream::processInputFrame(nsecs_t ts, const InputFrame &i
     }
 
     actualJpegRSize = jpegR.length;
-    p010_data.release();
 
     size_t finalJpegRSize = actualJpegRSize + sizeof(CameraBlob);
     if (finalJpegRSize > maxJpegRBufferSize) {

@@ -152,6 +152,37 @@ cc_library {
 }
 
 /**
+ * Only including AIDL core HAL conversion.
+ */
+cc_library {
+    name: "libaudio_aidl_conversion_core_ndk",
+    srcs: [
+        "AidlConversionCore.cpp",
+    ],
+    header_libs: [
+        "libaudio_aidl_conversion_common_util_ndk",
+    ],
+    export_header_lib_headers: [
+        "libaudio_aidl_conversion_common_util_ndk",
+    ],
+    defaults: [
+        "audio_aidl_conversion_common_default",
+        "latest_android_hardware_audio_common_ndk_shared",
+        "latest_android_hardware_audio_core_ndk_shared",
+        "latest_android_media_audio_common_types_ndk_shared",
+    ],
+    shared_libs: [
+        "libaudio_aidl_conversion_common_ndk",
+        "libbinder_ndk",
+        "libbase",
+    ],
+    cflags: [
+        "-DBACKEND_NDK",
+    ],
+    min_sdk_version: "31", //AParcelableHolder has been introduced in 31
+}
+
+/**
  * Only including AIDL effect HAL conversion.
  */
 cc_library {
@@ -180,4 +211,28 @@ cc_library {
         "-DBACKEND_NDK",
     ],
     min_sdk_version: "31", //AParcelableHolder has been introduced in 31
+}
+
+/**
+ * Conversions between the NDK and CPP backends for common types.
+ */
+cc_library {
+    name: "libaudio_aidl_conversion_common_ndk_cpp",
+    srcs: [
+        "AidlConversionNdkCpp.cpp",
+    ],
+    defaults: [
+        "audio_aidl_conversion_common_default",
+        "audio_aidl_conversion_common_util_default",
+        "latest_android_media_audio_common_types_cpp_shared",
+        "latest_android_media_audio_common_types_ndk_shared",
+    ],
+    shared_libs: [
+        "libbinder_ndk",
+        "libbase",
+    ],
+    cflags: [
+        "-DBACKEND_CPP_NDK",
+    ],
+    min_sdk_version: "33", //AParcel_unmarshal has been introduced in 33
 }
