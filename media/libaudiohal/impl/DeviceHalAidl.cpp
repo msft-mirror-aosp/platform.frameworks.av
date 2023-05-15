@@ -35,6 +35,7 @@
 #include "StreamHalAidl.h"
 
 using aidl::android::aidl_utils::statusTFromBinderStatus;
+using aidl::android::media::audio::common::Boolean;
 using aidl::android::media::audio::common::AudioChannelLayout;
 using aidl::android::media::audio::common::AudioConfig;
 using aidl::android::media::audio::common::AudioDevice;
@@ -68,6 +69,9 @@ using aidl::android::hardware::audio::common::makeBitPositionFlagMask;
 using aidl::android::hardware::audio::common::RecordTrackMetadata;
 using aidl::android::hardware::audio::core::AudioPatch;
 using aidl::android::hardware::audio::core::AudioRoute;
+using aidl::android::hardware::audio::core::IBluetooth;
+using aidl::android::hardware::audio::core::IBluetoothA2dp;
+using aidl::android::hardware::audio::core::IBluetoothLe;
 using aidl::android::hardware::audio::core::IModule;
 using aidl::android::hardware::audio::core::ITelephony;
 using aidl::android::hardware::audio::core::ModuleDebug;
@@ -107,7 +111,28 @@ ConversionResult<media::AudioRoute> ndk2cpp_AudioRoute(const AudioRoute& ndk) {
     return cpp;
 }
 
+template<typename T>
+std::shared_ptr<T> retrieveSubInterface(const std::shared_ptr<IModule>& module,
+        ::ndk::ScopedAStatus (IModule::*getT)(std::shared_ptr<T>*)) {
+    if (module != nullptr) {
+        std::shared_ptr<T> instance;
+        if (auto status = (module.get()->*getT)(&instance); status.isOk()) {
+            return instance;
+        }
+    }
+    return nullptr;
+}
+
 }  // namespace
+
+DeviceHalAidl::DeviceHalAidl(const std::string& instance, const std::shared_ptr<IModule>& module)
+        : ConversionHelperAidl("DeviceHalAidl"),
+          mInstance(instance), mModule(module),
+          mTelephony(retrieveSubInterface<ITelephony>(module, &IModule::getTelephony)),
+          mBluetooth(retrieveSubInterface<IBluetooth>(module, &IModule::getBluetooth)),
+          mBluetoothA2dp(retrieveSubInterface<IBluetoothA2dp>(module, &IModule::getBluetoothA2dp)),
+          mBluetoothLe(retrieveSubInterface<IBluetoothLe>(module, &IModule::getBluetoothLe)) {
+}
 
 status_t DeviceHalAidl::getAudioPorts(std::vector<media::audio::common::AudioPort> *ports) {
     auto convertAudioPortFromMap = [](const Ports::value_type& pair) {
@@ -121,6 +146,22 @@ status_t DeviceHalAidl::getAudioRoutes(std::vector<media::AudioRoute> *routes) {
     *routes = VALUE_OR_RETURN_STATUS(
             ::aidl::android::convertContainer<std::vector<media::AudioRoute>>(
                     mRoutes, ndk2cpp_AudioRoute));
+    return OK;
+}
+
+status_t DeviceHalAidl::getSupportedModes(std::vector<media::audio::common::AudioMode> *modes) {
+    TIME_CHECK();
+    if (modes == nullptr) {
+        return BAD_VALUE;
+    }
+    if (mModule == nullptr) return NO_INIT;
+    if (mTelephony == nullptr) return INVALID_OPERATION;
+    std::vector<AudioMode> aidlModes;
+    RETURN_STATUS_IF_ERROR(
+            statusTFromBinderStatus(mTelephony->getSupportedAudioModes(&aidlModes)));
+    *modes = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::convertContainer<std::vector<media::audio::common::AudioMode>>(
+                    aidlModes, ndk2cpp_AudioMode));
     return OK;
 }
 
@@ -175,17 +216,14 @@ status_t DeviceHalAidl::initCheck() {
 status_t DeviceHalAidl::setVoiceVolume(float volume) {
     TIME_CHECK();
     if (!mModule) return NO_INIT;
-    std::shared_ptr<ITelephony> telephony;
-    if (ndk::ScopedAStatus status = mModule->getTelephony(&telephony);
-            status.isOk() && telephony != nullptr) {
-        ITelephony::TelecomConfig inConfig{ .voiceVolume = Float{volume} }, outConfig;
-        RETURN_STATUS_IF_ERROR(
-                statusTFromBinderStatus(telephony->setTelecomConfig(inConfig, &outConfig)));
-        ALOGW_IF(outConfig.voiceVolume.has_value() && volume != outConfig.voiceVolume.value().value,
-                "%s: the resulting voice volume %f is not the same as requested %f",
-                __func__, outConfig.voiceVolume.value().value, volume);
-    }
-    return INVALID_OPERATION;
+    if (mTelephony == nullptr) return INVALID_OPERATION;
+    ITelephony::TelecomConfig inConfig{ .voiceVolume = Float{volume} }, outConfig;
+    RETURN_STATUS_IF_ERROR(
+            statusTFromBinderStatus(mTelephony->setTelecomConfig(inConfig, &outConfig)));
+    ALOGW_IF(outConfig.voiceVolume.has_value() && volume != outConfig.voiceVolume.value().value,
+            "%s: the resulting voice volume %f is not the same as requested %f",
+            __func__, outConfig.voiceVolume.value().value, volume);
+    return OK;
 }
 
 status_t DeviceHalAidl::setMasterVolume(float volume) {
@@ -204,10 +242,8 @@ status_t DeviceHalAidl::setMode(audio_mode_t mode) {
     TIME_CHECK();
     if (!mModule) return NO_INIT;
     AudioMode audioMode = VALUE_OR_FATAL(::aidl::android::legacy2aidl_audio_mode_t_AudioMode(mode));
-    std::shared_ptr<ITelephony> telephony;
-    if (ndk::ScopedAStatus status = mModule->getTelephony(&telephony);
-            status.isOk() && telephony != nullptr) {
-        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(telephony->switchAudioMode(audioMode)));
+    if (mTelephony != nullptr) {
+        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mTelephony->switchAudioMode(audioMode)));
     }
     return statusTFromBinderStatus(mModule->updateAudioMode(audioMode));
 }
@@ -236,15 +272,32 @@ status_t DeviceHalAidl::getMasterMute(bool *state) {
     return statusTFromBinderStatus(mModule->getMasterMute(state));
 }
 
-status_t DeviceHalAidl::setParameters(const String8& kvPairs __unused) {
-    TIME_CHECK();
+status_t DeviceHalAidl::setParameters(const String8& kvPairs) {
     if (!mModule) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    AudioParameter parameters(kvPairs);
+    ALOGD("%s: parameters: \"%s\"", __func__, parameters.toString().c_str());
+
+    if (status_t status = filterAndUpdateBtA2dpParameters(parameters); status != OK) {
+        ALOGW("%s: filtering or updating BT A2DP parameters failed: %d", __func__, status);
+    }
+    if (status_t status = filterAndUpdateBtHfpParameters(parameters); status != OK) {
+        ALOGW("%s: filtering or updating BT HFP parameters failed: %d", __func__, status);
+    }
+    if (status_t status = filterAndUpdateBtLeParameters(parameters); status != OK) {
+        ALOGW("%s: filtering or updating BT LE parameters failed: %d", __func__, status);
+    }
+    if (status_t status = filterAndUpdateBtScoParameters(parameters); status != OK) {
+        ALOGW("%s: filtering or updating BT SCO parameters failed: %d", __func__, status);
+    }
+
+    ALOGW_IF(parameters.size() != 0, "%s: unknown parameters, ignored: \"%s\"",
+            __func__, parameters.toString().c_str());
     return OK;
 }
 
 status_t DeviceHalAidl::getParameters(const String8& keys __unused, String8 *values) {
     TIME_CHECK();
+    // FIXME(b/278976019): Support keyReconfigA2dpSupported via vendor plugin
     values->clear();
     if (!mModule) return NO_INIT;
     ALOGE("%s not implemented yet", __func__);
@@ -1056,6 +1109,150 @@ status_t DeviceHalAidl::createOrUpdatePortConfig(
             std::move(appliedPortConfig));
     *result = it;
     *created = inserted;
+    return OK;
+}
+
+status_t DeviceHalAidl::filterAndUpdateBtA2dpParameters(AudioParameter &parameters) {
+    TIME_CHECK();
+    std::optional<bool> a2dpEnabled;
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<String8>(
+                    parameters, String8(AudioParameter::keyBtA2dpSuspended),
+                    [&a2dpEnabled](const String8& trueOrFalse) {
+                        if (trueOrFalse == AudioParameter::valueTrue) {
+                            a2dpEnabled = false;  // 'suspended' == true
+                            return OK;
+                        } else if (trueOrFalse == AudioParameter::valueFalse) {
+                            a2dpEnabled = true;  // 'suspended' == false
+                            return OK;
+                        }
+                        ALOGE("setParameters: parameter key \"%s\" has invalid value \"%s\"",
+                                AudioParameter::keyBtA2dpSuspended, trueOrFalse.c_str());
+                        return BAD_VALUE;
+                    }));
+    // FIXME(b/278976019): Support keyReconfigA2dp via vendor plugin
+    if (mBluetoothA2dp != nullptr && a2dpEnabled.has_value()) {
+        return statusTFromBinderStatus(mBluetoothA2dp->setEnabled(a2dpEnabled.value()));
+    }
+    return OK;
+}
+
+status_t DeviceHalAidl::filterAndUpdateBtHfpParameters(AudioParameter &parameters) {
+    TIME_CHECK();
+    IBluetooth::HfpConfig hfpConfig;
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<String8>(
+                    parameters, String8(AudioParameter::keyBtHfpEnable),
+                    [&hfpConfig](const String8& trueOrFalse) {
+                        if (trueOrFalse == AudioParameter::valueTrue) {
+                            hfpConfig.isEnabled = Boolean{ .value = true };
+                            return OK;
+                        } else if (trueOrFalse == AudioParameter::valueFalse) {
+                            hfpConfig.isEnabled = Boolean{ .value = false };
+                            return OK;
+                        }
+                        ALOGE("setParameters: parameter key \"%s\" has invalid value \"%s\"",
+                                AudioParameter::keyBtHfpEnable, trueOrFalse.c_str());
+                        return BAD_VALUE;
+                    }));
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                    parameters, String8(AudioParameter::keyBtHfpSamplingRate),
+                    [&hfpConfig](int sampleRate) {
+                        return sampleRate > 0 ?
+                                hfpConfig.sampleRate = Int{ .value = sampleRate }, OK : BAD_VALUE;
+                    }));
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                    parameters, String8(AudioParameter::keyBtHfpVolume),
+                    [&hfpConfig](int volume0to15) {
+                        if (volume0to15 >= 0 && volume0to15 <= 15) {
+                            hfpConfig.volume = Float{ .value = volume0to15 / 15.0f };
+                            return OK;
+                        }
+                        return BAD_VALUE;
+                    }));
+    if (mBluetooth != nullptr && hfpConfig != IBluetooth::HfpConfig{}) {
+        IBluetooth::HfpConfig newHfpConfig;
+        return statusTFromBinderStatus(mBluetooth->setHfpConfig(hfpConfig, &newHfpConfig));
+    }
+    return OK;
+}
+
+status_t DeviceHalAidl::filterAndUpdateBtLeParameters(AudioParameter &parameters) {
+    TIME_CHECK();
+    std::optional<bool> leEnabled;
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<String8>(
+                    parameters, String8(AudioParameter::keyBtLeSuspended),
+                    [&leEnabled](const String8& trueOrFalse) {
+                        if (trueOrFalse == AudioParameter::valueTrue) {
+                            leEnabled = false;  // 'suspended' == true
+                            return OK;
+                        } else if (trueOrFalse == AudioParameter::valueFalse) {
+                            leEnabled = true;  // 'suspended' == false
+                            return OK;
+                        }
+                        ALOGE("setParameters: parameter key \"%s\" has invalid value \"%s\"",
+                                AudioParameter::keyBtLeSuspended, trueOrFalse.c_str());
+                        return BAD_VALUE;
+                    }));
+    if (mBluetoothLe != nullptr && leEnabled.has_value()) {
+        return statusTFromBinderStatus(mBluetoothLe->setEnabled(leEnabled.value()));
+    }
+    return OK;
+}
+
+status_t DeviceHalAidl::filterAndUpdateBtScoParameters(AudioParameter &parameters) {
+    TIME_CHECK();
+    IBluetooth::ScoConfig scoConfig;
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<String8>(
+                    parameters, String8(AudioParameter::keyBtSco),
+                    [&scoConfig](const String8& onOrOff) {
+                        if (onOrOff == AudioParameter::valueOn) {
+                            scoConfig.isEnabled = Boolean{ .value = true };
+                            return OK;
+                        } else if (onOrOff == AudioParameter::valueOff) {
+                            scoConfig.isEnabled = Boolean{ .value = false };
+                            return OK;
+                        }
+                        ALOGE("setParameters: parameter key \"%s\" has invalid value \"%s\"",
+                                AudioParameter::keyBtSco, onOrOff.c_str());
+                        return BAD_VALUE;
+                    }));
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<String8>(
+                    parameters, String8(AudioParameter::keyBtScoHeadsetName),
+                    [&scoConfig](const String8& name) {
+                        scoConfig.debugName = name;
+                        return OK;
+                    }));
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<String8>(
+                    parameters, String8(AudioParameter::keyBtNrec),
+                    [&scoConfig](const String8& onOrOff) {
+                        if (onOrOff == AudioParameter::valueOn) {
+                            scoConfig.isNrecEnabled = Boolean{ .value = true };
+                            return OK;
+                        } else if (onOrOff == AudioParameter::valueOff) {
+                            scoConfig.isNrecEnabled = Boolean{ .value = false };
+                            return OK;
+                        }
+                        ALOGE("setParameters: parameter key \"%s\" has invalid value \"%s\"",
+                                AudioParameter::keyBtNrec, onOrOff.c_str());
+                        return BAD_VALUE;
+                    }));
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<String8>(
+                    parameters, String8(AudioParameter::keyBtScoWb),
+                    [&scoConfig](const String8& onOrOff) {
+                        if (onOrOff == AudioParameter::valueOn) {
+                            scoConfig.mode = IBluetooth::ScoConfig::Mode::SCO_WB;
+                            return OK;
+                        } else if (onOrOff == AudioParameter::valueOff) {
+                            scoConfig.mode = IBluetooth::ScoConfig::Mode::SCO;
+                            return OK;
+                        }
+                        ALOGE("setParameters: parameter key \"%s\" has invalid value \"%s\"",
+                                AudioParameter::keyBtScoWb, onOrOff.c_str());
+                        return BAD_VALUE;
+                    }));
+    if (mBluetooth != nullptr && scoConfig != IBluetooth::ScoConfig{}) {
+        IBluetooth::ScoConfig newScoConfig;
+        return statusTFromBinderStatus(mBluetooth->setScoConfig(scoConfig, &newScoConfig));
+    }
     return OK;
 }
 

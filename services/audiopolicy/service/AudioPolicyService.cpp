@@ -46,6 +46,7 @@
 
 #include <system/audio.h>
 #include <system/audio_policy.h>
+#include <AudioPolicyConfig.h>
 #include <AudioPolicyManager.h>
 
 namespace android {
@@ -185,7 +186,10 @@ static auto& getIAudioPolicyServiceStatistics() {
 
 static AudioPolicyInterface* createAudioPolicyManager(AudioPolicyClientInterface *clientInterface)
 {
-    AudioPolicyManager *apm = new AudioPolicyManager(clientInterface);
+    auto config = AudioPolicyConfig::loadFromApmXmlConfigWithFallback();  // This can't fail.
+    AudioPolicyManager *apm = new AudioPolicyManager(
+            config, loadApmEngineLibraryAndCreateEngine(config->getEngineLibraryNameSuffix()),
+            clientInterface);
     status_t status = apm->initialize();
     if (status != NO_ERROR) {
         delete apm;
@@ -1839,14 +1843,12 @@ void AudioPolicyService::UidPolicy::dumpInternals(int fd) {
 void AudioPolicyService::SensorPrivacyPolicy::registerSelf() {
     SensorPrivacyManager spm;
     mSensorPrivacyEnabled = spm.isSensorPrivacyEnabled();
-    (void)spm.addToggleSensorPrivacyListener(this);
     spm.addSensorPrivacyListener(this);
 }
 
 void AudioPolicyService::SensorPrivacyPolicy::unregisterSelf() {
     SensorPrivacyManager spm;
     spm.removeSensorPrivacyListener(this);
-    spm.removeToggleSensorPrivacyListener(this);
 }
 
 bool AudioPolicyService::SensorPrivacyPolicy::isSensorPrivacyEnabled() {

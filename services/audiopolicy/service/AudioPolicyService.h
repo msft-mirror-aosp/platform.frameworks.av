@@ -735,6 +735,8 @@ private:
         explicit AudioPolicyClient(AudioPolicyService *service) : mAudioPolicyService(service) {}
         virtual ~AudioPolicyClient() {}
 
+        virtual status_t getAudioPolicyConfig(media::AudioPolicyConfig *config);
+
         //
         // Audio HW module functions
         //
@@ -1070,7 +1072,7 @@ private:
     Mutex mNotificationClientsLock;
     DefaultKeyedVector<int64_t, sp<NotificationClient>> mNotificationClients
         GUARDED_BY(mNotificationClientsLock);
-    // Manage all effects configured in audio_effects.conf
+    // Manage all effects configured in audio_effects.xml
     // never hold AudioPolicyService::mLock when calling AudioPolicyEffects methods as
     // those can call back into AudioPolicyService methods and try to acquire the mutex
     sp<AudioPolicyEffects> mAudioPolicyEffects GUARDED_BY(mLock);

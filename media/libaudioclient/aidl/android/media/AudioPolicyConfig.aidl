@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2023 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,25 +14,20 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_EFFECTSCONFIGLOADER_H
-#define ANDROID_EFFECTSCONFIGLOADER_H
+package android.media;
 
-#include <cutils/compiler.h>
-#include "EffectsFactoryState.h"
+import android.media.AudioHwModule;
+import android.media.SurroundSoundConfig;
+import android.media.audio.common.AudioHalEngineConfig;
+import android.media.audio.common.AudioMode;
 
-#ifdef  __cplusplus
-extern "C" {
-#endif
-
-
-/** Parses the platform effect configuration
- * and stores its content in the global EffectFactoryState. */
-ANDROID_API
-int EffectLoadEffectConfig();
-
-
-#ifdef  __cplusplus
-} // extern "C"
-#endif
-
-#endif  // ANDROID_EFFECTSCONFIGLOADER_H
+/*
+ * Audio policy configuration. Functionally replaces the APM XML file.
+ * {@hide}
+ */
+parcelable AudioPolicyConfig {
+    AudioHwModule[] modules;
+    AudioMode[] supportedModes;
+    SurroundSoundConfig surroundSoundConfig;
+    AudioHalEngineConfig engineConfig;
+}
