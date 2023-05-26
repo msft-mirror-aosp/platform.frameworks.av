@@ -68,16 +68,21 @@ const InputSourceCollection &Engine::getCollection<audio_source_t>() const
 
 Engine::Engine() : mPolicyParameterMgr(new ParameterManagerWrapper())
 {
-    status_t loadResult = loadAudioPolicyEngineConfig();
+}
+
+status_t Engine::loadFromHalConfigWithFallback(
+        const media::audio::common::AudioHalEngineConfig& config __unused) {
+    // b/242678729. Need to implement for the configurable engine.
+    return INVALID_OPERATION;
+}
+
+status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath)
+{
+    status_t loadResult = loadAudioPolicyEngineConfig(xmlFilePath);
     if (loadResult < 0) {
         ALOGE("Policy Engine configuration is invalid.");
     }
-}
-
-Engine::~Engine()
-{
-    mStreamCollection.clear();
-    mInputSourceCollection.clear();
+    return loadResult;
 }
 
 status_t Engine::initCheck()
@@ -93,7 +98,7 @@ status_t Engine::initCheck()
 template <typename Key>
 Element<Key> *Engine::getFromCollection(const Key &key) const
 {
-    const Collection<Key> collection = getCollection<Key>();
+    const Collection<Key> &collection = getCollection<Key>();
     return collection.get(key);
 }
 
@@ -179,9 +184,9 @@ status_t Engine::setDeviceConnectionState(const sp<DeviceDescriptor> device,
     return EngineBase::setDeviceConnectionState(device, state);
 }
 
-status_t Engine::loadAudioPolicyEngineConfig()
+status_t Engine::loadAudioPolicyEngineConfig(const std::string& xmlFilePath)
 {
-    auto result = EngineBase::loadAudioPolicyEngineConfig();
+    auto result = EngineBase::loadAudioPolicyEngineConfig(xmlFilePath);
 
     // Custom XML Parsing
     auto loadCriteria= [this](const auto& configCriteria, const auto& configCriterionTypes) {
@@ -401,5 +406,3 @@ AudioPolicyPluginInterface *Engine::queryInterface()
 
 } // namespace audio_policy
 } // namespace android
-
-

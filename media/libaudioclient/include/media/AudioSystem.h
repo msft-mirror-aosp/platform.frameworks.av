@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <android/content/AttributionSourceState.h>
+#include <android/media/AudioPolicyConfig.h>
 #include <android/media/AudioPortFw.h>
 #include <android/media/AudioVibratorInfo.h>
 #include <android/media/BnAudioFlingerClient.h>
@@ -165,6 +166,10 @@ public:
     // to grant specific isolated processes access to the audio system. Currently used only for the
     // HotwordDetectionService.
     static void setAudioFlingerBinder(const sp<IBinder>& audioFlinger);
+
+    // Sets a local AudioFlinger interface to be used by AudioSystem.
+    // This is used by audioserver main() to avoid binder AIDL translation.
+    static status_t setLocalAudioFlinger(const sp<IAudioFlinger>& af);
 
     // helper function to obtain AudioFlinger service handle
     static const sp<IAudioFlinger> get_audio_flinger();
@@ -335,7 +340,7 @@ public:
     static status_t getMinVolumeIndexForAttributes(const audio_attributes_t &attr, int &index);
 
     static product_strategy_t getStrategyForStream(audio_stream_type_t stream);
-    static status_t getDevicesForAttributes(const AudioAttributes &aa,
+    static status_t getDevicesForAttributes(const audio_attributes_t &aa,
                                             AudioDeviceTypeAddrVector *devices,
                                             bool forVolume);
 
@@ -462,7 +467,7 @@ public:
 
     static status_t listAudioProductStrategies(AudioProductStrategyVector &strategies);
     static status_t getProductStrategyFromAudioAttributes(
-            const AudioAttributes &aa, product_strategy_t &productStrategy,
+            const audio_attributes_t &aa, product_strategy_t &productStrategy,
             bool fallbackOnDefault = true);
 
     static audio_attributes_t streamTypeToAttributes(audio_stream_type_t stream);
@@ -471,7 +476,8 @@ public:
     static status_t listAudioVolumeGroups(AudioVolumeGroupVector &groups);
 
     static status_t getVolumeGroupFromAudioAttributes(
-            const AudioAttributes &aa, volume_group_t &volumeGroup, bool fallbackOnDefault = true);
+            const audio_attributes_t &aa, volume_group_t &volumeGroup,
+            bool fallbackOnDefault = true);
 
     static status_t setRttEnabled(bool enabled);
 
@@ -587,6 +593,8 @@ public:
     static status_t isBluetoothVariableLatencyEnabled(bool *enabled);
 
     static status_t supportsBluetoothVariableLatency(bool *support);
+
+    static status_t getAudioPolicyConfig(media::AudioPolicyConfig *config);
 
     // A listener for capture state changes.
     class CaptureStateListener : public virtual RefBase {

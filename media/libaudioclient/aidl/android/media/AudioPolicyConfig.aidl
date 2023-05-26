@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Android Open Source Project
+ * Copyright (C) 2023 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,18 @@
 
 package android.media;
 
-import android.media.audio.common.AudioContentType;
-import android.media.audio.common.AudioSource;
-import android.media.audio.common.AudioUsage;
+import android.media.AudioHwModule;
+import android.media.SurroundSoundConfig;
+import android.media.audio.common.AudioHalEngineConfig;
+import android.media.audio.common.AudioMode;
 
-/**
- * The "Internal" suffix of this type name is to disambiguate it from the
- * android.media.AudioAttributes SDK type.
+/*
+ * Audio policy configuration. Functionally replaces the APM XML file.
  * {@hide}
  */
-parcelable AudioAttributesInternal {
-    AudioContentType contentType;
-    AudioUsage usage;
-    AudioSource source;
-    // Bitmask, indexed by AudioFlag.
-    int flags;
-    @utf8InCpp String tags; /* UTF8 */
+parcelable AudioPolicyConfig {
+    AudioHwModule[] modules;
+    AudioMode[] supportedModes;
+    SurroundSoundConfig surroundSoundConfig;
+    AudioHalEngineConfig engineConfig;
 }
