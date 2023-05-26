@@ -301,7 +301,8 @@ Status AudioPolicyService::getOutput(AudioStreamType streamAidl, int32_t* _aidl_
     audio_stream_type_t stream = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioStreamType_audio_stream_type_t(streamAidl));
 
-    if (uint32_t(stream) >= AUDIO_STREAM_PUBLIC_CNT) {
+    if (uint32_t(stream) >= AUDIO_STREAM_PUBLIC_CNT
+          && stream != AUDIO_STREAM_ASSISTANT && stream != AUDIO_STREAM_CALL_ASSISTANT) {
         *_aidl_return = VALUE_OR_RETURN_BINDER_STATUS(
             legacy2aidl_audio_io_handle_t_int32_t(AUDIO_IO_HANDLE_NONE));
         return Status::ok();
@@ -475,14 +476,14 @@ Status AudioPolicyService::startOutput(int32_t portIdAidl)
     }
     ALOGV("startOutput()");
     sp<AudioPlaybackClient> client;
-    sp<AudioPolicyEffects>audioPolicyEffects;
+    sp<AudioPolicyEffects> audioPolicyEffects;
 
     getPlaybackClientAndEffects(portId, client, audioPolicyEffects, __func__);
 
     if (audioPolicyEffects != 0) {
         // create audio processors according to stream
-        status_t status = audioPolicyEffects->addOutputSessionEffects(
-            client->io, client->stream, client->session);
+        status_t status = audioPolicyEffects->addOutputSessionEffects(client->io, client->stream,
+                                                                      client->session);
         if (status != NO_ERROR && status != ALREADY_EXISTS) {
             ALOGW("Failed to add effects on session %d", client->session);
         }
@@ -817,8 +818,29 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
 
     Mutex::Autolock _l(mLock);
 
+    ALOGW_IF(client->silenced, "startInput on silenced input for port %d, uid %d. Unsilencing.",
+            portIdAidl,
+            client->attributionSource.uid);
+
+    if (client->active) {
+        ALOGE("Client should never be active before startInput. Uid %d port %d",
+                client->attributionSource.uid, portId);
+        finishRecording(client->attributionSource, client->attributes.source);
+        return binderStatusFromStatusT(INVALID_OPERATION);
+    }
+
+    // Force the possibly silenced client to be unsilenced since we just called
+    // startRecording (i.e. we have assumed it is unsilenced).
+    // At this point in time, the client is inactive, so no calls to appops are sent in
+    // setAppState_l.
+    // This ensures existing clients have the same behavior as new clients (starting unsilenced).
+    // TODO(b/282076713)
+    setAppState_l(client, APP_STATE_TOP);
+
     client->active = true;
     client->startTimeNs = systemTime();
+    // This call updates the silenced state, and since we are active, appropriately notifies appops
+    // if we silence the track.
     updateUidStates_l();
 
     status_t status;
@@ -1538,6 +1560,17 @@ Status AudioPolicyService::listAudioPorts(media::AudioPortRole roleAidl,
     count->value = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int32_t>(num_ports));
     *_aidl_return = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int32_t>(generation));
     return Status::ok();
+}
+
+Status AudioPolicyService::listDeclaredDevicePorts(media::AudioPortRole role,
+                                                    std::vector<media::AudioPortFw>* _aidl_return) {
+    Mutex::Autolock _l(mLock);
+    if (mAudioPolicyManager == NULL) {
+        return binderStatusFromStatusT(NO_INIT);
+    }
+    AutoCallerClear acc;
+    return binderStatusFromStatusT(mAudioPolicyManager->listDeclaredDevicePorts(
+                    role, _aidl_return));
 }
 
 Status AudioPolicyService::getAudioPort(int portId,

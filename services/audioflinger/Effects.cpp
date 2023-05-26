@@ -44,6 +44,7 @@
 #include <mediautils/TimeCheck.h>
 
 #include "AudioFlinger.h"
+#include "EffectConfiguration.h"
 
 // ----------------------------------------------------------------------------
 
@@ -65,6 +66,7 @@
 namespace android {
 
 using aidl_utils::statusTFromBinderStatus;
+using audioflinger::EffectConfiguration;
 using binder::Status;
 
 namespace {
@@ -498,6 +500,7 @@ static String8 effectFlagsToString(uint32_t flags) {
 }
 
 void AudioFlinger::EffectBase::dump(int fd, const Vector<String16>& args __unused)
+NO_THREAD_SAFETY_ANALYSIS // conditional try lock
 {
     String8 result;
 
@@ -569,7 +572,6 @@ AudioFlinger::EffectModule::EffectModule(const sp<AudioFlinger::EffectCallbackIn
       mMaxDisableWaitCnt(1), // set by configure(), should be >= 1
       mDisableWaitCnt(0),    // set by process() and updateState()
       mOffloaded(false),
-      mAddedToHal(false),
       mIsOutput(false)
 #ifdef FLOAT_EFFECT_CHAIN
       , mSupportsFloat(false)
@@ -982,6 +984,7 @@ status_t AudioFlinger::EffectModule::configure()
 
 #ifdef MULTICHANNEL_EFFECT_CHAIN
     if (status != NO_ERROR &&
+            EffectConfiguration::isHidl() && // only HIDL effects support channel conversion
             mIsOutput &&
             (mConfig.inputCfg.channels != AUDIO_CHANNEL_OUT_STEREO
                     || mConfig.outputCfg.channels != AUDIO_CHANNEL_OUT_STEREO)) {
@@ -1012,7 +1015,8 @@ status_t AudioFlinger::EffectModule::configure()
         mSupportsFloat = true;
     }
 
-    if (status != NO_ERROR) {
+    // only HIDL effects support integer conversion.
+    if (status != NO_ERROR && EffectConfiguration::isHidl()) {
         ALOGV("EFFECT_CMD_SET_CONFIG failed with float format, retry with int16_t.");
         mConfig.inputCfg.format = AUDIO_FORMAT_PCM_16_BIT;
         mConfig.outputCfg.format = AUDIO_FORMAT_PCM_16_BIT;
@@ -1103,12 +1107,12 @@ void AudioFlinger::EffectModule::addEffectToHal_l()
 {
     if ((mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_PRE_PROC ||
          (mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_POST_PROC) {
-        if (mAddedToHal) {
+        if (mCurrentHalStream == getCallback()->io()) {
             return;
         }
 
         (void)getCallback()->addEffectToHal(mEffectInterface);
-        mAddedToHal = true;
+        mCurrentHalStream = getCallback()->io();
     }
 }
 
@@ -1204,12 +1208,11 @@ status_t AudioFlinger::EffectModule::removeEffectFromHal_l()
 {
     if ((mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_PRE_PROC ||
              (mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_POST_PROC) {
-        if (!mAddedToHal) {
-            return NO_ERROR;
+        if (mCurrentHalStream != getCallback()->io()) {
+            return (mCurrentHalStream == AUDIO_IO_HANDLE_NONE) ? NO_ERROR : INVALID_OPERATION;
         }
-
         getCallback()->removeEffectFromHal(mEffectInterface);
-        mAddedToHal = false;
+        mCurrentHalStream = AUDIO_IO_HANDLE_NONE;
     }
     return NO_ERROR;
 }
@@ -1249,13 +1252,13 @@ status_t AudioFlinger::EffectModule::command(int32_t cmdCode,
         return -EINVAL;
     }
     if (cmdCode == EFFECT_CMD_GET_PARAM &&
-            (maxReplySize < sizeof(effect_param_t) ||
+            (maxReplySize < static_cast<signed>(sizeof(effect_param_t)) ||
                    param->psize > maxReplySize - sizeof(effect_param_t))) {
         android_errorWriteLog(0x534e4554, "29251553");
         return -EINVAL;
     }
     if (cmdCode == EFFECT_CMD_GET_PARAM &&
-            (sizeof(effect_param_t) > maxReplySize
+            (static_cast<signed>(sizeof(effect_param_t)) > maxReplySize
                     || param->psize > maxReplySize - sizeof(effect_param_t)
                     || param->vsize > maxReplySize - sizeof(effect_param_t)
                             - param->psize
@@ -1685,6 +1688,7 @@ static std::string dumpInOutBuffer(bool isInput, const sp<EffectBufferHalInterfa
 }
 
 void AudioFlinger::EffectModule::dump(int fd, const Vector<String16>& args)
+NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 {
     EffectBase::dump(fd, args);
 
@@ -1946,7 +1950,7 @@ void AudioFlinger::EffectHandle::disconnect(bool unpinIfLast)
         }
         mCblkMemory.clear();    // free the shared memory before releasing the heap it belongs to
         // Client destructor must run with AudioFlinger client mutex locked
-        Mutex::Autolock _l(mClient->audioFlinger()->mClientLock);
+        Mutex::Autolock _l2(mClient->audioFlinger()->mClientLock);
         mClient.clear();
     }
 }
@@ -2010,14 +2014,14 @@ Status AudioFlinger::EffectHandle::command(int32_t cmdCode,
     }
 
     if (cmdCode == EFFECT_CMD_ENABLE) {
-        if (maxResponseSize < sizeof(int)) {
+        if (maxResponseSize < static_cast<signed>(sizeof(int))) {
             android_errorWriteLog(0x534e4554, "32095713");
             RETURN(BAD_VALUE);
         }
         writeToBuffer(NO_ERROR, response);
         return enable(_aidl_return);
     } else if (cmdCode == EFFECT_CMD_DISABLE) {
-        if (maxResponseSize < sizeof(int)) {
+        if (maxResponseSize < static_cast<signed>(sizeof(int))) {
             android_errorWriteLog(0x534e4554, "32095713");
             RETURN(BAD_VALUE);
         }
@@ -2041,7 +2045,7 @@ Status AudioFlinger::EffectHandle::command(int32_t cmdCode,
             RETURN(INVALID_OPERATION);
         }
 
-        if (maxResponseSize < sizeof(int)) {
+        if (maxResponseSize < (signed)sizeof(int)) {
             android_errorWriteLog(0x534e4554, "32095713");
             RETURN(BAD_VALUE);
         }
@@ -2050,7 +2054,7 @@ Status AudioFlinger::EffectHandle::command(int32_t cmdCode,
         // No need to trylock() here as this function is executed in the binder thread serving a
         // particular client process:  no risk to block the whole media server process or mixer
         // threads if we are stuck here
-        Mutex::Autolock _l(mCblk->lock);
+        Mutex::Autolock _l2(mCblk->lock);
         // keep local copy of index in case of client corruption b/32220769
         const uint32_t clientIndex = mCblk->clientIndex;
         const uint32_t serverIndex = mCblk->serverIndex;
@@ -2153,6 +2157,7 @@ void AudioFlinger::EffectHandle::framesProcessed(int32_t frames) const
 }
 
 void AudioFlinger::EffectHandle::dumpToBuffer(char* buffer, size_t size)
+NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 {
     bool locked = mCblk != NULL && AudioFlinger::dumpTryLock(mCblk->lock);
 
@@ -2407,7 +2412,7 @@ status_t AudioFlinger::EffectChain::addEffect_ll(const sp<EffectModule>& effect)
             }
         } else {
             effect->setInBuffer(mInBuffer);
-            if (idx_insert == previousSize) {
+            if (idx_insert == static_cast<ssize_t>(previousSize)) {
                 if (idx_insert != 0) {
                     mEffects[idx_insert-1]->configure();
                     mEffects[idx_insert-1]->setOutBuffer(mInBuffer);
@@ -2467,7 +2472,7 @@ ssize_t AudioFlinger::EffectChain::getInsertIndex(const effect_descriptor_t& des
             }
             // remember position of first insert effect and by default
             // select this as insert position for new effect
-            if (idx_insert == size) {
+            if (idx_insert == static_cast<ssize_t>(size)) {
                 idx_insert = i;
             }
             // remember position of last insert effect claiming
@@ -2697,6 +2702,7 @@ void AudioFlinger::EffectChain::syncHalEffectsState()
 }
 
 void AudioFlinger::EffectChain::dump(int fd, const Vector<String16>& args)
+NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 {
     String8 result;
 
@@ -3030,7 +3036,8 @@ status_t AudioFlinger::EffectChain::EffectCallback::createEffectHal(
         const effect_uuid_t *pEffectUuid, int32_t sessionId, int32_t deviceId,
         sp<EffectHalInterface> *effect) {
     status_t status = NO_INIT;
-    sp<EffectsFactoryHalInterface> effectsFactory = mAudioFlinger.getEffectsFactory();
+    const sp<EffectsFactoryHalInterface> effectsFactory =
+            EffectConfiguration::getEffectsFactoryHal();
     if (effectsFactory != 0) {
         status = effectsFactory->createEffect(pEffectUuid, sessionId, io(), deviceId, effect);
     }
@@ -3049,7 +3056,7 @@ status_t AudioFlinger::EffectChain::EffectCallback::allocateHalBuffer(
 }
 
 status_t AudioFlinger::EffectChain::EffectCallback::addEffectToHal(
-        sp<EffectHalInterface> effect) {
+        const sp<EffectHalInterface>& effect) {
     status_t result = NO_INIT;
     sp<ThreadBase> t = thread().promote();
     if (t == nullptr) {
@@ -3065,7 +3072,7 @@ status_t AudioFlinger::EffectChain::EffectCallback::addEffectToHal(
 }
 
 status_t AudioFlinger::EffectChain::EffectCallback::removeEffectFromHal(
-        sp<EffectHalInterface> effect) {
+        const sp<EffectHalInterface>& effect) {
     status_t result = NO_INIT;
     sp<ThreadBase> t = thread().promote();
     if (t == nullptr) {
@@ -3207,15 +3214,20 @@ size_t AudioFlinger::EffectChain::EffectCallback::frameCount() const {
     return t->frameCount();
 }
 
-uint32_t AudioFlinger::EffectChain::EffectCallback::latency() const {
+uint32_t AudioFlinger::EffectChain::EffectCallback::latency() const
+NO_THREAD_SAFETY_ANALYSIS  // latency_l() access
+{
     sp<ThreadBase> t = thread().promote();
     if (t == nullptr) {
         return 0;
     }
+    // TODO(b/275956781) - this requires the thread lock.
     return t->latency_l();
 }
 
-void AudioFlinger::EffectChain::EffectCallback::setVolumeForOutput(float left, float right) const {
+void AudioFlinger::EffectChain::EffectCallback::setVolumeForOutput(float left, float right) const
+NO_THREAD_SAFETY_ANALYSIS  // setVolumeForOutput_l() access
+{
     sp<ThreadBase> t = thread().promote();
     if (t == nullptr) {
         return;
@@ -3368,8 +3380,18 @@ status_t AudioFlinger::DeviceEffectProxy::checkPort(const PatchPanel::Patch& pat
     ALOGV("%s type %d device type %d address %s device ID %d patch.isSoftware() %d",
             __func__, port->type, port->ext.device.type,
             port->ext.device.address, port->id, patch.isSoftware());
-    if (port->type != AUDIO_PORT_TYPE_DEVICE || port->ext.device.type != mDevice.mType
-        || port->ext.device.address != mDevice.address()) {
+    if (port->type != AUDIO_PORT_TYPE_DEVICE || port->ext.device.type != mDevice.mType ||
+        port->ext.device.address != mDevice.address()) {
+        return NAME_NOT_FOUND;
+    }
+    if (((mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_POST_PROC) &&
+        (audio_port_config_has_input_direction(port))) {
+        ALOGI("%s don't create postprocessing effect on record port", __func__);
+        return NAME_NOT_FOUND;
+    }
+    if (((mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_PRE_PROC) &&
+        (!audio_port_config_has_input_direction(port))) {
+        ALOGI("%s don't create preprocessing effect on playback port", __func__);
         return NAME_NOT_FOUND;
     }
     status_t status = NAME_NOT_FOUND;
@@ -3421,6 +3443,7 @@ status_t AudioFlinger::DeviceEffectProxy::checkPort(const PatchPanel::Patch& pat
     } else {
         status = BAD_VALUE;
     }
+
     if (status == NO_ERROR || status == ALREADY_EXISTS) {
         Status bs;
         if (isEnabled()) {
@@ -3459,7 +3482,7 @@ size_t AudioFlinger::DeviceEffectProxy::removeEffect(const sp<EffectModule>& eff
 }
 
 status_t AudioFlinger::DeviceEffectProxy::addEffectToHal(
-    sp<EffectHalInterface> effect) {
+        const sp<EffectHalInterface>& effect) {
     if (mHalEffect == nullptr) {
         return NO_INIT;
     }
@@ -3468,7 +3491,7 @@ status_t AudioFlinger::DeviceEffectProxy::addEffectToHal(
 }
 
 status_t AudioFlinger::DeviceEffectProxy::removeEffectFromHal(
-    sp<EffectHalInterface> effect) {
+        const sp<EffectHalInterface>& effect) {
     if (mHalEffect == nullptr) {
         return NO_INIT;
     }
@@ -3506,7 +3529,9 @@ uint32_t AudioFlinger::DeviceEffectProxy::channelCount() const {
     return audio_channel_count_from_in_mask(channelMask());
 }
 
-void AudioFlinger::DeviceEffectProxy::dump(int fd, int spaces) {
+void AudioFlinger::DeviceEffectProxy::dump(int fd, int spaces)
+NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+{
     const Vector<String16> args;
     EffectBase::dump(fd, args);
 
@@ -3585,7 +3610,7 @@ status_t AudioFlinger::DeviceEffectProxy::ProxyCallback::createEffectHal(
 }
 
 status_t AudioFlinger::DeviceEffectProxy::ProxyCallback::addEffectToHal(
-        sp<EffectHalInterface> effect) {
+        const sp<EffectHalInterface>& effect) {
     sp<DeviceEffectProxy> proxy = mProxy.promote();
     if (proxy == nullptr) {
         return NO_INIT;
@@ -3594,7 +3619,7 @@ status_t AudioFlinger::DeviceEffectProxy::ProxyCallback::addEffectToHal(
 }
 
 status_t AudioFlinger::DeviceEffectProxy::ProxyCallback::removeEffectFromHal(
-        sp<EffectHalInterface> effect) {
+        const sp<EffectHalInterface>& effect) {
     sp<DeviceEffectProxy> proxy = mProxy.promote();
     if (proxy == nullptr) {
         return NO_INIT;

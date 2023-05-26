@@ -20,6 +20,7 @@
 #include <binder/Parcelable.h>
 
 #include <camera/CameraMetadata.h>
+#include <android/hardware/CameraExtensionSessionStats.h>
 
 namespace android {
 namespace hardware {
@@ -128,6 +129,22 @@ public:
     bool mIsNdk;
     // latency in ms for camera open, close, or session creation.
     int mLatencyMs;
+
+    /*
+     * A randomly generated identifier to map the open/active/idle/close stats to each other after
+     * being logged. Every 'open' event will have a newly generated id which will be logged with
+     * active/idle/closed that correspond to the particular 'open' event.
+     *
+     * This ID is not meant to be globally unique forever. Probabilistically, this ID can be
+     * safely considered unique across all logs from one android build for 48 to 72 hours from
+     * its generation. Chances of identifier collisions are significant past a week or two.
+     *
+     * NOTE: There are no guarantees that the identifiers will be unique. The probability of
+     * collision within a short timeframe is low, but any system consuming these identifiers at
+     * scale should handle identifier collisions, potentially even from the same device.
+     */
+    int64_t mLogId;
+
     float mMaxPreviewFps;
 
     // Session info and statistics
@@ -142,11 +159,15 @@ public:
     std::vector<CameraStreamStats> mStreamStats;
     String16 mUserTag;
     int mVideoStabilizationMode;
+    int mSessionIndex;
+
+    CameraExtensionSessionStats mCameraExtensionSessionStats;
 
     // Constructors
     CameraSessionStats();
     CameraSessionStats(const String16& cameraId, int facing, int newCameraState,
-            const String16& clientName, int apiLevel, bool isNdk, int32_t latencyMs);
+                       const String16& clientName, int apiLevel, bool isNdk, int32_t latencyMs,
+                       int64_t logId);
 
     virtual status_t readFromParcel(const android::Parcel* parcel) override;
     virtual status_t writeToParcel(android::Parcel* parcel) const override;

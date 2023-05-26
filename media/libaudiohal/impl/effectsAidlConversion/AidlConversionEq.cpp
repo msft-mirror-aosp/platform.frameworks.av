@@ -23,7 +23,6 @@
 #include <error/expected_utils.h>
 #include <media/AidlConversionNdk.h>
 #include <media/AidlConversionEffect.h>
-#include <media/audiohal/AudioEffectUuid.h>
 #include <system/audio_effects/effect_equalizer.h>
 
 #include <utils/Log.h>
@@ -38,6 +37,7 @@ using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::Equalizer;
 using ::aidl::android::hardware::audio::effect::Parameter;
 using ::aidl::android::hardware::audio::effect::Range;
+using ::aidl::android::hardware::audio::effect::VendorExtension;
 using ::android::base::unexpected;
 using ::android::status_t;
 using utils::EffectParamReader;
@@ -59,7 +59,7 @@ status_t AidlConversionEq::setParameter(EffectParamReader& param) {
                 return BAD_VALUE;
             }
             aidlParam = MAKE_SPECIFIC_PARAMETER(Equalizer, equalizer, preset, (int)value);
-            return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
+            break;
         }
         case EQ_PARAM_BAND_LEVEL: {
             int32_t band;
@@ -70,7 +70,7 @@ status_t AidlConversionEq::setParameter(EffectParamReader& param) {
             }
             std::vector<Equalizer::BandLevel> bandLevels = {{.index = band, .levelMb = level}};
             aidlParam = MAKE_SPECIFIC_PARAMETER(Equalizer, equalizer, bandLevels, bandLevels);
-            return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
+            break;
         }
         case EQ_PARAM_PROPERTIES: {
             int16_t num;
@@ -81,7 +81,7 @@ status_t AidlConversionEq::setParameter(EffectParamReader& param) {
             // set preset if it's valid
             if (num >= 0) {
                 aidlParam = MAKE_SPECIFIC_PARAMETER(Equalizer, equalizer, preset, (int)num);
-                return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
+                break;
             }
             // set bandLevel if no preset was set
             if (OK != param.readFromValue(&num)) {
@@ -98,30 +98,34 @@ status_t AidlConversionEq::setParameter(EffectParamReader& param) {
                 bandLevels.push_back(level);
             }
             aidlParam = MAKE_SPECIFIC_PARAMETER(Equalizer, equalizer, bandLevels, bandLevels);
-            return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
+            break;
         }
         default: {
-            // TODO: implement vendor extension parameters
-            ALOGW("%s unknown param %s", __func__, param.toString().c_str());
-            return BAD_VALUE;
+            // for vendor extension, copy data area to the DefaultExtension, parameter ignored
+            VendorExtension ext = VALUE_OR_RETURN_STATUS(
+                    aidl::android::legacy2aidl_EffectParameterReader_Data_VendorExtension(param));
+            aidlParam = MAKE_SPECIFIC_PARAMETER(Equalizer, equalizer, vendor, ext);
+            break;
         }
     }
+
+    return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
 }
 
-aidl::ConversionResult<Parameter> AidlConversionEq::getAidlParameter(Equalizer::Tag tag) {
+ConversionResult<Parameter> AidlConversionEq::getAidlParameter(Equalizer::Tag tag) {
     Parameter aidlParam;
     Parameter::Id id = MAKE_SPECIFIC_PARAMETER_ID(Equalizer, equalizerTag, tag);
     RETURN_IF_ERROR(statusTFromBinderStatus(mEffect->getParameter(id, &aidlParam)));
     return aidlParam;
 }
 
-aidl::ConversionResult<int32_t> AidlConversionEq::getParameterPreset() {
+ConversionResult<int32_t> AidlConversionEq::getParameterPreset() {
     Parameter aidlParam = VALUE_OR_RETURN_STATUS(getAidlParameter(Equalizer::preset));
     return VALUE_OR_RETURN_STATUS(GET_PARAMETER_SPECIFIC_FIELD(aidlParam, Equalizer, equalizer,
                                                                Equalizer::preset, int32_t));
 }
 
-aidl::ConversionResult<std::string> AidlConversionEq::getParameterPresetName(
+ConversionResult<std::string> AidlConversionEq::getParameterPresetName(
         EffectParamWriter& param) {
     int32_t presetIdx;
     if (OK != param.readFromParameter(&presetIdx)) {
@@ -289,8 +293,7 @@ status_t AidlConversionEq::getParameter(EffectParamWriter& param) {
             return OK;
         }
         default: {
-            ALOGW("%s unknown param %s", __func__, param.toString().c_str());
-            return BAD_VALUE;
+            VENDOR_EXTENSION_GET_AND_RETURN(Equalizer, equalizer, param);
         }
     }
 

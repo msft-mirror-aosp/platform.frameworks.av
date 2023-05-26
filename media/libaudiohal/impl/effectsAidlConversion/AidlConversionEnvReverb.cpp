@@ -24,7 +24,6 @@
 #include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionNdk.h>
 #include <media/AidlConversionEffect.h>
-#include <media/audiohal/AudioEffectUuid.h>
 #include <system/audio_effects/effect_environmentalreverb.h>
 
 #include <utils/Log.h>
@@ -39,6 +38,7 @@ using ::aidl::android::getParameterSpecificField;
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::EnvironmentalReverb;
 using ::aidl::android::hardware::audio::effect::Parameter;
+using ::aidl::android::hardware::audio::effect::VendorExtension;
 using ::android::status_t;
 using utils::EffectParamReader;
 using utils::EffectParamWriter;
@@ -166,7 +166,13 @@ status_t AidlConversionEnvReverb::setParameter(EffectParamReader& param) {
             break;
         }
         default: {
-            // TODO: handle with vendor extension
+            // for vendor extension, copy data area to the DefaultExtension, parameter ignored
+            VendorExtension ext = VALUE_OR_RETURN_STATUS(
+                    aidl::android::legacy2aidl_EffectParameterReader_Data_VendorExtension(param));
+            Parameter aidlParam = MAKE_SPECIFIC_PARAMETER(EnvironmentalReverb,
+                                                          environmentalReverb, vendor, ext);
+            RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mEffect->setParameter(aidlParam)));
+            break;
         }
     }
     return OK;
@@ -240,8 +246,7 @@ status_t AidlConversionEnvReverb::getParameter(EffectParamWriter& param) {
             break;
         }
         default: {
-            // TODO: handle with vendor extension
-            return BAD_VALUE;
+            VENDOR_EXTENSION_GET_AND_RETURN(EnvironmentalReverb, environmentalReverb, param);
         }
     }
     return OK;

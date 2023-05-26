@@ -24,6 +24,7 @@
 
 #include <aidl/android/hardware/camera/device/CameraBlob.h>
 #include <aidl/android/hardware/camera/device/CameraBlobId.h>
+#include "aidl/android/hardware/graphics/common/Dataspace.h"
 
 #include <android-base/unique_fd.h>
 #include <cutils/properties.h>
@@ -394,13 +395,12 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
             const camera_stream_buffer &buffer,
             nsecs_t timestamp,
             nsecs_t readoutTimestamp,
-            bool output,
+            [[maybe_unused]] bool output,
             int32_t transform,
             const std::vector<size_t>& surface_ids,
             /*out*/
             sp<Fence> *releaseFenceOut) {
 
-    (void)output;
     ALOG_ASSERT(output, "Expected output to be true");
 
     status_t res;
@@ -457,7 +457,10 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
             mTraceFirstBuffer = false;
         }
         // Fix CameraBlob id type discrepancy between HIDL and AIDL, details : http://b/229688810
-        if (getFormat() == HAL_PIXEL_FORMAT_BLOB && getDataSpace() == HAL_DATASPACE_V0_JFIF) {
+        if (getFormat() == HAL_PIXEL_FORMAT_BLOB && (getDataSpace() == HAL_DATASPACE_V0_JFIF ||
+                    (getDataSpace() ==
+                     static_cast<android_dataspace_t>(
+                         aidl::android::hardware::graphics::common::Dataspace::JPEG_R)))) {
             if (mIPCTransport == IPCTransport::HIDL) {
                 fixUpHidlJpegBlobHeader(anwBuffer, anwReleaseFence);
             }
@@ -519,8 +522,7 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
     return res;
 }
 
-void Camera3OutputStream::dump(int fd, const Vector<String16> &args) const {
-    (void) args;
+void Camera3OutputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) const {
     String8 lines;
     lines.appendFormat("    Stream[%d]: Output\n", mId);
     lines.appendFormat("      Consumer name: %s\n", mConsumerName.string());
@@ -1442,7 +1444,7 @@ nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
     //
     nsecs_t captureInterval = t - mLastCaptureTime;
     if (captureInterval > kSpacingResetIntervalNs) {
-        for (size_t i = 0; i < VsyncEventData::kFrameTimelinesLength; i++) {
+        for (size_t i = 0; i < vsyncEventData.frameTimelinesLength; i++) {
             const auto& timeline = vsyncEventData.frameTimelines[i];
             if (timeline.deadlineTimestamp >= currentTime &&
                     timeline.expectedPresentationTime > minPresentT) {
@@ -1511,7 +1513,7 @@ nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
     // - For variable FPS, or if the capture interval deviates from refresh
     //   interval for more than 5%, find a presentation time closest to the
     //   (lastPresentationTime + captureToPresentOffset) instead.
-    int maxTimelines = std::min(kMaxTimelines, (int)VsyncEventData::kFrameTimelinesLength);
+    int maxTimelines = std::min(kMaxTimelines, (int)vsyncEventData.frameTimelinesLength);
     float biasForShortDelay = 1.0f;
     for (int i = 0; i < maxTimelines; i ++) {
         const auto& vsyncTime = vsyncEventData.frameTimelines[i];

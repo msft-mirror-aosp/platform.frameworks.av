@@ -115,7 +115,7 @@ product_strategy_t EngineBase::getProductStrategyByName(const std::string &name)
     return PRODUCT_STRATEGY_NONE;
 }
 
-engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig()
+engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(const std::string& xmlFilePath)
 {
     auto loadVolumeConfig = [](auto &volumeGroups, auto &volumeConfig) {
         // Ensure name unicity to prevent duplicate
@@ -163,8 +163,9 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig()
         return stat(path, &fileStat) == 0 && S_ISREG(fileStat.st_mode);
     };
 
-    auto result = fileExists(engineConfig::DEFAULT_PATH) ?
-            engineConfig::parse(engineConfig::DEFAULT_PATH) : engineConfig::ParsingResult{};
+    const std::string filePath = xmlFilePath.empty() ? engineConfig::DEFAULT_PATH : xmlFilePath;
+    auto result = fileExists(filePath.c_str()) ?
+            engineConfig::parse(filePath.c_str()) : engineConfig::ParsingResult{};
     if (result.parsedConfig == nullptr) {
         ALOGD("%s: No configuration found, using default matching phone experience.", __FUNCTION__);
         engineConfig::Config config = gDefaultEngineConfig;
@@ -683,6 +684,58 @@ DeviceVector EngineBase::getActiveMediaDevices(const DeviceVector& availableDevi
         }
     }
     return activeDevices;
+}
+
+void EngineBase::initializeDeviceSelectionCache() {
+    // Initializing the device selection cache with default device won't be harmful, it will be
+    // updated after the audio modules are initialized.
+    auto defaultDevices = DeviceVector(getApmObserver()->getDefaultOutputDevice());
+    for (const auto &iter : getProductStrategies()) {
+        const auto &strategy = iter.second;
+        mDevicesForStrategies[strategy->getId()] = defaultDevices;
+        setStrategyDevices(strategy, defaultDevices);
+    }
+}
+
+void EngineBase::updateDeviceSelectionCache() {
+    for (const auto &iter : getProductStrategies()) {
+        const auto& strategy = iter.second;
+        auto devices = getDevicesForProductStrategy(strategy->getId());
+        mDevicesForStrategies[strategy->getId()] = devices;
+        setStrategyDevices(strategy, devices);
+    }
+}
+
+DeviceVector EngineBase::getPreferredAvailableDevicesForProductStrategy(
+        const DeviceVector& availableOutputDevices, product_strategy_t strategy) const {
+    DeviceVector preferredAvailableDevVec = {};
+    AudioDeviceTypeAddrVector preferredStrategyDevices;
+    const status_t status = getDevicesForRoleAndStrategy(
+            strategy, DEVICE_ROLE_PREFERRED, preferredStrategyDevices);
+    if (status == NO_ERROR) {
+        // there is a preferred device, is it available?
+        preferredAvailableDevVec =
+                availableOutputDevices.getDevicesFromDeviceTypeAddrVec(preferredStrategyDevices);
+        if (preferredAvailableDevVec.size() == preferredStrategyDevices.size()) {
+            ALOGV("%s using pref device %s for strategy %u",
+                   __func__, preferredAvailableDevVec.toString().c_str(), strategy);
+            return preferredAvailableDevVec;
+        }
+    }
+    return preferredAvailableDevVec;
+}
+
+DeviceVector EngineBase::getDisabledDevicesForProductStrategy(
+        const DeviceVector &availableOutputDevices, product_strategy_t strategy) const {
+    DeviceVector disabledDevices = {};
+    AudioDeviceTypeAddrVector disabledDevicesTypeAddr;
+    const status_t status = getDevicesForRoleAndStrategy(
+            strategy, DEVICE_ROLE_DISABLED, disabledDevicesTypeAddr);
+    if (status == NO_ERROR) {
+        disabledDevices =
+                availableOutputDevices.getDevicesFromDeviceTypeAddrVec(disabledDevicesTypeAddr);
+    }
+    return disabledDevices;
 }
 
 void EngineBase::dumpCapturePresetDevicesRoleMap(String8 *dst, int spaces) const

@@ -1616,13 +1616,16 @@ status_t AudioTrack::getPosition(uint32_t *position)
     }
 
     AutoMutex lock(mLock);
+    // IAudioTrack::stop() isn't synchronous; we don't know when presentation completes
+    if (mState == STATE_STOPPED || mState == STATE_FLUSHED) {
+        *position = 0;
+        return NO_ERROR;
+    }
     // FIXME: offloaded and direct tracks call into the HAL for render positions
     // for compressed/synced data; however, we use proxy position for pure linear pcm data
     // as we do not know the capability of the HAL for pcm position support and standby.
     // There may be some latency differences between the HAL position and the proxy position.
     if (isOffloadedOrDirect_l() && !isPurePcmData_l()) {
-        uint32_t dspFrames = 0;
-
         if (isOffloaded_l() && ((mState == STATE_PAUSED) || (mState == STATE_PAUSED_STOPPING))) {
             ALOGV("%s(%d): called in paused state, return cached position %u",
                 __func__, mPortId, mPausedPosition);
@@ -1630,13 +1633,15 @@ status_t AudioTrack::getPosition(uint32_t *position)
             return NO_ERROR;
         }
 
+        uint32_t dspFrames = 0;
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
             uint32_t halFrames; // actually unused
-            (void) AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
             // FIXME: on getRenderPosition() error, we return OK with frame position 0.
+            if (AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames) != NO_ERROR) {
+                *position = 0;
+                return NO_ERROR;
+            }
         }
-        // FIXME: dspFrames may not be zero in (mState == STATE_STOPPED || mState == STATE_FLUSHED)
-        // due to hardware latency. We leave this behavior for now.
         *position = dspFrames;
     } else {
         if (mCblk->mFlags & CBLK_INVALID) {
@@ -1644,11 +1649,9 @@ status_t AudioTrack::getPosition(uint32_t *position)
             // FIXME: for compatibility with the Java API we ignore the restoreTrack_l()
             // error here (e.g. DEAD_OBJECT) and return OK with the last recorded server position.
         }
-
-        // IAudioTrack::stop() isn't synchronous; we don't know when presentation completes
-        *position = (mState == STATE_STOPPED || mState == STATE_FLUSHED) ?
-                0 : updateAndGetPosition_l().value();
+        *position = updateAndGetPosition_l().value();
     }
+
     return NO_ERROR;
 }
 
@@ -1702,13 +1705,21 @@ audio_io_handle_t AudioTrack::getOutput() const
 
 status_t AudioTrack::setOutputDevice(audio_port_handle_t deviceId) {
     AutoMutex lock(mLock);
-    ALOGV("%s(%d): deviceId=%d mSelectedDeviceId=%d",
-            __func__, mPortId, deviceId, mSelectedDeviceId);
+    ALOGV("%s(%d): deviceId=%d mSelectedDeviceId=%d mRoutedDeviceId %d",
+            __func__, mPortId, deviceId, mSelectedDeviceId, mRoutedDeviceId);
     if (mSelectedDeviceId != deviceId) {
         mSelectedDeviceId = deviceId;
-        if (mStatus == NO_ERROR) {
-            android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
-            mProxy->interrupt();
+        if (mStatus == NO_ERROR && mSelectedDeviceId != mRoutedDeviceId) {
+            if (isPlaying_l()) {
+                android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+                mProxy->interrupt();
+            } else {
+                // if the track is idle, try to restore now and
+                // defer to next start if not possible
+                if (restoreTrack_l("setOutputDevice") != OK) {
+                    android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+                }
+            }
         }
     }
     return NO_ERROR;
@@ -2185,7 +2196,6 @@ status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, const struct timespec *re
         // obtainBuffer() is called with mutex unlocked, so keep extra references to these fields to
         // keep them from going away if another thread re-creates the track during obtainBuffer()
         sp<AudioTrackClientProxy> proxy;
-        sp<IMemory> iMem;
 
         {   // start of lock scope
             AutoMutex lock(mLock);
@@ -2211,8 +2221,9 @@ status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, const struct timespec *re
             }
 
             // Keep the extra references
+            mProxyObtainBufferRef = mProxy;
             proxy = mProxy;
-            iMem = mCblkMemory;
+            mCblkMemoryObtainBufferRef = mCblkMemory;
 
             if (mState == STATE_STOPPING) {
                 status = -EINTR;
@@ -2260,6 +2271,8 @@ void AudioTrack::releaseBuffer(const Buffer* audioBuffer)
     buffer.mFrameCount = stepCount;
     buffer.mRaw = audioBuffer->raw;
 
+    sp<IMemory> tempMemory;
+    sp<AudioTrackClientProxy> tempProxy;
     AutoMutex lock(mLock);
     if (audioBuffer->sequence != mSequence) {
         // This Buffer came from a different IAudioTrack instance, so ignore the releaseBuffer
@@ -2269,7 +2282,12 @@ void AudioTrack::releaseBuffer(const Buffer* audioBuffer)
     }
     mReleased += stepCount;
     mInUnderrun = false;
-    mProxy->releaseBuffer(&buffer);
+    mProxyObtainBufferRef->releaseBuffer(&buffer);
+    // The extra reference of shared memory and proxy from `obtainBuffer` is not used after
+    // calling `releaseBuffer`. Move the extra reference to a temp strong pointer so that it
+    // will be cleared outside `releaseBuffer`.
+    tempMemory = std::move(mCblkMemoryObtainBufferRef);
+    tempProxy = std::move(mProxyObtainBufferRef);
 
     // restart track if it was disabled by audioflinger due to previous underrun
     restartIfDisabled();
@@ -2507,11 +2525,22 @@ nsecs_t AudioTrack::processAudioBuffer()
         timeout.tv_sec = WAIT_STREAM_END_TIMEOUT_SEC;
         timeout.tv_nsec = 0;
 
+        // Use timestamp progress to safeguard we don't falsely time out.
+        AudioTimestamp timestamp{};
+        const bool isTimestampValid = getTimestamp(timestamp) == OK;
+        const auto frameCount = isTimestampValid ? timestamp.mPosition : 0;
+
         status_t status = proxy->waitStreamEndDone(&timeout);
         switch (status) {
+        case TIMED_OUT:
+            if (isTimestampValid
+                    && getTimestamp(timestamp) == OK && frameCount != timestamp.mPosition) {
+                ALOGD("%s: waitStreamEndDone retrying", __func__);
+                break;  // we retry again (and recheck possible state change).
+            }
+            [[fallthrough]];
         case NO_ERROR:
         case DEAD_OBJECT:
-        case TIMED_OUT:
             if (status != DEAD_OBJECT) {
                 // for DEAD_OBJECT, we do not send a EVENT_STREAM_END after stop();
                 // instead, the application should handle the EVENT_NEW_IAUDIOTRACK.
@@ -2529,6 +2558,7 @@ nsecs_t AudioTrack::processAudioBuffer()
                 }
             }
             if (waitStreamEnd && status != DEAD_OBJECT) {
+               ALOGV("%s: waitStreamEndDone complete", __func__);
                return NS_INACTIVE;
             }
             break;

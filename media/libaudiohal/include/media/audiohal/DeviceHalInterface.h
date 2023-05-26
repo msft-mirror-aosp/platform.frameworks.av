@@ -19,6 +19,9 @@
 
 #include <android/media/audio/common/AudioMMapPolicyInfo.h>
 #include <android/media/audio/common/AudioMMapPolicyType.h>
+#include <android/media/audio/common/AudioMode.h>
+#include <android/media/audio/common/AudioPort.h>
+#include <android/media/AudioRoute.h>
 #include <error/Result.h>
 #include <media/audiohal/EffectHalInterface.h>
 #include <system/audio.h>
@@ -38,6 +41,12 @@ class StreamOutHalInterface;
 class DeviceHalInterface : public virtual RefBase
 {
   public:
+    virtual status_t getAudioPorts(std::vector<media::audio::common::AudioPort> *ports) = 0;
+
+    virtual status_t getAudioRoutes(std::vector<media::AudioRoute> *routes) = 0;
+
+    virtual status_t getSupportedModes(std::vector<media::audio::common::AudioMode> *modes) = 0;
+
     // Sets the value of 'devices' to a bitmask of 1 or more values of audio_devices_t.
     virtual status_t getSupportedDevices(uint32_t *devices) = 0;
 
@@ -132,13 +141,14 @@ class DeviceHalInterface : public virtual RefBase
             std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
     virtual int32_t getAAudioMixerBurstCount() = 0;
     virtual int32_t getAAudioHardwareBurstMinUsec() = 0;
+
     virtual int32_t supportsBluetoothVariableLatency(bool* supports) = 0;
 
     // Update the connection status of an external device.
-    virtual status_t setConnectedState(const struct audio_port_v7* port, bool connected) {
-        ALOGE("%s override me port %p connected %d", __func__, port, connected);
-        return OK;
-    }
+    virtual status_t setConnectedState(const struct audio_port_v7* port, bool connected) = 0;
+
+    // Enable simulation of external devices connection at the HAL level.
+    virtual status_t setSimulateDeviceConnections(bool enabled) = 0;
 
     virtual error::Result<audio_hw_sync_t> getHwAvSync() = 0;
 
@@ -147,6 +157,8 @@ class DeviceHalInterface : public virtual RefBase
     // Returns the sound dose binder interface if it is supported by the HAL, nullptr otherwise
     virtual status_t getSoundDoseInterface(const std::string& module,
                                            ::ndk::SpAIBinder* soundDoseBinder) = 0;
+
+    virtual status_t prepareToDisconnectExternalDevice(const struct audio_port_v7* port) = 0;
 
   protected:
     // Subclasses can not be constructed directly by clients.
