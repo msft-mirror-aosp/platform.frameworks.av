@@ -21,10 +21,8 @@
 
 #include <system/audio.h>
 
-#include <android/media/AudioAttributesInternal.h>
 #include <android/media/AudioClient.h>
 #include <android/media/AudioDirectMode.h>
-#include <android/media/AudioFlag.h>
 #include <android/media/AudioIoConfigEvent.h>
 #include <android/media/AudioIoDescriptor.h>
 #include <android/media/AudioPortFw.h>
@@ -72,11 +70,6 @@ status_t legacy2aidl_audio_port_config_device_ext_AudioPortDeviceExt(
         media::audio::common::AudioPortDeviceExt* aidl,
         media::AudioPortDeviceExtSys* aidlDeviceExt);
 
-ConversionResult<audio_stream_type_t> aidl2legacy_AudioStreamType_audio_stream_type_t(
-        media::audio::common::AudioStreamType aidl);
-ConversionResult<media::audio::common::AudioStreamType>
-legacy2aidl_audio_stream_type_t_AudioStreamType(audio_stream_type_t legacy);
-
 ConversionResult<audio_port_config_mix_ext> aidl2legacy_AudioPortMixExt(
         const media::audio::common::AudioPortMixExt& aidl, media::AudioPortRole role,
         const media::AudioPortMixExtSys& aidlMixExt);
@@ -109,21 +102,6 @@ ConversionResult<AudioClient> aidl2legacy_AudioClient_AudioClient(
         const media::AudioClient& aidl);
 ConversionResult<media::AudioClient> legacy2aidl_AudioClient_AudioClient(
         const AudioClient& legacy);
-
-ConversionResult<audio_flags_mask_t>
-aidl2legacy_AudioFlag_audio_flags_mask_t(media::AudioFlag aidl);
-ConversionResult<media::AudioFlag>
-legacy2aidl_audio_flags_mask_t_AudioFlag(audio_flags_mask_t legacy);
-
-ConversionResult<audio_flags_mask_t>
-aidl2legacy_int32_t_audio_flags_mask_t_mask(int32_t aidl);
-ConversionResult<int32_t>
-legacy2aidl_audio_flags_mask_t_int32_t_mask(audio_flags_mask_t legacy);
-
-ConversionResult<audio_attributes_t>
-aidl2legacy_AudioAttributesInternal_audio_attributes_t(const media::AudioAttributesInternal& aidl);
-ConversionResult<media::AudioAttributesInternal>
-legacy2aidl_audio_attributes_t_AudioAttributesInternal(const audio_attributes_t& legacy);
 
 ConversionResult<sp<IMemory>>
 aidl2legacy_SharedFileRegion_IMemory(const media::SharedFileRegion& aidl);

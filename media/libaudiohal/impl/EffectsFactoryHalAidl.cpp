@@ -23,10 +23,12 @@
 //#define LOG_NDEBUG 0
 
 #include <error/expected_utils.h>
+#include <aidl/android/media/audio/common/AudioStreamType.h>
 #include <android/binder_manager.h>
 #include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionEffect.h>
 #include <system/audio.h>
+#include <system/audio_aidl_utils.h>
 #include <utils/Log.h>
 
 #include "EffectBufferHalAidl.h"
@@ -35,11 +37,16 @@
 #include "EffectsFactoryHalAidl.h"
 
 using ::aidl::android::legacy2aidl_audio_uuid_t_AudioUuid;
-using aidl::android::aidl_utils::statusTFromBinderStatus;
-using aidl::android::hardware::audio::effect::Descriptor;
-using aidl::android::hardware::audio::effect::IFactory;
-using aidl::android::media::audio::common::AudioUuid;
-using android::detail::AudioHalVersionInfo;
+using ::aidl::android::aidl_utils::statusTFromBinderStatus;
+using ::aidl::android::hardware::audio::effect::Descriptor;
+using ::aidl::android::hardware::audio::effect::IFactory;
+using ::aidl::android::hardware::audio::effect::Processing;
+using ::aidl::android::media::audio::common::AudioSource;
+using ::aidl::android::media::audio::common::AudioStreamType;
+using ::aidl::android::media::audio::common::AudioUuid;
+using ::android::audio::utils::toString;
+using ::android::base::unexpected;
+using ::android::detail::AudioHalVersionInfo;
 
 namespace android {
 namespace effect {
@@ -92,7 +99,14 @@ EffectsFactoryHalAidl::EffectsFactoryHalAidl(std::shared_ptr<IFactory> effectsFa
                        [](const Descriptor& desc) { return !desc.common.id.proxy.has_value(); });
           return list;
       }()),
-      mEffectCount(mNonProxyDescList.size() + mProxyDescList.size()) {
+      mEffectCount(mNonProxyDescList.size() + mProxyDescList.size()),
+      mAidlProcessings([this]() -> std::vector<Processing> {
+          std::vector<Processing> processings;
+          if (!mFactory || !mFactory->queryProcessing(std::nullopt, &processings).isOk()) {
+              ALOGE("%s queryProcessing failed", __func__);
+          }
+          return processings;
+      }()) {
     ALOG_ASSERT(mFactory != nullptr, "Provided IEffectsFactory service is NULL");
     ALOGI("%s with %zu nonProxyEffects and %zu proxyEffects", __func__, mNonProxyDescList.size(),
           mProxyDescList.size());
@@ -176,7 +190,7 @@ status_t EffectsFactoryHalAidl::createEffect(const effect_uuid_t* uuid, int32_t 
                 statusTFromBinderStatus(mFactory->createEffect(aidlUuid, &aidlEffect)));
     }
     if (aidlEffect == nullptr) {
-        ALOGE("%s failed to create effect with UUID: %s", __func__, aidlUuid.toString().c_str());
+        ALOGE("%s failed to create effect with UUID: %s", __func__, toString(aidlUuid).c_str());
         return NAME_NOT_FOUND;
     }
     Descriptor desc;
@@ -232,10 +246,10 @@ status_t EffectsFactoryHalAidl::getHalDescriptorWithImplUuid(const AudioUuid& uu
     auto matchIt = std::find_if(list.begin(), list.end(),
                                 [&](const auto& desc) { return desc.common.id.uuid == uuid; });
     if (matchIt == list.end()) {
-        ALOGE("%s UUID not found in HAL and proxy list %s", __func__, uuid.toString().c_str());
+        ALOGE("%s UUID not found in HAL and proxy list %s", __func__, toString(uuid).c_str());
         return BAD_VALUE;
     }
-    ALOGI("%s UUID impl found %s", __func__, uuid.toString().c_str());
+    ALOGI("%s UUID impl found %s", __func__, toString(uuid).c_str());
 
     *pDescriptor = VALUE_OR_RETURN_STATUS(
             ::aidl::android::aidl2legacy_Descriptor_effect_descriptor(*matchIt));
@@ -254,10 +268,10 @@ status_t EffectsFactoryHalAidl::getHalDescriptorWithTypeUuid(
     std::copy_if(mProxyDescList.begin(), mProxyDescList.end(), std::back_inserter(result),
                  [&](auto& desc) { return desc.common.id.type == type; });
     if (result.empty()) {
-        ALOGW("%s UUID type not found in HAL and proxy list %s", __func__, type.toString().c_str());
+        ALOGW("%s UUID type not found in HAL and proxy list %s", __func__, toString(type).c_str());
         return BAD_VALUE;
     }
-    ALOGI("%s UUID type found %zu \n %s", __func__, result.size(), type.toString().c_str());
+    ALOGI("%s UUID type found %zu \n %s", __func__, result.size(), toString(type).c_str());
 
     *descriptors = VALUE_OR_RETURN_STATUS(
             aidl::android::convertContainer<std::vector<effect_descriptor_t>>(
@@ -267,6 +281,83 @@ status_t EffectsFactoryHalAidl::getHalDescriptorWithTypeUuid(
 
 bool EffectsFactoryHalAidl::isProxyEffect(const AudioUuid& uuid) const {
     return 0 != mUuidProxyMap.count(uuid);
+}
+
+std::shared_ptr<const effectsConfig::Processings> EffectsFactoryHalAidl::getProcessings() const {
+
+    auto getConfigEffectWithDescriptor =
+            [](const auto& desc) -> std::shared_ptr<const effectsConfig::Effect> {
+        effectsConfig::Effect effect = {.name = desc.common.name, .isProxy = false};
+        if (const auto uuid =
+                    ::aidl::android::aidl2legacy_AudioUuid_audio_uuid_t(desc.common.id.uuid);
+            uuid.ok()) {
+            static_cast<effectsConfig::EffectImpl>(effect).uuid = uuid.value();
+            return std::make_shared<const effectsConfig::Effect>(effect);
+        } else {
+            return nullptr;
+        }
+    };
+
+    auto getConfigProcessingWithAidlProcessing =
+            [&](const auto& aidlProcess, std::vector<effectsConfig::InputStream>& preprocess,
+                std::vector<effectsConfig::OutputStream>& postprocess) {
+                if (aidlProcess.type.getTag() == Processing::Type::streamType) {
+                    AudioStreamType aidlType =
+                            aidlProcess.type.template get<Processing::Type::streamType>();
+                    const auto type =
+                            ::aidl::android::aidl2legacy_AudioStreamType_audio_stream_type_t(
+                                    aidlType);
+                    if (!type.ok()) {
+                        return;
+                    }
+
+                    std::vector<std::shared_ptr<const effectsConfig::Effect>> effects;
+                    std::transform(aidlProcess.ids.begin(), aidlProcess.ids.end(),
+                                   std::back_inserter(effects), getConfigEffectWithDescriptor);
+                    effectsConfig::OutputStream stream = {.type = type.value(),
+                                                          .effects = std::move(effects)};
+                    postprocess.emplace_back(stream);
+                } else if (aidlProcess.type.getTag() == Processing::Type::source) {
+                    AudioSource aidlType =
+                            aidlProcess.type.template get<Processing::Type::source>();
+                    const auto type =
+                            ::aidl::android::aidl2legacy_AudioSource_audio_source_t(aidlType);
+                    if (!type.ok()) {
+                        return;
+                    }
+
+                    std::vector<std::shared_ptr<const effectsConfig::Effect>> effects;
+                    std::transform(aidlProcess.ids.begin(), aidlProcess.ids.end(),
+                                   std::back_inserter(effects), getConfigEffectWithDescriptor);
+                    effectsConfig::InputStream stream = {.type = type.value(),
+                                                         .effects = std::move(effects)};
+                    preprocess.emplace_back(stream);
+                }
+            };
+
+    static std::shared_ptr<const effectsConfig::Processings> processings(
+            [&]() -> std::shared_ptr<const effectsConfig::Processings> {
+                std::vector<effectsConfig::InputStream> preprocess;
+                std::vector<effectsConfig::OutputStream> postprocess;
+                for (const auto& processing : mAidlProcessings) {
+                    getConfigProcessingWithAidlProcessing(processing, preprocess, postprocess);
+                }
+
+                if (0 == preprocess.size() && 0 == postprocess.size()) {
+                    return nullptr;
+                }
+
+                return std::make_shared<const effectsConfig::Processings>(
+                        effectsConfig::Processings({.preprocess = std::move(preprocess),
+                                                    .postprocess = std::move(postprocess)}));
+            }());
+
+    return processings;
+}
+
+// Return 0 for AIDL, as the AIDL interface is not aware of the configuration file.
+::android::error::Result<size_t> EffectsFactoryHalAidl::getSkippedElements() const {
+    return 0;
 }
 
 } // namespace effect
