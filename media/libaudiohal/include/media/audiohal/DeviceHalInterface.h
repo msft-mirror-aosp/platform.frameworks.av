@@ -19,6 +19,9 @@
 
 #include <android/media/audio/common/AudioMMapPolicyInfo.h>
 #include <android/media/audio/common/AudioMMapPolicyType.h>
+#include <android/media/audio/common/AudioMode.h>
+#include <android/media/audio/common/AudioPort.h>
+#include <android/media/AudioRoute.h>
 #include <error/Result.h>
 #include <media/audiohal/EffectHalInterface.h>
 #include <system/audio.h>
@@ -34,6 +37,12 @@ class StreamOutHalInterface;
 class DeviceHalInterface : public virtual RefBase
 {
   public:
+    virtual status_t getAudioPorts(std::vector<media::audio::common::AudioPort> *ports) = 0;
+
+    virtual status_t getAudioRoutes(std::vector<media::AudioRoute> *routes) = 0;
+
+    virtual status_t getSupportedModes(std::vector<media::audio::common::AudioMode> *modes) = 0;
+
     // Sets the value of 'devices' to a bitmask of 1 or more values of audio_devices_t.
     virtual status_t getSupportedDevices(uint32_t *devices) = 0;
 
@@ -140,6 +149,8 @@ class DeviceHalInterface : public virtual RefBase
     virtual error::Result<audio_hw_sync_t> getHwAvSync() = 0;
 
     virtual status_t dump(int fd, const Vector<String16>& args) = 0;
+
+    virtual status_t prepareToDisconnectExternalDevice(const struct audio_port_v7* port) = 0;
 
   protected:
     // Subclasses can not be constructed directly by clients.

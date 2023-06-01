@@ -58,7 +58,6 @@
 #include <audiomanager/AudioManager.h>
 
 #include "AudioFlinger.h"
-#include "NBAIO_Tee.h"
 #include "PropertyUtils.h"
 
 #include <media/AudioResamplerPublic.h>
@@ -86,9 +85,8 @@
 #include <private/android_filesystem_config.h>
 
 //#define BUFLOG_NDEBUG 0
-#include <BufLog.h>
-
-#include "TypedLogger.h"
+#include <afutils/BufLog.h>
+#include <afutils/TypedLogger.h>
 
 // ----------------------------------------------------------------------------
 
@@ -111,6 +109,7 @@ using ::android::base::StringPrintf;
 using media::IEffectClient;
 using media::audio::common::AudioMMapPolicyInfo;
 using media::audio::common::AudioMMapPolicyType;
+using media::audio::common::AudioMode;
 using android::content::AttributionSourceState;
 using android::detail::AudioHalVersionInfo;
 
@@ -235,6 +234,7 @@ BINDER_METHOD_ENTRY(getSupportedLatencyModes) \
 BINDER_METHOD_ENTRY(setBluetoothVariableLatencyEnabled) \
 BINDER_METHOD_ENTRY(isBluetoothVariableLatencyEnabled) \
 BINDER_METHOD_ENTRY(supportsBluetoothVariableLatency) \
+BINDER_METHOD_ENTRY(getAudioPolicyConfig) \
 
 // singleton for Binder Method Statistics for IAudioFlinger
 static auto& getIAudioFlingerStatistics() {
@@ -482,14 +482,17 @@ int32_t AudioFlinger::getAAudioHardwareBurstMinUsec() {
     return mAAudioHwBurstMinMicros;
 }
 
-status_t AudioFlinger::setDeviceConnectedState(const struct audio_port_v7 *port, bool connected) {
+status_t AudioFlinger::setDeviceConnectedState(const struct audio_port_v7 *port,
+                                               media::DeviceConnectedState state) {
     status_t final_result = NO_INIT;
     Mutex::Autolock _l(mLock);
     AutoMutex lock(mHardwareLock);
     mHardwareStatus = AUDIO_HW_SET_CONNECTED_STATE;
     for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
         sp<DeviceHalInterface> dev = mAudioHwDevs.valueAt(i)->hwDevice();
-        status_t result = dev->setConnectedState(port, connected);
+        status_t result = state == media::DeviceConnectedState::PREPARE_TO_DISCONNECT
+                ? dev->prepareToDisconnectExternalDevice(port)
+                : dev->setConnectedState(port, state == media::DeviceConnectedState::CONNECTED);
         // Same logic as with setParameter: it's a success if at least one
         // HAL module accepts the update.
         if (final_result != NO_ERROR) {
@@ -1231,18 +1234,19 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
         }
 
         // Look for sync events awaiting for a session to be used.
-        for (size_t i = 0; i < mPendingSyncEvents.size(); i++) {
-            if (mPendingSyncEvents[i]->triggerSession() == sessionId) {
-                if (thread->isValidSyncEvent(mPendingSyncEvents[i])) {
+        for (auto it = mPendingSyncEvents.begin(); it != mPendingSyncEvents.end();) {
+            if ((*it)->triggerSession() == sessionId) {
+                if (thread->isValidSyncEvent(*it)) {
                     if (lStatus == NO_ERROR) {
-                        (void) track->setSyncEvent(mPendingSyncEvents[i]);
+                        (void) track->setSyncEvent(*it);
                     } else {
-                        mPendingSyncEvents[i]->cancel();
+                        (*it)->cancel();
                     }
-                    mPendingSyncEvents.removeAt(i);
-                    i--;
+                    it = mPendingSyncEvents.erase(it);
+                    continue;
                 }
             }
+            ++it;
         }
         if ((output.flags & AUDIO_OUTPUT_FLAG_HW_AV_SYNC) == AUDIO_OUTPUT_FLAG_HW_AV_SYNC) {
             setAudioHwSyncForSession_l(thread, sessionId);
@@ -1827,6 +1831,8 @@ void AudioFlinger::filterReservedParameters(String8& keyValuePairs, uid_t callin
         String8(AudioParameter::keyStreamSupportedFormats),
         String8(AudioParameter::keyStreamSupportedChannels),
         String8(AudioParameter::keyStreamSupportedSamplingRates),
+        String8(AudioParameter::keyClosing),
+        String8(AudioParameter::keyExiting),
     };
 
     if (isAudioServerUid(callingUid)) {
@@ -2533,6 +2539,47 @@ Exit:
 
 // ----------------------------------------------------------------------------
 
+status_t AudioFlinger::getAudioPolicyConfig(media::AudioPolicyConfig *config)
+{
+    if (config == nullptr) {
+        return BAD_VALUE;
+    }
+    Mutex::Autolock _l(mLock);
+    AutoMutex lock(mHardwareLock);
+    RETURN_STATUS_IF_ERROR(
+            mDevicesFactoryHal->getSurroundSoundConfig(&config->surroundSoundConfig));
+    RETURN_STATUS_IF_ERROR(mDevicesFactoryHal->getEngineConfig(&config->engineConfig));
+    std::vector<std::string> hwModuleNames;
+    RETURN_STATUS_IF_ERROR(mDevicesFactoryHal->getDeviceNames(&hwModuleNames));
+    std::set<AudioMode> allSupportedModes;
+    for (const auto& name : hwModuleNames) {
+        AudioHwDevice* module = loadHwModule_l(name.c_str());
+        if (module == nullptr) continue;
+        media::AudioHwModule aidlModule;
+        if (module->hwDevice()->getAudioPorts(&aidlModule.ports) == OK &&
+                module->hwDevice()->getAudioRoutes(&aidlModule.routes) == OK) {
+            aidlModule.handle = module->handle();
+            aidlModule.name = module->moduleName();
+            config->modules.push_back(std::move(aidlModule));
+        }
+        std::vector<AudioMode> supportedModes;
+        if (module->hwDevice()->getSupportedModes(&supportedModes) == OK) {
+            allSupportedModes.insert(supportedModes.begin(), supportedModes.end());
+        }
+    }
+    if (!allSupportedModes.empty()) {
+        config->supportedModes.insert(config->supportedModes.end(),
+                allSupportedModes.begin(), allSupportedModes.end());
+    } else {
+        ALOGW("%s: The HAL does not provide telephony functionality", __func__);
+        config->supportedModes = { media::audio::common::AudioMode::NORMAL,
+            media::audio::common::AudioMode::RINGTONE,
+            media::audio::common::AudioMode::IN_CALL,
+            media::audio::common::AudioMode::IN_COMMUNICATION };
+    }
+    return OK;
+}
+
 audio_module_handle_t AudioFlinger::loadHwModule(const char *name)
 {
     if (name == NULL) {
@@ -2543,16 +2590,17 @@ audio_module_handle_t AudioFlinger::loadHwModule(const char *name)
     }
     Mutex::Autolock _l(mLock);
     AutoMutex lock(mHardwareLock);
-    return loadHwModule_l(name);
+    AudioHwDevice* module = loadHwModule_l(name);
+    return module != nullptr ? module->handle() : AUDIO_MODULE_HANDLE_NONE;
 }
 
 // loadHwModule_l() must be called with AudioFlinger::mLock and AudioFlinger::mHardwareLock held
-audio_module_handle_t AudioFlinger::loadHwModule_l(const char *name)
+AudioHwDevice* AudioFlinger::loadHwModule_l(const char *name)
 {
     for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
         if (strncmp(mAudioHwDevs.valueAt(i)->moduleName(), name, strlen(name)) == 0) {
             ALOGW("loadHwModule() module %s already loaded", name);
-            return mAudioHwDevs.keyAt(i);
+            return mAudioHwDevs.valueAt(i);
         }
     }
 
@@ -2561,7 +2609,7 @@ audio_module_handle_t AudioFlinger::loadHwModule_l(const char *name)
     int rc = mDevicesFactoryHal->openDevice(name, &dev);
     if (rc) {
         ALOGE("loadHwModule() error %d loading module %s", rc, name);
-        return AUDIO_MODULE_HANDLE_NONE;
+        return nullptr;
     }
 
     mHardwareStatus = AUDIO_HW_INIT;
@@ -2569,7 +2617,7 @@ audio_module_handle_t AudioFlinger::loadHwModule_l(const char *name)
     mHardwareStatus = AUDIO_HW_IDLE;
     if (rc) {
         ALOGE("loadHwModule() init check error %d for module %s", rc, name);
-        return AUDIO_MODULE_HANDLE_NONE;
+        return nullptr;
     }
 
     // Check and cache this HAL's level of support for master mute and master
@@ -2643,8 +2691,7 @@ audio_module_handle_t AudioFlinger::loadHwModule_l(const char *name)
 
     ALOGI("loadHwModule() Loaded %s audio interface, handle %d", name, handle);
 
-    return handle;
-
+    return audioDevice;
 }
 
 // ----------------------------------------------------------------------------
@@ -2892,14 +2939,6 @@ sp<AudioFlinger::ThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t mo
         ALOGE("openOutput_l requested output handle %d is not AUDIO_IO_HANDLE_NONE", *output);
         return nullptr;
     }
-
-#ifndef MULTICHANNEL_EFFECT_CHAIN
-    if (flags & AUDIO_OUTPUT_FLAG_SPATIALIZER) {
-        ALOGE("openOutput_l() cannot create spatializer thread "
-                "without #define MULTICHANNEL_EFFECT_CHAIN");
-        return nullptr;
-    }
-#endif
 
     mHardwareStatus = AUDIO_HW_OUTPUT_OPEN;
 
@@ -3871,15 +3910,16 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
     track->setTeePatches(std::move(teePatches));
 }
 
-sp<AudioFlinger::SyncEvent> AudioFlinger::createSyncEvent(AudioSystem::sync_event_t type,
+sp<audioflinger::SyncEvent> AudioFlinger::createSyncEvent(AudioSystem::sync_event_t type,
                                     audio_session_t triggerSession,
                                     audio_session_t listenerSession,
-                                    sync_event_callback_t callBack,
+                                    const audioflinger::SyncEventCallback& callBack,
                                     const wp<RefBase>& cookie)
 {
     Mutex::Autolock _l(mLock);
 
-    sp<SyncEvent> event = new SyncEvent(type, triggerSession, listenerSession, callBack, cookie);
+    auto event = sp<audioflinger::SyncEvent>::make(
+            type, triggerSession, listenerSession, callBack, cookie);
     status_t playStatus = NAME_NOT_FOUND;
     status_t recStatus = NAME_NOT_FOUND;
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
@@ -3895,7 +3935,7 @@ sp<AudioFlinger::SyncEvent> AudioFlinger::createSyncEvent(AudioSystem::sync_even
         }
     }
     if (playStatus == NAME_NOT_FOUND || recStatus == NAME_NOT_FOUND) {
-        mPendingSyncEvents.add(event);
+        mPendingSyncEvents.emplace_back(event);
     } else {
         ALOGV("createSyncEvent() invalid event %d", event->type());
         event.clear();
@@ -4643,6 +4683,7 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         case TransactionCode::SET_DEVICE_CONNECTED_STATE:
         case TransactionCode::SET_REQUESTED_LATENCY_MODE:
         case TransactionCode::GET_SUPPORTED_LATENCY_MODES:
+        case TransactionCode::GET_AUDIO_POLICY_CONFIG:
             ALOGW("%s: transaction %d received from PID %d",
                   __func__, code, IPCThreadState::self()->getCallingPid());
             // return status only for non void methods

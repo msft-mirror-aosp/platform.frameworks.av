@@ -35,6 +35,7 @@
 #include <media/PatchBuilder.h>
 #include "AudioPolicyInterface.h"
 
+#include <android/media/DeviceConnectedState.h>
 #include <android/media/audio/common/AudioPort.h>
 #include <AudioPolicyManagerObserver.h>
 #include <AudioPolicyConfig.h>
@@ -92,7 +93,9 @@ class AudioPolicyManager : public AudioPolicyInterface, public AudioPolicyManage
 {
 
 public:
-        explicit AudioPolicyManager(AudioPolicyClientInterface *clientInterface);
+        AudioPolicyManager(const sp<const AudioPolicyConfig>& config,
+                           EngineInstance&& engine,
+                           AudioPolicyClientInterface *clientInterface);
         virtual ~AudioPolicyManager();
 
         // AudioPolicyInterface
@@ -358,11 +361,10 @@ public:
         }
 
         virtual status_t getProductStrategyFromAudioAttributes(
-                const AudioAttributes &aa, product_strategy_t &productStrategy,
+                const audio_attributes_t &aa, product_strategy_t &productStrategy,
                 bool fallbackOnDefault)
         {
-            productStrategy = mEngine->getProductStrategyForAttributes(
-                    aa.getAttributes(), fallbackOnDefault);
+            productStrategy = mEngine->getProductStrategyForAttributes(aa, fallbackOnDefault);
             return (fallbackOnDefault && productStrategy == PRODUCT_STRATEGY_NONE) ?
                     BAD_VALUE : NO_ERROR;
         }
@@ -373,10 +375,9 @@ public:
         }
 
         virtual status_t getVolumeGroupFromAudioAttributes(
-                const AudioAttributes &aa, volume_group_t &volumeGroup, bool fallbackOnDefault)
+                const audio_attributes_t &aa, volume_group_t &volumeGroup, bool fallbackOnDefault)
         {
-            volumeGroup = mEngine->getVolumeGroupForAttributes(
-                        aa.getAttributes(), fallbackOnDefault);
+            volumeGroup = mEngine->getVolumeGroupForAttributes(aa, fallbackOnDefault);
             return (fallbackOnDefault && volumeGroup == VOLUME_GROUP_NONE) ?
                     BAD_VALUE : NO_ERROR;
         }
@@ -406,19 +407,7 @@ public:
         status_t initialize();
 
 protected:
-        // A constructor that allows more fine-grained control over initialization process,
-        // used in automatic tests.
-        AudioPolicyManager(AudioPolicyClientInterface *clientInterface, bool forTesting);
-
-        // These methods should be used when finer control over APM initialization
-        // is needed, e.g. in tests. Must be used in conjunction with the constructor
-        // that only performs fields initialization. The public constructor comprises
-        // these steps in the following sequence:
-        //   - field initializing constructor;
-        //   - loadConfig;
-        //   - initialize.
-        AudioPolicyConfig& getConfig() { return mConfig; }
-        void loadConfig();
+        const AudioPolicyConfig& getConfig() const { return *(mConfig.get()); }
 
         // From AudioPolicyManagerObserver
         virtual const AudioPatchCollection &getAudioPatches() const
@@ -452,7 +441,7 @@ protected:
         }
         virtual const sp<DeviceDescriptor> &getDefaultOutputDevice() const
         {
-            return mDefaultOutputDevice;
+            return mConfig->getDefaultOutputDevice();
         }
 
         std::vector<volume_group_t> getVolumeGroups() const
@@ -911,6 +900,8 @@ protected:
                 sp<SwAudioOutputDescriptor> ignoredOutput, uint32_t delayMs);
 
         const uid_t mUidCached;                         // AID_AUDIOSERVER
+        sp<const AudioPolicyConfig> mConfig;
+        EngineInstance mEngine;                         // Audio Policy Engine instance
         AudioPolicyClientInterface *mpClientInterface;  // audio policy client interface
         sp<SwAudioOutputDescriptor> mPrimaryOutput;     // primary output descriptor
         // list of descriptors for outputs currently opened
@@ -923,8 +914,6 @@ protected:
         SwAudioOutputCollection mPreviousOutputs;
         AudioInputCollection mInputs;     // list of input descriptors
 
-        DeviceVector  mOutputDevicesAll; // all output devices from the config
-        DeviceVector  mInputDevicesAll;  // all input devices from the config
         DeviceVector  mAvailableOutputDevices; // all available output devices
         DeviceVector  mAvailableInputDevices;  // all available input devices
 
@@ -934,11 +923,7 @@ protected:
         bool    mA2dpSuspended;  // true if A2DP output is suspended
 
         EffectDescriptorCollection mEffects;  // list of registered audio effects
-        sp<DeviceDescriptor> mDefaultOutputDevice; // output device selected by default at boot time
         HwModuleCollection mHwModules; // contains modules that have been loaded successfully
-        HwModuleCollection mHwModulesAll; // contains all modules declared in the config
-
-        AudioPolicyConfig mConfig;
 
         std::atomic<uint32_t> mAudioPortGeneration;
 
@@ -968,9 +953,6 @@ protected:
         audio_io_handle_t mMusicEffectOutput;     // output selected for music effects
 
         uint32_t nextAudioPortGeneration();
-
-        // Audio Policy Engine Interface.
-        EngineInstance mEngine;
 
         // Surround formats that are enabled manually. Taken into account when
         // "encoded surround" is forced into "manual" mode.
@@ -1036,13 +1018,16 @@ private:
         void updateAudioProfiles(const sp<DeviceDescriptor>& devDesc, audio_io_handle_t ioHandle,
                 AudioProfileVector &profiles);
 
+        // Notify the policy client to prepare for disconnecting external device.
+        void prepareToDisconnectExternalDevice(const sp<DeviceDescriptor> &device);
+
         // Notify the policy client of any change of device state with AUDIO_IO_HANDLE_NONE,
         // so that the client interprets it as global to audio hardware interfaces.
         // It can give a chance to HAL implementer to retrieve dynamic capabilities associated
         // to this device for example.
         // TODO avoid opening stream to retrieve capabilities of a profile.
         void broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
-                                            audio_policy_dev_state_t state);
+                                            media::DeviceConnectedState state);
 
         // updates device caching and output for streams that can influence the
         //    routing of notifications
