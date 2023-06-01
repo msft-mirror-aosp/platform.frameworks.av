@@ -78,20 +78,25 @@
 #include <mediautils/Synchronization.h>
 #include <mediautils/ThreadSnapshot.h>
 
+#include <afutils/AudioWatchdog.h>
+#include <afutils/NBAIO_Tee.h>
+
 #include <audio_utils/clock.h>
 #include <audio_utils/FdToString.h>
 #include <audio_utils/LinearMap.h>
 #include <audio_utils/SimpleLog.h>
 #include <audio_utils/TimestampVerifier.h>
 
-#include "FastCapture.h"
-#include "FastMixer.h"
+#include <timing/MonotonicFrameCounter.h>
+#include <timing/SyncEvent.h>
+#include <timing/SynchronizedRecordState.h>
+
+#include <fastpath/FastCapture.h>
+#include <fastpath/FastMixer.h>
 #include <media/nbaio/NBAIO.h>
-#include "AudioWatchdog.h"
 #include "AudioStreamOut.h"
 #include "SpdifStreamOut.h"
 #include "AudioHwDevice.h"
-#include "NBAIO_Tee.h"
 #include "ThreadMetrics.h"
 #include "TrackMetrics.h"
 
@@ -131,6 +136,7 @@ using android::content::AttributionSourceState;
 
 class AudioFlinger : public AudioFlingerServerAdapter::Delegate
 {
+    friend class sp<AudioFlinger>;
 public:
     static void instantiate() ANDROID_API;
 
@@ -291,7 +297,8 @@ public:
 
     virtual int32_t getAAudioHardwareBurstMinUsec();
 
-    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port, bool connected);
+    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port,
+                                             media::DeviceConnectedState state);
 
     virtual status_t setSimulateDeviceConnections(bool enabled);
 
@@ -306,6 +313,8 @@ public:
     virtual status_t isBluetoothVariableLatencyEnabled(bool* enabled);
 
     virtual status_t supportsBluetoothVariableLatency(bool* support);
+
+    virtual status_t getAudioPolicyConfig(media::AudioPolicyConfig* config);
 
     status_t onTransactWrapper(TransactionCode code, const Parcel& data, uint32_t flags,
         const std::function<status_t()>& delegate) override;
@@ -368,47 +377,10 @@ public:
 
     static inline std::atomic<AudioFlinger *> gAudioFlinger = nullptr;
 
-    class SyncEvent;
-
-    typedef void (*sync_event_callback_t)(const wp<SyncEvent>& event) ;
-
-    class SyncEvent : public RefBase {
-    public:
-        SyncEvent(AudioSystem::sync_event_t type,
-                  audio_session_t triggerSession,
-                  audio_session_t listenerSession,
-                  sync_event_callback_t callBack,
-                  const wp<RefBase>& cookie)
-        : mType(type), mTriggerSession(triggerSession), mListenerSession(listenerSession),
-          mCallback(callBack), mCookie(cookie)
-        {}
-
-        virtual ~SyncEvent() {}
-
-        void trigger() {
-            Mutex::Autolock _l(mLock);
-            if (mCallback) mCallback(wp<SyncEvent>(this));
-        }
-        bool isCancelled() const { Mutex::Autolock _l(mLock); return (mCallback == NULL); }
-        void cancel() { Mutex::Autolock _l(mLock); mCallback = NULL; }
-        AudioSystem::sync_event_t type() const { return mType; }
-        audio_session_t triggerSession() const { return mTriggerSession; }
-        audio_session_t listenerSession() const { return mListenerSession; }
-        wp<RefBase> cookie() const { return mCookie; }
-
-    private:
-          const AudioSystem::sync_event_t mType;
-          const audio_session_t mTriggerSession;
-          const audio_session_t mListenerSession;
-          sync_event_callback_t mCallback;
-          const wp<RefBase> mCookie;
-          mutable Mutex mLock;
-    };
-
-    sp<SyncEvent> createSyncEvent(AudioSystem::sync_event_t type,
+    sp<audioflinger::SyncEvent> createSyncEvent(AudioSystem::sync_event_t type,
                                         audio_session_t triggerSession,
                                         audio_session_t listenerSession,
-                                        sync_event_callback_t callBack,
+                                        const audioflinger::SyncEventCallback& callBack,
                                         const wp<RefBase>& cookie);
 
     bool        btNrecIsOff() const { return mBtNrecIsOff.load(); }
@@ -625,13 +597,6 @@ private:
     };
 
     // --- PlaybackThread ---
-#ifdef FLOAT_EFFECT_CHAIN
-#define EFFECT_BUFFER_FORMAT AUDIO_FORMAT_PCM_FLOAT
-using effect_buffer_t = float;
-#else
-#define EFFECT_BUFFER_FORMAT AUDIO_FORMAT_PCM_16_BIT
-using effect_buffer_t = int16_t;
-#endif
 
 #include "Threads.h"
 
@@ -967,10 +932,10 @@ using effect_buffer_t = int16_t;
                 float       masterVolume_l() const;
                 float       getMasterBalance_l() const;
                 bool        masterMute_l() const;
-                audio_module_handle_t loadHwModule_l(const char *name);
+                AudioHwDevice* loadHwModule_l(const char *name);
 
-                Vector < sp<SyncEvent> > mPendingSyncEvents; // sync events awaiting for a session
-                                                             // to be created
+                // sync events awaiting for a session to be created.
+                std::list<sp<audioflinger::SyncEvent>> mPendingSyncEvents;
 
                 // Effect chains without a valid thread
                 DefaultKeyedVector< audio_session_t , sp<EffectChain> > mOrphanEffectChains;

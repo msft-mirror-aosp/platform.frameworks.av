@@ -358,7 +358,8 @@ public:
 
     virtual int32_t getAAudioHardwareBurstMinUsec() = 0;
 
-    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port, bool connected) = 0;
+    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port,
+                                             media::DeviceConnectedState state) = 0;
 
     virtual status_t setSimulateDeviceConnections(bool enabled) = 0;
 
@@ -373,6 +374,8 @@ public:
     virtual status_t isBluetoothVariableLatencyEnabled(bool* enabled) = 0;
 
     virtual status_t supportsBluetoothVariableLatency(bool* support) = 0;
+
+    virtual status_t getAudioPolicyConfig(media::AudioPolicyConfig* output) = 0;
 };
 
 /**
@@ -474,7 +477,8 @@ public:
             std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
     int32_t getAAudioMixerBurstCount() override;
     int32_t getAAudioHardwareBurstMinUsec() override;
-    status_t setDeviceConnectedState(const struct audio_port_v7 *port, bool connected) override;
+    status_t setDeviceConnectedState(const struct audio_port_v7 *port,
+                                     media::DeviceConnectedState state) override;
     status_t setSimulateDeviceConnections(bool enabled) override;
     status_t setRequestedLatencyMode(audio_io_handle_t output,
             audio_latency_mode_t mode) override;
@@ -483,6 +487,7 @@ public:
     status_t setBluetoothVariableLatencyEnabled(bool enabled) override;
     status_t isBluetoothVariableLatencyEnabled(bool* enabled) override;
     status_t supportsBluetoothVariableLatency(bool* support) override;
+    status_t getAudioPolicyConfig(media::AudioPolicyConfig* output) override;
 
 private:
     const sp<media::IAudioFlingerService> mDelegate;
@@ -581,6 +586,8 @@ public:
                     media::BnAudioFlingerService::TRANSACTION_isBluetoothVariableLatencyEnabled,
             SUPPORTS_BLUETOOTH_VARIABLE_LATENCY =
                     media::BnAudioFlingerService::TRANSACTION_supportsBluetoothVariableLatency,
+            GET_AUDIO_POLICY_CONFIG =
+                    media::BnAudioFlingerService::TRANSACTION_getAudioPolicyConfig,
         };
 
     protected:
@@ -701,7 +708,8 @@ public:
             std::vector<media::audio::common::AudioMMapPolicyInfo> *_aidl_return) override;
     Status getAAudioMixerBurstCount(int32_t* _aidl_return) override;
     Status getAAudioHardwareBurstMinUsec(int32_t* _aidl_return) override;
-    Status setDeviceConnectedState(const media::AudioPortFw& port, bool connected) override;
+    Status setDeviceConnectedState(const media::AudioPortFw& port,
+                                   media::DeviceConnectedState state) override;
     Status setSimulateDeviceConnections(bool enabled) override;
     Status setRequestedLatencyMode(
             int output, media::audio::common::AudioLatencyMode mode) override;
@@ -710,6 +718,7 @@ public:
     Status setBluetoothVariableLatencyEnabled(bool enabled) override;
     Status isBluetoothVariableLatencyEnabled(bool* enabled) override;
     Status supportsBluetoothVariableLatency(bool* support) override;
+    Status getAudioPolicyConfig(media::AudioPolicyConfig* _aidl_return) override;
 private:
     const sp<AudioFlingerServerAdapter::Delegate> mDelegate;
 };

@@ -90,12 +90,13 @@ AudioFlinger::ThreadBase::TrackBase::TrackBase(
             pid_t creatorPid,
             uid_t clientUid,
             bool isOut,
-            alloc_type alloc,
+            const alloc_type alloc,
             track_type type,
             audio_port_handle_t portId,
             std::string metricsId)
     :   RefBase(),
         mThread(thread),
+        mAllocType(alloc),
         mClient(client),
         mCblk(NULL),
         // mBuffer, mBufferSize
@@ -276,6 +277,10 @@ AudioFlinger::ThreadBase::TrackBase::~TrackBase()
         // relying on the automatic clear() at end of scope.
         mClient.clear();
     }
+    if (mAllocType == ALLOC_LOCAL) {
+        free(mBuffer);
+        mBuffer = nullptr;
+    }
     // flush the binder command buffer
     IPCThreadState::self()->flushCommands();
 }
@@ -297,9 +302,10 @@ void AudioFlinger::ThreadBase::TrackBase::releaseBuffer(AudioBufferProvider::Buf
     mServerProxy->releaseBuffer(&buf);
 }
 
-status_t AudioFlinger::ThreadBase::TrackBase::setSyncEvent(const sp<SyncEvent>& event)
+status_t AudioFlinger::ThreadBase::TrackBase::setSyncEvent(
+        const sp<audioflinger::SyncEvent>& event)
 {
-    mSyncEvents.add(event);
+    mSyncEvents.emplace_back(event);
     return NO_ERROR;
 }
 
@@ -1361,25 +1367,7 @@ VolumeShaper::Status AudioFlinger::PlaybackThread::Track::applyVolumeShaper(
         const sp<VolumeShaper::Configuration>& configuration,
         const sp<VolumeShaper::Operation>& operation)
 {
-    sp<VolumeShaper::Configuration> newConfiguration;
-
-    if (isOffloadedOrDirect()) {
-        const VolumeShaper::Configuration::OptionFlag optionFlag
-            = configuration->getOptionFlags();
-        if ((optionFlag & VolumeShaper::Configuration::OPTION_FLAG_CLOCK_TIME) == 0) {
-            ALOGW("%s(%d): %s tracks do not support frame counted VolumeShaper,"
-                    " using clock time instead",
-                    __func__, mId,
-                    isOffloaded() ? "Offload" : "Direct");
-            newConfiguration = new VolumeShaper::Configuration(*configuration);
-            newConfiguration->setOptionFlags(
-                VolumeShaper::Configuration::OptionFlag(optionFlag
-                        | VolumeShaper::Configuration::OPTION_FLAG_CLOCK_TIME));
-        }
-    }
-
-    VolumeShaper::Status status = mVolumeHandler->applyVolumeShaper(
-            (newConfiguration.get() != nullptr ? newConfiguration : configuration), operation);
+    VolumeShaper::Status status = mVolumeHandler->applyVolumeShaper(configuration, operation);
 
     if (isOffloadedOrDirect()) {
         // Signal thread to fetch new volume.
@@ -1625,12 +1613,13 @@ void AudioFlinger::PlaybackThread::Track::notifyPresentationComplete()
 
 void AudioFlinger::PlaybackThread::Track::triggerEvents(AudioSystem::sync_event_t type)
 {
-    for (size_t i = 0; i < mSyncEvents.size();) {
-        if (mSyncEvents[i]->type() == type) {
-            mSyncEvents[i]->trigger();
-            mSyncEvents.removeAt(i);
+    for (auto it = mSyncEvents.begin(); it != mSyncEvents.end();) {
+        if ((*it)->type() == type) {
+            ALOGV("%s: triggering SyncEvent type %d", __func__, type);
+            (*it)->trigger();
+            it = mSyncEvents.erase(it);
         } else {
-            ++i;
+            ++it;
         }
     }
 }
@@ -1662,7 +1651,8 @@ gain_minifloat_packed_t AudioFlinger::PlaybackThread::Track::getVolumeLR()
     return vlr;
 }
 
-status_t AudioFlinger::PlaybackThread::Track::setSyncEvent(const sp<SyncEvent>& event)
+status_t AudioFlinger::PlaybackThread::Track::setSyncEvent(
+        const sp<audioflinger::SyncEvent>& event)
 {
     if (isTerminated() || mState == PAUSED ||
             ((framesReady() == 0) && ((mSharedBuffer != 0) ||
@@ -1876,6 +1866,8 @@ void AudioFlinger::PlaybackThread::Track::updateTrackFrameInfo(
         }
     }
 
+    ALOGV("%s: trackFramesReleased:%lld  sinkFramesWritten:%lld  setDrained: %d",
+        __func__, (long long)trackFramesReleased, (long long)sinkFramesWritten, drained);
     mAudioTrackServerProxy->setDrained(drained);
     // Set correction for flushed frames that are not accounted for in released.
     local.mFlushed = mAudioTrackServerProxy->framesFlushed();
@@ -2410,7 +2402,6 @@ AudioFlinger::RecordThread::RecordTrack::RecordTrack(
                   type, portId,
                   std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_RECORD) + std::to_string(portId)),
         mOverflow(false),
-        mFramesToDrop(0),
         mResamplerBufferProvider(NULL), // initialize in case of early constructor exit
         mRecordBufferConverter(NULL),
         mFlags(flags),
@@ -2612,27 +2603,24 @@ void AudioFlinger::RecordThread::RecordTrack::appendDump(String8& result, bool a
     result.append("\n");
 }
 
-void AudioFlinger::RecordThread::RecordTrack::handleSyncStartEvent(const sp<SyncEvent>& event)
+// This is invoked by SyncEvent callback.
+void AudioFlinger::RecordThread::RecordTrack::handleSyncStartEvent(
+        const sp<audioflinger::SyncEvent>& event)
 {
-    if (event == mSyncStartEvent) {
-        ssize_t framesToDrop = 0;
-        sp<ThreadBase> threadBase = mThread.promote();
-        if (threadBase != 0) {
-            // TODO: use actual buffer filling status instead of 2 buffers when info is available
-            // from audio HAL
-            framesToDrop = threadBase->mFrameCount * 2;
-        }
-        mFramesToDrop = framesToDrop;
+    size_t framesToDrop = 0;
+    sp<ThreadBase> threadBase = mThread.promote();
+    if (threadBase != 0) {
+        // TODO: use actual buffer filling status instead of 2 buffers when info is available
+        // from audio HAL
+        framesToDrop = threadBase->mFrameCount * 2;
     }
+
+    mSynchronizedRecordState.onPlaybackFinished(event, framesToDrop);
 }
 
 void AudioFlinger::RecordThread::RecordTrack::clearSyncStartEvent()
 {
-    if (mSyncStartEvent != 0) {
-        mSyncStartEvent->cancel();
-        mSyncStartEvent.clear();
-    }
-    mFramesToDrop = 0;
+    mSynchronizedRecordState.clear();
 }
 
 void AudioFlinger::RecordThread::RecordTrack::updateTrackFrameInfo(

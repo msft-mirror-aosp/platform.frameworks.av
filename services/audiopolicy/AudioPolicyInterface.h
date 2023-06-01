@@ -17,6 +17,7 @@
 #ifndef ANDROID_AUDIOPOLICY_INTERFACE_H
 #define ANDROID_AUDIOPOLICY_INTERFACE_H
 
+#include <android/media/DeviceConnectedState.h>
 #include <media/AudioCommonTypes.h>
 #include <media/AudioContainers.h>
 #include <media/AudioDeviceTypeAddr.h>
@@ -309,13 +310,13 @@ public:
     virtual status_t listAudioProductStrategies(AudioProductStrategyVector &strategies) = 0;
 
     virtual status_t getProductStrategyFromAudioAttributes(
-            const AudioAttributes &aa, product_strategy_t &productStrategy,
+            const audio_attributes_t &aa, product_strategy_t &productStrategy,
             bool fallbackOnDefault) = 0;
 
     virtual status_t listAudioVolumeGroups(AudioVolumeGroupVector &groups) = 0;
 
     virtual status_t getVolumeGroupFromAudioAttributes(
-            const AudioAttributes &aa, volume_group_t &volumeGroup, bool fallbackOnDefault) = 0;
+            const audio_attributes_t &aa, volume_group_t &volumeGroup, bool fallbackOnDefault) = 0;
 
     virtual bool     isCallScreenModeSupported() = 0;
 
@@ -416,6 +417,8 @@ class AudioPolicyClientInterface
 {
 public:
     virtual ~AudioPolicyClientInterface() {}
+
+    virtual status_t getAudioPolicyConfig(media::AudioPolicyConfig *config) = 0;
 
     //
     // Audio HW module functions
@@ -550,7 +553,8 @@ public:
     virtual status_t updateSecondaryOutputs(
             const TrackSecondaryOutputsMap& trackSecondaryOutputs) = 0;
 
-    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port, bool connected) = 0;
+    virtual status_t setDeviceConnectedState(const struct audio_port_v7 *port,
+                                             media::DeviceConnectedState state) = 0;
 };
 
     // These are the signatures of createAudioPolicyManager/destroyAudioPolicyManager
