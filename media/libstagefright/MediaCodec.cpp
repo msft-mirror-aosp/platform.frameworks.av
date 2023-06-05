@@ -19,17 +19,18 @@
 #define LOG_TAG "MediaCodec"
 #include <utils/Log.h>
 
-#include <set>
-#include <random>
-#include <stdlib.h>
-#include <inttypes.h>
-#include <stdlib.h>
 #include <dlfcn.h>
+#include <inttypes.h>
+#include <random>
+#include <set>
+#include <stdlib.h>
+#include <string>
 
 #include <C2Buffer.h>
 
 #include "include/SoftwareRenderer.h"
 
+#include <android/api-level.h>
 #include <android/binder_manager.h>
 #include <android/content/pm/IPackageManagerNative.h>
 #include <android/hardware/cas/native/1.0/IDescrambler.h>
@@ -81,6 +82,7 @@
 #include <media/stagefright/SurfaceUtils.h>
 #include <nativeloader/dlext_namespaces.h>
 #include <private/android_filesystem_config.h>
+#include <server_configurable_flags/get_flags.h>
 #include <utils/Singleton.h>
 
 namespace android {
@@ -90,6 +92,8 @@ using aidl::android::media::BnResourceManagerClient;
 using aidl::android::media::IResourceManagerClient;
 using aidl::android::media::IResourceManagerService;
 using aidl::android::media::ClientInfoParcel;
+using FreezeEvent = VideoRenderQualityTracker::FreezeEvent;
+using JudderEvent = VideoRenderQualityTracker::JudderEvent;
 
 // key for media statistics
 static const char *kCodecKeyName = "codec";
@@ -212,6 +216,7 @@ static const char *kCodecFramesSkipped = "android.media.mediacodec.frames-skippe
 static const char *kCodecFramerateContent = "android.media.mediacodec.framerate-content";
 static const char *kCodecFramerateDesired = "android.media.mediacodec.framerate-desired";
 static const char *kCodecFramerateActual = "android.media.mediacodec.framerate-actual";
+// Freeze
 static const char *kCodecFreezeCount = "android.media.mediacodec.freeze-count";
 static const char *kCodecFreezeScore = "android.media.mediacodec.freeze-score";
 static const char *kCodecFreezeRate = "android.media.mediacodec.freeze-rate";
@@ -226,6 +231,7 @@ static const char *kCodecFreezeDistanceMsHistogram =
         "android.media.mediacodec.freeze-distance-ms-histogram";
 static const char *kCodecFreezeDistanceMsHistogramBuckets =
         "android.media.mediacodec.freeze-distance-ms-histogram-buckets";
+// Judder
 static const char *kCodecJudderCount = "android.media.mediacodec.judder-count";
 static const char *kCodecJudderScore = "android.media.mediacodec.judder-score";
 static const char *kCodecJudderRate = "android.media.mediacodec.judder-rate";
@@ -234,6 +240,32 @@ static const char *kCodecJudderScoreMax = "android.media.mediacodec.judder-score
 static const char *kCodecJudderScoreHistogram = "android.media.mediacodec.judder-score-histogram";
 static const char *kCodecJudderScoreHistogramBuckets =
         "android.media.mediacodec.judder-score-histogram-buckets";
+// Freeze event
+static const char *kCodecFreezeEventCount = "android.media.mediacodec.freeze-event-count";
+static const char *kFreezeEventKeyName = "freeze";
+static const char *kFreezeEventInitialTimeUs = "android.media.mediacodec.freeze.initial-time-us";
+static const char *kFreezeEventDurationMs = "android.media.mediacodec.freeze.duration-ms";
+static const char *kFreezeEventCount = "android.media.mediacodec.freeze.count";
+static const char *kFreezeEventAvgDurationMs = "android.media.mediacodec.freeze.avg-duration-ms";
+static const char *kFreezeEventAvgDistanceMs = "android.media.mediacodec.freeze.avg-distance-ms";
+static const char *kFreezeEventDetailsDurationMs =
+        "android.media.mediacodec.freeze.details-duration-ms";
+static const char *kFreezeEventDetailsDistanceMs =
+        "android.media.mediacodec.freeze.details-distance-ms";
+// Judder event
+static const char *kCodecJudderEventCount = "android.media.mediacodec.judder-event-count";
+static const char *kJudderEventKeyName = "judder";
+static const char *kJudderEventInitialTimeUs = "android.media.mediacodec.judder.initial-time-us";
+static const char *kJudderEventDurationMs = "android.media.mediacodec.judder.duration-ms";
+static const char *kJudderEventCount = "android.media.mediacodec.judder.count";
+static const char *kJudderEventAvgScore = "android.media.mediacodec.judder.avg-score";
+static const char *kJudderEventAvgDistanceMs = "android.media.mediacodec.judder.avg-distance-ms";
+static const char *kJudderEventDetailsActualDurationUs =
+        "android.media.mediacodec.judder.details-actual-duration-us";
+static const char *kJudderEventDetailsContentDurationUs =
+        "android.media.mediacodec.judder.details-content-duration-us";
+static const char *kJudderEventDetailsDistanceMs =
+        "android.media.mediacodec.judder.details-distance-ms";
 
 // XXX suppress until we get our representation right
 static bool kEmitHistogram = false;
@@ -993,6 +1025,9 @@ MediaCodec::MediaCodec(
       mHavePendingInputBuffers(false),
       mCpuBoostRequested(false),
       mIsSurfaceToDisplay(false),
+      mVideoRenderQualityTracker(
+              VideoRenderQualityTracker::Configuration::getFromServerConfigurableFlags(
+                      server_configurable_flags::GetServerConfigurableFlag)),
       mLatencyUnknown(0),
       mBytesEncoded(0),
       mEarliestEncodedPtsUs(INT64_MAX),
@@ -1168,6 +1203,12 @@ void MediaCodec::updateMediametrics() {
             mediametrics_setString(mMetricsHandle, kCodecJudderScoreHistogram, h.emit());
             mediametrics_setString(mMetricsHandle, kCodecJudderScoreHistogramBuckets,
                                    h.emitBuckets());
+        }
+        if (m.freezeEventCount != 0) {
+            mediametrics_setInt32(mMetricsHandle, kCodecFreezeEventCount, m.freezeEventCount);
+        }
+        if (m.judderEventCount != 0) {
+            mediametrics_setInt32(mMetricsHandle, kCodecJudderEventCount, m.judderEventCount);
         }
     }
 
@@ -1407,6 +1448,53 @@ void MediaCodec::updateEphemeralMediametrics(mediametrics_handle_t item) {
     }
 }
 
+static std::string emitVector(std::vector<int32_t> vector) {
+    std::ostringstream sstr;
+    for (size_t i = 0; i < vector.size(); ++i) {
+        if (i != 0) {
+            sstr << ',';
+        }
+        sstr << vector[i];
+    }
+    return sstr.str();
+}
+
+static void reportToMediaMetricsIfValid(const FreezeEvent &e) {
+    if (e.valid) {
+        mediametrics_handle_t handle = mediametrics_create(kFreezeEventKeyName);
+        mediametrics_setInt64(handle, kFreezeEventInitialTimeUs, e.initialTimeUs);
+        mediametrics_setInt32(handle, kFreezeEventDurationMs, e.durationMs);
+        mediametrics_setInt64(handle, kFreezeEventCount, e.count);
+        mediametrics_setInt32(handle, kFreezeEventAvgDurationMs, e.sumDurationMs / e.count);
+        mediametrics_setInt32(handle, kFreezeEventAvgDistanceMs, e.sumDistanceMs / e.count);
+        mediametrics_setString(handle, kFreezeEventDetailsDurationMs,
+                               emitVector(e.details.durationMs));
+        mediametrics_setString(handle, kFreezeEventDetailsDistanceMs,
+                               emitVector(e.details.distanceMs));
+        mediametrics_selfRecord(handle);
+        mediametrics_delete(handle);
+    }
+}
+
+static void reportToMediaMetricsIfValid(const JudderEvent &e) {
+    if (e.valid) {
+        mediametrics_handle_t handle = mediametrics_create(kJudderEventKeyName);
+        mediametrics_setInt64(handle, kJudderEventInitialTimeUs, e.initialTimeUs);
+        mediametrics_setInt32(handle, kJudderEventDurationMs, e.durationMs);
+        mediametrics_setInt64(handle, kJudderEventCount, e.count);
+        mediametrics_setInt32(handle, kJudderEventAvgScore, e.sumScore / e.count);
+        mediametrics_setInt32(handle, kJudderEventAvgDistanceMs, e.sumDistanceMs / e.count);
+        mediametrics_setString(handle, kJudderEventDetailsActualDurationUs,
+                               emitVector(e.details.actualRenderDurationUs));
+        mediametrics_setString(handle, kJudderEventDetailsContentDurationUs,
+                               emitVector(e.details.contentRenderDurationUs));
+        mediametrics_setString(handle, kJudderEventDetailsDistanceMs,
+                               emitVector(e.details.distanceMs));
+        mediametrics_selfRecord(handle);
+        mediametrics_delete(handle);
+    }
+}
+
 void MediaCodec::flushMediametrics() {
     ALOGD("flushMediametrics");
 
@@ -1425,6 +1513,10 @@ void MediaCodec::flushMediametrics() {
     }
     // we no longer have anything pending upload
     mMetricsToUpload = false;
+
+    // Freeze and judder events are reported separately
+    reportToMediaMetricsIfValid(mVideoRenderQualityTracker.getAndResetFreezeEvent());
+    reportToMediaMetricsIfValid(mVideoRenderQualityTracker.getAndResetJudderEvent());
 }
 
 void MediaCodec::updateLowLatency(const sp<AMessage> &msg) {
@@ -1538,7 +1630,12 @@ void MediaCodec::processRenderedFrames(const sp<AMessage> &msg) {
             // Tunneled frames use INT64_MAX to indicate end-of-stream, so don't report it as a
             // rendered frame.
             if (!mTunneled || mediaTimeUs != INT64_MAX) {
-                mVideoRenderQualityTracker.onFrameRendered(mediaTimeUs, renderTimeNs);
+                FreezeEvent freezeEvent;
+                JudderEvent judderEvent;
+                mVideoRenderQualityTracker.onFrameRendered(mediaTimeUs, renderTimeNs, &freezeEvent,
+                                                           &judderEvent);
+                reportToMediaMetricsIfValid(freezeEvent);
+                reportToMediaMetricsIfValid(judderEvent);
             }
         }
     }
@@ -1951,6 +2048,40 @@ status_t MediaCodec::configure(
     return configure(format, nativeWindow, crypto, NULL, flags);
 }
 
+bool MediaCodec::isResolutionSupported(const sp<AMessage>& format) {
+    int32_t width = -1;
+    int32_t height = -1;
+    int32_t maxWidth = -1;
+    int32_t maxHeight = -1;
+    format->findInt32("width", &width);
+    format->findInt32("height", &height);
+    format->findInt32("max-width", &maxWidth);
+    format->findInt32("max-height", &maxHeight);
+    AString mediaType;
+    if (!format->findString("mime", &mediaType)) {
+        ALOGI("Can not check mediaFormat: No MIME set.");
+        return true;
+    }
+    sp<MediaCodecInfo::Capabilities> caps = mCodecInfo->getCapabilitiesFor(mediaType.c_str());
+    if (caps == NULL) {
+        ALOGI("Can not get Capabilities for MIME %s.", mediaType.c_str());
+        return true;
+    }
+    if (width != -1 && height != -1) {
+        if (!caps->isResolutionSupported(width, height)) {
+            ALOGD("Frame resolution (%dx%d) is beyond codec capabilities", width, height);
+            return false;
+        }
+    }
+    if (maxWidth != -1 && maxHeight != -1) {
+        if (!caps->isResolutionSupported(maxWidth, maxHeight)) {
+            ALOGD("Max frame resolution (%dx%d) is beyond codec capabilities", maxWidth, maxHeight);
+            return false;
+        }
+    }
+    return true;
+}
+
 status_t MediaCodec::configure(
         const sp<AMessage> &format,
         const sp<Surface> &surface,
@@ -2038,7 +2169,24 @@ status_t MediaCodec::configure(
             mediametrics_delete(nextMetricsHandle);
             return BAD_VALUE;
         }
-
+        // For applications built with targetSdkVersion of Android U or later (or if MediaCodec's
+        // caller is not an app) we enforce codec resolution capabilities if such enforcement is
+        // required by 'enforce-xml-capabilities' attribute
+        if (android_get_application_target_sdk_version() >= __ANDROID_API_U__) {
+            if (mCodecInfo != nullptr &&
+                (mCodecInfo->getAttributes() &
+                 MediaCodecInfo::kFlagIsEnforceXmlCapabilities)) {
+                if (!isResolutionSupported(format)) {
+                    mErrorLog.log(LOG_TAG,
+                                  base::StringPrintf("The input resolution of %dx%d is not "
+                                  "supported for this codec; please query MediaCodecList "
+                                  "for the supported formats including the resolution. See "
+                                  "CodecCapabilities#isFormatSupported() and "
+                                  "VideoCapabilities#isSizeSupported()", mWidth, mHeight));
+                    return BAD_VALUE;
+                }
+            }
+        }
     } else {
         if (nextMetricsHandle != 0) {
             int32_t channelCount;

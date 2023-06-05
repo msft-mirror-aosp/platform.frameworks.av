@@ -20,14 +20,91 @@
 #include <media/stagefright/VideoRenderQualityTracker.h>
 
 #include <assert.h>
+#include <charconv>
 #include <cmath>
+#include <stdio.h>
 #include <sys/time.h>
 
+#include <android-base/parsebool.h>
+#include <android-base/parseint.h>
+
 namespace android {
+
+using android::base::ParseBoolResult;
 
 static constexpr float FRAME_RATE_UNDETERMINED = VideoRenderQualityMetrics::FRAME_RATE_UNDETERMINED;
 static constexpr float FRAME_RATE_24_3_2_PULLDOWN =
         VideoRenderQualityMetrics::FRAME_RATE_24_3_2_PULLDOWN;
+
+typedef VideoRenderQualityTracker::Configuration::GetServerConfigurableFlagFn
+        GetServerConfigurableFlagFn;
+
+static void getServerConfigurableFlag(GetServerConfigurableFlagFn getServerConfigurableFlagFn,
+                                      char const *flagNameSuffix, bool *value) {
+    std::string flagName("render_metrics_");
+    flagName.append(flagNameSuffix);
+    std::string valueStr = (*getServerConfigurableFlagFn)("media_native", flagName,
+                                                          *value ? "true" : "false");
+    switch (android::base::ParseBool(valueStr)) {
+    case ParseBoolResult::kTrue: *value = true; break;
+    case ParseBoolResult::kFalse: *value = false; break;
+    case ParseBoolResult::kError:
+        ALOGW("failed to parse server-configurable flag '%s' from '%s'", flagNameSuffix,
+              valueStr.c_str());
+        break;
+    }
+}
+
+static void getServerConfigurableFlag(GetServerConfigurableFlagFn getServerConfigurableFlagFn,
+                                      char const *flagNameSuffix, int32_t *value) {
+    char defaultStr[11];
+    sprintf(defaultStr, "%d", int(*value));
+    std::string flagName("render_metrics_");
+    flagName.append(flagNameSuffix);
+    std::string valueStr = (*getServerConfigurableFlagFn)("media_native", flagName, defaultStr);
+    if (!android::base::ParseInt(valueStr.c_str(), value) || valueStr.size() == 0) {
+        ALOGW("failed to parse server-configurable flag '%s' from '%s'", flagNameSuffix,
+              valueStr.c_str());
+        return;
+    }
+}
+
+template<typename T>
+static void getServerConfigurableFlag(GetServerConfigurableFlagFn getServerConfigurableFlagFn,
+                                      char const *flagNameSuffix, std::vector<T> *value) {
+    std::stringstream sstr;
+    for (int i = 0; i < value->size(); ++i) {
+        if (i != 0) {
+            sstr << ",";
+        }
+        sstr << (*value)[i];
+    }
+    std::string flagName("render_metrics_");
+    flagName.append(flagNameSuffix);
+    std::string valueStr = (*getServerConfigurableFlagFn)("media_native", flagName, sstr.str());
+    if (valueStr.size() == 0) {
+        return;
+    }
+    // note: using android::base::Tokenize fails to catch parsing failures for values ending in ','
+    std::vector<T> newValues;
+    const char *p = valueStr.c_str();
+    const char *last = p + valueStr.size();
+    while (p != last) {
+        if (*p == ',') {
+            p++;
+        }
+        T value = -1;
+        auto [ptr, error] = std::from_chars(p, last, value);
+        if (error == std::errc::invalid_argument || error == std::errc::result_out_of_range) {
+            ALOGW("failed to parse server-configurable flag '%s' from '%s'", flagNameSuffix,
+                  valueStr.c_str());
+            return;
+        }
+        p = ptr;
+        newValues.push_back(value);
+    }
+    *value = std::move(newValues);
+}
 
 VideoRenderQualityMetrics::VideoRenderQualityMetrics() {
     clear();
@@ -42,9 +119,38 @@ void VideoRenderQualityMetrics::clear() {
     contentFrameRate = FRAME_RATE_UNDETERMINED;
     desiredFrameRate = FRAME_RATE_UNDETERMINED;
     actualFrameRate = FRAME_RATE_UNDETERMINED;
+    freezeEventCount = 0;
     freezeDurationMsHistogram.clear();
     freezeDistanceMsHistogram.clear();
+    judderEventCount = 0;
     judderScoreHistogram.clear();
+}
+
+VideoRenderQualityTracker::Configuration
+        VideoRenderQualityTracker::Configuration::getFromServerConfigurableFlags(
+            GetServerConfigurableFlagFn getServerConfigurableFlagFn) {
+    VideoRenderQualityTracker::Configuration c;
+#define getFlag(FIELDNAME, FLAGNAME) \
+    getServerConfigurableFlag(getServerConfigurableFlagFn, FLAGNAME, &c.FIELDNAME)
+    getFlag(enabled, "enabled");
+    getFlag(areSkippedFramesDropped, "are_skipped_frames_dropped");
+    getFlag(maxExpectedContentFrameDurationUs, "max_expected_content_frame_duration_us");
+    getFlag(frameRateDetectionToleranceUs, "frame_rate_detection_tolerance_us");
+    getFlag(liveContentFrameDropToleranceUs, "live_content_frame_drop_tolerance_us");
+    getFlag(freezeDurationMsHistogramBuckets, "freeze_duration_ms_histogram_buckets");
+    getFlag(freezeDurationMsHistogramToScore, "freeze_duration_ms_histogram_to_score");
+    getFlag(freezeDistanceMsHistogramBuckets, "freeze_distance_ms_histogram_buckets");
+    getFlag(freezeEventMax, "freeze_event_max");
+    getFlag(freezeEventDetailsMax, "freeze_event_details_max");
+    getFlag(freezeEventDistanceToleranceMs, "freeze_event_distance_tolerance_ms");
+    getFlag(judderErrorToleranceUs, "judder_error_tolerance_us");
+    getFlag(judderScoreHistogramBuckets, "judder_score_histogram_buckets");
+    getFlag(judderScoreHistogramToScore, "judder_score_histogram_to_score");
+    getFlag(judderEventMax, "judder_event_max");
+    getFlag(judderEventDetailsMax, "judder_event_details_max");
+    getFlag(judderEventDistanceToleranceMs, "judder_event_distance_tolerance_ms");
+#undef getFlag
+    return c;
 }
 
 VideoRenderQualityTracker::Configuration::Configuration() {
@@ -62,18 +168,24 @@ VideoRenderQualityTracker::Configuration::Configuration() {
 
     // Allow for a tolerance of 200 milliseconds for determining if we moved forward in content time
     // because of frame drops for live content, or because the user is seeking.
-    contentTimeAdvancedForLiveContentToleranceUs = 200 * 1000;
+    liveContentFrameDropToleranceUs = 200 * 1000;
 
     // Freeze configuration
     freezeDurationMsHistogramBuckets = {1, 20, 40, 60, 80, 100, 120, 150, 175, 225, 300, 400, 500};
     freezeDurationMsHistogramToScore = {1,  1,  1,  1,  1,   1,   1,   1,   1,   1,   1,   1,   1};
     freezeDistanceMsHistogramBuckets = {0, 20, 100, 400, 1000, 2000, 3000, 4000, 8000, 15000, 30000,
                                         60000};
+    freezeEventMax = 0; // enabled only when debugging
+    freezeEventDetailsMax = 20;
+    freezeEventDistanceToleranceMs = 60000; // lump freeze occurrences together when 60s or less
 
     // Judder configuration
     judderErrorToleranceUs = 2000;
     judderScoreHistogramBuckets = {1, 4, 5, 9, 11, 20, 30, 40, 50, 60, 70, 80};
     judderScoreHistogramToScore = {1, 1, 1, 1,  1,  1,  1,  1,  1,  1,  1,  1};
+    judderEventMax = 0; // enabled only when debugging
+    judderEventDetailsMax = 20;
+    judderEventDistanceToleranceMs = 5000; // lump judder occurrences together when 5s or less
 }
 
 VideoRenderQualityTracker::VideoRenderQualityTracker() : mConfiguration(Configuration()) {
@@ -139,7 +251,9 @@ void VideoRenderQualityTracker::onFrameReleased(int64_t contentTimeUs,
     mLastContentTimeUs = contentTimeUs;
 }
 
-void VideoRenderQualityTracker::onFrameRendered(int64_t contentTimeUs, int64_t actualRenderTimeNs) {
+void VideoRenderQualityTracker::onFrameRendered(int64_t contentTimeUs, int64_t actualRenderTimeNs,
+                                                FreezeEvent *freezeEventOut,
+                                                JudderEvent *judderEventOut) {
     if (!mConfiguration.enabled) {
         return;
     }
@@ -183,8 +297,21 @@ void VideoRenderQualityTracker::onFrameRendered(int64_t contentTimeUs, int64_t a
                                       nextExpectedFrame.desiredRenderTimeUs);
     }
     processMetricsForRenderedFrame(nextExpectedFrame.contentTimeUs,
-                                   nextExpectedFrame.desiredRenderTimeUs, actualRenderTimeUs);
+                                   nextExpectedFrame.desiredRenderTimeUs, actualRenderTimeUs,
+                                   freezeEventOut, judderEventOut);
     mLastRenderTimeUs = actualRenderTimeUs;
+}
+
+VideoRenderQualityTracker::FreezeEvent VideoRenderQualityTracker::getAndResetFreezeEvent() {
+    FreezeEvent event = std::move(mFreezeEvent);
+    mFreezeEvent.valid = false;
+    return event;
+}
+
+VideoRenderQualityTracker::JudderEvent VideoRenderQualityTracker::getAndResetJudderEvent() {
+    JudderEvent event = std::move(mJudderEvent);
+    mJudderEvent.valid = false;
+    return event;
 }
 
 const VideoRenderQualityMetrics &VideoRenderQualityTracker::getMetrics() {
@@ -232,6 +359,10 @@ void VideoRenderQualityTracker::resetForDiscontinuity() {
     mLastContentTimeUs = -1;
     mLastRenderTimeUs = -1;
     mLastFreezeEndTimeUs = -1;
+    mLastJudderEndTimeUs = -1;
+    mWasPreviousFrameDropped = false;
+    mFreezeEvent.valid = false;
+    mJudderEvent.valid = false;
 
     // Don't worry about tracking frame rendering times from now up until playback catches up to the
     // discontinuity. While stuttering or freezing could be found in the next few frames, the impact
@@ -276,7 +407,7 @@ bool VideoRenderQualityTracker::resetIfDiscontinuity(int64_t contentTimeUs,
         int64_t desiredFrameDurationUs = desiredRenderTimeUs - mLastRenderTimeUs;
         bool skippedForwardDueToLiveContentFrameDrops =
                 abs(contentFrameDurationUs - desiredFrameDurationUs) <
-                mConfiguration.contentTimeAdvancedForLiveContentToleranceUs;
+                mConfiguration.liveContentFrameDropToleranceUs;
         if (!skippedForwardDueToLiveContentFrameDrops) {
             ALOGI("Video playback jumped %d ms forward in content time (%d -> %d) ",
                 int((contentTimeUs - mLastContentTimeUs) / 1000), int(mLastContentTimeUs / 1000),
@@ -298,6 +429,7 @@ void VideoRenderQualityTracker::processMetricsForSkippedFrame(int64_t contentTim
     updateFrameDurations(mDesiredFrameDurationUs, -1);
     updateFrameDurations(mActualFrameDurationUs, -1);
     updateFrameRate(mMetrics.contentFrameRate, mContentFrameDurationUs, mConfiguration);
+    mWasPreviousFrameDropped = false;
 }
 
 void VideoRenderQualityTracker::processMetricsForDroppedFrame(int64_t contentTimeUs,
@@ -308,11 +440,14 @@ void VideoRenderQualityTracker::processMetricsForDroppedFrame(int64_t contentTim
     updateFrameDurations(mActualFrameDurationUs, -1);
     updateFrameRate(mMetrics.contentFrameRate, mContentFrameDurationUs, mConfiguration);
     updateFrameRate(mMetrics.desiredFrameRate, mDesiredFrameDurationUs, mConfiguration);
+    mWasPreviousFrameDropped = true;
 }
 
 void VideoRenderQualityTracker::processMetricsForRenderedFrame(int64_t contentTimeUs,
                                                                int64_t desiredRenderTimeUs,
-                                                               int64_t actualRenderTimeUs) {
+                                                               int64_t actualRenderTimeUs,
+                                                               FreezeEvent *freezeEventOut,
+                                                               JudderEvent *judderEventOut) {
     // Capture the timestamp at which the first frame was rendered
     if (mMetrics.firstRenderTimeUs == 0) {
         mMetrics.firstRenderTimeUs = actualRenderTimeUs;
@@ -334,29 +469,90 @@ void VideoRenderQualityTracker::processMetricsForRenderedFrame(int64_t contentTi
     updateFrameRate(mMetrics.actualFrameRate, mActualFrameDurationUs, mConfiguration);
 
     // If the previous frame was dropped, there was a freeze if we've already rendered a frame
-    if (mActualFrameDurationUs[1] == -1 && mLastRenderTimeUs != -1) {
-        processFreeze(actualRenderTimeUs, mLastRenderTimeUs, mLastFreezeEndTimeUs, mMetrics);
+    if (mWasPreviousFrameDropped && mLastRenderTimeUs != -1) {
+        processFreeze(actualRenderTimeUs, mLastRenderTimeUs, mLastFreezeEndTimeUs, mFreezeEvent,
+                      mMetrics, mConfiguration);
         mLastFreezeEndTimeUs = actualRenderTimeUs;
     }
+    maybeCaptureFreezeEvent(actualRenderTimeUs, mLastFreezeEndTimeUs, mFreezeEvent, mMetrics,
+                            mConfiguration, freezeEventOut);
 
     // Judder is computed on the prior video frame, not the current video frame
     int64_t judderScore = computePreviousJudderScore(mActualFrameDurationUs,
                                                      mContentFrameDurationUs,
                                                      mConfiguration);
+    int64_t judderTimeUs = actualRenderTimeUs - mActualFrameDurationUs[0] -
+                           mActualFrameDurationUs[1];
     if (judderScore != 0) {
-        mMetrics.judderScoreHistogram.insert(judderScore);
+        processJudder(judderScore, judderTimeUs, mLastJudderEndTimeUs, mActualFrameDurationUs,
+                      mContentFrameDurationUs, mJudderEvent, mMetrics, mConfiguration);
+        mLastJudderEndTimeUs = judderTimeUs + mActualFrameDurationUs[1];
     }
+    maybeCaptureJudderEvent(actualRenderTimeUs, mLastJudderEndTimeUs, mJudderEvent, mMetrics,
+                            mConfiguration, judderEventOut);
+
+    mWasPreviousFrameDropped = false;
 }
 
 void VideoRenderQualityTracker::processFreeze(int64_t actualRenderTimeUs, int64_t lastRenderTimeUs,
-                                              int64_t lastFreezeEndTimeUs,
-                                              VideoRenderQualityMetrics &m) {
-    int64_t freezeDurationMs = (actualRenderTimeUs - lastRenderTimeUs) / 1000;
-    m.freezeDurationMsHistogram.insert(freezeDurationMs);
+                                              int64_t lastFreezeEndTimeUs, FreezeEvent &e,
+                                              VideoRenderQualityMetrics &m,
+                                              const Configuration &c) {
+    int32_t durationMs = int32_t((actualRenderTimeUs - lastRenderTimeUs) / 1000);
+    m.freezeDurationMsHistogram.insert(durationMs);
+    int32_t distanceMs = -1;
     if (lastFreezeEndTimeUs != -1) {
-        int64_t distanceSinceLastFreezeMs = (lastRenderTimeUs - lastFreezeEndTimeUs) / 1000;
-        m.freezeDistanceMsHistogram.insert(distanceSinceLastFreezeMs);
+        // The distance to the last freeze is measured from the end of the last freze to the start
+        // of this freeze.
+        distanceMs = int32_t((lastRenderTimeUs - lastFreezeEndTimeUs) / 1000);
+        m.freezeDistanceMsHistogram.insert(distanceMs);
     }
+    if (c.freezeEventMax > 0) {
+        if (e.valid == false) {
+            m.freezeEventCount++;
+            e.valid = true;
+            e.initialTimeUs = lastRenderTimeUs;
+            e.durationMs = 0;
+            e.sumDurationMs = 0;
+            e.sumDistanceMs = 0;
+            e.count = 0;
+            e.details.durationMs.clear();
+            e.details.distanceMs.clear();
+        // The first occurrence in the event should not have the distance recorded as part of the
+        // event, because it belongs in a vacuum between two events. However we still want the
+        // distance recorded in the details to calculate times in all details in all events.
+        } else if (distanceMs != -1) {
+            e.durationMs += distanceMs;
+            e.sumDistanceMs += distanceMs;
+        }
+        e.durationMs += durationMs;
+        e.count++;
+        e.sumDurationMs += durationMs;
+        if (e.details.durationMs.size() < c.freezeEventDetailsMax) {
+            e.details.durationMs.push_back(durationMs);
+            e.details.distanceMs.push_back(distanceMs); // -1 for first detail in the first event
+        }
+    }
+}
+
+void VideoRenderQualityTracker::maybeCaptureFreezeEvent(int64_t actualRenderTimeUs,
+                                                        int64_t lastFreezeEndTimeUs, FreezeEvent &e,
+                                                        const VideoRenderQualityMetrics & m,
+                                                        const Configuration &c,
+                                                        FreezeEvent *freezeEventOut) {
+    if (lastFreezeEndTimeUs == -1 || !e.valid) {
+        return;
+    }
+    // Future freeze occurrences are still pulled into the current freeze event if under tolerance
+    int64_t distanceMs = (actualRenderTimeUs - lastFreezeEndTimeUs) / 1000;
+    if (distanceMs < c.freezeEventDistanceToleranceMs) {
+        return;
+    }
+    if (freezeEventOut != nullptr && m.freezeEventCount <= c.freezeEventMax) {
+        *freezeEventOut = std::move(e);
+    }
+    // start recording a new freeze event after pushing the current one back to the caller
+    e.valid = false;
 }
 
 int64_t VideoRenderQualityTracker::computePreviousJudderScore(
@@ -399,6 +595,67 @@ int64_t VideoRenderQualityTracker::computePreviousJudderScore(
     }
 
     return abs(errorUs) / 1000; // error in millis to keep numbers small
+}
+
+void VideoRenderQualityTracker::processJudder(int32_t judderScore, int64_t judderTimeUs,
+                                              int64_t lastJudderEndTime,
+                                              const FrameDurationUs &actualDurationUs,
+                                              const FrameDurationUs &contentDurationUs,
+                                              JudderEvent &e, VideoRenderQualityMetrics &m,
+                                              const Configuration &c) {
+    int32_t distanceMs = -1;
+    if (lastJudderEndTime != -1) {
+        distanceMs = int32_t((judderTimeUs - lastJudderEndTime) / 1000);
+    }
+    m.judderScoreHistogram.insert(judderScore);
+    if (c.judderEventMax > 0) {
+        if (!e.valid) {
+            m.judderEventCount++;
+            e.valid = true;
+            e.initialTimeUs = judderTimeUs;
+            e.durationMs = 0;
+            e.sumScore = 0;
+            e.sumDistanceMs = 0;
+            e.count = 0;
+            e.details.contentRenderDurationUs.clear();
+            e.details.actualRenderDurationUs.clear();
+            e.details.distanceMs.clear();
+        // The first occurrence in the event should not have the distance recorded as part of the
+        // event, because it belongs in a vacuum between two events. However we still want the
+        // distance recorded in the details to calculate the times using all details in all events.
+        } else if (distanceMs != -1) {
+            e.durationMs += distanceMs;
+            e.sumDistanceMs += distanceMs;
+        }
+        e.durationMs += actualDurationUs[1] / 1000;
+        e.count++;
+        e.sumScore += judderScore;
+        if (e.details.contentRenderDurationUs.size() < c.judderEventDetailsMax) {
+            e.details.actualRenderDurationUs.push_back(actualDurationUs[1]);
+            e.details.contentRenderDurationUs.push_back(contentDurationUs[1]);
+            e.details.distanceMs.push_back(distanceMs); // -1 for first detail in the first event
+        }
+    }
+}
+
+void VideoRenderQualityTracker::maybeCaptureJudderEvent(int64_t actualRenderTimeUs,
+                                                        int64_t lastJudderEndTimeUs, JudderEvent &e,
+                                                        const VideoRenderQualityMetrics &m,
+                                                        const Configuration &c,
+                                                        JudderEvent *judderEventOut) {
+    if (lastJudderEndTimeUs == -1 || !e.valid) {
+        return;
+    }
+    // Future judder occurrences are still pulled into the current judder event if under tolerance
+    int64_t distanceMs = (actualRenderTimeUs - lastJudderEndTimeUs) / 1000;
+    if (distanceMs < c.judderEventDistanceToleranceMs) {
+        return;
+    }
+    if (judderEventOut != nullptr && m.judderEventCount <= c.judderEventMax) {
+        *judderEventOut = std::move(e);
+    }
+    // start recording a new judder event after pushing the current one back to the caller
+    e.valid = false;
 }
 
 void VideoRenderQualityTracker::configureHistograms(VideoRenderQualityMetrics &m,
