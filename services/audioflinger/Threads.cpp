@@ -74,8 +74,6 @@
 #include <media/audiohal/StreamHalInterface.h>
 
 #include "AudioFlinger.h"
-#include "FastMixer.h"
-#include "FastCapture.h"
 #include <mediautils/SchedulingPolicyService.h>
 #include <mediautils/ServiceUtilities.h>
 
@@ -89,7 +87,7 @@
 #include <cpustats/ThreadCpuUsage.h>
 #endif
 
-#include "AutoPark.h"
+#include <fastpath/AutoPark.h>
 
 #include <pthread.h>
 #include <afutils/TypedLogger.h>
@@ -3707,7 +3705,7 @@ void AudioFlinger::PlaybackThread::detachAuxEffect_l(int effectId)
 bool AudioFlinger::PlaybackThread::threadLoop()
 NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
 {
-    tlNBLogWriter = mNBLogWriter.get();
+    aflog::setThreadWriter(mNBLogWriter.get());
 
     Vector< sp<Track> > tracksToRemove;
 
