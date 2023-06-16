@@ -1645,6 +1645,10 @@ status_t Camera3Device::waitUntilStateThenRelock(bool active, nsecs_t timeout,
     bool stateSeen = false;
     nsecs_t startTime = systemTime();
     do {
+        if (mStatus == STATUS_ERROR) {
+            // Device in error state. Return right away.
+            break;
+        }
         if (active == (mStatus == STATUS_ACTIVE) &&
             (requestThreadInvocation || !mStatusIsInternal)) {
             // Desired state is current
@@ -1674,6 +1678,11 @@ status_t Camera3Device::waitUntilStateThenRelock(bool active, nsecs_t timeout,
         // they are not paused. This avoids intermediate pause signals from reconfigureCamera as it
         // changes the status to active right after.
         for (size_t i = startIndex; i < mRecentStatusUpdates.size(); i++) {
+            if (mRecentStatusUpdates[i].status == STATUS_ERROR) {
+                // Device in error state. Return right away.
+                stateSeen = true;
+                break;
+            }
             if (active == (mRecentStatusUpdates[i].status == STATUS_ACTIVE) &&
                 (requestThreadInvocation || !mRecentStatusUpdates[i].isInternal)) {
                 stateSeen = true;
@@ -2365,6 +2374,9 @@ bool Camera3Device::reconfigureCamera(const CameraMetadata& sessionParams, int c
             //present streams end up with outstanding buffers that will
             //not get drained.
             internalUpdateStatusLocked(STATUS_ACTIVE);
+
+            mCameraServiceProxyWrapper->logStreamConfigured(mId, mOperatingMode,
+                    true /*internalReconfig*/, ns2ms(systemTime() - startTime));
         } else if (rc == DEAD_OBJECT) {
             // DEAD_OBJECT can be returned if either the consumer surface is
             // abandoned, or the HAL has died.
@@ -2379,9 +2391,6 @@ bool Camera3Device::reconfigureCamera(const CameraMetadata& sessionParams, int c
     } else {
         ALOGE("%s: Failed to pause streaming: %d", __FUNCTION__, rc);
     }
-
-    mCameraServiceProxyWrapper->logStreamConfigured(mId, mOperatingMode, true /*internalReconfig*/,
-        ns2ms(systemTime() - startTime));
 
     if (markClientActive) {
         mStatusTracker->markComponentActive(clientStatusId);
