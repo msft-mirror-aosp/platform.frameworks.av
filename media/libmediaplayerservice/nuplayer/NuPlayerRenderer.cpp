@@ -478,6 +478,23 @@ void NuPlayer::Renderer::closeAudioSink() {
     msg->postAndAwaitResponse(&response);
 }
 
+void NuPlayer::Renderer::dump(AString& logString) {
+    Mutex::Autolock autoLock(mLock);
+    logString.append("paused(");
+    logString.append(mPaused);
+    logString.append("), offloading(");
+    logString.append(offloadingAudio());
+    logString.append("), wakelock(acquired=");
+    mWakelockAcquireEvent.dump(logString);
+    logString.append(", timeout=");
+    mWakelockTimeoutEvent.dump(logString);
+    logString.append(", release=");
+    mWakelockReleaseEvent.dump(logString);
+    logString.append(", cancel=");
+    mWakelockCancelEvent.dump(logString);
+    logString.append(")");
+}
+
 void NuPlayer::Renderer::changeAudioFormat(
         const sp<AMessage> &format,
         bool offloadOnly,
@@ -792,6 +809,10 @@ void NuPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
         {
             int32_t generation;
             CHECK(msg->findInt32("drainGeneration", &generation));
+            mWakelockTimeoutEvent.updateValues(
+                    uptimeMillis(),
+                    generation,
+                    mAudioOffloadPauseTimeoutGeneration);
             if (generation != mAudioOffloadPauseTimeoutGeneration) {
                 break;
             }
@@ -807,6 +828,10 @@ void NuPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
         {
             int32_t generation;
             CHECK(msg->findInt32("drainGeneration", &generation));
+            mWakelockReleaseEvent.updateValues(
+                uptimeMillis(),
+                generation,
+                mAudioOffloadPauseTimeoutGeneration);
             if (generation != mAudioOffloadPauseTimeoutGeneration) {
                 break;
             }
@@ -1914,6 +1939,9 @@ void NuPlayer::Renderer::onAudioTearDown(AudioTearDownReason reason) {
 void NuPlayer::Renderer::startAudioOffloadPauseTimeout() {
     if (offloadingAudio()) {
         mWakeLock->acquire();
+        mWakelockAcquireEvent.updateValues(uptimeMillis(),
+                                           mAudioOffloadPauseTimeoutGeneration,
+                                           mAudioOffloadPauseTimeoutGeneration);
         sp<AMessage> msg = new AMessage(kWhatAudioOffloadPauseTimeout, this);
         msg->setInt32("drainGeneration", mAudioOffloadPauseTimeoutGeneration);
         msg->post(kOffloadPauseMaxUs);
@@ -1930,6 +1958,9 @@ void NuPlayer::Renderer::cancelAudioOffloadPauseTimeout() {
     // Note: The acquired wakelock prevents the device from suspending
     // immediately after offload pause (in case a resume happens shortly thereafter).
     mWakeLock->release(true);
+    mWakelockCancelEvent.updateValues(uptimeMillis(),
+                                      mAudioOffloadPauseTimeoutGeneration,
+                                      mAudioOffloadPauseTimeoutGeneration);
     ++mAudioOffloadPauseTimeoutGeneration;
 }
 
@@ -1947,22 +1978,12 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
     CHECK(format->findInt32("channel-count", &numChannels));
 
     // channel mask info as read from the audio format
-    int32_t channelMaskFromFormat;
+    int32_t mediaFormatChannelMask;
     // channel mask to use for native playback
     audio_channel_mask_t channelMask;
-    if (format->findInt32("channel-mask", &channelMaskFromFormat)) {
+    if (format->findInt32("channel-mask", &mediaFormatChannelMask)) {
         // KEY_CHANNEL_MASK follows the android.media.AudioFormat java mask
-        // which is left-bitshifted by 2 relative to the native mask
-        if ((channelMaskFromFormat & 0b11) != 0) {
-            // received an unexpected mask (supposed to follow AudioFormat constants
-            // for output masks with the 2 least-significant bits at 0), but
-            // it may come from an extractor that uses native masks: keeping
-            // the mask as given is ok as it contains at least mono or stereo
-            // and potentially the haptic channels
-            channelMask = static_cast<audio_channel_mask_t>(channelMaskFromFormat);
-        } else {
-            channelMask = static_cast<audio_channel_mask_t>(channelMaskFromFormat >> 2);
-        }
+        channelMask = audio_channel_mask_from_media_format_mask(mediaFormatChannelMask);
     } else {
         // no mask found: the mask will be derived from the channel count
         channelMask = CHANNEL_MASK_USE_CHANNEL_ORDER;
@@ -2173,6 +2194,16 @@ void NuPlayer::Renderer::onChangeAudioFormat(
         notify->setInt32("err", err);
     }
     notify->post();
+}
+
+void NuPlayer::Renderer::WakeLockEvent::dump(AString& logString) {
+  logString.append("[");
+  logString.append(mTimeMs);
+  logString.append(",");
+  logString.append(mEventTimeoutGeneration);
+  logString.append(",");
+  logString.append(mRendererTimeoutGeneration);
+  logString.append("]");
 }
 
 }  // namespace android
