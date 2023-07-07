@@ -183,7 +183,8 @@ status_t AudioPolicyMixCollection::registerMix(const AudioMix& mix,
     for (size_t i = 0; i < size(); i++) {
         const sp<AudioPolicyMix>& registeredMix = itemAt(i);
         if (mix.mDeviceType == registeredMix->mDeviceType
-                && mix.mDeviceAddress.compare(registeredMix->mDeviceAddress) == 0) {
+                && mix.mDeviceAddress.compare(registeredMix->mDeviceAddress) == 0
+                && is_mix_loopback(mix.mRouteFlags)) {
             ALOGE("registerMix(): mix already registered for dev=0x%x addr=%s",
                     mix.mDeviceType, mix.mDeviceAddress.string());
             return BAD_VALUE;
@@ -288,9 +289,10 @@ status_t AudioPolicyMixCollection::getOutputForAttr(
             continue; // skip the mix
         }
 
-        if (flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
-            // AAudio MMAP_NOIRQ streams cannot be routed using dynamic audio policy.
-            ALOGD("%s: Rejecting MMAP_NOIRQ request matched to dynamic audio policy mix.",
+        if ((flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) && is_mix_loopback(policyMix->mRouteFlags)) {
+            // AAudio MMAP_NOIRQ streams cannot be routed to loopback/loopback+render
+            // using dynamic audio policy.
+            ALOGD("%s: Rejecting MMAP_NOIRQ request matched to loopback dynamic audio policy mix.",
                 __func__);
             return INVALID_OPERATION;
         }

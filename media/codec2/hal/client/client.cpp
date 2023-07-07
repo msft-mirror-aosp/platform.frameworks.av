@@ -610,16 +610,9 @@ struct Codec2Client::Component::OutputBufferQueue :
 
 // Codec2Client
 Codec2Client::Codec2Client(sp<Base> const& base,
+                           sp<IConfigurable> const& configurable,
                            size_t serviceIndex)
-      : Configurable{
-            [base]() -> sp<IConfigurable> {
-                Return<sp<IConfigurable>> transResult =
-                        base->getConfigurable();
-                return transResult.isOk() ?
-                        static_cast<sp<IConfigurable>>(transResult) :
-                        nullptr;
-            }()
-        },
+      : Configurable{configurable},
         mBase1_0{base},
         mBase1_1{Base1_1::castFrom(base)},
         mBase1_2{Base1_2::castFrom(base)},
@@ -1003,7 +996,11 @@ std::shared_ptr<Codec2Client> Codec2Client::_CreateFromIndex(size_t index) {
     CHECK(baseStore) << "Codec2 service \"" << name << "\""
                         " inaccessible for unknown reasons.";
     LOG(VERBOSE) << "Client to Codec2 service \"" << name << "\" created";
-    return std::make_shared<Codec2Client>(baseStore, index);
+    Return<sp<IConfigurable>> transResult = baseStore->getConfigurable();
+    CHECK(transResult.isOk()) << "Codec2 service \"" << name << "\""
+                                "does not have IConfigurable.";
+    sp<IConfigurable> configurable = static_cast<sp<IConfigurable>>(transResult);
+    return std::make_shared<Codec2Client>(baseStore, configurable, index);
 }
 
 c2_status_t Codec2Client::ForAllServices(
@@ -1523,8 +1520,8 @@ c2_status_t Codec2Client::Component::setOutputSurface(
     uint64_t consumerUsage = kDefaultConsumerUsage;
     {
         if (surface) {
-            int usage = 0;
-            status_t err = surface->query(NATIVE_WINDOW_CONSUMER_USAGE_BITS, &usage);
+            uint64_t usage = 0;
+            status_t err = surface->getConsumerUsage(&usage);
             if (err != NO_ERROR) {
                 ALOGD("setOutputSurface -- failed to get consumer usage bits (%d/%s). ignoring",
                         err, asString(err));
@@ -1537,8 +1534,7 @@ c2_status_t Codec2Client::Component::setOutputSurface(
                 // they do not exist inside of C2 scope. Any buffer usage shall be communicated
                 // through the sideband channel.
 
-                // do an unsigned conversion as bit-31 may be 1
-                consumerUsage = (uint32_t)usage | kDefaultConsumerUsage;
+                consumerUsage = usage | kDefaultConsumerUsage;
             }
         }
 
@@ -1561,6 +1557,8 @@ c2_status_t Codec2Client::Component::setOutputSurface(
             mBase1_0->setOutputSurface(
                     static_cast<uint64_t>(blockPoolId),
                     bqId == 0 ? nullHgbp : igbp);
+
+    mOutputBufferQueue->expireOldWaiters();
 
     if (!transStatus.isOk()) {
         LOG(ERROR) << "setOutputSurface -- transaction failed.";
@@ -1607,6 +1605,7 @@ void Codec2Client::Component::stopUsingOutputSurface(
                        << status << ".";
         }
     }
+    mOutputBufferQueue->expireOldWaiters();
 }
 
 c2_status_t Codec2Client::Component::connectToInputSurface(

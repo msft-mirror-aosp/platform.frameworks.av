@@ -34,6 +34,7 @@
 
 #include <android/hardware/cas/native/1.0/IDescrambler.h>
 #include <android/hardware/drm/1.0/types.h>
+#include <android-base/parseint.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <binder/MemoryBase.h>
@@ -52,6 +53,7 @@
 #include <media/stagefright/SurfaceUtils.h>
 #include <media/MediaCodecBuffer.h>
 #include <mediadrm/ICrypto.h>
+#include <server_configurable_flags/get_flags.h>
 #include <system/window.h>
 
 #include "CCodecBufferChannel.h"
@@ -75,7 +77,6 @@ using DrmBufferType = hardware::drm::V1_0::BufferType;
 namespace {
 
 constexpr size_t kSmoothnessFactor = 4;
-constexpr size_t kRenderingDepth = 3;
 
 // This is for keeping IGBP's buffer dropping logic in legacy mode other
 // than making it non-blocking. Do not change this value.
@@ -149,10 +150,10 @@ CCodecBufferChannel::CCodecBufferChannel(
       mFirstValidFrameIndex(0u),
       mIsSurfaceToDisplay(false),
       mHasPresentFenceTimes(false),
+      mRenderingDepth(3u),
       mMetaMode(MODE_NONE),
       mInputMetEos(false),
       mSendEncryptedInfoBuffer(false) {
-    mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + kRenderingDepth;
     {
         Mutexed<Input>::Locked input(mInput);
         input->buffers.reset(new DummyInputBuffers(""));
@@ -167,11 +168,16 @@ CCodecBufferChannel::CCodecBufferChannel(
         Mutexed<Output>::Locked output(mOutput);
         output->outputDelay = 0u;
         output->numSlots = kSmoothnessFactor;
+        output->bounded = false;
     }
     {
         Mutexed<BlockPools>::Locked pools(mBlockPools);
         pools->outputPoolId = C2BlockPool::BASIC_LINEAR;
     }
+    std::string value = server_configurable_flags::GetServerConfigurableFlag(
+            "media_native", "ccodec_rendering_depth", "3");
+    android::base::ParseInt(value, &mRenderingDepth);
+    mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + mRenderingDepth;
 }
 
 CCodecBufferChannel::~CCodecBufferChannel() {
@@ -727,7 +733,7 @@ void CCodecBufferChannel::feedInputBufferIfAvailableInternal() {
         Mutexed<Output>::Locked output(mOutput);
         if (!output->buffers ||
                 output->buffers->hasPending() ||
-                output->buffers->numActiveSlots() >= output->numSlots) {
+                (!output->bounded && output->buffers->numActiveSlots() >= output->numSlots)) {
             return;
         }
     }
@@ -1017,7 +1023,7 @@ void CCodecBufferChannel::initializeFrameTrackingFor(ANativeWindow * window) {
     int hasPresentFenceTimes = 0;
     window->query(window, NATIVE_WINDOW_FRAME_TIMESTAMPS_SUPPORTS_PRESENT, &hasPresentFenceTimes);
     mHasPresentFenceTimes = hasPresentFenceTimes == 1;
-    if (mHasPresentFenceTimes) {
+    if (!mHasPresentFenceTimes) {
         ALOGI("Using latch times for frame rendered signals - present fences not supported");
     }
 }
@@ -1386,7 +1392,7 @@ status_t CCodecBufferChannel::start(
         {
             Mutexed<OutputSurface>::Locked output(mOutputSurface);
             maxDequeueCount = output->maxDequeueBuffers = numOutputSlots +
-                    reorderDepth.value + kRenderingDepth;
+                    reorderDepth.value + mRenderingDepth;
             outputSurface = output->surface ?
                     output->surface->getIGraphicBufferProducer() : nullptr;
             if (outputSurface) {
@@ -1509,6 +1515,7 @@ status_t CCodecBufferChannel::start(
         Mutexed<Output>::Locked output(mOutput);
         output->outputDelay = outputDelayValue;
         output->numSlots = numOutputSlots;
+        output->bounded = bool(outputSurface);
         if (graphic) {
             if (outputSurface || !buffersBoundToCodec) {
                 output->buffers.reset(new GraphicOutputBuffers(mName));
@@ -1801,8 +1808,6 @@ void CCodecBufferChannel::flush(const std::list<std::unique_ptr<C2Work>> &flushe
             output->buffers->flushStash();
         }
     }
-    // reset the frames that are being tracked for onFrameRendered callbacks
-    mTrackedFrames.clear();
 }
 
 void CCodecBufferChannel::onWorkDone(
@@ -2055,7 +2060,7 @@ bool CCodecBufferChannel::handleWork(
         {
             Mutexed<OutputSurface>::Locked output(mOutputSurface);
             maxDequeueCount = output->maxDequeueBuffers =
-                    numOutputSlots + reorderDepth + kRenderingDepth;
+                    numOutputSlots + reorderDepth + mRenderingDepth;
             if (output->surface) {
                 output->surface->setMaxDequeuedBufferCount(output->maxDequeueBuffers);
             }
@@ -2113,7 +2118,10 @@ bool CCodecBufferChannel::handleWork(
             outBuffer->meta()->setInt32("flags", BUFFER_FLAG_CODEC_CONFIG);
             ALOGV("[%s] onWorkDone: csd index = %zu [%p]", mName, index, outBuffer.get());
 
-            output.unlock();
+            // TRICKY: we want popped buffers reported in order, so sending
+            // the callback while holding the lock here. This assumes that
+            // onOutputBufferAvailable() does not block. onOutputBufferAvailable()
+            // callbacks are always sent with the Output lock held.
             mCallback->onOutputBufferAvailable(index, outBuffer);
         } else {
             ALOGD("[%s] onWorkDone: unable to register csd", mName);
@@ -2203,7 +2211,10 @@ void CCodecBufferChannel::sendOutputBuffers() {
         case OutputBuffers::DISCARD:
             break;
         case OutputBuffers::NOTIFY_CLIENT:
-            output.unlock();
+            // TRICKY: we want popped buffers reported in order, so sending
+            // the callback while holding the lock here. This assumes that
+            // onOutputBufferAvailable() does not block. onOutputBufferAvailable()
+            // callbacks are always sent with the Output lock held.
             mCallback->onOutputBufferAvailable(index, outBuffer);
             break;
         case OutputBuffers::REALLOCATE:

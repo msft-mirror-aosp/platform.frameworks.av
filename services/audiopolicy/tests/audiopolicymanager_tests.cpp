@@ -92,11 +92,44 @@ AttributionSourceState createAttributionSourceState(uid_t uid) {
 
 } // namespace
 
+TEST(AudioPolicyConfigTest, DefaultConfigForTestsIsEmpty) {
+    auto config = AudioPolicyConfig::createWritableForTests();
+    EXPECT_TRUE(config->getSource().empty());
+    EXPECT_TRUE(config->getHwModules().isEmpty());
+    EXPECT_TRUE(config->getInputDevices().isEmpty());
+    EXPECT_TRUE(config->getOutputDevices().isEmpty());
+}
+
+TEST(AudioPolicyConfigTest, FallbackToDefault) {
+    auto config = AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
+            base::GetExecutableDirectory() + "/test_invalid_audio_policy_configuration.xml");
+    EXPECT_EQ(AudioPolicyConfig::kDefaultConfigSource, config->getSource());
+}
+
+TEST(AudioPolicyConfigTest, LoadForTests) {
+    {
+        auto result = AudioPolicyConfig::loadFromCustomXmlConfigForTests(
+                base::GetExecutableDirectory() + "/test_invalid_audio_policy_configuration.xml");
+        EXPECT_FALSE(result.ok());
+    }
+    {
+        const std::string source =
+                base::GetExecutableDirectory() + "/test_audio_policy_configuration.xml";
+        auto result = AudioPolicyConfig::loadFromCustomXmlConfigForTests(source);
+        ASSERT_TRUE(result.ok());
+        EXPECT_EQ(source, result.value()->getSource());
+        EXPECT_FALSE(result.value()->getHwModules().isEmpty());
+        EXPECT_FALSE(result.value()->getInputDevices().isEmpty());
+        EXPECT_FALSE(result.value()->getOutputDevices().isEmpty());
+    }
+}
+
 TEST(AudioPolicyManagerTestInit, EngineFailure) {
     AudioPolicyTestClient client;
-    AudioPolicyTestManager manager(&client);
-    manager.getConfig().setDefault();
-    manager.getConfig().setEngineLibraryNameSuffix("non-existent");
+    auto config = AudioPolicyConfig::createWritableForTests();
+    config->setDefault();
+    config->setEngineLibraryNameSuffix("non-existent");
+    AudioPolicyTestManager manager(config, &client);
     ASSERT_EQ(NO_INIT, manager.initialize());
     ASSERT_EQ(NO_INIT, manager.initCheck());
 }
@@ -104,39 +137,10 @@ TEST(AudioPolicyManagerTestInit, EngineFailure) {
 TEST(AudioPolicyManagerTestInit, ClientFailure) {
     AudioPolicyTestClient client;
     AudioPolicyTestManager manager(&client);
-    manager.getConfig().setDefault();
     // Since the default client fails to open anything,
     // APM should indicate that the initialization didn't succeed.
     ASSERT_EQ(NO_INIT, manager.initialize());
     ASSERT_EQ(NO_INIT, manager.initCheck());
-}
-
-// Verifies that a failure while loading a config doesn't leave
-// APM config in a "dirty" state. Since AudioPolicyConfig object
-// is a proxy for the data hosted by APM, it isn't possible
-// to "deep copy" it, and thus we have to test its elements
-// individually.
-TEST(AudioPolicyManagerTestInit, ConfigLoadingIsTransactional) {
-    AudioPolicyTestClient client;
-    AudioPolicyTestManager manager(&client);
-    ASSERT_TRUE(manager.getConfig().getHwModules().isEmpty());
-    ASSERT_TRUE(manager.getConfig().getInputDevices().isEmpty());
-    ASSERT_TRUE(manager.getConfig().getOutputDevices().isEmpty());
-    status_t status = deserializeAudioPolicyFile(
-            (base::GetExecutableDirectory() +
-                    "/test_invalid_audio_policy_configuration.xml").c_str(),
-            &manager.getConfig());
-    ASSERT_NE(NO_ERROR, status);
-    EXPECT_TRUE(manager.getConfig().getHwModules().isEmpty());
-    EXPECT_TRUE(manager.getConfig().getInputDevices().isEmpty());
-    EXPECT_TRUE(manager.getConfig().getOutputDevices().isEmpty());
-    status = deserializeAudioPolicyFile(
-            (base::GetExecutableDirectory() + "/test_audio_policy_configuration.xml").c_str(),
-            &manager.getConfig());
-    ASSERT_EQ(NO_ERROR, status);
-    EXPECT_FALSE(manager.getConfig().getHwModules().isEmpty());
-    EXPECT_FALSE(manager.getConfig().getInputDevices().isEmpty());
-    EXPECT_FALSE(manager.getConfig().getOutputDevices().isEmpty());
 }
 
 
@@ -200,6 +204,7 @@ class AudioPolicyManagerTest : public testing::Test {
     static audio_port_handle_t getDeviceIdFromPatch(const struct audio_patch* patch);
     virtual AudioPolicyManagerTestClient* getClient() { return new AudioPolicyManagerTestClient; }
 
+    sp<AudioPolicyConfig> mConfig;
     std::unique_ptr<AudioPolicyManagerTestClient> mClient;
     std::unique_ptr<AudioPolicyTestManager> mManager;
 
@@ -208,8 +213,8 @@ class AudioPolicyManagerTest : public testing::Test {
 
 void AudioPolicyManagerTest::SetUp() {
     mClient.reset(getClient());
-    mManager.reset(new AudioPolicyTestManager(mClient.get()));
     ASSERT_NO_FATAL_FAILURE(SetUpManagerConfig());  // Subclasses may want to customize the config.
+    mManager.reset(new AudioPolicyTestManager(mConfig, mClient.get()));
     ASSERT_EQ(NO_ERROR, mManager->initialize());
     ASSERT_EQ(NO_ERROR, mManager->initCheck());
 }
@@ -220,7 +225,8 @@ void AudioPolicyManagerTest::TearDown() {
 }
 
 void AudioPolicyManagerTest::SetUpManagerConfig() {
-    mManager->getConfig().setDefault();
+    mConfig = AudioPolicyConfig::createWritableForTests();
+    mConfig->setDefault();
 }
 
 void AudioPolicyManagerTest::dumpToLog() {
@@ -467,7 +473,6 @@ INSTANTIATE_TEST_CASE_P(
 void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
     // TODO: Consider using Serializer to load part of the config from a string.
     ASSERT_NO_FATAL_FAILURE(AudioPolicyManagerTest::SetUpManagerConfig());
-    AudioPolicyConfig& config = mManager->getConfig();
     mMsdOutputDevice = new DeviceDescriptor(AUDIO_DEVICE_OUT_BUS);
     sp<AudioProfile> pcmOutputProfile = new AudioProfile(
             AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO, k48000SamplingRate);
@@ -483,26 +488,26 @@ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
     sp<AudioProfile> pcmInputProfile = new AudioProfile(
             AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO, 44100);
     mMsdInputDevice->addAudioProfile(pcmInputProfile);
-    config.addDevice(mMsdOutputDevice);
-    config.addDevice(mMsdInputDevice);
+    mConfig->addDevice(mMsdOutputDevice);
+    mConfig->addDevice(mMsdInputDevice);
 
     if (mExpectedAudioPatchCount == 2) {
         // Add SPDIF device with PCM output profile as a second device for dual MSD audio patching.
         mSpdifDevice = new DeviceDescriptor(AUDIO_DEVICE_OUT_SPDIF);
         mSpdifDevice->addAudioProfile(pcmOutputProfile);
-        config.addDevice(mSpdifDevice);
+        mConfig->addDevice(mSpdifDevice);
 
         sp<OutputProfile> spdifOutputProfile = new OutputProfile("spdif output");
         spdifOutputProfile->addAudioProfile(pcmOutputProfile);
         spdifOutputProfile->addSupportedDevice(mSpdifDevice);
-        config.getHwModules().getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY)->
+        mConfig->getHwModules().getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY)->
                 addOutputProfile(spdifOutputProfile);
     }
 
     sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 2 /*halVersionMajor*/);
-    HwModuleCollection modules = config.getHwModules();
+    HwModuleCollection modules = mConfig->getHwModules();
     modules.add(msdModule);
-    config.setHwModules(modules);
+    mConfig->setHwModules(modules);
 
     sp<OutputProfile> msdOutputProfile = new OutputProfile("msd input");
     msdOutputProfile->addAudioProfile(pcmOutputProfile);
@@ -530,15 +535,15 @@ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
     // of streams that are not supported by MSD.
     sp<AudioProfile> dtsOutputProfile = new AudioProfile(
             AUDIO_FORMAT_DTS, AUDIO_CHANNEL_OUT_5POINT1, k48000SamplingRate);
-    config.getDefaultOutputDevice()->addAudioProfile(dtsOutputProfile);
+    mConfig->getDefaultOutputDevice()->addAudioProfile(dtsOutputProfile);
     sp<OutputProfile> primaryEncodedOutputProfile = new OutputProfile("encoded");
     primaryEncodedOutputProfile->addAudioProfile(dtsOutputProfile);
     primaryEncodedOutputProfile->setFlags(AUDIO_OUTPUT_FLAG_DIRECT);
-    primaryEncodedOutputProfile->addSupportedDevice(config.getDefaultOutputDevice());
-    config.getHwModules().getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY)->
+    primaryEncodedOutputProfile->addSupportedDevice(mConfig->getDefaultOutputDevice());
+    mConfig->getHwModules().getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY)->
             addOutputProfile(primaryEncodedOutputProfile);
 
-    mDefaultOutputDevice = config.getDefaultOutputDevice();
+    mDefaultOutputDevice = mConfig->getDefaultOutputDevice();
     if (mExpectedAudioPatchCount == 2) {
         mSpdifDevice->addAudioProfile(dtsOutputProfile);
         primaryEncodedOutputProfile->addSupportedDevice(mSpdifDevice);
@@ -549,12 +554,12 @@ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
     sp<AudioProfile> iec958InputProfile = new AudioProfile(
             AUDIO_FORMAT_IEC60958, AUDIO_CHANNEL_INDEX_MASK_24, k48000SamplingRate);
     mHdmiInputDevice->addAudioProfile(iec958InputProfile);
-    config.addDevice(mHdmiInputDevice);
+    mConfig->addDevice(mHdmiInputDevice);
     sp<InputProfile> hdmiInputProfile = new InputProfile("hdmi input");
     hdmiInputProfile->addAudioProfile(iec958InputProfile);
     hdmiInputProfile->setFlags(AUDIO_INPUT_FLAG_DIRECT);
     hdmiInputProfile->addSupportedDevice(mHdmiInputDevice);
-    config.getHwModules().getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY)->
+    mConfig->getHwModules().getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY)->
             addInputProfile(hdmiInputProfile);
 }
 
@@ -721,7 +726,7 @@ TEST_P(AudioPolicyManagerTestMsd, GetDirectProfilesForAttributesWithMsd) {
     int countDirectProfilesPrimary = 0;
     const auto& primary = mManager->getConfig().getHwModules()
             .getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY);
-    for (const auto outputProfile : primary->getOutputProfiles()) {
+    for (const auto& outputProfile : primary->getOutputProfiles()) {
         if (outputProfile->asAudioPort()->isDirectOutput()) {
             countDirectProfilesPrimary += outputProfile->asAudioPort()->getAudioProfiles().size();
         }
@@ -731,7 +736,7 @@ TEST_P(AudioPolicyManagerTestMsd, GetDirectProfilesForAttributesWithMsd) {
     int countDirectProfilesMsd = 0;
     const auto& msd = mManager->getConfig().getHwModules()
             .getModuleFromName(AUDIO_HARDWARE_MODULE_ID_MSD);
-    for (const auto outputProfile : msd->getOutputProfiles()) {
+    for (const auto& outputProfile : msd->getOutputProfiles()) {
         if (outputProfile->asAudioPort()->isDirectOutput()) {
             countDirectProfilesMsd += outputProfile->asAudioPort()->getAudioProfiles().size();
         }
@@ -922,9 +927,9 @@ const std::string AudioPolicyManagerTestWithConfigurationFile::sDefaultConfig =
         sExecutableDir + "test_audio_policy_configuration.xml";
 
 void AudioPolicyManagerTestWithConfigurationFile::SetUpManagerConfig() {
-    status_t status = deserializeAudioPolicyFile(getConfigFile().c_str(), &mManager->getConfig());
-    ASSERT_EQ(NO_ERROR, status);
-    mManager->getConfig().setSource(getConfigFile());
+    auto result = AudioPolicyConfig::loadFromCustomXmlConfigForTests(getConfigFile());
+    ASSERT_TRUE(result.ok());
+    mConfig = result.value();
 }
 
 TEST_F(AudioPolicyManagerTestWithConfigurationFile, InitSuccess) {
@@ -1332,13 +1337,14 @@ TEST_F(AudioPolicyManagerTestDynamicPolicy, RegisterPolicyMixes) {
             AUDIO_DEVICE_OUT_REMOTE_SUBMIX, "", audioConfig);
     ASSERT_EQ(INVALID_OPERATION, ret);
 
-    // The first time to register valid policy mixes should succeed.
+    // The first time to register valid loopback policy mix should succeed.
     clearPolicyMix();
-    ret = addPolicyMix(MIX_TYPE_PLAYERS, MIX_ROUTE_FLAG_RENDER,
-            AUDIO_DEVICE_OUT_SPEAKER, "", audioConfig);
+    ret = addPolicyMix(MIX_TYPE_PLAYERS, MIX_ROUTE_FLAG_LOOP_BACK,
+            AUDIO_DEVICE_OUT_REMOTE_SUBMIX, "addr", audioConfig);
     ASSERT_EQ(NO_ERROR, ret);
-    // Registering the same policy mixes should fail.
-    ret = mManager->registerPolicyMixes(mAudioMixes);
+    // Registering the render policy for the loopback address should succeed.
+    ret = addPolicyMix(MIX_TYPE_PLAYERS, MIX_ROUTE_FLAG_RENDER,
+            AUDIO_DEVICE_OUT_REMOTE_SUBMIX, "addr", audioConfig);
     ASSERT_EQ(INVALID_OPERATION, ret);
 }
 
@@ -1893,7 +1899,7 @@ class AudioPolicyManagerTestMMapPlaybackRerouting
     bool mIsBitPerfect;
 };
 
-TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingDapMixFails) {
+TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLoopbackDapMixFails) {
     // Add mix matching the test uid.
     const int testUid = 12345;
     const auto param = GetParam();
@@ -1910,7 +1916,8 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingDa
                                          &mOutputType, &mIsSpatialized, &mIsBitPerfect));
 }
 
-TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, NonMmapPlaybackStreamMatchingDapMixSucceeds) {
+TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
+        NonMmapPlaybackStreamMatchingLoopbackDapMixSucceeds) {
     // Add mix matching the test uid.
     const int testUid = 12345;
     const auto param = GetParam();
@@ -1927,15 +1934,30 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, NonMmapPlaybackStreamMatchin
                                          &mOutputType, &mIsSpatialized, &mIsBitPerfect));
 }
 
+TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
+        MmapPlaybackStreamMatchingRenderDapMixSucceeds) {
+      // Add render-only mix matching the test uid.
+    const int testUid = 12345;
+    status_t ret = addPolicyMix(MIX_TYPE_PLAYERS, MIX_ROUTE_FLAG_RENDER, AUDIO_DEVICE_OUT_SPEAKER,
+                                /*mixAddress=*/"", audioConfig, {createUidCriterion(testUid)});
+    ASSERT_EQ(NO_ERROR, ret);
+
+    // Geting output for matching uid should succeed for mmaped stream.
+    audio_output_flags_t outputFlags = AUDIO_OUTPUT_FLAG_MMAP_NOIRQ;
+    ASSERT_EQ(NO_ERROR,
+              mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
+                                         createAttributionSourceState(testUid), &audioConfig,
+                                         &outputFlags, &mSelectedDeviceId, &mPortId, {},
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+}
+
 INSTANTIATE_TEST_SUITE_P(
         MmapPlaybackRerouting, AudioPolicyManagerTestMMapPlaybackRerouting,
         testing::Values(DPMmapTestParam(MIX_ROUTE_FLAG_LOOP_BACK, AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
                                         /*deviceAddress=*/"remote_submix_media"),
                         DPMmapTestParam(MIX_ROUTE_FLAG_LOOP_BACK_AND_RENDER,
                                         AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
-                                        /*deviceAddress=*/"remote_submix_media"),
-                        DPMmapTestParam(MIX_ROUTE_FLAG_RENDER, AUDIO_DEVICE_OUT_SPEAKER,
-                                        /*deviceAddress=*/"")));
+                                        /*deviceAddress=*/"remote_submix_media")));
 
 class AudioPolicyManagerTestDPMixRecordInjection : public AudioPolicyManagerTestDynamicPolicy,
         public testing::WithParamInterface<DPTestParam> {

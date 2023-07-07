@@ -73,11 +73,11 @@ void StreamConfiguration::getStreamConfigurations(
 
     int32_t dynamicDepthKey =
             SessionConfigurationUtils::getAppropriateModeTag(
-                    ANDROID_DEPTH_AVAILABLE_DYNAMIC_DEPTH_STREAM_CONFIGURATIONS);
+                    ANDROID_DEPTH_AVAILABLE_DYNAMIC_DEPTH_STREAM_CONFIGURATIONS, maxRes);
 
     int32_t heicKey =
             SessionConfigurationUtils::getAppropriateModeTag(
-                    ANDROID_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS);
+                    ANDROID_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS, maxRes);
 
     getStreamConfigurations(staticInfo, scalerKey, scm);
     getStreamConfigurations(staticInfo, depthKey, scm);
@@ -677,7 +677,8 @@ void mapStreamInfo(const OutputStreamInfo &streamInfo,
 binder::Status
 convertToHALStreamCombination(
         const SessionConfiguration& sessionConfiguration,
-        const String8 &logicalCameraId, const CameraMetadata &deviceInfo, bool supportNativeJpegR,
+        const String8 &logicalCameraId, const CameraMetadata &deviceInfo,
+        bool isCompositeJpegRDisabled,
         metadataGetter getMetadata, const std::vector<std::string> &physicalCameraIds,
         aidl::android::hardware::camera::device::StreamConfiguration &streamConfiguration,
         bool overrideForPerfClass, bool *earlyExit) {
@@ -822,7 +823,7 @@ convertToHALStreamCombination(
                         camera3::HeicCompositeStream::isHeicCompositeStream(surface);
                 bool isJpegRCompositeStream =
                         camera3::JpegRCompositeStream::isJpegRCompositeStream(surface) &&
-                        !supportNativeJpegR;
+                        !isCompositeJpegRDisabled;
                 if (isDepthCompositeStream || isHeicCompositeStream || isJpegRCompositeStream) {
                     // We need to take in to account that composite streams can have
                     // additional internal camera streams.
