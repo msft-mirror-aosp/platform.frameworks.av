@@ -73,6 +73,10 @@ static inline int32_t getAudioSinkPcmMsSetting() {
 // is closed to allow the audio DSP to power down.
 static const int64_t kOffloadPauseMaxUs = 10000000LL;
 
+// Additional delay after teardown before releasing the wake lock to allow time for the audio path
+// to be completely released
+static const int64_t kWakelockReleaseDelayUs = 2000000LL;
+
 // Maximum allowed delay from AudioSink, 1.5 seconds.
 static const int64_t kMaxAllowedAudioSinkDelayUs = 1500000LL;
 
@@ -474,6 +478,23 @@ void NuPlayer::Renderer::closeAudioSink() {
     msg->postAndAwaitResponse(&response);
 }
 
+void NuPlayer::Renderer::dump(AString& logString) {
+    Mutex::Autolock autoLock(mLock);
+    logString.append("paused(");
+    logString.append(mPaused);
+    logString.append("), offloading(");
+    logString.append(offloadingAudio());
+    logString.append("), wakelock(acquired=");
+    mWakelockAcquireEvent.dump(logString);
+    logString.append(", timeout=");
+    mWakelockTimeoutEvent.dump(logString);
+    logString.append(", release=");
+    mWakelockReleaseEvent.dump(logString);
+    logString.append(", cancel=");
+    mWakelockCancelEvent.dump(logString);
+    logString.append(")");
+}
+
 void NuPlayer::Renderer::changeAudioFormat(
         const sp<AMessage> &format,
         bool offloadOnly,
@@ -788,11 +809,33 @@ void NuPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
         {
             int32_t generation;
             CHECK(msg->findInt32("drainGeneration", &generation));
+            mWakelockTimeoutEvent.updateValues(
+                    uptimeMillis(),
+                    generation,
+                    mAudioOffloadPauseTimeoutGeneration);
             if (generation != mAudioOffloadPauseTimeoutGeneration) {
                 break;
             }
             ALOGV("Audio Offload tear down due to pause timeout.");
             onAudioTearDown(kDueToTimeout);
+            sp<AMessage> newMsg = new AMessage(kWhatReleaseWakeLock, this);
+            newMsg->setInt32("drainGeneration", generation);
+            newMsg->post(kWakelockReleaseDelayUs);
+            break;
+        }
+
+        case kWhatReleaseWakeLock:
+        {
+            int32_t generation;
+            CHECK(msg->findInt32("drainGeneration", &generation));
+            mWakelockReleaseEvent.updateValues(
+                uptimeMillis(),
+                generation,
+                mAudioOffloadPauseTimeoutGeneration);
+            if (generation != mAudioOffloadPauseTimeoutGeneration) {
+                break;
+            }
+            ALOGV("releasing audio offload pause wakelock.");
             mWakeLock->release();
             break;
         }
@@ -1785,6 +1828,8 @@ void NuPlayer::Renderer::onPause() {
         return;
     }
 
+    startAudioOffloadPauseTimeout();
+
     {
         Mutex::Autolock autoLock(mLock);
         // we do not increment audio drain generation so that we fill audio buffer during pause.
@@ -1799,7 +1844,6 @@ void NuPlayer::Renderer::onPause() {
 
     // Note: audio data may not have been decoded, and the AudioSink may not be opened.
     mAudioSink->pause();
-    startAudioOffloadPauseTimeout();
 
     ALOGV("now paused audio queue has %zu entries, video has %zu entries",
           mAudioQueue.size(), mVideoQueue.size());
@@ -1895,6 +1939,9 @@ void NuPlayer::Renderer::onAudioTearDown(AudioTearDownReason reason) {
 void NuPlayer::Renderer::startAudioOffloadPauseTimeout() {
     if (offloadingAudio()) {
         mWakeLock->acquire();
+        mWakelockAcquireEvent.updateValues(uptimeMillis(),
+                                           mAudioOffloadPauseTimeoutGeneration,
+                                           mAudioOffloadPauseTimeoutGeneration);
         sp<AMessage> msg = new AMessage(kWhatAudioOffloadPauseTimeout, this);
         msg->setInt32("drainGeneration", mAudioOffloadPauseTimeoutGeneration);
         msg->post(kOffloadPauseMaxUs);
@@ -1911,6 +1958,9 @@ void NuPlayer::Renderer::cancelAudioOffloadPauseTimeout() {
     // Note: The acquired wakelock prevents the device from suspending
     // immediately after offload pause (in case a resume happens shortly thereafter).
     mWakeLock->release(true);
+    mWakelockCancelEvent.updateValues(uptimeMillis(),
+                                      mAudioOffloadPauseTimeoutGeneration,
+                                      mAudioOffloadPauseTimeoutGeneration);
     ++mAudioOffloadPauseTimeoutGeneration;
 }
 
@@ -1927,12 +1977,17 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
     int32_t numChannels;
     CHECK(format->findInt32("channel-count", &numChannels));
 
-    int32_t rawChannelMask;
-    audio_channel_mask_t channelMask =
-            format->findInt32("channel-mask", &rawChannelMask) ?
-                    static_cast<audio_channel_mask_t>(rawChannelMask)
-                    // signal to the AudioSink to derive the mask from count.
-                    : CHANNEL_MASK_USE_CHANNEL_ORDER;
+    // channel mask info as read from the audio format
+    int32_t mediaFormatChannelMask;
+    // channel mask to use for native playback
+    audio_channel_mask_t channelMask;
+    if (format->findInt32("channel-mask", &mediaFormatChannelMask)) {
+        // KEY_CHANNEL_MASK follows the android.media.AudioFormat java mask
+        channelMask = audio_channel_mask_from_media_format_mask(mediaFormatChannelMask);
+    } else {
+        // no mask found: the mask will be derived from the channel count
+        channelMask = CHANNEL_MASK_USE_CHANNEL_ORDER;
+    }
 
     int32_t sampleRate;
     CHECK(format->findInt32("sample-rate", &sampleRate));
@@ -2139,6 +2194,16 @@ void NuPlayer::Renderer::onChangeAudioFormat(
         notify->setInt32("err", err);
     }
     notify->post();
+}
+
+void NuPlayer::Renderer::WakeLockEvent::dump(AString& logString) {
+  logString.append("[");
+  logString.append(mTimeMs);
+  logString.append(",");
+  logString.append(mEventTimeoutGeneration);
+  logString.append(",");
+  logString.append(mRendererTimeoutGeneration);
+  logString.append("]");
 }
 
 }  // namespace android
