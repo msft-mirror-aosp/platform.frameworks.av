@@ -17,18 +17,19 @@
 #include "VisualizerContext.h"
 
 #include <algorithm>
+#include <math.h>
+#include <time.h>
+
 #include <android/binder_status.h>
 #include <audio_utils/primitives.h>
-#include <math.h>
 #include <system/audio.h>
-#include <time.h>
 #include <Utils.h>
 
 #ifndef BUILD_FLOAT
         #error AIDL Visualizer only support float 32bits, make sure add cflags -DBUILD_FLOAT,
 #endif
 
-using android::hardware::audio::common::getChannelCount;
+using aidl::android::hardware::audio::common::getChannelCount;
 
 namespace aidl::android::hardware::audio::effect {
 
@@ -191,9 +192,15 @@ Visualizer::Measurement VisualizerContext::getMeasure() {
 std::vector<uint8_t> VisualizerContext::capture() {
     std::vector<uint8_t> result;
     std::lock_guard lg(mMutex);
-    RETURN_VALUE_IF(mState != State::ACTIVE, result, "illegalState");
-    const uint32_t deltaMs = getDeltaTimeMsFromUpdatedTime_l();
+    // cts android.media.audio.cts.VisualizerTest expecting silence data when effect not running
+    // RETURN_VALUE_IF(mState != State::ACTIVE, result, "illegalState");
+    if (mState != State::ACTIVE) {
+        result.resize(mCaptureSamples);
+        memset(result.data(), 0x80, mCaptureSamples);
+        return result;
+    }
 
+    const uint32_t deltaMs = getDeltaTimeMsFromUpdatedTime_l();
     // if audio framework has stopped playing audio although the effect is still active we must
     // clear the capture buffer to return silence
     if ((mLastCaptureIdx == mCaptureIdx) && (mBufferUpdateTime.tv_sec != 0) &&

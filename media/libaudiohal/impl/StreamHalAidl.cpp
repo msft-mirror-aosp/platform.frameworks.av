@@ -21,16 +21,28 @@
 #include <cstdint>
 
 #include <audio_utils/clock.h>
+#include <media/AidlConversion.h>
+#include <media/AidlConversionCore.h>
+#include <media/AidlConversionCppNdk.h>
+#include <media/AidlConversionNdk.h>
+#include <media/AidlConversionUtil.h>
+#include <media/AudioParameter.h>
 #include <mediautils/TimeCheck.h>
+#include <system/audio.h>
 #include <utils/Log.h>
 
 #include "DeviceHalAidl.h"
 #include "StreamHalAidl.h"
 
+using ::aidl::android::aidl_utils::statusTFromBinderStatus;
+using ::aidl::android::hardware::audio::common::PlaybackTrackMetadata;
+using ::aidl::android::hardware::audio::common::RecordTrackMetadata;
 using ::aidl::android::hardware::audio::core::IStreamCommon;
 using ::aidl::android::hardware::audio::core::IStreamIn;
 using ::aidl::android::hardware::audio::core::IStreamOut;
 using ::aidl::android::hardware::audio::core::StreamDescriptor;
+using ::aidl::android::hardware::audio::core::MmapBufferDescriptor;
+using ::aidl::android::media::audio::common::MicrophoneDynamicInfo;
 
 namespace android {
 
@@ -110,11 +122,21 @@ status_t StreamHalAidl::getAudioProperties(audio_config_base_t *configBase) {
     return OK;
 }
 
-status_t StreamHalAidl::setParameters(const String8& kvPairs __unused) {
-    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
+status_t StreamHalAidl::setParameters(const String8& kvPairs) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+
+    AudioParameter parameters(kvPairs);
+    ALOGD("%s: parameters: %s", __func__, parameters.toString().c_str());
+
+    (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                    parameters, String8(AudioParameter::keyStreamHwAvSync),
+            [&](int hwAvSyncId) {
+                return statusTFromBinderStatus(mStream->updateHwAvSyncId(hwAvSyncId));
+            }));
+
+    ALOGW_IF(parameters.size() != 0, "%s: unknown parameters, ignored: %s",
+            __func__, parameters.toString().c_str());
     return OK;
 }
 
@@ -122,9 +144,8 @@ status_t StreamHalAidl::getParameters(const String8& keys __unused, String8 *val
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     values->clear();
-    if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    // AIDL HAL doesn't support getParameters API.
+    return INVALID_OPERATION;
 }
 
 status_t StreamHalAidl::getFrameSize(size_t *size) {
@@ -211,16 +232,23 @@ status_t StreamHalAidl::start() {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    const auto state = getState();
+    StreamDescriptor::Reply reply;
+    if (state == StreamDescriptor::State::STANDBY) {
+        if (status_t status = sendCommand(makeHalCommand<HalCommand::Tag::start>(), &reply, true);
+                status != OK) {
+            return status;
+        }
+        return sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), &reply, true);
+    }
+
+    return INVALID_OPERATION;
 }
 
 status_t StreamHalAidl::stop() {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
-    TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return standby();
 }
 
 status_t StreamHalAidl::getLatency(uint32_t *latency) {
@@ -246,6 +274,20 @@ status_t StreamHalAidl::getObservablePosition(int64_t *frames, int64_t *timestam
     return OK;
 }
 
+status_t StreamHalAidl::getHardwarePosition(int64_t *frames, int64_t *timestamp) {
+    ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
+    if (!mStream) return NO_INIT;
+    StreamDescriptor::Reply reply;
+    // TODO: switch to updateCountersIfNeeded once we sort out mWorkerTid initialization
+    if (status_t status = sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(), &reply, true);
+            status != OK) {
+        return status;
+    }
+    *frames = reply.hardware.frames;
+    *timestamp = reply.hardware.timeNs;
+    return OK;
+}
+
 status_t StreamHalAidl::getXruns(int32_t *frames) {
     ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
     if (!mStream) return NO_INIT;
@@ -259,7 +301,7 @@ status_t StreamHalAidl::getXruns(int32_t *frames) {
 
 status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred) {
     ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
-    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+    // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!mStream || mContext.getDataMQ() == nullptr) return NO_INIT;
     mWorkerTid.store(gettid(), std::memory_order_release);
     // Switch the stream into an active state if needed.
@@ -323,6 +365,26 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
     if (mIsInput) {
         return sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), reply);
     } else {
+        if (mContext.isAsynchronous()) {
+            // Handle pause-flush-resume sequence. 'flush' from PAUSED goes to
+            // IDLE. We move here from IDLE to ACTIVE (same as 'start' from PAUSED).
+            const auto state = getState();
+            if (state == StreamDescriptor::State::IDLE) {
+                StreamDescriptor::Reply localReply{};
+                StreamDescriptor::Reply* innerReply = reply ?: &localReply;
+                if (status_t status =
+                        sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), innerReply);
+                        status != OK) {
+                    return status;
+                }
+                if (innerReply->state != StreamDescriptor::State::ACTIVE) {
+                    ALOGE("%s: unexpected stream state: %s (expected ACTIVE)",
+                            __func__, toString(innerReply->state).c_str());
+                    return INVALID_OPERATION;
+                }
+                return OK;
+            }
+        }
         return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
     }
 }
@@ -334,7 +396,8 @@ status_t StreamHalAidl::drain(bool earlyNotify, StreamDescriptor::Reply* reply) 
     return sendCommand(makeHalCommand<HalCommand::Tag::drain>(
                     mIsInput ? StreamDescriptor::DrainMode::DRAIN_UNSPECIFIED :
                     earlyNotify ? StreamDescriptor::DrainMode::DRAIN_EARLY_NOTIFY :
-                    StreamDescriptor::DrainMode::DRAIN_ALL), reply);
+                    StreamDescriptor::DrainMode::DRAIN_ALL), reply,
+                    true /*safeFromNonWorkerThread*/);
 }
 
 status_t StreamHalAidl::flush(StreamDescriptor::Reply* reply) {
@@ -349,43 +412,45 @@ status_t StreamHalAidl::exit() {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return statusTFromBinderStatus(mStream->prepareToClose());
 }
 
 status_t StreamHalAidl::createMmapBuffer(int32_t minSizeFrames __unused,
-                                  struct audio_mmap_buffer_info *info __unused) {
+                                         struct audio_mmap_buffer_info *info) {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    if (!mContext.isMmapped()) {
+        return BAD_VALUE;
+    }
+    const MmapBufferDescriptor& bufferDescriptor = mContext.getMmapBufferDescriptor();
+    info->shared_memory_fd = bufferDescriptor.sharedMemory.fd.get();
+    info->buffer_size_frames = mContext.getBufferSizeFrames();
+    info->burst_size_frames = bufferDescriptor.burstSizeFrames;
+    info->flags = static_cast<audio_mmap_buffer_flag>(bufferDescriptor.flags);
+
     return OK;
 }
 
-status_t StreamHalAidl::getMmapPosition(struct audio_mmap_position *position __unused) {
-    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
+status_t StreamHalAidl::getMmapPosition(struct audio_mmap_position *position) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    if (!mContext.isMmapped()) {
+        return BAD_VALUE;
+    }
+    int64_t aidlPosition = 0, aidlTimestamp = 0;
+    if (status_t status = getHardwarePosition(&aidlPosition, &aidlTimestamp); status != OK) {
+        return status;
+    }
+
+    position->time_nanoseconds = aidlTimestamp;
+    position->position_frames = static_cast<int32_t>(aidlPosition);
     return OK;
 }
 
 status_t StreamHalAidl::setHalThreadPriority(int priority __unused) {
     // Obsolete, must be done by the HAL module.
     return OK;
-}
-
-status_t StreamHalAidl::getHalPid(pid_t *pid __unused) {
-    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
-    TIME_CHECK();
-    if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
-}
-
-bool StreamHalAidl::requestHalThreadPriority(pid_t threadPid __unused, pid_t threadId __unused) {
-    // Obsolete, must be done by the HAL module.
-    return true;
 }
 
 status_t StreamHalAidl::legacyCreateAudioPatch(const struct audio_port_config& port __unused,
@@ -404,7 +469,7 @@ status_t StreamHalAidl::sendCommand(
         const ::aidl::android::hardware::audio::core::StreamDescriptor::Command &command,
         ::aidl::android::hardware::audio::core::StreamDescriptor::Reply* reply,
         bool safeFromNonWorkerThread) {
-    // TIME_CHECK();  // TODO(b/238654698) reenable only when optimized.
+    // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!safeFromNonWorkerThread) {
         const pid_t workerTid = mWorkerTid.load(std::memory_order_acquire);
         LOG_ALWAYS_FATAL_IF(workerTid != gettid(),
@@ -455,12 +520,30 @@ status_t StreamHalAidl::updateCountersIfNeeded(
     return OK;
 }
 
+// static
+ConversionResult<::aidl::android::hardware::audio::common::SourceMetadata>
+StreamOutHalAidl::legacy2aidl_SourceMetadata(const StreamOutHalInterface::SourceMetadata& legacy) {
+    ::aidl::android::hardware::audio::common::SourceMetadata aidl;
+    aidl.tracks = VALUE_OR_RETURN(
+            ::aidl::android::convertContainer<std::vector<PlaybackTrackMetadata>>(
+                    legacy.tracks,
+                    ::aidl::android::legacy2aidl_playback_track_metadata_v7_PlaybackTrackMetadata));
+    return aidl;
+}
+
 StreamOutHalAidl::StreamOutHalAidl(
         const audio_config& config, StreamContextAidl&& context, int32_t nominalLatency,
         const std::shared_ptr<IStreamOut>& stream, const sp<CallbackBroker>& callbackBroker)
         : StreamHalAidl("StreamOutHalAidl", false /*isInput*/, config, nominalLatency,
                 std::move(context), getStreamCommon(stream)),
-          mStream(stream), mCallbackBroker(callbackBroker) {}
+          mStream(stream), mCallbackBroker(callbackBroker) {
+    // Initialize the offload metadata
+    mOffloadMetadata.sampleRate = static_cast<int32_t>(config.sample_rate);
+    mOffloadMetadata.channelMask = VALUE_OR_FATAL(
+            ::aidl::android::legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
+                    config.channel_mask, false));
+    mOffloadMetadata.averageBitRatePerSecond = static_cast<int32_t>(config.offload_info.bit_rate);
+}
 
 StreamOutHalAidl::~StreamOutHalAidl() {
     if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
@@ -468,22 +551,33 @@ StreamOutHalAidl::~StreamOutHalAidl() {
     }
 }
 
+status_t StreamOutHalAidl::setParameters(const String8& kvPairs) {
+    if (!mStream) return NO_INIT;
+
+    AudioParameter parameters(kvPairs);
+    ALOGD("%s: parameters: \"%s\"", __func__, parameters.toString().c_str());
+
+    if (status_t status = filterAndUpdateOffloadMetadata(parameters); status != OK) {
+        ALOGW("%s: filtering or updating offload metadata failed: %d", __func__, status);
+    }
+
+    return StreamHalAidl::setParameters(parameters.toString());
+}
+
 status_t StreamOutHalAidl::getLatency(uint32_t *latency) {
     return StreamHalAidl::getLatency(latency);
 }
 
-status_t StreamOutHalAidl::setVolume(float left __unused, float right __unused) {
+status_t StreamOutHalAidl::setVolume(float left, float right) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return statusTFromBinderStatus(mStream->setHwVolume({left, right}));
 }
 
-status_t StreamOutHalAidl::selectPresentation(int presentationId __unused, int programId __unused) {
+status_t StreamOutHalAidl::selectPresentation(int presentationId, int programId) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return statusTFromBinderStatus(mStream->selectPresentation(presentationId, programId));
 }
 
 status_t StreamOutHalAidl::write(const void *buffer, size_t bytes, size_t *written) {
@@ -514,6 +608,10 @@ status_t StreamOutHalAidl::getNextWriteTimestamp(int64_t *timestamp __unused) {
 status_t StreamOutHalAidl::setCallback(wp<StreamOutHalInterfaceCallback> callback) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
+    if (!mContext.isAsynchronous()) {
+        ALOGE("%s: the callback is intended for asynchronous streams only", __func__);
+        return INVALID_OPERATION;
+    }
     if (auto broker = mCallbackBroker.promote(); broker != nullptr) {
         if (auto cb = callback.promote(); cb != nullptr) {
             broker->setStreamOutCallback(this, cb);
@@ -577,55 +675,69 @@ status_t StreamOutHalAidl::getPresentationPosition(uint64_t *frames, struct time
 }
 
 status_t StreamOutHalAidl::updateSourceMetadata(
-        const StreamOutHalInterface::SourceMetadata& sourceMetadata __unused) {
+        const StreamOutHalInterface::SourceMetadata& sourceMetadata) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    ::aidl::android::hardware::audio::common::SourceMetadata aidlMetadata =
+              VALUE_OR_RETURN_STATUS(legacy2aidl_SourceMetadata(sourceMetadata));
+    return statusTFromBinderStatus(mStream->updateMetadata(aidlMetadata));
+}
+
+status_t StreamOutHalAidl::getDualMonoMode(audio_dual_mono_mode_t* mode) {
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    if (mode == nullptr) {
+        return BAD_VALUE;
+    }
+    ::aidl::android::media::audio::common::AudioDualMonoMode aidlMode;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mStream->getDualMonoMode(&aidlMode)));
+    *mode = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::aidl2legacy_AudioDualMonoMode_audio_dual_mono_mode_t(aidlMode));
     return OK;
 }
 
-status_t StreamOutHalAidl::getDualMonoMode(audio_dual_mono_mode_t* mode __unused) {
+status_t StreamOutHalAidl::setDualMonoMode(audio_dual_mono_mode_t mode) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    ::aidl::android::media::audio::common::AudioDualMonoMode aidlMode = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::legacy2aidl_audio_dual_mono_mode_t_AudioDualMonoMode(mode));
+    return statusTFromBinderStatus(mStream->setDualMonoMode(aidlMode));
+}
+
+status_t StreamOutHalAidl::getAudioDescriptionMixLevel(float* leveldB) {
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    if (leveldB == nullptr) {
+        return BAD_VALUE;
+    }
+    return statusTFromBinderStatus(mStream->getAudioDescriptionMixLevel(leveldB));
+}
+
+status_t StreamOutHalAidl::setAudioDescriptionMixLevel(float leveldB) {
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    return statusTFromBinderStatus(mStream->setAudioDescriptionMixLevel(leveldB));
+}
+
+status_t StreamOutHalAidl::getPlaybackRateParameters(audio_playback_rate_t* playbackRate) {
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    if (playbackRate == nullptr) {
+        return BAD_VALUE;
+    }
+    ::aidl::android::media::audio::common::AudioPlaybackRate aidlRate;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mStream->getPlaybackRateParameters(&aidlRate)));
+    *playbackRate = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::aidl2legacy_AudioPlaybackRate_audio_playback_rate_t(aidlRate));
     return OK;
 }
 
-status_t StreamOutHalAidl::setDualMonoMode(audio_dual_mono_mode_t mode __unused) {
+status_t StreamOutHalAidl::setPlaybackRateParameters(const audio_playback_rate_t& playbackRate) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
-}
-
-status_t StreamOutHalAidl::getAudioDescriptionMixLevel(float* leveldB __unused) {
-    TIME_CHECK();
-    if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
-}
-
-status_t StreamOutHalAidl::setAudioDescriptionMixLevel(float leveldB __unused) {
-    TIME_CHECK();
-    if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
-}
-
-status_t StreamOutHalAidl::getPlaybackRateParameters(
-        audio_playback_rate_t* playbackRate __unused) {
-    TIME_CHECK();
-    if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
-}
-
-status_t StreamOutHalAidl::setPlaybackRateParameters(
-        const audio_playback_rate_t& playbackRate __unused) {
-    TIME_CHECK();
-    if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    ::aidl::android::media::audio::common::AudioPlaybackRate aidlRate = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::legacy2aidl_audio_playback_rate_t_AudioPlaybackRate(playbackRate));
+    return statusTFromBinderStatus(mStream->setPlaybackRateParameters(aidlRate));
 }
 
 status_t StreamOutHalAidl::setEventCallback(
@@ -638,18 +750,27 @@ status_t StreamOutHalAidl::setEventCallback(
     return OK;
 }
 
-status_t StreamOutHalAidl::setLatencyMode(audio_latency_mode_t mode __unused) {
+status_t StreamOutHalAidl::setLatencyMode(audio_latency_mode_t mode) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    ::aidl::android::media::audio::common::AudioLatencyMode aidlMode = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::legacy2aidl_audio_latency_mode_t_AudioLatencyMode(mode));
+    return statusTFromBinderStatus(mStream->setLatencyMode(aidlMode));
 };
 
-status_t StreamOutHalAidl::getRecommendedLatencyModes(
-        std::vector<audio_latency_mode_t> *modes __unused) {
+status_t StreamOutHalAidl::getRecommendedLatencyModes(std::vector<audio_latency_mode_t> *modes) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    if (modes == nullptr) {
+        return BAD_VALUE;
+    }
+    std::vector<::aidl::android::media::audio::common::AudioLatencyMode> aidlModes;
+    RETURN_STATUS_IF_ERROR(
+            statusTFromBinderStatus(mStream->getRecommendedLatencyModes(&aidlModes)));
+    *modes = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::convertContainer<std::vector<audio_latency_mode_t>>(
+                    aidlModes,
+                    ::aidl::android::aidl2legacy_AudioLatencyMode_audio_latency_mode_t));
     return OK;
 };
 
@@ -667,18 +788,88 @@ status_t StreamOutHalAidl::exit() {
     return StreamHalAidl::exit();
 }
 
+status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parameters) {
+    TIME_CHECK();
+    bool updateMetadata = false;
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecAverageBitRate),
+                [&](int value) {
+                    return value > 0 ?
+                            mOffloadMetadata.averageBitRatePerSecond = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecSampleRate),
+                [&](int value) {
+                    return value > 0 ? mOffloadMetadata.sampleRate = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecChannels),
+                [&](int value) -> status_t {
+                    if (value > 0) {
+                        audio_channel_mask_t channel_mask = audio_channel_out_mask_from_count(
+                                static_cast<uint32_t>(value));
+                        if (channel_mask == AUDIO_CHANNEL_INVALID) return BAD_VALUE;
+                        mOffloadMetadata.channelMask = VALUE_OR_RETURN_STATUS(
+                                ::aidl::android::legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
+                                        channel_mask, false /*isInput*/));
+                    }
+                    return BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecDelaySamples),
+                [&](int value) {
+                    // The legacy keys are misnamed, the value is in frames.
+                    return value > 0 ? mOffloadMetadata.delayFrames = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
+                parameters, String8(AudioParameter::keyOffloadCodecPaddingSamples),
+                [&](int value) {
+                    // The legacy keys are misnamed, the value is in frames.
+                    return value > 0 ? mOffloadMetadata.paddingFrames = value, OK : BAD_VALUE;
+                }))) {
+        updateMetadata = true;
+    }
+    if (updateMetadata) {
+        ALOGD("%s set offload metadata %s", __func__, mOffloadMetadata.toString().c_str());
+        if (status_t status = statusTFromBinderStatus(
+                        mStream->updateOffloadMetadata(mOffloadMetadata)); status != OK) {
+            ALOGE("%s: updateOffloadMetadata failed %d", __func__, status);
+            return status;
+        }
+    }
+    return OK;
+}
+
+// static
+ConversionResult<::aidl::android::hardware::audio::common::SinkMetadata>
+StreamInHalAidl::legacy2aidl_SinkMetadata(const StreamInHalInterface::SinkMetadata& legacy) {
+    ::aidl::android::hardware::audio::common::SinkMetadata aidl;
+    aidl.tracks = VALUE_OR_RETURN(
+            ::aidl::android::convertContainer<std::vector<RecordTrackMetadata>>(
+                    legacy.tracks,
+                    ::aidl::android::legacy2aidl_record_track_metadata_v7_RecordTrackMetadata));
+    return aidl;
+}
+
 StreamInHalAidl::StreamInHalAidl(
         const audio_config& config, StreamContextAidl&& context, int32_t nominalLatency,
-        const std::shared_ptr<IStreamIn>& stream)
+        const std::shared_ptr<IStreamIn>& stream, const sp<MicrophoneInfoProvider>& micInfoProvider)
         : StreamHalAidl("StreamInHalAidl", true /*isInput*/, config, nominalLatency,
                 std::move(context), getStreamCommon(stream)),
-          mStream(stream) {}
+          mStream(stream), mMicInfoProvider(micInfoProvider) {}
 
-status_t StreamInHalAidl::setGain(float gain __unused) {
+status_t StreamInHalAidl::setGain(float gain) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return statusTFromBinderStatus(mStream->setHwGain({gain}));
 }
 
 status_t StreamInHalAidl::read(void *buffer, size_t bytes, size_t *read) {
@@ -707,35 +898,64 @@ status_t StreamInHalAidl::getCapturePosition(int64_t *frames, int64_t *time) {
     return getObservablePosition(frames, time);
 }
 
-status_t StreamInHalAidl::getActiveMicrophones(
-        std::vector<media::MicrophoneInfoFw> *microphones __unused) {
+status_t StreamInHalAidl::getActiveMicrophones(std::vector<media::MicrophoneInfoFw> *microphones) {
+    if (!microphones) {
+        return BAD_VALUE;
+    }
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
+    sp<MicrophoneInfoProvider> micInfoProvider = mMicInfoProvider.promote();
+    if (!micInfoProvider) return NO_INIT;
+    auto staticInfo = micInfoProvider->getMicrophoneInfo();
+    if (!staticInfo) return INVALID_OPERATION;
+    std::vector<MicrophoneDynamicInfo> dynamicInfo;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mStream->getActiveMicrophones(&dynamicInfo)));
+    std::vector<media::MicrophoneInfoFw> result;
+    result.reserve(dynamicInfo.size());
+    for (const auto& d : dynamicInfo) {
+        const auto staticInfoIt = std::find_if(staticInfo->begin(), staticInfo->end(),
+                [&](const auto& s) { return s.id == d.id; });
+        if (staticInfoIt != staticInfo->end()) {
+            // Convert into the c++ backend type from the ndk backend type via the legacy structure.
+            audio_microphone_characteristic_t legacy = VALUE_OR_RETURN_STATUS(
+                    ::aidl::android::aidl2legacy_MicrophoneInfos_audio_microphone_characteristic_t(
+                            *staticInfoIt, d));
+            media::MicrophoneInfoFw info = VALUE_OR_RETURN_STATUS(
+                    ::android::legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfoFw(
+                            legacy));
+            // Note: info.portId is not filled because it's a bit of framework info.
+            result.push_back(std::move(info));
+        } else {
+            ALOGE("%s: no static info for active microphone with id '%s'", __func__, d.id.c_str());
+        }
+    }
+    *microphones = std::move(result);
     return OK;
 }
 
 status_t StreamInHalAidl::updateSinkMetadata(
-        const StreamInHalInterface::SinkMetadata& sinkMetadata  __unused) {
+        const StreamInHalInterface::SinkMetadata& sinkMetadata) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    ::aidl::android::hardware::audio::common::SinkMetadata aidlMetadata =
+              VALUE_OR_RETURN_STATUS(legacy2aidl_SinkMetadata(sinkMetadata));
+    return statusTFromBinderStatus(mStream->updateMetadata(aidlMetadata));
 }
 
-status_t StreamInHalAidl::setPreferredMicrophoneDirection(
-            audio_microphone_direction_t direction __unused) {
+status_t StreamInHalAidl::setPreferredMicrophoneDirection(audio_microphone_direction_t direction) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    ::aidl::android::hardware::audio::core::IStreamIn::MicrophoneDirection aidlDirection =
+              VALUE_OR_RETURN_STATUS(
+                      ::aidl::android::legacy2aidl_audio_microphone_direction_t_MicrophoneDirection(
+                              direction));
+    return statusTFromBinderStatus(mStream->setMicrophoneDirection(aidlDirection));
 }
 
-status_t StreamInHalAidl::setPreferredMicrophoneFieldDimension(float zoom __unused) {
+status_t StreamInHalAidl::setPreferredMicrophoneFieldDimension(float zoom) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    return statusTFromBinderStatus(mStream->setMicrophoneFieldDimension(zoom));
 }
 
 } // namespace android

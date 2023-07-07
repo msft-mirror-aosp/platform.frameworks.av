@@ -20,6 +20,7 @@
 //#define LOG_NDEBUG 0
 #include <utils/Log.h>
 
+#include <algorithm>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
@@ -29,10 +30,10 @@
 #include <audio_utils/fixedfft.h>
 #include <cutils/bitops.h>
 #include <hardware/sensors.h>
-#include <media/audiohal/EffectsFactoryHalInterface.h>
 #include <media/stagefright/foundation/AHandler.h>
 #include <media/stagefright/foundation/AMessage.h>
 #include <media/MediaMetricsItem.h>
+#include <media/QuaternionUtil.h>
 #include <media/ShmemCompat.h>
 #include <mediautils/SchedulingPolicyService.h>
 #include <mediautils/ServiceUtilities.h>
@@ -73,6 +74,34 @@ static audio_channel_mask_t getMaxChannelMask(
         }
     }
     return maxMask;
+}
+
+static std::vector<float> recordFromTranslationRotationVector(
+        const std::vector<float>& trVector) {
+    auto headToStageOpt = Pose3f::fromVector(trVector);
+    if (!headToStageOpt) return {};
+
+    const auto stageToHead = headToStageOpt.value().inverse();
+    const auto stageToHeadTranslation = stageToHead.translation();
+    constexpr float RAD_TO_DEGREE = 180.f / M_PI;
+    std::vector<float> record{
+        stageToHeadTranslation[0], stageToHeadTranslation[1], stageToHeadTranslation[2],
+        0.f, 0.f, 0.f};
+    media::quaternionToAngles(stageToHead.rotation(), &record[3], &record[4], &record[5]);
+    record[3] *= RAD_TO_DEGREE;
+    record[4] *= RAD_TO_DEGREE;
+    record[5] *= RAD_TO_DEGREE;
+    return record;
+}
+
+template<typename T>
+static constexpr const T& safe_clamp(const T& value, const T& low, const T& high) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return value != value /* constexpr isnan */
+                ? low : std::clamp(value, low, high);
+    } else /* constexpr */ {
+        return std::clamp(value, low, high);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,53 +214,17 @@ const std::vector<const char *> Spatializer::sHeadPoseKeys = {
 };
 
 // ---------------------------------------------------------------------------
-
-// Convert recorded sensor data to string with level indentation.
-std::string Spatializer::HeadToStagePoseRecorder::toString(unsigned level) const {
-    std::string prefixSpace(level, ' ');
-    return mPoseRecordLog.dumpToString((prefixSpace + " ").c_str(), Spatializer::mMaxLocalLogLine);
-}
-
-// Compute sensor data, record into local log when it is time.
-void Spatializer::HeadToStagePoseRecorder::record(const std::vector<float>& headToStage) {
-    if (headToStage.size() != mPoseVectorSize) return;
-
-    if (mNumOfSampleSinceLastRecord++ == 0) {
-        mFirstSampleTimestamp = std::chrono::steady_clock::now();
-    }
-    // if it's time, do record and reset.
-    if (shouldRecordLog()) {
-        poseSumToAverage();
-        mPoseRecordLog.log(
-                "mean: %s, min: %s, max %s, calculated %d samples in %0.4f second(s)",
-                Spatializer::toString<double>(mPoseRadianSum, true /* radianToDegree */).c_str(),
-                Spatializer::toString<float>(mMinPoseAngle, true /* radianToDegree */).c_str(),
-                Spatializer::toString<float>(mMaxPoseAngle, true /* radianToDegree */).c_str(),
-                mNumOfSampleSinceLastRecord, mNumOfSecondsSinceLastRecord.count());
-        resetRecord();
-    }
-    // update stream average.
-    for (int i = 0; i < mPoseVectorSize; i++) {
-        mPoseRadianSum[i] += headToStage[i];
-        mMaxPoseAngle[i] = std::max(mMaxPoseAngle[i], headToStage[i]);
-        mMinPoseAngle[i] = std::min(mMinPoseAngle[i], headToStage[i]);
-    }
-    return;
-}
-
-// ---------------------------------------------------------------------------
-sp<Spatializer> Spatializer::create(SpatializerPolicyCallback *callback) {
+sp<Spatializer> Spatializer::create(SpatializerPolicyCallback* callback,
+                                    const sp<EffectsFactoryHalInterface>& effectsFactoryHal) {
     sp<Spatializer> spatializer;
 
-    sp<EffectsFactoryHalInterface> effectsFactoryHal = EffectsFactoryHalInterface::create();
     if (effectsFactoryHal == nullptr) {
         ALOGW("%s failed to create effect factory interface", __func__);
         return spatializer;
     }
 
     std::vector<effect_descriptor_t> descriptors;
-    status_t status =
-            effectsFactoryHal->getDescriptors(FX_IID_SPATIALIZER, &descriptors);
+    status_t status = effectsFactoryHal->getDescriptors(FX_IID_SPATIALIZER, &descriptors);
     if (status != NO_ERROR) {
         ALOGW("%s failed to get spatializer descriptor, error %d", __func__, status);
         return spatializer;
@@ -590,7 +583,8 @@ Status Spatializer::setGlobalTransform(const std::vector<float>& screenToStage) 
     }
     std::lock_guard lock(mLock);
     if (mPoseController != nullptr) {
-        mLocalLog.log("%s with screenToStage %s", __func__, toString<float>(screenToStage).c_str());
+        mLocalLog.log("%s with screenToStage %s", __func__,
+                media::VectorRecorder::toString<float>(screenToStage).c_str());
         mPoseController->setScreenToStagePose(maybePose.value());
     }
     return Status::ok();
@@ -653,28 +647,48 @@ Status Spatializer::setScreenSensor(int sensorHandle) {
 
 Status Spatializer::setDisplayOrientation(float physicalToLogicalAngle) {
     ALOGV("%s physicalToLogicalAngle %f", __func__, physicalToLogicalAngle);
-    if (!mSupportsHeadTracking) {
-        return binderStatusFromStatusT(INVALID_OPERATION);
-    }
-    std::lock_guard lock(mLock);
-    mDisplayOrientation = physicalToLogicalAngle;
     mLocalLog.log("%s with %f", __func__, physicalToLogicalAngle);
+    const float angle = safe_clamp(physicalToLogicalAngle, 0.f, (float)(2. * M_PI));
+    // It is possible due to numerical inaccuracies to exceed the boundaries of 0 to 2 * M_PI.
+    ALOGI_IF(angle != physicalToLogicalAngle,
+            "%s: clamping %f to %f", __func__, physicalToLogicalAngle, angle);
+    std::lock_guard lock(mLock);
+    mDisplayOrientation = angle;
     if (mPoseController != nullptr) {
-        mPoseController->setDisplayOrientation(mDisplayOrientation);
+        // This turns on the rate-limiter.
+        mPoseController->setDisplayOrientation(angle);
     }
     if (mEngine != nullptr) {
         setEffectParameter_l(
-            SPATIALIZER_PARAM_DISPLAY_ORIENTATION, std::vector<float>{physicalToLogicalAngle});
+            SPATIALIZER_PARAM_DISPLAY_ORIENTATION, std::vector<float>{angle});
     }
     return Status::ok();
 }
 
 Status Spatializer::setHingeAngle(float hingeAngle) {
-    std::lock_guard lock(mLock);
     ALOGV("%s hingeAngle %f", __func__, hingeAngle);
+    mLocalLog.log("%s with %f", __func__, hingeAngle);
+    const float angle = safe_clamp(hingeAngle, 0.f, (float)(2. * M_PI));
+    // It is possible due to numerical inaccuracies to exceed the boundaries of 0 to 2 * M_PI.
+    ALOGI_IF(angle != hingeAngle,
+            "%s: clamping %f to %f", __func__, hingeAngle, angle);
+    std::lock_guard lock(mLock);
+    mHingeAngle = angle;
     if (mEngine != nullptr) {
-        mLocalLog.log("%s with %f", __func__, hingeAngle);
-        setEffectParameter_l(SPATIALIZER_PARAM_HINGE_ANGLE, std::vector<float>{hingeAngle});
+        setEffectParameter_l(SPATIALIZER_PARAM_HINGE_ANGLE, std::vector<float>{angle});
+    }
+    return Status::ok();
+}
+
+Status Spatializer::setFoldState(bool folded) {
+    ALOGV("%s foldState %d", __func__, (int)folded);
+    mLocalLog.log("%s with %d", __func__, (int)folded);
+    std::lock_guard lock(mLock);
+    mFoldedState = folded;
+    if (mEngine != nullptr) {
+        // we don't suppress multiple calls with the same folded state - that's
+        // done at the caller.
+        setEffectParameter_l(SPATIALIZER_PARAM_FOLD_STATE, std::vector<uint8_t>{mFoldedState});
     }
     return Status::ok();
 }
@@ -771,8 +785,9 @@ void Spatializer::onHeadToStagePoseMsg(const std::vector<float>& headToStage) {
         callback = mHeadTrackingCallback;
         if (mEngine != nullptr) {
             setEffectParameter_l(SPATIALIZER_PARAM_HEAD_TO_STAGE, headToStage);
-            mPoseRecorder.record(headToStage);
-            mPoseDurableRecorder.record(headToStage);
+            const auto record = recordFromTranslationRotationVector(headToStage);
+            mPoseRecorder.record(record);
+            mPoseDurableRecorder.record(record);
         }
     }
 
@@ -822,8 +837,7 @@ void Spatializer::onActualModeChangeMsg(HeadTrackingMode mode) {
             }
         }
         callback = mHeadTrackingCallback;
-        mLocalLog.log("%s: %s, spatializerMode %s", __func__, media::toString(mode).c_str(),
-                      media::toString(spatializerMode).c_str());
+        mLocalLog.log("%s: updating mode to %s", __func__, media::toString(mode).c_str());
     }
     if (callback != nullptr) {
         callback->onHeadTrackingModeChanged(spatializerMode);
@@ -878,6 +892,14 @@ status_t Spatializer::attachOutput(audio_io_handle_t output, size_t numActiveTra
             checkSensorsState_l();
         }
         callback = mSpatializerCallback;
+
+        // Restore common effect state.
+        setEffectParameter_l(SPATIALIZER_PARAM_DISPLAY_ORIENTATION,
+                std::vector<float>{mDisplayOrientation});
+        setEffectParameter_l(SPATIALIZER_PARAM_FOLD_STATE,
+                std::vector<uint8_t>{mFoldedState});
+        setEffectParameter_l(SPATIALIZER_PARAM_HINGE_ANGLE,
+                std::vector<float>{mHingeAngle});
     }
 
     if (outputChanged && callback != nullptr) {
@@ -1032,8 +1054,7 @@ void Spatializer::onFramesProcessed(int32_t framesProcessed) {
 }
 
 std::string Spatializer::toString(unsigned level) const {
-    std::string prefixSpace;
-    prefixSpace.append(level, ' ');
+    std::string prefixSpace(level, ' ');
     std::string ss = prefixSpace + "Spatializer:\n";
     bool needUnlock = false;
 
@@ -1089,14 +1110,15 @@ std::string Spatializer::toString(unsigned level) const {
 
     // PostController dump.
     if (mPoseController != nullptr) {
-        ss += mPoseController->toString(level + 1);
-        ss.append(prefixSpace +
-                  "Sensor data format - [rx, ry, rz, vx, vy, vz] (units-degree, "
-                  "r-transform, v-angular velocity, x-pitch, y-roll, z-yaw):\n");
-        ss.append(prefixSpace + " PerMinuteHistory:\n");
-        ss += mPoseDurableRecorder.toString(level + 1);
-        ss.append(prefixSpace + " PerSecondHistory:\n");
-        ss += mPoseRecorder.toString(level + 1);
+        ss.append(mPoseController->toString(level + 1))
+            .append(prefixSpace)
+            .append("Pose (active stage-to-head) [tx, ty, tz : pitch, roll, yaw]:\n")
+            .append(prefixSpace)
+            .append(" PerMinuteHistory:\n")
+            .append(mPoseDurableRecorder.toString(level + 3))
+            .append(prefixSpace)
+            .append(" PerSecondHistory:\n")
+            .append(mPoseRecorder.toString(level + 3));
     } else {
         ss.append(prefixSpace).append("SpatializerPoseController not exist\n");
     }

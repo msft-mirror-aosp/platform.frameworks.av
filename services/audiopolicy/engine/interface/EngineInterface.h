@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <string>
 #include <utility>
 
 #include <AudioPolicyManagerObserver.h>
@@ -45,6 +46,13 @@ using CapturePresetDevicesRoleMap =
 class EngineInterface
 {
 public:
+    /**
+     * Loads the engine configuration from the specified or the default config file.
+     * If loading failed, tries to fall back to some default configuration. If fallback
+     * is impossible, returns an error.
+     */
+    virtual status_t loadFromXmlConfigWithFallback(const std::string& xmlFilePath = "") = 0;
+
     /**
      * Checks if the engine was correctly initialized.
      *
@@ -433,6 +441,16 @@ public:
      * @return collection of active devices
      */
     virtual DeviceVector getActiveMediaDevices(const DeviceVector& availableDevices) const = 0;
+
+    /**
+     * @brief initializeDeviceSelectionCache. Device selection for AudioAttribute / Streams is
+     * cached in the engine in order to speed up process when the audio system is stable. When the
+     * audio system is initializing, not all audio devices information will be available. In that
+     * case, calling this function can allow the engine to initialize the device selection cache
+     * with default values.
+     * This must only be called when audio policy manager is initializing.
+     */
+    virtual void initializeDeviceSelectionCache() = 0;
 
     virtual void dump(String8 *dst) const = 0;
 

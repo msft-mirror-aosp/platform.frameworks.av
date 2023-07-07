@@ -24,6 +24,7 @@
 
 #include <aidl/android/hardware/camera/device/CameraBlob.h>
 #include <aidl/android/hardware/camera/device/CameraBlobId.h>
+#include "aidl/android/hardware/graphics/common/Dataspace.h"
 
 #include <android-base/unique_fd.h>
 #include <cutils/properties.h>
@@ -394,13 +395,12 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
             const camera_stream_buffer &buffer,
             nsecs_t timestamp,
             nsecs_t readoutTimestamp,
-            bool output,
+            [[maybe_unused]] bool output,
             int32_t transform,
             const std::vector<size_t>& surface_ids,
             /*out*/
             sp<Fence> *releaseFenceOut) {
 
-    (void)output;
     ALOG_ASSERT(output, "Expected output to be true");
 
     status_t res;
@@ -457,7 +457,10 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
             mTraceFirstBuffer = false;
         }
         // Fix CameraBlob id type discrepancy between HIDL and AIDL, details : http://b/229688810
-        if (getFormat() == HAL_PIXEL_FORMAT_BLOB && getDataSpace() == HAL_DATASPACE_V0_JFIF) {
+        if (getFormat() == HAL_PIXEL_FORMAT_BLOB && (getDataSpace() == HAL_DATASPACE_V0_JFIF ||
+                    (getDataSpace() ==
+                     static_cast<android_dataspace_t>(
+                         aidl::android::hardware::graphics::common::Dataspace::JPEG_R)))) {
             if (mIPCTransport == IPCTransport::HIDL) {
                 fixUpHidlJpegBlobHeader(anwBuffer, anwReleaseFence);
             }
@@ -483,7 +486,7 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
             bufferDeferred = true;
         } else {
             nsecs_t presentTime = mSyncToDisplay ?
-                    syncTimestampToDisplayLocked(captureTime) : captureTime;
+                    syncTimestampToDisplayLocked(captureTime, releaseFence->dup()) : captureTime;
 
             setTransform(transform, true/*mayChangeMirror*/);
             res = native_window_set_buffers_timestamp(mConsumer.get(), presentTime);
@@ -519,8 +522,7 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
     return res;
 }
 
-void Camera3OutputStream::dump(int fd, const Vector<String16> &args) const {
-    (void) args;
+void Camera3OutputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) const {
     String8 lines;
     lines.appendFormat("    Stream[%d]: Output\n", mId);
     lines.appendFormat("      Consumer name: %s\n", mConsumerName.string());
@@ -1408,7 +1410,7 @@ void Camera3OutputStream::returnPrefetchedBuffersLocked() {
     }
 }
 
-nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
+nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t, int releaseFence) {
     nsecs_t currentTime = systemTime();
     if (!mFixedFps) {
         mLastCaptureTime = t;
@@ -1442,7 +1444,7 @@ nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
     //
     nsecs_t captureInterval = t - mLastCaptureTime;
     if (captureInterval > kSpacingResetIntervalNs) {
-        for (size_t i = 0; i < VsyncEventData::kFrameTimelinesLength; i++) {
+        for (size_t i = 0; i < vsyncEventData.frameTimelinesLength; i++) {
             const auto& timeline = vsyncEventData.frameTimelines[i];
             if (timeline.deadlineTimestamp >= currentTime &&
                     timeline.expectedPresentationTime > minPresentT) {
@@ -1451,12 +1453,53 @@ nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
                 mLastCaptureTime = t;
                 mLastPresentTime = presentT;
 
+                // If releaseFence is available, store the fence to check signal
+                // time later.
+                mRefVsyncData = vsyncEventData;
+                mReferenceCaptureTime = t;
+                mReferenceArrivalTime = currentTime;
+                if (releaseFence != -1) {
+                    mReferenceFrameFence = new Fence(releaseFence);
+                } else {
+                    mFenceSignalOffset = 0;
+                }
+
                 // Move the expected presentation time back by 1/3 of frame interval to
                 // mitigate the time drift. Due to time drift, if we directly use the
                 // expected presentation time, often times 2 expected presentation time
                 // falls into the same VSYNC interval.
                 return presentT - vsyncEventData.frameInterval/3;
             }
+        }
+    }
+
+    // If there is a reference frame release fence, get the signal time and
+    // update the captureToPresentOffset.
+    if (mReferenceFrameFence != nullptr) {
+        mFenceSignalOffset = 0;
+        nsecs_t signalTime = mReferenceFrameFence->getSignalTime();
+        // Now that the fence has signaled, recalculate the offsets based on
+        // the timeline which was actually latched
+        if (signalTime != INT64_MAX) {
+            for (size_t i = 0; i < mRefVsyncData.frameTimelinesLength; i++) {
+                const auto& timeline = mRefVsyncData.frameTimelines[i];
+                if (timeline.deadlineTimestamp >= signalTime) {
+                    nsecs_t originalOffset = mCaptureToPresentOffset;
+                    mCaptureToPresentOffset = timeline.expectedPresentationTime
+                            - mReferenceCaptureTime;
+                    mLastPresentTime = timeline.expectedPresentationTime;
+                    mFenceSignalOffset = signalTime > mReferenceArrivalTime ?
+                            signalTime - mReferenceArrivalTime : 0;
+
+                    ALOGV("%s: Last deadline %" PRId64 " signalTime %" PRId64
+                            " original offset %" PRId64 " new offset %" PRId64
+                            " fencesignal offset %" PRId64, __FUNCTION__,
+                            timeline.deadlineTimestamp, signalTime, originalOffset,
+                            mCaptureToPresentOffset, mFenceSignalOffset);
+                    break;
+                }
+            }
+            mReferenceFrameFence.clear();
         }
     }
 
@@ -1503,6 +1546,7 @@ nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
 
     // Find best timestamp in the vsync timelines:
     // - Only use at most kMaxTimelines timelines to avoid long latency
+    // - Add an extra timeline if display fence is used
     // - closest to the ideal presentation time,
     // - deadline timestamp is greater than the current time, and
     // - For fixed FPS, if the capture interval doesn't deviate too much from refresh interval,
@@ -1511,7 +1555,9 @@ nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
     // - For variable FPS, or if the capture interval deviates from refresh
     //   interval for more than 5%, find a presentation time closest to the
     //   (lastPresentationTime + captureToPresentOffset) instead.
-    int maxTimelines = std::min(kMaxTimelines, (int)VsyncEventData::kFrameTimelinesLength);
+    int fenceAdjustment = (mFenceSignalOffset > 0) ? 1 : 0;
+    int maxTimelines = std::min(kMaxTimelines + fenceAdjustment,
+            (int)vsyncEventData.frameTimelinesLength);
     float biasForShortDelay = 1.0f;
     for (int i = 0; i < maxTimelines; i ++) {
         const auto& vsyncTime = vsyncEventData.frameTimelines[i];
@@ -1522,7 +1568,7 @@ nsecs_t Camera3OutputStream::syncTimestampToDisplayLocked(nsecs_t t) {
             biasForShortDelay = 1.0 - 2.0 * i / (maxTimelines - 1);
         }
         if (std::abs(vsyncTime.expectedPresentationTime - idealPresentT) < minDiff &&
-                vsyncTime.deadlineTimestamp >= currentTime &&
+                vsyncTime.deadlineTimestamp >= currentTime + mFenceSignalOffset &&
                 ((!cameraDisplayInSync && vsyncTime.expectedPresentationTime > minPresentT) ||
                  (cameraDisplayInSync && vsyncTime.expectedPresentationTime >
                 mLastPresentTime + minInterval +

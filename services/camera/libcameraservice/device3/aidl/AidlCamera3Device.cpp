@@ -205,6 +205,7 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         return res;
     }
     mSupportNativeZoomRatio = manager->supportNativeZoomRatio(mId.string());
+    mIsCompositeJpegRDisabled = manager->isCompositeJpegRDisabled(mId.string());
 
     std::vector<std::string> physicalCameraIds;
     bool isLogical = manager->isLogicalCamera(mId.string(), &physicalCameraIds);
@@ -213,7 +214,7 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
             // Do not override characteristics for physical cameras
             res = manager->getCameraCharacteristics(
                     physicalId, /*overrideForPerfClass*/false, &mPhysicalDeviceInfoMap[physicalId],
-                    /*overrideToPortrait*/true);
+                    mOverrideToPortrait);
             if (res != OK) {
                 SET_ERR_L("Could not retrieve camera %s characteristics: %s (%d)",
                         physicalId.c_str(), strerror(-res), res);
@@ -238,7 +239,7 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
                     &mPhysicalDeviceInfoMap[physicalId],
                     mSupportNativeZoomRatio, usePrecorrectArray);
 
-            if (SessionConfigurationUtils::isUltraHighResolutionSensor(
+            if (SessionConfigurationUtils::supportsUltraHighResolutionCapture(
                     mPhysicalDeviceInfoMap[physicalId])) {
                 mUHRCropAndMeteringRegionMappers[physicalId] =
                         UHRCropAndMeteringRegionMapper(mPhysicalDeviceInfoMap[physicalId],
@@ -874,8 +875,9 @@ status_t AidlCamera3Device::AidlHalInterface::constructDefaultRequestSettings(
 }
 
 status_t AidlCamera3Device::AidlHalInterface::configureStreams(
-    const camera_metadata_t *sessionParams,
-        camera_stream_configuration *config, const std::vector<uint32_t>& bufferSizes) {
+        const camera_metadata_t *sessionParams,
+        camera_stream_configuration *config, const std::vector<uint32_t>& bufferSizes,
+        int64_t logId) {
     using camera::device::StreamType;
     using camera::device::StreamConfigurationMode;
 
@@ -960,6 +962,7 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
 
     requestedConfiguration.streamConfigCounter = mNextStreamConfigCounter++;
     requestedConfiguration.multiResolutionInputImage = config->input_is_multi_resolution;
+    requestedConfiguration.logId = logId;
     auto err = mAidlSession->configureStreams(requestedConfiguration, &finalConfiguration);
     if (!err.isOk()) {
         ALOGE("%s: Transaction error: %s", __FUNCTION__, err.getMessage());
@@ -1416,9 +1419,10 @@ AidlCamera3Device::AidlRequestThread::AidlRequestThread(wp<Camera3Device> parent
                 const Vector<int32_t>& sessionParamKeys,
                 bool useHalBufManager,
                 bool supportCameraMute,
-                bool overrideToPortrait) :
+                bool overrideToPortrait,
+                bool supportSettingsOverride) :
           RequestThread(parent, statusTracker, interface, sessionParamKeys, useHalBufManager,
-                  supportCameraMute, overrideToPortrait) {}
+                  supportCameraMute, overrideToPortrait, supportSettingsOverride) {}
 
 status_t AidlCamera3Device::AidlRequestThread::switchToOffline(
         const std::vector<int32_t>& streamsToKeep,
@@ -1588,9 +1592,10 @@ sp<Camera3Device::RequestThread> AidlCamera3Device::createNewRequestThread(
                 const Vector<int32_t>& sessionParamKeys,
                 bool useHalBufManager,
                 bool supportCameraMute,
-                bool overrideToPortrait) {
+                bool overrideToPortrait,
+                bool supportSettingsOverride) {
     return new AidlRequestThread(parent, statusTracker, interface, sessionParamKeys,
-            useHalBufManager, supportCameraMute, overrideToPortrait);
+            useHalBufManager, supportCameraMute, overrideToPortrait, supportSettingsOverride);
 };
 
 sp<Camera3Device::Camera3DeviceInjectionMethods>

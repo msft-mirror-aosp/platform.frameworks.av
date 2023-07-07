@@ -43,6 +43,7 @@ Parameters::Parameters(int cameraId,
         int cameraFacing) :
         cameraId(cameraId),
         cameraFacing(cameraFacing),
+        isSlowJpegModeForced(false),
         info(NULL),
         mDefaultSceneMode(ANDROID_CONTROL_SCENE_MODE_DISABLED) {
 }
@@ -990,9 +991,8 @@ status_t Parameters::initialize(CameraDeviceBase *device) {
     Size maxJpegSize = getMaxSize(getAvailableJpegSizes());
     int64_t minFrameDurationNs = getJpegStreamMinFrameDurationNs(maxJpegSize);
 
-    slowJpegMode = false;
-    if (minFrameDurationNs > kSlowJpegModeThreshold) {
-        slowJpegMode = true;
+    slowJpegMode = isSlowJpegModeForced || minFrameDurationNs > kSlowJpegModeThreshold;
+    if (slowJpegMode) {
         // Slow jpeg devices does not support video snapshot without
         // slowing down preview.
         // TODO: support video size video snapshot only?
@@ -2089,7 +2089,7 @@ status_t Parameters::set(const String8& paramString) {
     paramsFlattened = newParams.flatten();
     params = newParams;
 
-    slowJpegMode = false;
+    slowJpegMode = isSlowJpegModeForced;
     Size pictureSize = { pictureWidth, pictureHeight };
     bool zslFrameRateSupported = false;
     int64_t jpegMinFrameDurationNs = getJpegStreamMinFrameDurationNs(pictureSize);

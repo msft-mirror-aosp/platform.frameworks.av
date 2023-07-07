@@ -16,11 +16,14 @@
 
 #pragma once
 
+#include <memory>
+
 #include <aidl/android/hardware/audio/effect/IEffect.h>
 #include <aidl/android/hardware/audio/effect/IFactory.h>
+#include <fmq/AidlMessageQueue.h>
 #include <media/audiohal/EffectHalInterface.h>
 #include <system/audio_effect.h>
-#include <memory>
+#include <system/audio_effects/aidl_effects_utils.h>
 
 #include "EffectConversionHelperAidl.h"
 
@@ -29,6 +32,7 @@ namespace effect {
 
 class EffectHalAidl : public EffectHalInterface {
   public:
+
     // Set the input buffer.
     status_t setInBuffer(const sp<EffectBufferHalInterface>& buffer) override;
 
@@ -63,6 +67,9 @@ class EffectHalAidl : public EffectHalInterface {
         return mEffect;
     }
 
+    // for TIME_CHECK
+    const std::string getClassName() const { return "EffectHalAidl"; }
+
   private:
     friend class sp<EffectHalAidl>;
 
@@ -72,10 +79,11 @@ class EffectHalAidl : public EffectHalInterface {
     const int32_t mSessionId;
     const int32_t mIoId;
     const ::aidl::android::hardware::audio::effect::Descriptor mDesc;
+    const bool mIsProxyEffect;
+
     std::unique_ptr<EffectConversionHelperAidl> mConversion;
 
     sp<EffectBufferHalInterface> mInBuffer, mOutBuffer;
-    effect_config_t mConfig;
 
     status_t createAidlConversion(
             std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
@@ -86,8 +94,10 @@ class EffectHalAidl : public EffectHalInterface {
             const std::shared_ptr<::aidl::android::hardware::audio::effect::IFactory>& factory,
             const std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect>& effect,
             uint64_t effectId, int32_t sessionId, int32_t ioId,
-            const ::aidl::android::hardware::audio::effect::Descriptor& desc);
+            const ::aidl::android::hardware::audio::effect::Descriptor& desc,
+            bool isProxyEffect);
     bool setEffectReverse(bool reverse);
+    bool needUpdateReturnParam(uint32_t cmdCode);
 
     // The destructor automatically releases the effect.
     virtual ~EffectHalAidl();

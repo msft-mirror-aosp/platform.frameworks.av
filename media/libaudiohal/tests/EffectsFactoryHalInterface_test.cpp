@@ -15,6 +15,7 @@
  */
 
 //#define LOG_NDEBUG 0
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -27,6 +28,7 @@
 #include <media/audiohal/EffectsFactoryHalInterface.h>
 #include <system/audio_effects/audio_effects_utils.h>
 #include <system/audio_effects/effect_aec.h>
+#include <system/audio_effects/effect_agc.h>
 #include <system/audio_effects/effect_agc2.h>
 #include <system/audio_effects/effect_bassboost.h>
 #include <system/audio_effects/effect_downmix.h>
@@ -88,6 +90,47 @@ TEST(libAudioHalTest, createEffect) {
         EXPECT_EQ(OK, factory->getDescriptor(i, &desc));
         EXPECT_EQ(OK, factory->createEffect(&desc.uuid, 1 /* sessionId */, 1 /* ioId */,
                                             1 /* deviceId */, &interface));
+    }
+}
+
+TEST(libAudioHalTest, getProcessings) {
+    auto factory = EffectsFactoryHalInterface::create();
+    ASSERT_NE(nullptr, factory);
+
+    const auto &processings = factory->getProcessings();
+    if (processings) {
+        EXPECT_NE(0UL, processings->preprocess.size() + processings->postprocess.size() +
+                               processings->deviceprocess.size());
+
+        auto processingChecker = [](const auto& processings) {
+            if (processings.size() != 0) {
+                // any process need at least 1 effect inside
+                std::for_each(processings.begin(), processings.end(), [](const auto& process) {
+                    EXPECT_NE(0ul, process.effects.size());
+                    // any effect should have a valid name string, and not proxy
+                    for (const auto& effect : process.effects) {
+                        SCOPED_TRACE("Effect: {" +
+                                     (effect == nullptr
+                                              ? "NULL}"
+                                              : ("{name: " + effect->name + ", isproxy: " +
+                                                 (effect->isProxy ? "true" : "false") + ", sw: " +
+                                                 (effect->libSw ? "non-null" : "null") + ", hw: " +
+                                                 (effect->libHw ? "non-null" : "null") + "}")));
+                        EXPECT_NE(nullptr, effect);
+                        EXPECT_NE("", effect->name);
+                        EXPECT_EQ(false, effect->isProxy);
+                        EXPECT_EQ(nullptr, effect->libSw);
+                        EXPECT_EQ(nullptr, effect->libHw);
+                    }
+                });
+            }
+        };
+
+        processingChecker(processings->preprocess);
+        processingChecker(processings->postprocess);
+        processingChecker(processings->deviceprocess);
+    } else {
+        GTEST_SKIP() << "no processing found, skipping the test";
     }
 }
 
@@ -157,6 +200,9 @@ std::vector<EffectParamTestTuple> testPairs = {
         std::make_tuple(FX_IID_AEC,
                         createEffectParamCombination(AEC_PARAM_ECHO_DELAY, 0xff /* echoDelayMs */,
                                                      sizeof(int32_t) /* returnValueSize */)),
+        std::make_tuple(FX_IID_AGC,
+                        createEffectParamCombination(AGC_PARAM_TARGET_LEVEL, 20 /* targetLevel */,
+                                                     sizeof(int16_t) /* returnValueSize */)),
         std::make_tuple(FX_IID_AGC2, createEffectParamCombination(
                                              AGC2_PARAM_FIXED_DIGITAL_GAIN, 15 /* digitalGainDb */,
                                              sizeof(int32_t) /* returnValueSize */)),
@@ -165,7 +211,7 @@ std::vector<EffectParamTestTuple> testPairs = {
                                                      sizeof(int32_t) /* returnValueSize */)),
         std::make_tuple(EFFECT_UIID_DOWNMIX,
                         createEffectParamCombination(DOWNMIX_PARAM_TYPE, DOWNMIX_TYPE_FOLD,
-                                                     sizeof(int32_t) /* returnValueSize */)),
+                                                     sizeof(int16_t) /* returnValueSize */)),
         std::make_tuple(SL_IID_DYNAMICSPROCESSING,
                         createEffectParamCombination(
                                 std::array<uint32_t, 2>({DP_PARAM_INPUT_GAIN, 0 /* channel */}),
@@ -264,7 +310,8 @@ class libAudioHalEffectParamTest : public ::testing::TestWithParam<EffectParamTe
         if (mCombination->valueSize) {
             std::vector<uint8_t> response(mCombination->valueSize);
             EXPECT_EQ(OK, parameterGet.readFromValue(response.data(), mCombination->valueSize))
-                << parameterGet.toString();
+                    << " try get valueSize " << mCombination->valueSize << " from "
+                    << parameterGet.toString();
             EXPECT_EQ(response, mExpectedValue);
         }
     }

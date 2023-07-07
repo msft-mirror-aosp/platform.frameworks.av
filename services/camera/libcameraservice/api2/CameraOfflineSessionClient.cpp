@@ -106,6 +106,13 @@ void CameraOfflineSessionClient::setStreamUseCaseOverrides(
 void CameraOfflineSessionClient::clearStreamUseCaseOverrides() {
 }
 
+bool CameraOfflineSessionClient::supportsZoomOverride() {
+    return false;
+}
+
+status_t CameraOfflineSessionClient::setZoomOverride(int32_t /*zoomOverride*/) {
+    return INVALID_OPERATION;
+}
 
 status_t CameraOfflineSessionClient::dump(int fd, const Vector<String16>& args) {
     return BasicClient::dump(fd, args);
@@ -257,7 +264,7 @@ status_t CameraOfflineSessionClient::startCameraOps() {
     mOpsActive = true;
 
     // Transition device state to OPEN
-    sCameraService->mUidPolicy->registerMonitorUid(mClientUid);
+    sCameraService->mUidPolicy->registerMonitorUid(mClientUid, /*openCamera*/true);
 
     return OK;
 }
@@ -281,7 +288,7 @@ status_t CameraOfflineSessionClient::finishCameraOps() {
     }
     mOpsCallback.clear();
 
-    sCameraService->mUidPolicy->unregisterMonitorUid(mClientUid);
+    sCameraService->mUidPolicy->unregisterMonitorUid(mClientUid, /*closeCamera*/true);
 
     return OK;
 }
@@ -325,26 +332,20 @@ void CameraOfflineSessionClient::notifyIdle(
     finishCameraStreamingOps();
 }
 
-void CameraOfflineSessionClient::notifyAutoFocus(uint8_t newState, int triggerId) {
-    (void)newState;
-    (void)triggerId;
-
+void CameraOfflineSessionClient::notifyAutoFocus([[maybe_unused]] uint8_t newState,
+                [[maybe_unused]] int triggerId) {
     ALOGV("%s: Autofocus state now %d, last trigger %d",
           __FUNCTION__, newState, triggerId);
 }
 
-void CameraOfflineSessionClient::notifyAutoExposure(uint8_t newState, int triggerId) {
-    (void)newState;
-    (void)triggerId;
-
+void CameraOfflineSessionClient::notifyAutoExposure([[maybe_unused]] uint8_t newState,
+                [[maybe_unused]] int triggerId) {
     ALOGV("%s: Autoexposure state now %d, last trigger %d",
             __FUNCTION__, newState, triggerId);
 }
 
-void CameraOfflineSessionClient::notifyAutoWhitebalance(uint8_t newState, int triggerId) {
-    (void)newState;
-    (void)triggerId;
-
+void CameraOfflineSessionClient::notifyAutoWhitebalance([[maybe_unused]] uint8_t newState,
+                [[maybe_unused]] int triggerId) {
     ALOGV("%s: Auto-whitebalance state now %d, last trigger %d", __FUNCTION__, newState,
             triggerId);
 }

@@ -204,6 +204,9 @@ public:
     virtual bool          supportsCameraMute();
     virtual status_t      setCameraMute(bool enabled);
 
+    virtual bool          supportsZoomOverride() override;
+    virtual status_t      setZoomOverride(int32_t zoomOverride) override;
+
     virtual status_t      dump(int fd, const Vector<String16>& args);
 
     virtual status_t      dumpClient(int fd, const Vector<String16>& args);
@@ -242,7 +245,7 @@ protected:
     // Calculate the ANativeWindow transform from android.sensor.orientation
     status_t              getRotationTransformLocked(int mirrorMode, /*out*/int32_t* transform);
 
-    bool isUltraHighResolutionSensor(const String8 &cameraId);
+    bool supportsUltraHighResolutionCapture(const String8 &cameraId);
 
     bool isSensorPixelModeConsistent(const std::list<int> &streamIdList,
             const CameraMetadata &settings);

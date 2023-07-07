@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
+#include <cstdint>
+#include <inttypes.h>
 #include <utility>
 
 #define LOG_TAG "AidlConversionEffect"
 //#define LOG_NDEBUG 0
 #include <utils/Log.h>
 
+#include <aidl/android/hardware/audio/effect/DefaultExtension.h>
+#include <aidl/android/hardware/audio/effect/VendorExtension.h>
 #include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionEffect.h>
 
@@ -32,16 +36,23 @@ namespace android {
 using ::aidl::android::hardware::audio::effect::AcousticEchoCanceler;
 using ::aidl::android::hardware::audio::effect::AutomaticGainControlV2;
 using ::aidl::android::hardware::audio::effect::BassBoost;
+using ::aidl::android::hardware::audio::effect::DefaultExtension;
 using ::aidl::android::hardware::audio::effect::Descriptor;
 using ::aidl::android::hardware::audio::effect::Downmix;
 using ::aidl::android::hardware::audio::effect::DynamicsProcessing;
 using ::aidl::android::hardware::audio::effect::Flags;
 using ::aidl::android::hardware::audio::effect::Parameter;
 using ::aidl::android::hardware::audio::effect::PresetReverb;
+using ::aidl::android::hardware::audio::effect::VendorExtension;
+using ::aidl::android::hardware::audio::effect::Visualizer;
 using ::aidl::android::media::audio::common::AudioDeviceDescription;
 
 using ::android::BAD_VALUE;
+using ::android::OK;
+using ::android::status_t;
 using ::android::base::unexpected;
+using ::android::effect::utils::EffectParamReader;
+using ::android::effect::utils::EffectParamWriter;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Converters
@@ -347,6 +358,117 @@ legacy2aidl_int32_DynamicsProcessing_ResolutionPreference(int32_t legacy) {
 ConversionResult<int32_t> aidl2legacy_DynamicsProcessing_ResolutionPreference_int32(
         DynamicsProcessing::ResolutionPreference aidl) {
     return static_cast<int32_t>(aidl);
+}
+
+ConversionResult<uint32_t> aidl2legacy_Parameter_Visualizer_ScalingMode_uint32(
+        Visualizer::ScalingMode aidl) {
+    switch (aidl) {
+        case Visualizer::ScalingMode::NORMALIZED: {
+            return 0;
+        }
+        case Visualizer::ScalingMode::AS_PLAYED: {
+            return 1;
+        }
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<Visualizer::ScalingMode> legacy2aidl_Parameter_Visualizer_uint32_ScalingMode(
+        uint32_t legacy) {
+    if (legacy == 0) {
+        return Visualizer::ScalingMode::NORMALIZED;
+    } else if (legacy == 1) {
+        return Visualizer::ScalingMode::AS_PLAYED;
+    } else {
+        return unexpected(BAD_VALUE);
+    }
+}
+
+ConversionResult<uint32_t> aidl2legacy_Parameter_Visualizer_MeasurementMode_uint32(
+        Visualizer::MeasurementMode aidl) {
+    switch (aidl) {
+        case Visualizer::MeasurementMode::NONE: {
+            return 0;
+        }
+        case Visualizer::MeasurementMode::PEAK_RMS: {
+            return 1;
+        }
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<Visualizer::MeasurementMode>
+legacy2aidl_Parameter_Visualizer_uint32_MeasurementMode(uint32_t legacy) {
+    if (legacy == 0) {
+        return Visualizer::MeasurementMode::NONE;
+    } else if (legacy == 1) {
+        return Visualizer::MeasurementMode::PEAK_RMS;
+    } else {
+        return unexpected(BAD_VALUE);
+    }
+}
+
+/**
+ * Copy the parameter area of effect_param_t to DefaultExtension::bytes.
+ */
+ConversionResult<VendorExtension> legacy2aidl_EffectParameterReader_Param_VendorExtension(
+        EffectParamReader& param) {
+    size_t len = param.getParameterSize();
+    DefaultExtension defaultExt;
+    defaultExt.bytes.resize(len);
+    RETURN_IF_ERROR(param.readFromParameter(defaultExt.bytes.data(), len));
+
+    VendorExtension ext;
+    ext.extension.setParcelable(defaultExt);
+    return ext;
+}
+
+/**
+ * Copy the data area of effect_param_t to DefaultExtension::bytes.
+ */
+ConversionResult<VendorExtension> legacy2aidl_EffectParameterReader_Data_VendorExtension(
+        EffectParamReader& param) {
+    size_t len = param.getValueSize();
+    DefaultExtension defaultExt;
+    defaultExt.bytes.resize(len);
+    RETURN_IF_ERROR(param.readFromValue(defaultExt.bytes.data(), len));
+
+    VendorExtension ext;
+    ext.extension.setParcelable(defaultExt);
+    return ext;
+}
+
+/**
+ * Copy DefaultExtension::bytes to the data area of effect_param_t.
+ */
+ConversionResult<status_t> aidl2legacy_VendorExtension_EffectParameterWriter_Data(
+        EffectParamWriter& param, VendorExtension ext) {
+    std::optional<DefaultExtension> defaultExt;
+    RETURN_IF_ERROR(ext.extension.getParcelable(&defaultExt));
+    if (!defaultExt.has_value()) {
+        return unexpected(BAD_VALUE);
+    }
+
+    RETURN_IF_ERROR(param.writeToValue(defaultExt->bytes.data(), defaultExt->bytes.size()));
+
+    return OK;
+}
+
+ConversionResult<Parameter> legacy2aidl_EffectParameterReader_ParameterExtension(
+        EffectParamReader& param) {
+    VendorExtension ext =
+            VALUE_OR_RETURN(legacy2aidl_EffectParameterReader_Data_VendorExtension(param));
+    return UNION_MAKE(Parameter, specific, UNION_MAKE(Parameter::Specific, vendorEffect, ext));
+}
+
+ConversionResult<::android::status_t> aidl2legacy_ParameterExtension_EffectParameterWriter(
+        const ::aidl::android::hardware::audio::effect::Parameter& aidl,
+        EffectParamWriter& legacy) {
+    VendorExtension ext = VALUE_OR_RETURN(
+            (::aidl::android::getParameterSpecific<Parameter, VendorExtension,
+                                                   Parameter::Specific::vendorEffect>(aidl)));
+    return VALUE_OR_RETURN_STATUS(
+            aidl2legacy_VendorExtension_EffectParameterWriter_Data(legacy, ext));
 }
 
 }  // namespace android

@@ -29,6 +29,8 @@
 #include <binder/ActivityManager.h>
 #include <binder/AppOpsManager.h>
 #include <binder/BinderService.h>
+#include <binder/IServiceManager.h>
+#include <binder/IActivityManager.h>
 #include <binder/IAppOpsCallback.h>
 #include <binder/IUidObserver.h>
 #include <hardware/camera.h>
@@ -152,7 +154,7 @@ public:
     virtual binder::Status     connect(const sp<hardware::ICameraClient>& cameraClient,
             int32_t cameraId, const String16& clientPackageName,
             int32_t clientUid, int clientPid, int targetSdkVersion,
-            bool overrideToPortrait,
+            bool overrideToPortrait, bool forceSlowJpegMode,
             /*out*/
             sp<hardware::ICamera>* device) override;
 
@@ -216,6 +218,9 @@ public:
             /*out*/
             sp<hardware::camera2::ICameraInjectionSession>* cameraInjectionSession);
 
+    virtual binder::Status reportExtensionSessionStats(
+            const hardware::CameraExtensionSessionStats& stats, String16* sessionKey /*out*/);
+
     // Extra permissions checks
     virtual status_t    onTransact(uint32_t code, const Parcel& data,
                                    Parcel* reply, uint32_t flags);
@@ -231,6 +236,7 @@ public:
 
     // Monitored UIDs availability notification
     void                notifyMonitoredUids();
+    void                notifyMonitoredUids(const std::unordered_set<uid_t> &notifyUidSet);
 
     // Stores current open session device info in temp file.
     void cacheDump();
@@ -368,6 +374,12 @@ public:
 
         // Clear stream use case overrides
         virtual void clearStreamUseCaseOverrides() = 0;
+
+        // Whether the client supports camera zoom override
+        virtual bool supportsZoomOverride() = 0;
+
+        // Set/reset zoom override
+        virtual status_t setZoomOverride(int32_t zoomOverride) = 0;
 
         // The injection camera session to replace the internal camera
         // session.
@@ -596,6 +608,20 @@ public:
 
 private:
 
+    // TODO: b/263304156 update this to make use of a death callback for more
+    // robust/fault tolerant logging
+    static const sp<IActivityManager>& getActivityManager() {
+        static const char* kActivityService = "activity";
+        static const auto activityManager = []() -> sp<IActivityManager> {
+            const sp<IServiceManager> sm(defaultServiceManager());
+            if (sm != nullptr) {
+                 return interface_cast<IActivityManager>(sm->checkService(String16(kActivityService)));
+            }
+            return nullptr;
+        }();
+        return activityManager;
+    }
+
     /**
      * Typesafe version of device status, containing both the HAL-layer and the service interface-
      * layer values.
@@ -741,13 +767,13 @@ private:
         void onUidIdle(uid_t uid, bool disabled) override;
         void onUidStateChanged(uid_t uid, int32_t procState, int64_t procStateSeq,
                 int32_t capability) override;
-        void onUidProcAdjChanged(uid_t uid) override;
+        void onUidProcAdjChanged(uid_t uid, int adj) override;
 
         void addOverrideUid(uid_t uid, String16 callingPackage, bool active);
         void removeOverrideUid(uid_t uid, String16 callingPackage);
 
-        void registerMonitorUid(uid_t uid);
-        void unregisterMonitorUid(uid_t uid);
+        void registerMonitorUid(uid_t uid, bool openCamera);
+        void unregisterMonitorUid(uid_t uid, bool closeCamera);
 
         // Implementation of IServiceManager::LocalRegistrationCallback
         virtual void onServiceRegistration(const String16& name,
@@ -762,6 +788,8 @@ private:
 
         struct MonitoredUid {
             int32_t procState;
+            int32_t procAdj;
+            bool hasCamera;
             size_t refCount;
         };
 
@@ -773,6 +801,7 @@ private:
         // Monitored uid map
         std::unordered_map<uid_t, MonitoredUid> mMonitoredUids;
         std::unordered_map<uid_t, bool> mOverrideUids;
+        sp<IBinder> mObserverToken;
     }; // class UidPolicy
 
     // If sensor privacy is enabled then all apps, including those that are active, should be
@@ -887,7 +916,8 @@ private:
             int api1CameraId, const String16& clientPackageNameMaybe, bool systemNativeClient,
             const std::optional<String16>& clientFeatureId, int clientUid, int clientPid,
             apiLevel effectiveApiLevel, bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
-            bool overrideToPortrait, /*out*/sp<CLIENT>& device);
+            bool overrideToPortrait, bool forceSlowJpegMode,
+            /*out*/sp<CLIENT>& device);
 
     // Lock guarding camera service state
     Mutex               mServiceLock;
@@ -1289,6 +1319,9 @@ private:
     // Clear the stream use case overrides
     void handleClearStreamUseCaseOverrides();
 
+    // Set or clear the zoom override flag
+    status_t handleSetZoomOverride(const Vector<String16>& args);
+
     // Handle 'watch' command as passed through 'cmd'
     status_t handleWatchCommand(const Vector<String16> &args, int inFd, int outFd);
 
@@ -1340,7 +1373,8 @@ private:
             const String8& cameraId, int api1CameraId, int facing, int sensorOrientation,
             int clientPid, uid_t clientUid, int servicePid,
             std::pair<int, IPCTransport> deviceVersionAndIPCTransport, apiLevel effectiveApiLevel,
-            bool overrideForPerfClass, bool overrideToPortrait, /*out*/sp<BasicClient>* client);
+            bool overrideForPerfClass, bool overrideToPortrait, bool forceSlowJpegMode,
+            /*out*/sp<BasicClient>* client);
 
     status_t checkCameraAccess(const String16& opPackageName);
 
@@ -1389,6 +1423,9 @@ private:
 
     // Current stream use case overrides
     std::vector<int64_t> mStreamUseCaseOverrides;
+
+    // Current zoom override value
+    int32_t mZoomOverrideValue = -1;
 
     /**
      * A listener class that implements the IBinder::DeathRecipient interface
