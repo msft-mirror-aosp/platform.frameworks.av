@@ -270,6 +270,7 @@ cc_library {
         "SurfaceUtils.cpp",
         "ThrottledSource.cpp",
         "Utils.cpp",
+        "VideoRenderQualityTracker.cpp",
         "VideoFrameSchedulerBase.cpp",
         "VideoFrameScheduler.cpp",
     ],
@@ -313,6 +314,7 @@ cc_library {
         "framework-permission-aidl-cpp",
         "libaudioclient_aidl_conversion",
         "packagemanager_aidl-cpp",
+        "server_configurable_flags",
     ],
 
     static_libs: [
