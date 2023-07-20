@@ -388,7 +388,9 @@ static void dumpCodecDetails(int fd, const sp<IMediaCodecList> &codecList, bool 
                         mediaType.equalsIgnoreCase(MIMETYPE_VIDEO_VP9)
                             ? asString_VP9Profile(pl.mProfile) :
                         mediaType.equalsIgnoreCase(MIMETYPE_VIDEO_AV1)
-                            ? asString_AV1Profile(pl.mProfile) : "??";
+                            ? asString_AV1Profile(pl.mProfile) :
+                        mediaType.equalsIgnoreCase(MIMETYPE_VIDEO_DOLBY_VISION)
+                            ? asString_DolbyVisionProfile(pl.mProfile) : "??";
                     const char *niceLevel =
                         mediaType.equalsIgnoreCase(MIMETYPE_VIDEO_MPEG2)
                             ? asString_MPEG2Level(pl.mLevel) :
@@ -405,7 +407,9 @@ static void dumpCodecDetails(int fd, const sp<IMediaCodecList> &codecList, bool 
                         mediaType.equalsIgnoreCase(MIMETYPE_VIDEO_VP9)
                             ? asString_VP9Level(pl.mLevel) :
                         mediaType.equalsIgnoreCase(MIMETYPE_VIDEO_AV1)
-                            ? asString_AV1Level(pl.mLevel) : "??";
+                            ? asString_AV1Level(pl.mLevel) :
+                        mediaType.equalsIgnoreCase(MIMETYPE_VIDEO_DOLBY_VISION)
+                            ? asString_DolbyVisionLevel(pl.mLevel) : "??";
 
                     list.add(AStringPrintf("% 5u/% 5u (%s/%s)",
                             pl.mProfile, pl.mLevel, niceProfile, niceLevel));
@@ -1836,7 +1840,6 @@ MediaPlayerService::AudioOutput::AudioOutput(audio_session_t sessionId,
     } else {
         mAttributes = NULL;
     }
-
     setMinBufferCount();
 }
 
@@ -3034,4 +3037,11 @@ status_t MediaPlayerService::BatteryTracker::pullBatteryData(Parcel* reply) {
     }
     return NO_ERROR;
 }
+
+#ifdef FUZZ_MODE_MEDIA_PLAYER_SERVICE
+sp<MediaPlayerService> MediaPlayerService::createForFuzzTesting() {
+    return sp<MediaPlayerService>::make();
+}
+#endif // FUZZ_MODE_MEDIA_PLAYER_SERVICE
+
 } // namespace android

@@ -16,9 +16,16 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "RemoteMediaExtractor"
+
+#include <list>
+#include <pthread.h>
+#include <condition_variable>
+#include <mutex>
+
 #include <utils/Log.h>
 
 #include <binder/IPCThreadState.h>
+#include <cutils/properties.h>
 #include <media/stagefright/InterfaceUtils.h>
 #include <media/MediaMetricsItem.h>
 #include <media/stagefright/MediaSource.h>
@@ -90,10 +97,70 @@ RemoteMediaExtractor::RemoteMediaExtractor(
     }
 }
 
+static pthread_t myThread;
+static std::list<sp<DataSource>> pending;
+static std::mutex pending_mutex;
+static std::condition_variable pending_added;
+
+static void* closingThreadWorker(void *arg) {
+    // simplifies debugging to name the thread
+    if (pthread_setname_np(pthread_self(), "mediaCloser")) {
+        ALOGW("Failed to set thread name on thread for closing data sources");
+    }
+
+    while (true) {
+        sp<DataSource> ds = nullptr;
+        std::unique_lock _lk(pending_mutex);
+        pending_added.wait(_lk, []{return !pending.empty();});
+        ALOGV("worker thread wake up with %zu entries", pending.size());
+        if (!pending.empty()) {
+            ds = pending.front();
+            (void) pending.pop_front();
+        }
+        _lk.unlock();       // unique_lock is not scoped
+        if (ds != nullptr) {
+            ds->close();
+        }
+    }
+
+    ALOGE("[unexpected] worker thread quit");
+    return arg;
+}
+
+// this can be '&ds' as long as the pending.push_back() bumps the
+// reference counts to ensure the object lives long enough
+static void asyncDataSourceClose(sp<DataSource> &ds) {
+
+    // make sure we have our (single) worker thread
+    static std::once_flag sCheckOnce;
+    std::call_once(sCheckOnce, [&](){
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+        pthread_create(&myThread, &attr, closingThreadWorker, nullptr);
+        pthread_attr_destroy(&attr);
+    });
+
+    {
+        std::lock_guard _lm(pending_mutex);     // scoped, no explicit unlock
+        pending.push_back(ds);
+    }
+    pending_added.notify_one();     // get the worker thread going
+}
+
 RemoteMediaExtractor::~RemoteMediaExtractor() {
     delete mExtractor;
-    mSource->close();
-    mSource.clear();
+    // TODO(287851984) hook for changing behavior this dynamically, drop after testing
+    int8_t new_scheme = property_get_bool("debug.mediaextractor.delayedclose", 1);
+    if (new_scheme != 0) {
+        ALOGV("deferred close()");
+        asyncDataSourceClose(mSource);
+        mSource.clear();
+    } else {
+        ALOGV("immediate close()");
+        mSource->close();
+        mSource.clear();
+    }
     mExtractorPlugin = nullptr;
     // log the current record, provided it has some information worth recording
     if (MEDIA_LOG) {
