@@ -10,12 +10,6 @@ package {
 cc_library_headers {
     name: "libcodec2_client_headers",
     export_include_dirs: ["include"],
-    vendor_available: true,
-    apex_available: [
-        "//apex_available:platform",
-        "com.android.media",
-        "com.android.media.swcodec",
-    ],
     min_sdk_version: "29",
     host_supported: true,
     target: {
@@ -43,8 +37,10 @@ cc_library {
         "android.hardware.media.c2@1.0",
         "android.hardware.media.c2@1.1",
         "android.hardware.media.c2@1.2",
+        "android.hardware.media.c2-V1-ndk",
         "libbase",
         "libbinder",
+        "libbinder_ndk",
         "libcodec2",
         "libcodec2_hidl_client@1.0",
         "libcodec2_hidl_client@1.1",
