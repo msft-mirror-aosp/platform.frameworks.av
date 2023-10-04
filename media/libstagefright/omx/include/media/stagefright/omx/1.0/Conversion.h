@@ -425,8 +425,16 @@ inline CodecBuffer *wrapAs(CodecBuffer *t, sp<GraphicBuffer> const& graphicBuffe
     t->attr.anwBuffer.stride = graphicBuffer->getStride();
     t->attr.anwBuffer.format = static_cast<PixelFormat>(
             graphicBuffer->getPixelFormat());
-    t->attr.anwBuffer.layerCount = graphicBuffer->getLayerCount();
-    t->attr.anwBuffer.usage = graphicBuffer->getUsage();
+    // HACK
+    // anwBuffer.layerCount 8 bytes : GraphicBuffer::layerCount 4 bytes
+    // anwBuffer.usage      4 bytes : GraphicBuffer::usage      8 bytes
+    // We would like to retain high part of usage with high part of layerCount
+    uint64_t usage = graphicBuffer->getUsage();
+    uint32_t usageHigh = (usage >> 32);
+    uint32_t usageLow = (0xFFFFFFFF & usage);
+    uint32_t layerLow = graphicBuffer->getLayerCount();
+    t->attr.anwBuffer.layerCount = ((uint64_t(usageHigh) << 32) | layerLow);
+    t->attr.anwBuffer.usage = usageLow;
     t->nativeHandle = graphicBuffer->handle;
     return t;
 }
@@ -532,11 +540,11 @@ inline bool convertTo(OMXBuffer* l, CodecBuffer const& t) {
  */
 // convert: IOMX::ComponentInfo -> IOmx::ComponentInfo
 inline bool convertTo(IOmx::ComponentInfo* t, IOMX::ComponentInfo const& l) {
-    t->mName = l.mName.string();
+    t->mName = l.mName.c_str();
     t->mRoles.resize(l.mRoles.size());
     size_t i = 0;
     for (auto& role : l.mRoles) {
-        t->mRoles[i++] = role.string();
+        t->mRoles[i++] = role.c_str();
     }
     return true;
 }

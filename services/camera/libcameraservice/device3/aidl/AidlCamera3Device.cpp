@@ -26,10 +26,10 @@
 #endif
 
 // Convenience macro for transient errors
-#define CLOGE(fmt, ...) ALOGE("Camera %s: %s: " fmt, mId.string(), __FUNCTION__, \
+#define CLOGE(fmt, ...) ALOGE("Camera %s: %s: " fmt, mId.c_str(), __FUNCTION__, \
             ##__VA_ARGS__)
 
-#define CLOGW(fmt, ...) ALOGW("Camera %s: %s: " fmt, mId.string(), __FUNCTION__, \
+#define CLOGW(fmt, ...) ALOGW("Camera %s: %s: " fmt, mId.c_str(), __FUNCTION__, \
             ##__VA_ARGS__)
 
 // Convenience macros for transitioning to the error state
@@ -51,8 +51,10 @@
 
 #include <aidl/android/hardware/camera/device/ICameraInjectionSession.h>
 #include <aidlcommonsupport/NativeHandle.h>
+#include <android-base/properties.h>
 #include <android/binder_ibinder_platform.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
+#include <camera/StringUtils.h>
 
 #include "utils/CameraTraces.h"
 #include "mediautils/SchedulingPolicyService.h"
@@ -162,19 +164,19 @@ uint64_t AidlCamera3Device::mapProducerToFrameworkUsage(
     return (uint64_t)usage;
 }
 
-AidlCamera3Device::AidlCamera3Device(const String8& id, bool overrideForPerfClass,
+AidlCamera3Device::AidlCamera3Device(const std::string& id, bool overrideForPerfClass,
         bool overrideToPortrait, bool legacyClient) :
         Camera3Device(id, overrideForPerfClass, overrideToPortrait, legacyClient) {
     mCallbacks = ndk::SharedRefBase::make<AidlCameraDeviceCallbacks>(this);
 }
 
 status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
-        const String8& monitorTags) {
+        const std::string& monitorTags) {
     ATRACE_CALL();
     Mutex::Autolock il(mInterfaceLock);
     Mutex::Autolock l(mLock);
 
-    ALOGV("%s: Initializing AIDL device for camera %s", __FUNCTION__, mId.string());
+    ALOGV("%s: Initializing AIDL device for camera %s", __FUNCTION__, mId.c_str());
     if (mStatus != STATUS_UNINITIALIZED) {
         CLOGE("Already initialized!");
         return INVALID_OPERATION;
@@ -183,7 +185,7 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
 
     std::shared_ptr<camera::device::ICameraDeviceSession> session;
     ATRACE_BEGIN("CameraHal::openSession");
-    status_t res = manager->openAidlSession(mId.string(), mCallbacks,
+    status_t res = manager->openAidlSession(mId, mCallbacks,
             /*out*/ &session);
     ATRACE_END();
     if (res != OK) {
@@ -194,17 +196,17 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
       SET_ERR("Session iface returned is null");
       return INVALID_OPERATION;
     }
-    res = manager->getCameraCharacteristics(mId.string(), mOverrideForPerfClass, &mDeviceInfo,
+    res = manager->getCameraCharacteristics(mId, mOverrideForPerfClass, &mDeviceInfo,
             mOverrideToPortrait);
     if (res != OK) {
         SET_ERR_L("Could not retrieve camera characteristics: %s (%d)", strerror(-res), res);
         session->close();
         return res;
     }
-    mSupportNativeZoomRatio = manager->supportNativeZoomRatio(mId.string());
+    mSupportNativeZoomRatio = manager->supportNativeZoomRatio(mId);
 
     std::vector<std::string> physicalCameraIds;
-    bool isLogical = manager->isLogicalCamera(mId.string(), &physicalCameraIds);
+    bool isLogical = manager->isLogicalCamera(mId, &physicalCameraIds);
     if (isLogical) {
         for (auto& physicalId : physicalCameraIds) {
             // Do not override characteristics for physical cameras
@@ -295,10 +297,10 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
     mInterface = new AidlHalInterface(session, queue, mUseHalBufManager, mSupportOfflineProcessing);
 
     std::string providerType;
-    mVendorTagId = manager->getProviderTagIdLocked(mId.string());
+    mVendorTagId = manager->getProviderTagIdLocked(mId);
     mTagMonitor.initialize(mVendorTagId);
-    if (!monitorTags.isEmpty()) {
-        mTagMonitor.parseTagsToMonitor(String8(monitorTags));
+    if (!monitorTags.empty()) {
+        mTagMonitor.parseTagsToMonitor(monitorTags);
     }
 
     for (size_t i = 0; i < capabilities.count; i++) {
@@ -307,6 +309,20 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
             mNeedFixupMonochromeTags = true;
         }
     }
+
+    // batch size limit is applied to the device with camera device version larger than 3.2 which is
+    // AIDL v2
+    hardware::hidl_version maxVersion{0, 0};
+    IPCTransport transport = IPCTransport::AIDL;
+    res = manager->getHighestSupportedVersion(mId, &maxVersion, &transport);
+    if (res != OK) {
+        ALOGE("%s: Error in getting camera device version id: %s (%d)", __FUNCTION__,
+              strerror(-res), res);
+        return res;
+    }
+    int deviceVersion = HARDWARE_DEVICE_API_VERSION(maxVersion.get_major(), maxVersion.get_minor());
+
+    mBatchSizeLimitEnabled = (deviceVersion >= CAMERA_DEVICE_API_VERSION_1_2);
 
     return initializeCommonLocked();
 }
@@ -916,7 +932,7 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
                     cam3stream->getOriginalDataSpace() : src->data_space);
 
         dst.bufferSize = bufferSizes[i];
-        if (src->physical_camera_id != nullptr) {
+        if (!src->physical_camera_id.empty()) {
             dst.physicalCameraId = src->physical_camera_id;
         }
         dst.groupId = cam3stream->getHalStreamGroupId();
@@ -1093,7 +1109,7 @@ status_t AidlCamera3Device::AidlHalInterface::configureInjectedStreams(
             mapToAidlDataspace(cam3stream->isDataSpaceOverridden() ?
                     cam3stream->getOriginalDataSpace() : src->data_space);
         dst.bufferSize = bufferSizes[i];
-        if (src->physical_camera_id != nullptr) {
+        if (!src->physical_camera_id.empty()) {
             dst.physicalCameraId = src->physical_camera_id;
         }
         dst.groupId = cam3stream->getHalStreamGroupId();
@@ -1448,7 +1464,7 @@ status_t AidlCamera3Device::AidlRequestThread::switchToOffline(
 }
 
 status_t AidlCamera3Device::AidlCamera3DeviceInjectionMethods::injectionInitialize(
-        const String8& injectedCamId, sp<CameraProviderManager> manager,
+        const std::string& injectedCamId, sp<CameraProviderManager> manager,
         const std::shared_ptr<camera::device::ICameraDeviceCallback>&callback) {
     ATRACE_CALL();
     Mutex::Autolock lock(mInjectionLock);
@@ -1472,7 +1488,7 @@ status_t AidlCamera3Device::AidlCamera3DeviceInjectionMethods::injectionInitiali
     mInjectedCamId = injectedCamId;
     std::shared_ptr<camera::device::ICameraInjectionSession> injectionSession;
     ATRACE_BEGIN("Injection CameraHal::openSession");
-    status_t res = manager->openAidlInjectionSession(injectedCamId.string(), callback,
+    status_t res = manager->openAidlInjectionSession(injectedCamId, callback,
                                           /*out*/ &injectionSession);
     ATRACE_END();
     if (res != OK) {
@@ -1571,7 +1587,67 @@ status_t AidlCamera3Device::AidlCamera3DeviceInjectionMethods::replaceHalInterfa
     return OK;
 }
 
-status_t AidlCamera3Device::injectionCameraInitialize(const String8 &injectedCamId,
+void AidlCamera3Device::applyMaxBatchSizeLocked(
+        RequestList* requestList, const sp<camera3::Camera3OutputStreamInterface>& stream) {
+    int batchSize = requestList->size();
+
+    if (!mBatchSizeLimitEnabled) {
+        (*requestList->begin())->mBatchSize = batchSize;
+        stream->setBatchSize(batchSize);
+        return;
+    }
+
+    const auto& metadata = (*requestList->begin())->mSettingsList.begin()->metadata;
+
+    uint32_t tag = ANDROID_CONTROL_AVAILABLE_HIGH_SPEED_VIDEO_CONFIGURATIONS;
+    auto sensorPixelModeEntry = metadata.find(ANDROID_SENSOR_PIXEL_MODE);
+    if (sensorPixelModeEntry.count != 0) {
+        if (ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION == sensorPixelModeEntry.data.u8[0]) {
+            tag = ANDROID_CONTROL_AVAILABLE_HIGH_SPEED_VIDEO_CONFIGURATIONS_MAXIMUM_RESOLUTION;
+        }
+    }
+
+    const auto fpsRange = metadata.find(ANDROID_CONTROL_AE_TARGET_FPS_RANGE);
+    if (fpsRange.count > 1) {
+        auto configEntry = mDeviceInfo.find(tag);
+        for (size_t index = 4; index < configEntry.count; index += 5) {
+            if (stream->getWidth() == static_cast<uint32_t>(configEntry.data.i32[index - 4]) &&
+                stream->getHeight() == static_cast<uint32_t>(configEntry.data.i32[index - 3]) &&
+                fpsRange.data.i32[0] == configEntry.data.i32[index - 2] &&
+                fpsRange.data.i32[1] == configEntry.data.i32[index - 1]) {
+                const int maxBatchSize = configEntry.data.i32[index - 1] / 30;
+                const int reportedSize = configEntry.data.i32[index];
+
+                if (maxBatchSize % reportedSize == 0 && requestList->size() % reportedSize == 0) {
+                    batchSize = reportedSize;
+                    ALOGVV("Matching high speed configuration found. Limit batch size to %d",
+                           batchSize);
+                } else if (maxBatchSize % reportedSize == 0 &&
+                           reportedSize % requestList->size() == 0) {
+                    ALOGVV("Matching high speed configuration found, but requested batch size is "
+                           "divisor of batch_size_max. No need to limit batch size.");
+                } else {
+                    ALOGW("Matching high speed configuration found, but batch_size_max is not a "
+                          "divisor of corresponding fps_max/30 or requested batch size is not a "
+                          "divisor of batch_size_max, (fps_max %d, batch_size_max %d, requested "
+                          "batch size %zu)",
+                          configEntry.data.i32[index - 1], reportedSize, requestList->size());
+                }
+                break;
+            }
+        }
+    }
+
+    for (auto request = requestList->begin(); request != requestList->end(); request++) {
+        if (requestList->distance(requestList->begin(), request) % batchSize == 0) {
+            (*request)->mBatchSize = batchSize;
+        }
+    }
+
+    stream->setBatchSize(batchSize);
+}
+
+status_t AidlCamera3Device::injectionCameraInitialize(const std::string &injectedCamId,
             sp<CameraProviderManager> manager) {
         return (static_cast<AidlCamera3DeviceInjectionMethods *>
                     (mInjectionMethods.get()))->injectionInitialize(injectedCamId, manager,

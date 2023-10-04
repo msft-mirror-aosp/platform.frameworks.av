@@ -330,7 +330,7 @@ private:
         std::scoped_lock lock{mLock};
         // Unregistering from DeathRecipient notification.
         if (mService != nullptr) {
-            AIBinder_unlinkToDeath(mService->asBinder().get(), mDeathRecipient.get(), this);
+            AIBinder_unlinkToDeath(mService->asBinder().get(), mDeathRecipient.get(), mCookie);
             mService = nullptr;
         }
     }
@@ -370,13 +370,15 @@ private:
     std::shared_ptr<IResourceManagerClient> mClient;
     ::ndk::ScopedAIBinder_DeathRecipient mDeathRecipient;
     std::shared_ptr<IResourceManagerService> mService;
+    BinderDiedContext* mCookie;
 };
 
 MediaCodec::ResourceManagerServiceProxy::ResourceManagerServiceProxy(
         pid_t pid, uid_t uid, const std::shared_ptr<IResourceManagerClient> &client) :
     mPid(pid), mUid(uid), mClient(client),
     mDeathRecipient(::ndk::ScopedAIBinder_DeathRecipient(
-            AIBinder_DeathRecipient_new(BinderDiedCallback))) {
+            AIBinder_DeathRecipient_new(BinderDiedCallback))),
+    mCookie(nullptr) {
     if (mUid == MediaCodec::kNoUid) {
         mUid = AIBinder_getCallingUid();
     }
@@ -434,9 +436,9 @@ std::shared_ptr<IResourceManagerService> MediaCodec::ResourceManagerServiceProxy
 
     // Create the context that is passed as cookie to the binder death notification.
     // The context gets deleted at BinderUnlinkedCallback.
-    BinderDiedContext* context = new BinderDiedContext{.mRMServiceProxy = weak_from_this()};
+    mCookie = new BinderDiedContext{.mRMServiceProxy = weak_from_this()};
     // Register for the callbacks by linking to death notification.
-    AIBinder_linkToDeath(mService->asBinder().get(), mDeathRecipient.get(), context);
+    AIBinder_linkToDeath(mService->asBinder().get(), mDeathRecipient.get(), mCookie);
 
     // If the RM was restarted, re-register all the resources.
     if (mBinderDied) {
@@ -1607,23 +1609,21 @@ void MediaCodec::statsBufferSent(int64_t presentationUs, const sp<MediaCodecBuff
         mFramesInput++;
     }
 
-    const int64_t nowNs = systemTime(SYSTEM_TIME_MONOTONIC);
-    BufferFlightTiming_t startdata = { presentationUs, nowNs };
+    // mutex access to mBuffersInFlight and other stats
+    Mutex::Autolock al(mLatencyLock);
 
-    {
-        // mutex access to mBuffersInFlight and other stats
-        Mutex::Autolock al(mLatencyLock);
-
-
-        // XXX: we *could* make sure that the time is later than the end of queue
-        // as part of a consistency check...
+    // XXX: we *could* make sure that the time is later than the end of queue
+    // as part of a consistency check...
+    if (!mTunneled) {
+        const int64_t nowNs = systemTime(SYSTEM_TIME_MONOTONIC);
+        BufferFlightTiming_t startdata = { presentationUs, nowNs };
         mBuffersInFlight.push_back(startdata);
-
-        if (mIsLowLatencyModeOn && mIndexOfFirstFrameWhenLowLatencyOn < 0) {
-            mIndexOfFirstFrameWhenLowLatencyOn = mInputBufferCounter;
-        }
-        ++mInputBufferCounter;
     }
+
+    if (mIsLowLatencyModeOn && mIndexOfFirstFrameWhenLowLatencyOn < 0) {
+        mIndexOfFirstFrameWhenLowLatencyOn = mInputBufferCounter;
+    }
+    ++mInputBufferCounter;
 }
 
 // when we get a buffer back from the codec
@@ -2005,7 +2005,9 @@ status_t MediaCodec::configure(
         mediametrics_setInt32(nextMetricsHandle, kCodecEncoder,
                               (flags & CONFIGURE_FLAG_ENCODE) ? 1 : 0);
 
-        mediametrics_setCString(nextMetricsHandle, kCodecLogSessionId, mLogSessionId.c_str());
+        if (!mLogSessionId.empty()) {
+            mediametrics_setCString(nextMetricsHandle, kCodecLogSessionId, mLogSessionId.c_str());
+        }
 
         // moved here from ::init()
         mediametrics_setCString(nextMetricsHandle, kCodecCodec, mInitName.c_str());

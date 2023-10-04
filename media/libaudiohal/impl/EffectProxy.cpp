@@ -15,6 +15,7 @@
  */
 
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
 #include <memory>
 #define LOG_TAG "EffectProxy"
@@ -92,11 +93,13 @@ ndk::ScopedAStatus EffectProxy::setOffloadParam(const effect_offload_param_t* of
     }
 
     mActiveSubIdx = std::distance(mSubEffects.begin(), itor);
-    ALOGV("%s: active %soffload sub-effect %zu descriptor: %s", __func__,
+    ALOGI("%s: active %soffload sub-effect %zu descriptor: %s", __func__,
           offload->isOffload ? "" : "non-", mActiveSubIdx,
           ::android::audio::utils::toString(mSubEffects[mActiveSubIdx].descriptor.common.id.uuid)
                   .c_str());
-    return ndk::ScopedAStatus::ok();
+    return runWithAllSubEffects([&](std::shared_ptr<IEffect>& effect) {
+        return effect->setParameter(Parameter::make<Parameter::offload>(offload->isOffload));
+    });
 }
 
 // EffectProxy go over sub-effects and call IEffect interfaces
@@ -134,8 +137,8 @@ ndk::ScopedAStatus EffectProxy::close() {
 }
 
 ndk::ScopedAStatus EffectProxy::getDescriptor(Descriptor* desc) {
-    desc->common = mDescriptorCommon;
-    desc->capability = mSubEffects[mActiveSubIdx].descriptor.capability;
+    *desc = mSubEffects[mActiveSubIdx].descriptor;
+    desc->common.id.uuid = desc->common.id.proxy.value();
     return ndk::ScopedAStatus::ok();
 }
 
@@ -229,7 +232,10 @@ ndk::ScopedAStatus EffectProxy::runWithActiveSubEffectThenOthers(
     }
 
     // proceed with others
-    for (size_t i = 0; i < mSubEffects.size() && i != mActiveSubIdx; i++) {
+    for (size_t i = 0; i < mSubEffects.size(); i++) {
+        if (i == mActiveSubIdx) {
+            continue;
+        }
         if (!mSubEffects[i].handle) {
             ALOGE("%s null sub-effect interface for %s", __func__,
                   mSubEffects[i].descriptor.common.id.uuid.toString().c_str());
@@ -270,6 +276,11 @@ ndk::ScopedAStatus EffectProxy::runWithAllSubEffects(
 
 bool EffectProxy::isBypassing() const {
     return mSubEffects[mActiveSubIdx].descriptor.common.flags.bypass;
+}
+
+bool EffectProxy::isTunnel() const {
+    return mSubEffects[mActiveSubIdx].descriptor.common.flags.hwAcceleratorMode ==
+           Flags::HardwareAccelerator::TUNNEL;
 }
 
 binder_status_t EffectProxy::dump(int fd, const char** args, uint32_t numArgs) {
