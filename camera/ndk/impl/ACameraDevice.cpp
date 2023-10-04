@@ -21,6 +21,7 @@
 #include <inttypes.h>
 #include <android/hardware/ICameraService.h>
 #include <gui/Surface.h>
+#include <camera/StringUtils.h>
 #include "ACameraDevice.h"
 #include "ACameraMetadata.h"
 #include "ACaptureRequest.h"
@@ -162,7 +163,7 @@ CameraDevice::createCaptureRequest(
             templateId);
         return ACAMERA_ERROR_INVALID_PARAMETER;
     } else if (!remoteRet.isOk()) {
-        ALOGE("Create capture request failed: %s", remoteRet.toString8().string());
+        ALOGE("Create capture request failed: %s", remoteRet.toString8().c_str());
         return ACAMERA_ERROR_UNKNOWN;
     }
     ACaptureRequest* outReq = new ACaptureRequest();
@@ -234,8 +235,7 @@ camera_status_t CameraDevice::isSessionConfigurationSupported(
             return ret;
         }
 
-        String16 physicalId16(output.mPhysicalCameraId.c_str());
-        OutputConfiguration outConfig(iGBP, output.mRotation, physicalId16,
+        OutputConfiguration outConfig(iGBP, output.mRotation, output.mPhysicalCameraId,
                 OutputConfiguration::INVALID_SET_ID, true);
 
         for (auto& anw : output.mSharedWindows) {
@@ -299,8 +299,7 @@ camera_status_t CameraDevice::updateOutputConfigurationLocked(ACaptureSessionOut
         return ret;
     }
 
-    String16 physicalId16(output->mPhysicalCameraId.c_str());
-    OutputConfiguration outConfig(iGBP, output->mRotation, physicalId16,
+    OutputConfiguration outConfig(iGBP, output->mRotation, output->mPhysicalCameraId,
             OutputConfiguration::INVALID_SET_ID, true);
 
     for (auto& anw : output->mSharedWindows) {
@@ -318,22 +317,22 @@ camera_status_t CameraDevice::updateOutputConfigurationLocked(ACaptureSessionOut
         switch (remoteRet.serviceSpecificErrorCode()) {
             case hardware::ICameraService::ERROR_INVALID_OPERATION:
                 ALOGE("Camera device %s invalid operation: %s", getId(),
-                        remoteRet.toString8().string());
+                        remoteRet.toString8().c_str());
                 return ACAMERA_ERROR_INVALID_OPERATION;
                 break;
             case hardware::ICameraService::ERROR_ALREADY_EXISTS:
                 ALOGE("Camera device %s output surface already exists: %s", getId(),
-                        remoteRet.toString8().string());
+                        remoteRet.toString8().c_str());
                 return ACAMERA_ERROR_INVALID_PARAMETER;
                 break;
             case hardware::ICameraService::ERROR_ILLEGAL_ARGUMENT:
                 ALOGE("Camera device %s invalid input argument: %s", getId(),
-                        remoteRet.toString8().string());
+                        remoteRet.toString8().c_str());
                 return ACAMERA_ERROR_INVALID_PARAMETER;
                 break;
             default:
                 ALOGE("Camera device %s failed to add shared output: %s", getId(),
-                        remoteRet.toString8().string());
+                        remoteRet.toString8().c_str());
                 return ACAMERA_ERROR_UNKNOWN;
         }
     }
@@ -495,7 +494,7 @@ CameraDevice::stopRepeatingLocked() {
             ALOGV("Repeating request is already stopped.");
             return ACAMERA_OK;
         } else if (!remoteRet.isOk()) {
-            ALOGE("Stop repeating request fails in remote: %s", remoteRet.toString8().string());
+            ALOGE("Stop repeating request fails in remote: %s", remoteRet.toString8().c_str());
             return ACAMERA_ERROR_UNKNOWN;
         }
         checkRepeatingSequenceCompleteLocked(repeatingSequenceId, lastFrameNumber);
@@ -547,7 +546,7 @@ CameraDevice::flushLocked(ACameraCaptureSession* session) {
     int64_t lastFrameNumber;
     binder::Status remoteRet = mRemote->flush(&lastFrameNumber);
     if (!remoteRet.isOk()) {
-        ALOGE("Abort captures fails in remote: %s", remoteRet.toString8().string());
+        ALOGE("Abort captures fails in remote: %s", remoteRet.toString8().c_str());
         return ACAMERA_ERROR_UNKNOWN;
     }
     if (mRepeatingSequenceId != REQUEST_ID_NONE) {
@@ -571,7 +570,7 @@ CameraDevice::waitUntilIdleLocked() {
 
     binder::Status remoteRet = mRemote->waitUntilIdle();
     if (!remoteRet.isOk()) {
-        ALOGE("Camera device %s waitUntilIdle failed: %s", getId(), remoteRet.toString8().string());
+        ALOGE("Camera device %s waitUntilIdle failed: %s", getId(), remoteRet.toString8().c_str());
         // TODO: define a function to convert status_t -> camera_status_t
         return ACAMERA_ERROR_UNKNOWN;
     }
@@ -631,9 +630,8 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
         if (ret != ACAMERA_OK) {
             return ret;
         }
-        String16 physicalId16(outConfig.mPhysicalCameraId.c_str());
         outputSet.insert(std::make_pair(
-                anw, OutputConfiguration(iGBP, outConfig.mRotation, physicalId16,
+                anw, OutputConfiguration(iGBP, outConfig.mRotation, outConfig.mPhysicalCameraId,
                         OutputConfiguration::INVALID_SET_ID, outConfig.mIsShared)));
     }
     auto addSet = outputSet;
@@ -682,7 +680,7 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
 
     binder::Status remoteRet = mRemote->beginConfigure();
     if (!remoteRet.isOk()) {
-        ALOGE("Camera device %s begin configure failed: %s", getId(), remoteRet.toString8().string());
+        ALOGE("Camera device %s begin configure failed: %s", getId(), remoteRet.toString8().c_str());
         return ACAMERA_ERROR_UNKNOWN;
     }
 
@@ -691,7 +689,7 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
         remoteRet = mRemote->deleteStream(streamId);
         if (!remoteRet.isOk()) {
             ALOGE("Camera device %s failed to remove stream %d: %s", getId(), streamId,
-                    remoteRet.toString8().string());
+                    remoteRet.toString8().c_str());
             return ACAMERA_ERROR_UNKNOWN;
         }
         mConfiguredOutputs.erase(streamId);
@@ -703,7 +701,7 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
         remoteRet = mRemote->createStream(outputPair.second, &streamId);
         if (!remoteRet.isOk()) {
             ALOGE("Camera device %s failed to create stream: %s", getId(),
-                    remoteRet.toString8().string());
+                    remoteRet.toString8().c_str());
             return ACAMERA_ERROR_UNKNOWN;
         }
         mConfiguredOutputs.insert(std::make_pair(streamId, outputPair));
@@ -718,10 +716,10 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
             ns2ms(startTimeNs), &offlineStreamIds);
     if (remoteRet.serviceSpecificErrorCode() == hardware::ICameraService::ERROR_ILLEGAL_ARGUMENT) {
         ALOGE("Camera device %s cannnot support app output configuration: %s", getId(),
-                remoteRet.toString8().string());
+                remoteRet.toString8().c_str());
         return ACAMERA_ERROR_STREAM_CONFIGURE_FAIL;
     } else if (!remoteRet.isOk()) {
-        ALOGE("Camera device %s end configure failed: %s", getId(), remoteRet.toString8().string());
+        ALOGE("Camera device %s end configure failed: %s", getId(), remoteRet.toString8().c_str());
         return ACAMERA_ERROR_UNKNOWN;
     }
 
@@ -867,8 +865,8 @@ CameraDevice::onCaptureErrorLocked(
         msg->setObject(kSessionSpKey, session);
         if (cbh.mIsLogicalCameraCallback) {
             if (resultExtras.errorPhysicalCameraId.size() > 0) {
-                String8 cameraId(resultExtras.errorPhysicalCameraId);
-                msg->setString(kFailingPhysicalCameraId, cameraId.string(), cameraId.size());
+                String8 cameraId = toString8(resultExtras.errorPhysicalCameraId);
+                msg->setString(kFailingPhysicalCameraId, cameraId.c_str(), cameraId.size());
             }
             msg->setPointer(kCallbackFpKey, (void*) cbh.mOnLogicalCameraCaptureFailed);
         } else {
@@ -1141,7 +1139,7 @@ void CameraDevice::CallbackHandler::onMessageReceived(
                     std::vector<std::string> physicalCameraIds;
                     std::vector<sp<ACameraMetadata>> physicalMetadataCopy;
                     for (size_t i = 0; i < physicalResultInfo.size(); i++) {
-                        String8 physicalId8(physicalResultInfo[i].mPhysicalCameraId);
+                        String8 physicalId8 = toString8(physicalResultInfo[i].mPhysicalCameraId);
                         physicalCameraIds.push_back(physicalId8.c_str());
 
                         CameraMetadata clone = physicalResultInfo[i].mPhysicalCameraMetadata;

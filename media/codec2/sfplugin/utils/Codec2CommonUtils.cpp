@@ -31,11 +31,19 @@
 
 namespace android {
 
-bool isAtLeastT() {
+
+static bool isAtLeast(int version, const char *codeName) {
     char deviceCodeName[PROP_VALUE_MAX];
     __system_property_get("ro.build.version.codename", deviceCodeName);
-    return android_get_device_api_level() >= __ANDROID_API_T__ ||
-           !strcmp(deviceCodeName, "Tiramisu");
+    return android_get_device_api_level() >= version || !strcmp(deviceCodeName, codeName);
+}
+
+bool isAtLeastT() {
+    return isAtLeast(__ANDROID_API_T__, "Tiramisu");
+}
+
+bool isAtLeastU() {
+    return isAtLeast(__ANDROID_API_U__, "UpsideDownCake");
 }
 
 static bool isP010Allowed() {
@@ -83,7 +91,7 @@ bool isHalPixelFormatSupported(AHardwareBuffer_Format format) {
     }
 
     // Default scenario --- the consumer is display or GPU
-    const AHardwareBuffer_Desc desc = {
+    const AHardwareBuffer_Desc consumableForDisplayOrGpu = {
             .width = 320,
             .height = 240,
             .format = format,
@@ -98,7 +106,7 @@ bool isHalPixelFormatSupported(AHardwareBuffer_Format format) {
     };
 
     // The consumer is a HW encoder
-    const AHardwareBuffer_Desc descHwEncoder = {
+    const AHardwareBuffer_Desc consumableForHwEncoder = {
             .width = 320,
             .height = 240,
             .format = format,
@@ -106,7 +114,6 @@ bool isHalPixelFormatSupported(AHardwareBuffer_Format format) {
             .usage = AHARDWAREBUFFER_USAGE_CPU_READ_RARELY |
                      AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN |
                      AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
-                     AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY |
                      AHARDWAREBUFFER_USAGE_VIDEO_ENCODE,
             .stride = 0,
             .rfu0 = 0,
@@ -114,7 +121,7 @@ bool isHalPixelFormatSupported(AHardwareBuffer_Format format) {
     };
 
     // The consumer is a SW encoder
-    const AHardwareBuffer_Desc descSwEncoder = {
+    const AHardwareBuffer_Desc consumableForSwEncoder = {
             .width = 320,
             .height = 240,
             .format = format,
@@ -127,10 +134,16 @@ bool isHalPixelFormatSupported(AHardwareBuffer_Format format) {
             .rfu0 = 0,
             .rfu1 = 0,
     };
-
-    return AHardwareBuffer_isSupported(&desc)
-            && AHardwareBuffer_isSupported(&descHwEncoder)
-            && AHardwareBuffer_isSupported(&descSwEncoder);
+    // Some devices running versions prior to Android U aren't guaranteed to advertise support
+    // for some color formats when the consumer is an encoder. Hence limit these checks to
+    // Android U and beyond.
+    if (isAtLeastU()) {
+        return AHardwareBuffer_isSupported(&consumableForDisplayOrGpu)
+                && AHardwareBuffer_isSupported(&consumableForHwEncoder)
+                && AHardwareBuffer_isSupported(&consumableForSwEncoder);
+    } else {
+        return AHardwareBuffer_isSupported(&consumableForDisplayOrGpu);
+    }
 }
 
 }  // namespace android

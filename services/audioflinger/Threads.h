@@ -167,7 +167,7 @@ public:
             mKeyValuePairs(keyValuePairs) {}
 
         virtual  void dump(char *buffer, size_t size) {
-            snprintf(buffer, size, "- KeyValue: %s\n", mKeyValuePairs.string());
+            snprintf(buffer, size, "- KeyValue: %s\n", mKeyValuePairs.c_str());
         }
 
         const String8 mKeyValuePairs;
@@ -2233,12 +2233,17 @@ public:
 
 protected:
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
+                float       streamVolume_l() const {
+                    return mStreamTypes[mStreamType].volume;
+                }
+                bool     streamMuted_l() const {
+                    return mStreamTypes[mStreamType].mute;
+                }
 
+                stream_type_t               mStreamTypes[AUDIO_STREAM_CNT];
                 audio_stream_type_t         mStreamType;
                 float                       mMasterVolume;
-                float                       mStreamVolume;
                 bool                        mMasterMute;
-                bool                        mStreamMute;
                 AudioStreamOut*             mOutput;
 };
 

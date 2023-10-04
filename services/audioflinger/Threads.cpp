@@ -488,7 +488,7 @@ void CpuStats::sample(const String8 &title
                 "  us per mix loop: mean=%.0f stddev=%.0f min=%.0f max=%.0f\n"
                 "  %% of wall: mean=%.1f stddev=%.1f min=%.1f max=%.1f\n"
                 "  MHz: mean=%.1f, stddev=%.1f, min=%.1f max=%.1f",
-                    title.string(),
+                    title.c_str(),
                     elapsed * .000000001, n, perLoop * .000001,
                     mean * .001,
                     stddev * .001,
@@ -612,7 +612,7 @@ void AudioFlinger::ThreadBase::exit()
 
 status_t AudioFlinger::ThreadBase::setParameters(const String8& keyValuePairs)
 {
-    ALOGV("ThreadBase::setParameters() %s", keyValuePairs.string());
+    ALOGV("ThreadBase::setParameters() %s", keyValuePairs.c_str());
     Mutex::Autolock _l(mLock);
 
     return sendSetParameterConfigEvent_l(keyValuePairs);
@@ -797,7 +797,7 @@ void AudioFlinger::ThreadBase::processConfigEvents_l()
             if (checkForNewParameter_l(data->mKeyValuePairs, event->mStatus)) {
                 configChanged = true;
                 mLocalLog.log("CFG_EVENT_SET_PARAMETER: (%s) configuration changed",
-                        data->mKeyValuePairs.string());
+                        data->mKeyValuePairs.c_str());
             }
         } break;
         case CFG_EVENT_CREATE_AUDIO_PATCH: {
@@ -982,7 +982,7 @@ void AudioFlinger::ThreadBase::dumpBase_l(int fd, const Vector<String16>& args _
     dprintf(fd, "  HAL buffer size: %zu bytes\n", mBufferSize);
     dprintf(fd, "  Channel count: %u\n", mChannelCount);
     dprintf(fd, "  Channel mask: 0x%08x (%s)\n", mChannelMask,
-            channelMaskToString(mChannelMask, mType != RECORD).string());
+            channelMaskToString(mChannelMask, mType != RECORD).c_str());
     dprintf(fd, "  Processing format: 0x%x (%s)\n", mFormat, formatToString(mFormat).c_str());
     dprintf(fd, "  Processing frame size: %zu bytes\n", mFrameSize);
     dprintf(fd, "  Pending config events:");
@@ -1801,7 +1801,7 @@ void AudioFlinger::ThreadBase::toAudioPortConfig(struct audio_port_config *confi
     config->type = AUDIO_PORT_TYPE_MIX;
     config->ext.mix.handle = mId;
     config->sample_rate = mSampleRate;
-    config->format = mFormat;
+    config->format = mHALFormat;
     config->channel_mask = mChannelMask;
     config->config_mask = AUDIO_PORT_CONFIG_SAMPLE_RATE|AUDIO_PORT_CONFIG_CHANNEL_MASK|
                             AUDIO_PORT_CONFIG_FORMAT;
@@ -1918,7 +1918,7 @@ void AudioFlinger::ThreadBase::ActiveTracks<T>::logTrack(
     if (mLocalLog != nullptr) {
         String8 result;
         track->appendDump(result, false /* active */);
-        mLocalLog->log("AT::%-10s(%p) %s", funcName, track.get(), result.string());
+        mLocalLog->log("AT::%-10s(%p) %s", funcName, track.get(), result.c_str());
     }
 }
 
@@ -2171,7 +2171,7 @@ void AudioFlinger::PlaybackThread::dumpTracks_l(int fd, const Vector<String16>& 
         }
     }
     result.append("\n");
-    write(fd, result.string(), result.length());
+    write(fd, result.c_str(), result.length());
     result.clear();
 
     // These values are "raw"; they will wrap around.  See prepareTracks_l() for a better way.
@@ -2217,7 +2217,7 @@ void AudioFlinger::PlaybackThread::dumpTracks_l(int fd, const Vector<String16>& 
         }
     }
 
-    write(fd, result.string(), result.size());
+    write(fd, result.c_str(), result.size());
 }
 
 void AudioFlinger::PlaybackThread::dumpInternals_l(int fd, const Vector<String16>& args)
@@ -2827,7 +2827,7 @@ void AudioFlinger::PlaybackThread::removeTrack_l(const sp<Track>& track)
 
     String8 result;
     track->appendDump(result, false /* active */);
-    mLocalLog.log("removeTrack_l (%p) %s", track.get(), result.string());
+    mLocalLog.log("removeTrack_l (%p) %s", track.get(), result.c_str());
 
     mTracks.remove(track);
     {
@@ -3886,9 +3886,9 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
 
                     releaseWakeLock_l();
                     // wait until we have something to do...
-                    ALOGV("%s going to sleep", myName.string());
+                    ALOGV("%s going to sleep", myName.c_str());
                     mWaitWorkCV.wait(mLock);
-                    ALOGV("%s waking up", myName.string());
+                    ALOGV("%s waking up", myName.c_str());
                     acquireWakeLock_l();
 
                     mMixerStatus = MIXER_IDLE;
@@ -6167,12 +6167,11 @@ void AudioFlinger::DirectOutputThread::processVolume_l(Track *track, bool lastTr
     // Ensure volumeshaper state always advances even when muted.
     const sp<AudioTrackServerProxy> proxy = track->mAudioTrackServerProxy;
 
-    const size_t framesReleased = proxy->framesReleased();
     const int64_t frames = mTimestamp.mPosition[ExtendedTimestamp::LOCATION_KERNEL];
     const int64_t time = mTimestamp.mTimeNs[ExtendedTimestamp::LOCATION_KERNEL];
 
-    ALOGV("%s: Direct/Offload bufferConsumed:%zu  timestamp frames:%lld  time:%lld",
-            __func__, framesReleased, (long long)frames, (long long)time);
+    ALOGVV("%s: Direct/Offload bufferConsumed:%zu  timestamp frames:%lld  time:%lld",
+            __func__, proxy->framesReleased(), (long long)frames, (long long)time);
 
     const int64_t volumeShaperFrames =
             mMonotonicFrameCounter.updateAndGetMonotonicFrameCount(frames, time);
@@ -8817,7 +8816,7 @@ void AudioFlinger::RecordThread::removeTrack_l(const sp<RecordTrack>& track)
 {
     String8 result;
     track->appendDump(result, false /* active */);
-    mLocalLog.log("removeTrack_l (%p) %s", track.get(), result.string());
+    mLocalLog.log("removeTrack_l (%p) %s", track.get(), result.c_str());
 
     mTracks.remove(track);
     // need anything related to effects here?
@@ -8896,7 +8895,7 @@ void AudioFlinger::RecordThread::dumpTracks_l(int fd, const Vector<String16>& ar
         }
 
     }
-    write(fd, result.string(), result.size());
+    write(fd, result.c_str(), result.size());
 }
 
 void AudioFlinger::RecordThread::setRecordSilenced(audio_port_handle_t portId, bool silenced)
@@ -9238,6 +9237,7 @@ AudioFlinger::AudioStreamIn* AudioFlinger::RecordThread::clearInput()
     Mutex::Autolock _l(mLock);
     AudioStreamIn *input = mInput;
     mInput = NULL;
+    mInputSource.clear();
     return input;
 }
 
@@ -9933,9 +9933,9 @@ bool AudioFlinger::MmapThread::threadLoop()
                 }
 
                 // wait until we have something to do...
-                ALOGV("%s going to sleep", myName.string());
+                ALOGV("%s going to sleep", myName.c_str());
                 mWaitWorkCV.wait(mLock);
-                ALOGV("%s waking up", myName.string());
+                ALOGV("%s waking up", myName.c_str());
 
                 checkSilentMode_l();
 
@@ -10303,7 +10303,7 @@ void AudioFlinger::MmapThread::dumpTracks_l(int fd, const Vector<String16>& args
     } else {
         dprintf(fd, "\n");
     }
-    write(fd, result.string(), result.size());
+    write(fd, result.c_str(), result.size());
 }
 
 AudioFlinger::MmapPlaybackThread::MmapPlaybackThread(
@@ -10311,14 +10311,24 @@ AudioFlinger::MmapPlaybackThread::MmapPlaybackThread(
         AudioHwDevice *hwDev,  AudioStreamOut *output, bool systemReady)
     : MmapThread(audioFlinger, id, hwDev, output->stream, systemReady, true /* isOut */),
       mStreamType(AUDIO_STREAM_MUSIC),
-      mStreamVolume(1.0),
-      mStreamMute(false),
       mOutput(output)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioMmapOut_%X", id);
     mChannelCount = audio_channel_count_from_out_mask(mChannelMask);
     mMasterVolume = audioFlinger->masterVolume_l();
     mMasterMute = audioFlinger->masterMute_l();
+
+    for (int i = AUDIO_STREAM_MIN; i < AUDIO_STREAM_FOR_POLICY_CNT; ++i) {
+        const audio_stream_type_t stream{static_cast<audio_stream_type_t>(i)};
+        mStreamTypes[stream].volume = 0.0f;
+        mStreamTypes[stream].mute = mAudioFlinger->streamMute_l(stream);
+    }
+    // Audio patch and call assistant volume are always max
+    mStreamTypes[AUDIO_STREAM_PATCH].volume = 1.0f;
+    mStreamTypes[AUDIO_STREAM_PATCH].mute = false;
+    mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].volume = 1.0f;
+    mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].mute = false;
+
     if (mAudioHwDev) {
         if (mAudioHwDev->canSetMasterVolume()) {
             mMasterVolume = 1.0;
@@ -10375,8 +10385,8 @@ void AudioFlinger::MmapPlaybackThread::setMasterMute(bool muted)
 void AudioFlinger::MmapPlaybackThread::setStreamVolume(audio_stream_type_t stream, float value)
 {
     Mutex::Autolock _l(mLock);
+    mStreamTypes[stream].volume = value;
     if (stream == mStreamType) {
-        mStreamVolume = value;
         broadcast_l();
     }
 }
@@ -10384,17 +10394,14 @@ void AudioFlinger::MmapPlaybackThread::setStreamVolume(audio_stream_type_t strea
 float AudioFlinger::MmapPlaybackThread::streamVolume(audio_stream_type_t stream) const
 {
     Mutex::Autolock _l(mLock);
-    if (stream == mStreamType) {
-        return mStreamVolume;
-    }
-    return 0.0f;
+    return mStreamTypes[stream].volume;
 }
 
 void AudioFlinger::MmapPlaybackThread::setStreamMute(audio_stream_type_t stream, bool muted)
 {
     Mutex::Autolock _l(mLock);
+    mStreamTypes[stream].mute = muted;
     if (stream == mStreamType) {
-        mStreamMute= muted;
         broadcast_l();
     }
 }
@@ -10415,14 +10422,13 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
 {
     float volume;
 
-    if (mMasterMute || mStreamMute) {
+    if (mMasterMute || streamMuted_l()) {
         volume = 0;
     } else {
-        volume = mMasterVolume * mStreamVolume;
+        volume = mMasterVolume * streamVolume_l();
     }
 
     if (volume != mHalVolFloat) {
-
         // Convert volumes from float to 8.24
         uint32_t vol = (uint32_t)(volume * (1 << 24));
 
@@ -10534,7 +10540,7 @@ void AudioFlinger::MmapPlaybackThread::dumpInternals_l(int fd, const Vector<Stri
     MmapThread::dumpInternals_l(fd, args);
 
     dprintf(fd, "  Stream type: %d Stream volume: %f HAL volume: %f Stream mute %d\n",
-            mStreamType, mStreamVolume, mHalVolFloat, mStreamMute);
+            mStreamType, streamVolume_l(), mHalVolFloat, streamMuted_l());
     dprintf(fd, "  Master volume: %f Master mute %d\n", mMasterVolume, mMasterMute);
 }
 
