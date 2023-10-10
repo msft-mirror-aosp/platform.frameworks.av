@@ -112,6 +112,10 @@ IAudioFlinger::CreateTrackOutput::toAidl() const {
     aidl.afFrameCount = VALUE_OR_RETURN(convertIntegral<int64_t>(afFrameCount));
     aidl.afSampleRate = VALUE_OR_RETURN(convertIntegral<int32_t>(afSampleRate));
     aidl.afLatencyMs = VALUE_OR_RETURN(convertIntegral<int32_t>(afLatencyMs));
+    aidl.afChannelMask = VALUE_OR_RETURN(
+            legacy2aidl_audio_channel_mask_t_AudioChannelLayout(afChannelMask, false /*isInput*/));
+    aidl.afFormat = VALUE_OR_RETURN(
+            legacy2aidl_audio_format_t_AudioFormatDescription(afFormat));
     aidl.outputId = VALUE_OR_RETURN(legacy2aidl_audio_io_handle_t_int32_t(outputId));
     aidl.portId = VALUE_OR_RETURN(legacy2aidl_audio_port_handle_t_int32_t(portId));
     aidl.audioTrack = audioTrack;
@@ -135,6 +139,11 @@ IAudioFlinger::CreateTrackOutput::fromAidl(
     legacy.afFrameCount = VALUE_OR_RETURN(convertIntegral<size_t>(aidl.afFrameCount));
     legacy.afSampleRate = VALUE_OR_RETURN(convertIntegral<uint32_t>(aidl.afSampleRate));
     legacy.afLatencyMs = VALUE_OR_RETURN(convertIntegral<uint32_t>(aidl.afLatencyMs));
+    legacy.afChannelMask = VALUE_OR_RETURN(
+            aidl2legacy_AudioChannelLayout_audio_channel_mask_t(aidl.afChannelMask,
+                                                                false /*isInput*/));
+    legacy.afFormat = VALUE_OR_RETURN(
+            aidl2legacy_AudioFormatDescription_audio_format_t(aidl.afFormat));
     legacy.outputId = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_io_handle_t(aidl.outputId));
     legacy.portId = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_port_handle_t(aidl.portId));
     legacy.audioTrack = aidl.audioTrack;
@@ -199,6 +208,8 @@ IAudioFlinger::CreateRecordOutput::toAidl() const {
     aidl.audioRecord = audioRecord;
     aidl.serverConfig = VALUE_OR_RETURN(
             legacy2aidl_audio_config_base_t_AudioConfigBase(serverConfig, true /*isInput*/));
+    aidl.halConfig = VALUE_OR_RETURN(
+        legacy2aidl_audio_config_base_t_AudioConfigBase(halConfig, true /*isInput*/));
     return aidl;
 }
 
@@ -221,6 +232,8 @@ IAudioFlinger::CreateRecordOutput::fromAidl(
     legacy.audioRecord = aidl.audioRecord;
     legacy.serverConfig = VALUE_OR_RETURN(
             aidl2legacy_AudioConfigBase_audio_config_base_t(aidl.serverConfig, true /*isInput*/));
+    legacy.halConfig = VALUE_OR_RETURN(
+        aidl2legacy_AudioConfigBase_audio_config_base_t(aidl.halConfig, true /*isInput*/));
     return legacy;
 }
 
@@ -480,12 +493,6 @@ status_t AudioFlingerClientAdapter::closeInput(audio_io_handle_t input) {
     return statusTFromBinderStatus(mDelegate->closeInput(inputAidl));
 }
 
-status_t AudioFlingerClientAdapter::invalidateStream(audio_stream_type_t stream) {
-    AudioStreamType streamAidl = VALUE_OR_RETURN_STATUS(
-            legacy2aidl_audio_stream_type_t_AudioStreamType(stream));
-    return statusTFromBinderStatus(mDelegate->invalidateStream(streamAidl));
-}
-
 status_t AudioFlingerClientAdapter::setVoiceVolume(float volume) {
     return statusTFromBinderStatus(mDelegate->setVoiceVolume(volume));
 }
@@ -639,7 +646,7 @@ audio_module_handle_t AudioFlingerClientAdapter::loadHwModule(const char* name) 
     return result.value_or(0);
 }
 
-uint32_t AudioFlingerClientAdapter::getPrimaryOutputSamplingRate() {
+uint32_t AudioFlingerClientAdapter::getPrimaryOutputSamplingRate() const {
     auto result = [&]() -> ConversionResult<uint32_t> {
         int32_t aidlRet;
         RETURN_IF_ERROR(statusTFromBinderStatus(
@@ -650,7 +657,7 @@ uint32_t AudioFlingerClientAdapter::getPrimaryOutputSamplingRate() {
     return result.value_or(0);
 }
 
-size_t AudioFlingerClientAdapter::getPrimaryOutputFrameCount() {
+size_t AudioFlingerClientAdapter::getPrimaryOutputFrameCount() const {
     auto result = [&]() -> ConversionResult<size_t> {
         int64_t aidlRet;
         RETURN_IF_ERROR(statusTFromBinderStatus(
@@ -665,7 +672,7 @@ status_t AudioFlingerClientAdapter::setLowRamDevice(bool isLowRamDevice, int64_t
     return statusTFromBinderStatus(mDelegate->setLowRamDevice(isLowRamDevice, totalMemory));
 }
 
-status_t AudioFlingerClientAdapter::getAudioPort(struct audio_port_v7* port) {
+status_t AudioFlingerClientAdapter::getAudioPort(struct audio_port_v7* port) const {
     media::AudioPortFw portAidl = VALUE_OR_RETURN_STATUS(
             legacy2aidl_audio_port_v7_AudioPortFw(*port));
     media::AudioPortFw aidlRet;
@@ -698,7 +705,7 @@ status_t AudioFlingerClientAdapter::releaseAudioPatch(audio_patch_handle_t handl
 }
 
 status_t AudioFlingerClientAdapter::listAudioPatches(unsigned int* num_patches,
-                                                     struct audio_patch* patches) {
+                                                     struct audio_patch* patches) const {
     std::vector<media::AudioPatchFw> aidlRet;
     int32_t maxPatches = VALUE_OR_RETURN_STATUS(convertIntegral<int32_t>(*num_patches));
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
@@ -746,7 +753,8 @@ size_t AudioFlingerClientAdapter::frameCountHAL(audio_io_handle_t ioHandle) cons
 }
 
 status_t
-AudioFlingerClientAdapter::getMicrophones(std::vector<media::MicrophoneInfoFw>* microphones) {
+AudioFlingerClientAdapter::getMicrophones(
+        std::vector<media::MicrophoneInfoFw>* microphones) const {
     std::vector<media::MicrophoneInfoFw> aidlRet;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mDelegate->getMicrophones(&aidlRet)));
     if (microphones != nullptr) {
@@ -781,7 +789,7 @@ status_t AudioFlingerClientAdapter::getMmapPolicyInfos(
     return statusTFromBinderStatus(mDelegate->getMmapPolicyInfos(policyType, policyInfos));
 }
 
-int32_t AudioFlingerClientAdapter::getAAudioMixerBurstCount() {
+int32_t AudioFlingerClientAdapter::getAAudioMixerBurstCount() const {
     auto result = [&]() -> ConversionResult<int32_t> {
         int32_t aidlRet;
         RETURN_IF_ERROR(statusTFromBinderStatus(mDelegate->getAAudioMixerBurstCount(&aidlRet)));
@@ -791,7 +799,7 @@ int32_t AudioFlingerClientAdapter::getAAudioMixerBurstCount() {
     return result.value_or(0);
 }
 
-int32_t AudioFlingerClientAdapter::getAAudioHardwareBurstMinUsec() {
+int32_t AudioFlingerClientAdapter::getAAudioHardwareBurstMinUsec() const {
     auto result = [&]() -> ConversionResult<int32_t> {
         int32_t aidlRet;
         RETURN_IF_ERROR(statusTFromBinderStatus(
@@ -822,7 +830,7 @@ status_t AudioFlingerClientAdapter::setRequestedLatencyMode(
 }
 
 status_t AudioFlingerClientAdapter::getSupportedLatencyModes(
-        audio_io_handle_t output, std::vector<audio_latency_mode_t>* modes) {
+        audio_io_handle_t output, std::vector<audio_latency_mode_t>* modes) const {
     if (modes == nullptr) {
         return BAD_VALUE;
     }
@@ -844,7 +852,7 @@ status_t AudioFlingerClientAdapter::setBluetoothVariableLatencyEnabled(bool enab
     return statusTFromBinderStatus(mDelegate->setBluetoothVariableLatencyEnabled(enabled));
 }
 
-status_t AudioFlingerClientAdapter::isBluetoothVariableLatencyEnabled(bool* enabled) {
+status_t AudioFlingerClientAdapter::isBluetoothVariableLatencyEnabled(bool* enabled) const {
     if (enabled == nullptr) {
         return BAD_VALUE;
     }
@@ -855,7 +863,7 @@ status_t AudioFlingerClientAdapter::isBluetoothVariableLatencyEnabled(bool* enab
     return NO_ERROR;
 }
 
-status_t AudioFlingerClientAdapter::supportsBluetoothVariableLatency(bool* support) {
+status_t AudioFlingerClientAdapter::supportsBluetoothVariableLatency(bool* support) const {
     if (support == nullptr) {
         return BAD_VALUE;
     }
@@ -864,6 +872,20 @@ status_t AudioFlingerClientAdapter::supportsBluetoothVariableLatency(bool* suppo
             mDelegate->supportsBluetoothVariableLatency(support)));
 
     return NO_ERROR;
+}
+
+status_t AudioFlingerClientAdapter::getSoundDoseInterface(
+        const sp<media::ISoundDoseCallback> &callback,
+        sp<media::ISoundDose>* soundDose) const {
+    return statusTFromBinderStatus(mDelegate->getSoundDoseInterface(callback, soundDose));
+}
+
+status_t AudioFlingerClientAdapter::invalidateTracks(
+        const std::vector<audio_port_handle_t>& portIds) {
+    std::vector<int32_t> portIdsAidl = VALUE_OR_RETURN_STATUS(
+            convertContainer<std::vector<int32_t>>(
+                    portIds, legacy2aidl_audio_port_handle_t_int32_t));
+    return statusTFromBinderStatus(mDelegate->invalidateTracks(portIdsAidl));
 }
 
 status_t AudioFlingerClientAdapter::getAudioPolicyConfig(media::AudioPolicyConfig *config) {
@@ -1106,12 +1128,6 @@ Status AudioFlingerServerAdapter::closeInput(int32_t input) {
     audio_io_handle_t inputLegacy = VALUE_OR_RETURN_BINDER(
             aidl2legacy_int32_t_audio_io_handle_t(input));
     return Status::fromStatusT(mDelegate->closeInput(inputLegacy));
-}
-
-Status AudioFlingerServerAdapter::invalidateStream(AudioStreamType stream) {
-    audio_stream_type_t streamLegacy = VALUE_OR_RETURN_BINDER(
-            aidl2legacy_AudioStreamType_audio_stream_type_t(stream));
-    return Status::fromStatusT(mDelegate->invalidateStream(streamLegacy));
 }
 
 Status AudioFlingerServerAdapter::setVoiceVolume(float volume) {
@@ -1407,6 +1423,21 @@ Status AudioFlingerServerAdapter::isBluetoothVariableLatencyEnabled(bool *enable
 
 Status AudioFlingerServerAdapter::supportsBluetoothVariableLatency(bool *support) {
     return Status::fromStatusT(mDelegate->supportsBluetoothVariableLatency(support));
+}
+
+Status AudioFlingerServerAdapter::getSoundDoseInterface(
+        const sp<media::ISoundDoseCallback>& callback,
+        sp<media::ISoundDose>* soundDose)
+{
+    return Status::fromStatusT(mDelegate->getSoundDoseInterface(callback, soundDose));
+}
+
+Status AudioFlingerServerAdapter::invalidateTracks(const std::vector<int32_t>& portIds) {
+    std::vector<audio_port_handle_t> portIdsLegacy = VALUE_OR_RETURN_BINDER(
+            convertContainer<std::vector<audio_port_handle_t>>(
+                    portIds, aidl2legacy_int32_t_audio_port_handle_t));
+    RETURN_BINDER_IF_ERROR(mDelegate->invalidateTracks(portIdsLegacy));
+    return Status::ok();
 }
 
 Status AudioFlingerServerAdapter::getAudioPolicyConfig(media::AudioPolicyConfig* _aidl_return) {

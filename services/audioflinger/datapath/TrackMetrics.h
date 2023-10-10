@@ -17,6 +17,11 @@
 #ifndef ANDROID_AUDIO_TRACKMETRICS_H
 #define ANDROID_AUDIO_TRACKMETRICS_H
 
+#include <binder/IActivityManager.h>
+#include <binder/IPCThreadState.h>
+#include <binder/IServiceManager.h>
+#include <media/MediaMetricsItem.h>
+
 #include <mutex>
 
 namespace android {
@@ -38,10 +43,13 @@ namespace android {
  * We currently deliver metrics based on an AudioIntervalGroup.
  */
 class TrackMetrics final {
+
+
 public:
-    TrackMetrics(std::string metricsId, bool isOut)
+    TrackMetrics(std::string metricsId, bool isOut, int clientUid)
         : mMetricsId(std::move(metricsId))
         , mIsOut(isOut)
+        , mUid(clientUid)
         {}  // we don't log a constructor item, we wait for more info in logConstructor().
 
     ~TrackMetrics() {
@@ -64,6 +72,18 @@ public:
                     AMEDIAMETRICS_PROP_EVENT_VALUE_BEGINAUDIOINTERVALGROUP, devices.c_str());
         }
         ++mIntervalCount;
+        const auto& mActivityManager = getActivityManager();
+        if (mActivityManager) {
+            if (mIsOut) {
+                mActivityManager->logFgsApiBegin(AUDIO_API,
+                    mUid,
+                    IPCThreadState::self() -> getCallingPid());
+            } else {
+                mActivityManager->logFgsApiBegin(MICROPHONE_API,
+                    mUid,
+                    IPCThreadState::self() -> getCallingPid());
+            }
+        }
     }
 
     void logConstructor(pid_t creatorPid, uid_t creatorUid, int32_t internalTrackId,
@@ -92,6 +112,18 @@ public:
         if (mLastVolumeChangeTimeNs != 0) {
             logVolume_l(mVolume); // flush out the last volume.
             mLastVolumeChangeTimeNs = 0;
+        }
+        const auto& mActivityManager = getActivityManager();
+        if (mActivityManager) {
+            if (mIsOut) {
+                mActivityManager->logFgsApiEnd(AUDIO_API,
+                    mUid,
+                    IPCThreadState::self() -> getCallingPid());
+            } else {
+                mActivityManager->logFgsApiEnd(MICROPHONE_API,
+                    mUid,
+                    IPCThreadState::self() -> getCallingPid());
+            }
         }
     }
 
@@ -222,8 +254,24 @@ private:
         // do not reset mUnderrunCount - it keeps continuously running for tracks.
     }
 
+    // Meyer's singleton is thread-safe.
+    static const sp<IActivityManager>& getActivityManager() {
+        static const auto activityManager = []() -> sp<IActivityManager> {
+            const sp<IServiceManager> sm(defaultServiceManager());
+            if (sm != nullptr) {
+                 return interface_cast<IActivityManager>(sm->checkService(String16("activity")));
+            }
+            return nullptr;
+        }();
+        return activityManager;
+    }
+
     const std::string mMetricsId;
     const bool        mIsOut;  // if true, than a playback track, otherwise used for record.
+
+    static constexpr int AUDIO_API = 5;
+    static constexpr int MICROPHONE_API = 6;
+    const int         mUid;
 
     mutable           std::mutex mLock;
 
