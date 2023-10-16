@@ -22,6 +22,7 @@
 
 #include <aidl/android/media/audio/IHalAdapterVendorExtension.h>
 #include <aidl/android/hardware/audio/core/BpModule.h>
+#include <aidl/android/hardware/audio/core/sounddose/BpSoundDose.h>
 #include <android-base/thread_annotations.h>
 #include <media/audiohal/DeviceHalInterface.h>
 #include <media/audiohal/EffectHalInterface.h>
@@ -166,6 +167,9 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
 
     int32_t supportsBluetoothVariableLatency(bool* supports __unused) override;
 
+    status_t getSoundDoseInterface(const std::string& module,
+                                   ::ndk::SpAIBinder* soundDoseBinder) override;
+
     status_t prepareToDisconnectExternalDevice(const struct audio_port_v7 *port) override;
 
     status_t setConnectedState(const struct audio_port_v7 *port, bool connected) override;
@@ -187,6 +191,8 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
         Status status = Status::UNKNOWN;
         MicrophoneInfoProvider::Info info;
     };
+    // IDs of ports for connected external devices, and whether they are held by streams.
+    using ConnectedPorts = std::map<int32_t /*port ID*/, bool>;
     using Patches = std::map<int32_t /*patch ID*/,
             ::aidl::android::hardware::audio::core::AudioPatch>;
     using PortConfigs = std::map<int32_t /*port config ID*/,
@@ -257,6 +263,7 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
             const ::aidl::android::media::audio::common::AudioConfig& config,
             const std::optional<::aidl::android::media::audio::common::AudioIoFlags>& flags,
             int32_t ioHandle);
+    bool isPortHeldByAStream(int32_t portId);
     status_t prepareToOpenStream(
         int32_t aidlHandle,
         const ::aidl::android::media::audio::common::AudioDevice& aidlDevice,
@@ -299,6 +306,8 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     const std::shared_ptr<::aidl::android::hardware::audio::core::IBluetooth> mBluetooth;
     const std::shared_ptr<::aidl::android::hardware::audio::core::IBluetoothA2dp> mBluetoothA2dp;
     const std::shared_ptr<::aidl::android::hardware::audio::core::IBluetoothLe> mBluetoothLe;
+    std::shared_ptr<::aidl::android::hardware::audio::core::sounddose::ISoundDose>
+        mSoundDose = nullptr;
     Ports mPorts;
     int32_t mDefaultInputPortId = -1;
     int32_t mDefaultOutputPortId = -1;
@@ -312,6 +321,7 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     std::mutex mLock;
     std::map<void*, Callbacks> mCallbacks GUARDED_BY(mLock);
     std::set<audio_port_handle_t> mDeviceDisconnectionNotified;
+    ConnectedPorts mConnectedPorts;
 };
 
 } // namespace android

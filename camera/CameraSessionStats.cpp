@@ -20,6 +20,7 @@
 #include <utils/String16.h>
 
 #include <camera/CameraSessionStats.h>
+#include <camera/StringUtils.h>
 
 #include <binder/Parcel.h>
 
@@ -130,6 +131,12 @@ status_t CameraStreamStats::readFromParcel(const android::Parcel* parcel) {
         return err;
     }
 
+    int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED;
+    if ((err = parcel->readInt32(&colorSpace)) != OK) {
+        ALOGE("%s: Failed to read color space from parcel", __FUNCTION__);
+        return err;
+    }
+
     mWidth = width;
     mHeight = height;
     mFormat = format;
@@ -146,6 +153,7 @@ status_t CameraStreamStats::readFromParcel(const android::Parcel* parcel) {
     mHistogramCounts = std::move(histogramCounts);
     mDynamicRangeProfile = dynamicRangeProfile;
     mStreamUseCase = streamUseCase;
+    mColorSpace = colorSpace;
 
     return OK;
 }
@@ -238,6 +246,11 @@ status_t CameraStreamStats::writeToParcel(android::Parcel* parcel) const {
         return err;
     }
 
+    if ((err = parcel->writeInt32(mColorSpace)) != OK) {
+        ALOGE("%s: Failed to write color space", __FUNCTION__);
+        return err;
+    }
+
     return OK;
 }
 
@@ -259,17 +272,20 @@ CameraSessionStats::CameraSessionStats() :
         mApiLevel(0),
         mIsNdk(false),
         mLatencyMs(-1),
+        mLogId(0),
         mMaxPreviewFps(0),
         mSessionType(0),
         mInternalReconfigure(0),
         mRequestCount(0),
         mResultErrorCount(0),
         mDeviceError(false),
-        mVideoStabilizationMode(-1) {}
+        mVideoStabilizationMode(-1),
+        mSessionIndex(0),
+        mCameraExtensionSessionStats() {}
 
-CameraSessionStats::CameraSessionStats(const String16& cameraId,
-        int facing, int newCameraState, const String16& clientName,
-        int apiLevel, bool isNdk, int32_t latencyMs) :
+CameraSessionStats::CameraSessionStats(const std::string& cameraId,
+        int facing, int newCameraState, const std::string& clientName,
+        int apiLevel, bool isNdk, int32_t latencyMs, int64_t logId) :
                 mCameraId(cameraId),
                 mFacing(facing),
                 mNewCameraState(newCameraState),
@@ -277,13 +293,16 @@ CameraSessionStats::CameraSessionStats(const String16& cameraId,
                 mApiLevel(apiLevel),
                 mIsNdk(isNdk),
                 mLatencyMs(latencyMs),
+                mLogId(logId),
                 mMaxPreviewFps(0),
                 mSessionType(0),
                 mInternalReconfigure(0),
                 mRequestCount(0),
                 mResultErrorCount(0),
                 mDeviceError(0),
-                mVideoStabilizationMode(-1) {}
+                mVideoStabilizationMode(-1),
+                mSessionIndex(0),
+                mCameraExtensionSessionStats() {}
 
 status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
     if (parcel == NULL) {
@@ -332,6 +351,12 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
     int32_t latencyMs;
     if ((err = parcel->readInt32(&latencyMs)) != OK) {
         ALOGE("%s: Failed to read latencyMs from parcel", __FUNCTION__);
+        return err;
+    }
+
+    int64_t logId;
+    if ((err = parcel->readInt64(&logId)) != OK) {
+        ALOGE("%s: Failed to read log ID from parcel", __FUNCTION__);
         return err;
     }
 
@@ -389,13 +414,26 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
         return err;
     }
 
-    mCameraId = id;
+    int32_t sessionIdx;
+    if ((err = parcel->readInt32(&sessionIdx)) != OK) {
+        ALOGE("%s: Failed to read session index from parcel", __FUNCTION__);
+        return err;
+    }
+
+    CameraExtensionSessionStats extStats{};
+    if ((err = extStats.readFromParcel(parcel)) != OK) {
+        ALOGE("%s: Failed to read extension session stats from parcel", __FUNCTION__);
+        return err;
+    }
+
+    mCameraId = toStdString(id);
     mFacing = facing;
     mNewCameraState = newCameraState;
-    mClientName = clientName;
+    mClientName = toStdString(clientName);
     mApiLevel = apiLevel;
     mIsNdk = isNdk;
     mLatencyMs = latencyMs;
+    mLogId = logId;
     mMaxPreviewFps = maxPreviewFps;
     mSessionType = sessionType;
     mInternalReconfigure = internalReconfigure;
@@ -403,8 +441,10 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
     mResultErrorCount = resultErrorCount;
     mDeviceError = deviceError;
     mStreamStats = std::move(streamStats);
-    mUserTag = userTag;
+    mUserTag = toStdString(userTag);
     mVideoStabilizationMode = videoStabilizationMode;
+    mSessionIndex = sessionIdx;
+    mCameraExtensionSessionStats = extStats;
 
     return OK;
 }
@@ -417,7 +457,7 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
 
     status_t err = OK;
 
-    if ((err = parcel->writeString16(mCameraId)) != OK) {
+    if ((err = parcel->writeString16(toString16(mCameraId))) != OK) {
         ALOGE("%s: Failed to write camera id!", __FUNCTION__);
         return err;
     }
@@ -432,7 +472,7 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
         return err;
     }
 
-    if ((err = parcel->writeString16(mClientName)) != OK) {
+    if ((err = parcel->writeString16(toString16(mClientName))) != OK) {
         ALOGE("%s: Failed to write client name!", __FUNCTION__);
         return err;
     }
@@ -449,6 +489,11 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
 
     if ((err = parcel->writeInt32(mLatencyMs)) != OK) {
         ALOGE("%s: Failed to write latency in Ms!", __FUNCTION__);
+        return err;
+    }
+
+    if ((err = parcel->writeInt64(mLogId)) != OK) {
+        ALOGE("%s: Failed to write log ID!", __FUNCTION__);
         return err;
     }
 
@@ -487,7 +532,7 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
         return err;
     }
 
-    if ((err = parcel->writeString16(mUserTag)) != OK) {
+    if ((err = parcel->writeString16(toString16(mUserTag))) != OK) {
         ALOGE("%s: Failed to write user tag!", __FUNCTION__);
         return err;
     }
@@ -496,6 +541,17 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
         ALOGE("%s: Failed to write video stabilization mode!", __FUNCTION__);
         return err;
     }
+
+    if ((err = parcel->writeInt32(mSessionIndex)) != OK) {
+        ALOGE("%s: Failed to write session index!", __FUNCTION__);
+        return err;
+    }
+
+    if ((err = mCameraExtensionSessionStats.writeToParcel(parcel)) != OK) {
+        ALOGE("%s: Failed to write extension sessions stats!", __FUNCTION__);
+        return err;
+    }
+
     return OK;
 }
 

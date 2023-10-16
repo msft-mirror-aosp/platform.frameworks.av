@@ -211,6 +211,7 @@ sp<IMemory> StagefrightMetadataRetriever::getImageInternal(
         mime = MEDIA_MIMETYPE_VIDEO_AV1;
         trackMeta = new MetaData(*trackMeta);
         trackMeta->setCString(kKeyMIMEType, mime);
+        isHeif = true;
     }
 
     sp<AMessage> format = new AMessage;
@@ -471,7 +472,7 @@ const char *StagefrightMetadataRetriever::extractMetadata(int keyCode) {
         return NULL;
     }
 
-    return mMetaData.valueAt(index).string();
+    return mMetaData.valueAt(index).c_str();
 }
 
 void StagefrightMetadataRetriever::parseColorAspects(const sp<MetaData>& meta) {
@@ -691,7 +692,7 @@ void StagefrightMetadataRetriever::parseMetaData() {
     // To save the language codes for all timed text tracks
     // If multiple text tracks present, the format will look
     // like "eng:chi"
-    if (!timedTextLang.isEmpty()) {
+    if (!timedTextLang.empty()) {
         mMetaData.add(METADATA_KEY_TIMED_TEXT_LANGUAGES, timedTextLang);
     }
 

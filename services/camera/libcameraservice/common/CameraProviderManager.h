@@ -86,6 +86,7 @@ enum SystemCameraKind {
 };
 
 #define CAMERA_DEVICE_API_VERSION_1_0 HARDWARE_DEVICE_API_VERSION(1, 0)
+#define CAMERA_DEVICE_API_VERSION_1_2 HARDWARE_DEVICE_API_VERSION(1, 2)
 #define CAMERA_DEVICE_API_VERSION_3_0 HARDWARE_DEVICE_API_VERSION(3, 0)
 #define CAMERA_DEVICE_API_VERSION_3_1 HARDWARE_DEVICE_API_VERSION(3, 1)
 #define CAMERA_DEVICE_API_VERSION_3_2 HARDWARE_DEVICE_API_VERSION(3, 2)
@@ -179,15 +180,15 @@ public:
     struct StatusListener : virtual public RefBase {
         ~StatusListener() {}
 
-        virtual void onDeviceStatusChanged(const String8 &cameraId,
+        virtual void onDeviceStatusChanged(const std::string &cameraId,
                 CameraDeviceStatus newStatus) = 0;
-        virtual void onDeviceStatusChanged(const String8 &cameraId,
-                const String8 &physicalCameraId,
+        virtual void onDeviceStatusChanged(const std::string &cameraId,
+                const std::string &physicalCameraId,
                 CameraDeviceStatus newStatus) = 0;
-        virtual void onTorchStatusChanged(const String8 &cameraId,
+        virtual void onTorchStatusChanged(const std::string &cameraId,
                 TorchModeStatus newStatus,
                 SystemCameraKind kind) = 0;
-        virtual void onTorchStatusChanged(const String8 &cameraId,
+        virtual void onTorchStatusChanged(const std::string &cameraId,
                 TorchModeStatus newStatus) = 0;
         virtual void onNewProviderRegistered() = 0;
     };
@@ -246,6 +247,11 @@ public:
      * Return true if the camera device has native zoom ratio support.
      */
     bool supportNativeZoomRatio(const std::string &id) const;
+
+    /**
+     * Return true if the camera device has no composite Jpeg/R support.
+     */
+    bool isCompositeJpegRDisabled(const std::string &id) const;
 
     /**
      * Return the resource cost of this camera device
@@ -407,7 +413,11 @@ public:
 
     status_t notifyUsbDeviceEvent(int32_t eventId, const std::string &usbDeviceId);
 
+    static bool isConcurrentDynamicRangeCaptureSupported(const CameraMetadata& deviceInfo,
+            int64_t profile, int64_t concurrentProfile);
+
     static const float kDepthARTolerance;
+    static const bool kFrameworkJpegRDisabled;
 private:
     // All private members, unless otherwise noted, expect mInterfaceMutex to be locked before use
     mutable std::mutex mInterfaceMutex;
@@ -564,6 +574,7 @@ private:
 
             bool hasFlashUnit() const { return mHasFlashUnit; }
             bool supportNativeZoomRatio() const { return mSupportNativeZoomRatio; }
+            bool isCompositeJpegRDisabled() const { return mCompositeJpegRDisabled; }
             virtual status_t setTorchMode(bool enabled) = 0;
             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
             virtual status_t getTorchStrengthLevel(int32_t *torchStrength) = 0;
@@ -605,13 +616,14 @@ private:
                     mParentProvider(parentProvider), mTorchStrengthLevel(0),
                     mTorchMaximumStrengthLevel(0), mTorchDefaultStrengthLevel(0),
                     mHasFlashUnit(false), mSupportNativeZoomRatio(false),
-                    mPublicCameraIds(publicCameraIds) {}
+                    mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false) {}
             virtual ~DeviceInfo() {}
         protected:
 
             bool mHasFlashUnit; // const after constructor
             bool mSupportNativeZoomRatio; // const after constructor
             const std::vector<std::string>& mPublicCameraIds;
+            bool mCompositeJpegRDisabled;
         };
         std::vector<std::unique_ptr<DeviceInfo>> mDevices;
         std::unordered_set<std::string> mUniqueCameraIds;
@@ -673,7 +685,9 @@ private:
             status_t fixupTorchStrengthTags();
             status_t addDynamicDepthTags(bool maxResolution = false);
             status_t deriveHeicTags(bool maxResolution = false);
+            status_t deriveJpegRTags(bool maxResolution = false);
             status_t addRotateCropTags();
+            status_t addAutoframingTags();
             status_t addPreCorrectionActiveArraySize();
             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
 
@@ -771,7 +785,7 @@ private:
         void torchModeStatusChangeInternal(const std::string& cameraDeviceName,
                 TorchModeStatus newStatus);
 
-        void removeDevice(std::string id);
+        void removeDevice(const std::string &id);
 
     };
 
@@ -797,6 +811,8 @@ private:
     // and the calling code doesn't mutate the list of providers or their lists of devices.
     // No guarantees on the order of traversal
     ProviderInfo::DeviceInfo* findDeviceInfoLocked(const std::string& id) const;
+
+    bool isCompositeJpegRDisabledLocked(const std::string &id) const;
 
     // Map external providers to USB devices in order to handle USB hotplug
     // events for lazy HALs

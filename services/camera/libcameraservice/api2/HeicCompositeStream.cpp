@@ -29,6 +29,7 @@
 #include <gui/Surface.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
+#include <camera/StringUtils.h>
 
 #include <mediadrm/ICrypto.h>
 #include <media/MediaCodecBuffer.h>
@@ -98,17 +99,17 @@ bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
     status_t err;
     int format;
     if ((err = anw->query(anw, NATIVE_WINDOW_FORMAT, &format)) != OK) {
-        String8 msg = String8::format("Failed to query Surface format: %s (%d)", strerror(-err),
+        std::string msg = fmt::sprintf("Failed to query Surface format: %s (%d)", strerror(-err),
                 err);
-        ALOGE("%s: %s", __FUNCTION__, msg.string());
+        ALOGE("%s: %s", __FUNCTION__, msg.c_str());
         return false;
     }
 
     int dataspace;
     if ((err = anw->query(anw, NATIVE_WINDOW_DEFAULT_DATASPACE, &dataspace)) != OK) {
-        String8 msg = String8::format("Failed to query Surface dataspace: %s (%d)", strerror(-err),
+        std::string msg = fmt::sprintf("Failed to query Surface dataspace: %s (%d)", strerror(-err),
                 err);
-        ALOGE("%s: %s", __FUNCTION__, msg.string());
+        ALOGE("%s: %s", __FUNCTION__, msg.c_str());
         return false;
     }
 
@@ -117,11 +118,11 @@ bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
 
 status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface>>& consumers,
         bool /*hasDeferredConsumer*/, uint32_t width, uint32_t height, int format,
-        camera_stream_rotation_t rotation, int *id, const String8& physicalCameraId,
+        camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
         const std::unordered_set<int32_t> &sensorPixelModesUsed,
         std::vector<int> *surfaceIds,
-        int /*streamSetId*/, bool /*isShared*/) {
-
+        int /*streamSetId*/, bool /*isShared*/, int32_t colorSpace,
+        int64_t /*dynamicProfile*/, int64_t /*streamUseCase*/, bool useReadoutTimestamp) {
     sp<CameraDeviceBase> device = mDevice.promote();
     if (!device.get()) {
         ALOGE("%s: Invalid camera device!", __FUNCTION__);
@@ -147,7 +148,14 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface
 
     res = device->createStream(mAppSegmentSurface, mAppSegmentMaxSize, 1, format,
             kAppSegmentDataSpace, rotation, &mAppSegmentStreamId, physicalCameraId,
-            sensorPixelModesUsed,surfaceIds);
+            sensorPixelModesUsed, surfaceIds, camera3::CAMERA3_STREAM_SET_ID_INVALID,
+            /*isShared*/false, /*isMultiResolution*/false,
+            /*consumerUsage*/0, ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
+            ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+            OutputConfiguration::MIRROR_MODE_AUTO,
+            colorSpace,
+            useReadoutTimestamp);
     if (res == OK) {
         mAppSegmentSurfaceId = (*surfaceIds)[0];
     } else {
@@ -183,7 +191,14 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface
     int srcStreamFmt = mUseGrid ? HAL_PIXEL_FORMAT_YCbCr_420_888 :
             HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
     res = device->createStream(mMainImageSurface, width, height, srcStreamFmt, kHeifDataSpace,
-            rotation, id, physicalCameraId, sensorPixelModesUsed, &sourceSurfaceId);
+            rotation, id, physicalCameraId, sensorPixelModesUsed, &sourceSurfaceId,
+            camera3::CAMERA3_STREAM_SET_ID_INVALID, /*isShared*/false, /*isMultiResolution*/false,
+            /*consumerUsage*/0, ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
+            ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+            OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+            OutputConfiguration::MIRROR_MODE_AUTO,
+            colorSpace,
+            useReadoutTimestamp);
     if (res == OK) {
         mMainImageSurfaceId = sourceSurfaceId[0];
         mMainImageStreamId = *id;

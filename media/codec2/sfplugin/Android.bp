@@ -52,7 +52,6 @@ cc_library_shared {
         "android.hardware.drm@1.0",
         "android.hardware.media.c2@1.0",
         "android.hardware.media.omx@1.0",
-        "android.hardware.graphics.mapper@4.0",
         "libbase",
         "libbinder",
         "libcodec2",
@@ -71,10 +70,11 @@ cc_library_shared {
         "libstagefright_codecbase",
         "libstagefright_foundation",
         "libstagefright_omx",
-	"libstagefright_surface_utils",
+        "libstagefright_surface_utils",
         "libstagefright_xmlparser",
         "libui",
         "libutils",
+        "server_configurable_flags",
     ],
 
     export_shared_lib_headers: [

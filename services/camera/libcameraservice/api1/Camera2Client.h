@@ -86,6 +86,7 @@ public:
     virtual status_t        setAudioRestriction(int mode);
     virtual int32_t         getGlobalAudioRestriction();
     virtual status_t        setRotateAndCropOverride(uint8_t rotateAndCrop);
+    virtual status_t        setAutoframingOverride(uint8_t autoframingMode);
 
     virtual bool            supportsCameraMute();
     virtual status_t        setCameraMute(bool enabled);
@@ -96,15 +97,19 @@ public:
                                     const std::vector<int64_t>& useCaseOverrides);
     virtual void            clearStreamUseCaseOverrides();
 
+    virtual bool            supportsZoomOverride();
+    virtual status_t        setZoomOverride(int32_t zoomOverride);
+
     /**
      * Interface used by CameraService
      */
 
     Camera2Client(const sp<CameraService>& cameraService,
             const sp<hardware::ICameraClient>& cameraClient,
-            const String16& clientPackageName,
-            const std::optional<String16>& clientFeatureId,
-            const String8& cameraDeviceId,
+            std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
+            const std::string& clientPackageName,
+            const std::optional<std::string>& clientFeatureId,
+            const std::string& cameraDeviceId,
             int api1CameraId,
             int cameraFacing,
             int sensorOrientation,
@@ -118,7 +123,7 @@ public:
     virtual ~Camera2Client();
 
     virtual status_t initialize(sp<CameraProviderManager> manager,
-            const String8& monitorTags) override;
+            const std::string& monitorTags) override;
 
     virtual status_t dump(int fd, const Vector<String16>& args);
 
@@ -243,7 +248,7 @@ private:
     status_t overrideVideoSnapshotSize(Parameters &params);
 
     template<typename TProviderPtr>
-    status_t initializeImpl(TProviderPtr providerPtr, const String8& monitorTags);
+    status_t initializeImpl(TProviderPtr providerPtr, const std::string& monitorTags);
 
     bool isZslEnabledInStillTemplate();
     // The current rotate & crop mode passed by camera service

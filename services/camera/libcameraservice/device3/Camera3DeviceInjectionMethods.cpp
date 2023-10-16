@@ -58,7 +58,8 @@ status_t Camera3Device::Camera3DeviceInjectionMethods::injectCamera(
     if (parent->mStatus == STATUS_ACTIVE) {
         ALOGV("%s: Let the device be IDLE and the request thread is paused",
                 __FUNCTION__);
-        res = parent->internalPauseAndWaitLocked(maxExpectedDuration);
+        res = parent->internalPauseAndWaitLocked(maxExpectedDuration,
+                                                 /*requestThreadInvocation*/false);
         if (res != OK) {
             ALOGE("%s: Can't pause captures to inject camera!", __FUNCTION__);
             return res;
@@ -117,7 +118,8 @@ status_t Camera3Device::Camera3DeviceInjectionMethods::stopInjection() {
     if (parent->mStatus == STATUS_ACTIVE) {
         ALOGV("%s: Let the device be IDLE and the request thread is paused",
                 __FUNCTION__);
-        res = parent->internalPauseAndWaitLocked(maxExpectedDuration);
+        res = parent->internalPauseAndWaitLocked(maxExpectedDuration,
+                                                 /*requestThreadInvocation*/false);
         if (res != OK) {
             ALOGE("%s: Can't pause captures to stop injection!", __FUNCTION__);
             return res;
@@ -155,7 +157,7 @@ bool Camera3Device::Camera3DeviceInjectionMethods::isStreamConfigCompleteButNotI
     return mIsStreamConfigCompleteButNotInjected;
 }
 
-const String8& Camera3Device::Camera3DeviceInjectionMethods::getInjectedCamId()
+const std::string& Camera3Device::Camera3DeviceInjectionMethods::getInjectedCamId()
         const {
     return mInjectedCamId;
 }
@@ -204,7 +206,7 @@ status_t Camera3Device::Camera3DeviceInjectionMethods::injectionConfigureStreams
 
     // Start configuring the streams
     ALOGV("%s: Injection camera %s: Starting stream configuration", __FUNCTION__,
-            mInjectedCamId.string());
+            mInjectedCamId.c_str());
 
     parent->mPreparerThread->pause();
 
@@ -247,12 +249,12 @@ status_t Camera3Device::Camera3DeviceInjectionMethods::injectionConfigureStreams
     parent->internalUpdateStatusLocked(STATUS_CONFIGURED);
 
     ALOGV("%s: Injection camera %s: Stream configuration complete", __FUNCTION__,
-            mInjectedCamId.string());
+            mInjectedCamId.c_str());
 
     auto rc = parent->mPreparerThread->resume();
     if (rc != OK) {
         ALOGE("%s: Injection camera %s: Preparer thread failed to resume!",
-                 __FUNCTION__, mInjectedCamId.string());
+                 __FUNCTION__, mInjectedCamId.c_str());
         return rc;
     }
 

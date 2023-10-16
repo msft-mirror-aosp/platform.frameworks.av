@@ -143,7 +143,8 @@ AudioDeviceDescription make_ADD_MicIn() {
 }
 
 AudioDeviceDescription make_ADD_RSubmixIn() {
-    return make_AudioDeviceDescription(AudioDeviceType::IN_SUBMIX);
+    return make_AudioDeviceDescription(AudioDeviceType::IN_SUBMIX,
+                                       AudioDeviceDescription::CONNECTION_VIRTUAL());
 }
 
 AudioDeviceDescription make_ADD_DefaultOut() {
@@ -646,7 +647,8 @@ TEST_P(AudioStandardRoundTripTest, Aidl2Legacy2Aidl) {
     EXPECT_EQ(initial, convBack.value());
 }
 INSTANTIATE_TEST_SUITE_P(AudioStandard, AudioStandardRoundTripTest,
-                         testing::Values(AudioStandard::NONE, AudioStandard::EDID));
+                         testing::Values(AudioStandard::NONE, AudioStandard::EDID,
+                                         AudioStandard::SADB, AudioStandard::VSADB));
 
 class AudioEncapsulationMetadataTypeRoundTripTest
     : public testing::TestWithParam<AudioEncapsulationMetadataType> {};
@@ -705,7 +707,11 @@ INSTANTIATE_TEST_SUITE_P(
         ExtraAudioDescriptor, ExtraAudioDescriptorRoundTripTest,
         testing::Values(std::make_tuple(AudioStandard::NONE, AudioEncapsulationType::NONE),
                         std::make_tuple(AudioStandard::EDID, AudioEncapsulationType::NONE),
-                        std::make_tuple(AudioStandard::EDID, AudioEncapsulationType::IEC61937)));
+                        std::make_tuple(AudioStandard::EDID, AudioEncapsulationType::IEC61937),
+                        std::make_tuple(AudioStandard::SADB, AudioEncapsulationType::NONE),
+                        std::make_tuple(AudioStandard::SADB, AudioEncapsulationType::IEC61937),
+                        std::make_tuple(AudioStandard::VSADB, AudioEncapsulationType::NONE),
+                        std::make_tuple(AudioStandard::VSADB, AudioEncapsulationType::IEC61937)));
 
 TEST(AudioPortSessionExtRoundTripTest, Aidl2Legacy2Aidl) {
     const int32_t initial = 7;

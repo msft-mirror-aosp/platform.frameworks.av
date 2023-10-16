@@ -21,7 +21,6 @@
 
 #include <camera/CaptureResult.h>
 #include <camera/CameraMetadata.h>
-#include <utils/String8.h>
 #include <utils/Timers.h>
 
 #include "common/CameraDeviceBase.h"
@@ -168,7 +167,7 @@ struct InFlightRequest {
     // For request on a physical camera stream, the inside set contains one Id
     // For request on a stream group containing physical camera streams, the
     // inside set contains all stream Ids in the group.
-    std::set<std::set<String8>> physicalCameraIds;
+    std::set<std::set<std::string>> physicalCameraIds;
 
     // Map of physicalCameraId <-> Metadata
     std::vector<PhysicalCaptureResultInfo> physicalMetadatas;
@@ -181,6 +180,9 @@ struct InFlightRequest {
 
     // Indicates that ROTATE_AND_CROP was set to AUTO
     bool rotateAndCropAuto;
+
+    // Indicates that AUTOFRAMING was set to AUTO
+    bool autoframingAuto;
 
     // Requested camera ids (both logical and physical) with zoomRatio != 1.0f
     std::set<std::string> cameraIdsWithZoom;
@@ -214,15 +216,17 @@ struct InFlightRequest {
             stillCapture(false),
             zslCapture(false),
             rotateAndCropAuto(false),
+            autoframingAuto(false),
             requestTimeNs(0),
             transform(-1) {
     }
 
     InFlightRequest(int numBuffers, CaptureResultExtras extras, bool hasInput,
             bool hasAppCallback, nsecs_t minDuration, nsecs_t maxDuration, bool fixedFps,
-            const std::set<std::set<String8>>& physicalCameraIdSet, bool isStillCapture,
-            bool isZslCapture, bool rotateAndCropAuto, const std::set<std::string>& idsWithZoom,
-            nsecs_t requestNs, const SurfaceMap& outSurfaces = SurfaceMap{}) :
+            const std::set<std::set<std::string>>& physicalCameraIdSet, bool isStillCapture,
+            bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
+            const std::set<std::string>& idsWithZoom, nsecs_t requestNs,
+            const SurfaceMap& outSurfaces = SurfaceMap{}) :
             shutterTimestamp(0),
             sensorTimestamp(0),
             requestStatus(OK),
@@ -240,6 +244,7 @@ struct InFlightRequest {
             stillCapture(isStillCapture),
             zslCapture(isZslCapture),
             rotateAndCropAuto(rotateAndCropAuto),
+            autoframingAuto(autoframingAuto),
             cameraIdsWithZoom(idsWithZoom),
             requestTimeNs(requestNs),
             outputSurfaces(outSurfaces),

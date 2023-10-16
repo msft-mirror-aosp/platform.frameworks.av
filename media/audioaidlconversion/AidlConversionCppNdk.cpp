@@ -508,15 +508,6 @@ const detail::AudioDevicePairs& getAudioDevicePairs() {
             {
                 AUDIO_DEVICE_IN_ECHO_REFERENCE, make_AudioDeviceDescription(
                         AudioDeviceType::IN_ECHO_REFERENCE)
-            },
-            {
-                AUDIO_DEVICE_IN_REMOTE_SUBMIX, make_AudioDeviceDescription(
-                         AudioDeviceType::IN_SUBMIX)
-            },
-            {
-                AUDIO_DEVICE_OUT_REMOTE_SUBMIX, make_AudioDeviceDescription(
-                        AudioDeviceType::OUT_SUBMIX,
-                        GET_DEVICE_DESC_CONNECTION(VIRTUAL))
             }
         }};
         append_AudioDeviceDescription(pairs,
@@ -592,6 +583,11 @@ const detail::AudioDevicePairs& getAudioDevicePairs() {
                 AUDIO_DEVICE_IN_BLE_HEADSET, AUDIO_DEVICE_OUT_BLE_HEADSET,
                 AudioDeviceType::IN_HEADSET, AudioDeviceType::OUT_HEADSET,
                 GET_DEVICE_DESC_CONNECTION(BT_LE));
+        append_AudioDeviceDescription(pairs,
+                AUDIO_DEVICE_IN_REMOTE_SUBMIX, AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
+                AudioDeviceType::IN_SUBMIX, AudioDeviceType::OUT_SUBMIX,
+                GET_DEVICE_DESC_CONNECTION(VIRTUAL));
+
         return pairs;
     }();
     return pairs;
@@ -1309,6 +1305,10 @@ ConversionResult<audio_input_flags_t> aidl2legacy_AudioInputFlags_audio_input_fl
             return AUDIO_INPUT_FLAG_DIRECT;
         case AudioInputFlags::ULTRASOUND:
             return AUDIO_INPUT_FLAG_ULTRASOUND;
+        case AudioInputFlags::HOTWORD_TAP:
+            return AUDIO_INPUT_FLAG_HOTWORD_TAP;
+        case AudioInputFlags::HW_LOOKBACK:
+            return AUDIO_INPUT_FLAG_HW_LOOKBACK;
     }
     return unexpected(BAD_VALUE);
 }
@@ -1336,6 +1336,10 @@ ConversionResult<AudioInputFlags> legacy2aidl_audio_input_flags_t_AudioInputFlag
             return AudioInputFlags::DIRECT;
         case AUDIO_INPUT_FLAG_ULTRASOUND:
             return AudioInputFlags::ULTRASOUND;
+        case AUDIO_INPUT_FLAG_HOTWORD_TAP:
+            return AudioInputFlags::HOTWORD_TAP;
+        case AUDIO_INPUT_FLAG_HW_LOOKBACK:
+            return AudioInputFlags::HW_LOOKBACK;
     }
     return unexpected(BAD_VALUE);
 }
@@ -2794,6 +2798,10 @@ aidl2legacy_AudioStandard_audio_standard_t(AudioStandard aidl) {
             return AUDIO_STANDARD_NONE;
         case AudioStandard::EDID:
             return AUDIO_STANDARD_EDID;
+        case AudioStandard::SADB:
+            return AUDIO_STANDARD_SADB;
+        case AudioStandard::VSADB:
+            return AUDIO_STANDARD_VSADB;
     }
     return unexpected(BAD_VALUE);
 }
@@ -2805,6 +2813,10 @@ legacy2aidl_audio_standard_t_AudioStandard(audio_standard_t legacy) {
             return AudioStandard::NONE;
         case AUDIO_STANDARD_EDID:
             return AudioStandard::EDID;
+        case AUDIO_STANDARD_SADB:
+            return AudioStandard::SADB;
+        case AUDIO_STANDARD_VSADB:
+            return AudioStandard::VSADB;
     }
     return unexpected(BAD_VALUE);
 }

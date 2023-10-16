@@ -105,14 +105,14 @@ convertAidlToHidl37StreamCombination(
 binder::Status
 convertToHALStreamCombination(
         const SessionConfiguration& sessionConfiguration,
-        const String8 &logicalCameraId, const CameraMetadata &deviceInfo,
+        const std::string &logicalCameraId, const CameraMetadata &deviceInfo,
         metadataGetter getMetadata, const std::vector<std::string> &physicalCameraIds,
         hardware::camera::device::V3_7::StreamConfiguration &streamConfiguration,
         bool overrideForPerfClass, bool *earlyExit) {
     aidl::android::hardware::camera::device::StreamConfiguration aidlStreamConfiguration;
     auto ret = convertToHALStreamCombination(sessionConfiguration, logicalCameraId, deviceInfo,
-            getMetadata, physicalCameraIds, aidlStreamConfiguration, overrideForPerfClass,
-            earlyExit);
+            false /*isCompositeJpegRDisabled*/, getMetadata, physicalCameraIds,
+            aidlStreamConfiguration, overrideForPerfClass, earlyExit);
     if (!ret.isOk()) {
         return ret;
     }

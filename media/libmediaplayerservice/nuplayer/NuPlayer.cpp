@@ -370,7 +370,7 @@ status_t NuPlayer::setBufferingSettings(const BufferingSettings& buffering) {
 }
 
 void NuPlayer::setDataSourceAsync(const String8& rtpParams) {
-    ALOGD("setDataSourceAsync for RTP = %s", rtpParams.string());
+    ALOGD("setDataSourceAsync for RTP = %s", rtpParams.c_str());
     sp<AMessage> msg = new AMessage(kWhatSetDataSource, this);
 
     sp<AMessage> notify = new AMessage(kWhatSourceNotify, this);
@@ -555,6 +555,13 @@ void NuPlayer::writeTrackInfo(
         reply->writeInt32(isAuto);
         reply->writeInt32(isDefault);
         reply->writeInt32(isForced);
+    } else if (trackType == MEDIA_TRACK_TYPE_AUDIO) {
+        int32_t hapticChannelCount;
+        bool hasHapticChannels = format->findInt32("haptic-channel-count", &hapticChannelCount);
+        reply->writeInt32(hasHapticChannels);
+        if (hasHapticChannels) {
+            reply->writeInt32(hapticChannelCount);
+        }
     }
 }
 
@@ -3028,6 +3035,16 @@ const char *NuPlayer::getDataSourceType() {
         default:
             return "None";
     }
+ }
+
+ void NuPlayer::dump(AString& logString) {
+    logString.append("renderer(");
+    if (mRenderer != nullptr) {
+        mRenderer->dump(logString);
+    } else {
+        logString.append("null");
+    }
+    logString.append(")");
  }
 
 // Modular DRM begin

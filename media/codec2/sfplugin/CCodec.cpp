@@ -206,12 +206,19 @@ public:
         mNode = new C2OMXNode(comp);
         mOmxNode = new hardware::media::omx::V1_0::utils::TWOmxNode(mNode);
         mNode->setFrameSize(mWidth, mHeight);
-
         // Usage is queried during configure(), so setting it beforehand.
-        OMX_U32 usage = mConfig.mUsage & 0xFFFFFFFF;
-        (void)mNode->setParameter(
-                (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits,
-                &usage, sizeof(usage));
+        // 64 bit set parameter is existing only in C2OMXNode.
+        OMX_U64 usage64 = mConfig.mUsage;
+        status_t res = mNode->setParameter(
+                (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits64,
+                &usage64, sizeof(usage64));
+
+        if (res != OK) {
+            OMX_U32 usage = mConfig.mUsage & 0xFFFFFFFF;
+            (void)mNode->setParameter(
+                    (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits,
+                    &usage, sizeof(usage));
+        }
 
         return GetStatus(mSource->configure(
                 mOmxNode, static_cast<hardware::graphics::common::V1_0::Dataspace>(mDataSpace)));
@@ -1825,6 +1832,7 @@ void CCodec::start() {
         mCallback->onError(err2, ACTION_CODE_FATAL);
         return;
     }
+
     err2 = mChannel->start(inputFormat, outputFormat, buffersBoundToCodec);
     if (err2 != OK) {
         mCallback->onError(err2, ACTION_CODE_FATAL);
@@ -2128,6 +2136,25 @@ void CCodec::signalResume() {
         RevertOutputFormatIfNeeded(outputFormat, config->mOutputFormat);
     }
 
+    std::map<size_t, sp<MediaCodecBuffer>> clientInputBuffers;
+    status_t err = mChannel->prepareInitialInputBuffers(&clientInputBuffers);
+    if (err != OK) {
+        if (err == NO_MEMORY) {
+            // NO_MEMORY happens here when all the buffers are still
+            // with the codec. That is not an error as it is momentarily
+            // and the buffers are send to the client as soon as the codec
+            // releases them
+            ALOGI("Resuming with all input buffers still with codec");
+        } else {
+            ALOGE("Resume request for Input Buffers failed");
+            mCallback->onError(err, ACTION_CODE_FATAL);
+            return;
+        }
+    }
+
+    // channel start should be called after prepareInitialBuffers
+    // Calling before can cause a failure during prepare when
+    // buffers are sent to the client before preparation from onWorkDone
     (void)mChannel->start(nullptr, nullptr, [&]{
         Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
         const std::unique_ptr<Config> &config = *configLocked;
@@ -2145,14 +2172,6 @@ void CCodec::signalResume() {
         state->set(RUNNING);
     }
 
-    std::map<size_t, sp<MediaCodecBuffer>> clientInputBuffers;
-    status_t err = mChannel->prepareInitialInputBuffers(&clientInputBuffers);
-    // FIXME(b/237656746)
-    if (err != OK && err != NO_MEMORY) {
-        ALOGE("Resume request for Input Buffers failed");
-        mCallback->onError(err, ACTION_CODE_FATAL);
-        return;
-    }
     mChannel->requestInitialInputBuffers(std::move(clientInputBuffers));
 }
 
