@@ -35,13 +35,14 @@ class Camera3IOStreamBase :
     Camera3IOStreamBase(int id, camera_stream_type_t type,
             uint32_t width, uint32_t height, size_t maxSize, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation,
-            const String8& physicalCameraId,
+            const std::string& physicalCameraId,
             const std::unordered_set<int32_t> &sensorPixelModesUsed,
             int setId = CAMERA3_STREAM_SET_ID_INVALID, bool isMultiResolution = false,
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             bool deviceTimeBaseIsRealtime = false,
-            int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT);
+            int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+            int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED);
 
   public:
 

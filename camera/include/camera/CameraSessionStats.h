@@ -17,9 +17,12 @@
 #ifndef ANDROID_HARDWARE_CAMERA_SERVICE_SESSION_STATS_H
 #define ANDROID_HARDWARE_CAMERA_SERVICE_SESSION_STATS_H
 
+#include <string>
+
 #include <binder/Parcelable.h>
 
 #include <camera/CameraMetadata.h>
+#include <android/hardware/CameraExtensionSessionStats.h>
 
 namespace android {
 namespace hardware {
@@ -67,22 +70,26 @@ public:
     int64_t mDynamicRangeProfile;
     // Stream use case
     int64_t mStreamUseCase;
+    // Color space
+    int32_t mColorSpace;
 
     CameraStreamStats() :
             mWidth(0), mHeight(0), mFormat(0), mMaxPreviewFps(0), mDataSpace(0), mUsage(0),
             mRequestCount(0), mErrorCount(0), mStartLatencyMs(0),
             mMaxHalBuffers(0), mMaxAppBuffers(0), mHistogramType(HISTOGRAM_TYPE_UNKNOWN),
             mDynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD),
-            mStreamUseCase(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT) {}
+            mStreamUseCase(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT),
+            mColorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED) {}
     CameraStreamStats(int width, int height, int format, float maxPreviewFps, int dataSpace,
             int64_t usage, int maxHalBuffers, int maxAppBuffers, int dynamicRangeProfile,
-            int streamUseCase)
+            int streamUseCase, int32_t colorSpace)
             : mWidth(width), mHeight(height), mFormat(format), mMaxPreviewFps(maxPreviewFps),
               mDataSpace(dataSpace), mUsage(usage), mRequestCount(0), mErrorCount(0),
               mStartLatencyMs(0), mMaxHalBuffers(maxHalBuffers), mMaxAppBuffers(maxAppBuffers),
               mHistogramType(HISTOGRAM_TYPE_UNKNOWN),
               mDynamicRangeProfile(dynamicRangeProfile),
-              mStreamUseCase(streamUseCase) {}
+              mStreamUseCase(streamUseCase),
+              mColorSpace(colorSpace) {}
 
     virtual status_t readFromParcel(const android::Parcel* parcel) override;
     virtual status_t writeToParcel(android::Parcel* parcel) const override;
@@ -116,14 +123,30 @@ public:
     static const int CAMERA_API_LEVEL_1;
     static const int CAMERA_API_LEVEL_2;
 
-    String16 mCameraId;
+    std::string mCameraId;
     int mFacing;
     int mNewCameraState;
-    String16 mClientName;
+    std::string mClientName;
     int mApiLevel;
     bool mIsNdk;
     // latency in ms for camera open, close, or session creation.
     int mLatencyMs;
+
+    /*
+     * A randomly generated identifier to map the open/active/idle/close stats to each other after
+     * being logged. Every 'open' event will have a newly generated id which will be logged with
+     * active/idle/closed that correspond to the particular 'open' event.
+     *
+     * This ID is not meant to be globally unique forever. Probabilistically, this ID can be
+     * safely considered unique across all logs from one android build for 48 to 72 hours from
+     * its generation. Chances of identifier collisions are significant past a week or two.
+     *
+     * NOTE: There are no guarantees that the identifiers will be unique. The probability of
+     * collision within a short timeframe is low, but any system consuming these identifiers at
+     * scale should handle identifier collisions, potentially even from the same device.
+     */
+    int64_t mLogId;
+
     float mMaxPreviewFps;
 
     // Session info and statistics
@@ -136,13 +159,17 @@ public:
     // Whether the device runs into an error state
     bool mDeviceError;
     std::vector<CameraStreamStats> mStreamStats;
-    String16 mUserTag;
+    std::string mUserTag;
     int mVideoStabilizationMode;
+    int mSessionIndex;
+
+    CameraExtensionSessionStats mCameraExtensionSessionStats;
 
     // Constructors
     CameraSessionStats();
-    CameraSessionStats(const String16& cameraId, int facing, int newCameraState,
-            const String16& clientName, int apiLevel, bool isNdk, int32_t latencyMs);
+    CameraSessionStats(const std::string& cameraId, int facing, int newCameraState,
+                       const std::string& clientName, int apiLevel, bool isNdk, int32_t latencyMs,
+                       int64_t logId);
 
     virtual status_t readFromParcel(const android::Parcel* parcel) override;
     virtual status_t writeToParcel(android::Parcel* parcel) const override;

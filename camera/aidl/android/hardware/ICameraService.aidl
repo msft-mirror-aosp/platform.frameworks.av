@@ -30,6 +30,7 @@ import android.hardware.camera2.impl.CameraMetadataNative;
 import android.hardware.ICameraServiceListener;
 import android.hardware.CameraInfo;
 import android.hardware.CameraStatus;
+import android.hardware.CameraExtensionSessionStats;
 
 /**
  * Binder interface for the native camera service running in mediaserver.
@@ -81,7 +82,7 @@ interface ICameraService
      */
     ICamera connect(ICameraClient client,
             int cameraId,
-            String opPackageName,
+            @utf8InCpp String opPackageName,
             int clientUid, int clientPid,
             int targetSdkVersion,
             boolean overrideToPortrait,
@@ -92,9 +93,9 @@ interface ICameraService
      * Only supported for device HAL versions >= 3.2
      */
     ICameraDeviceUser connectDevice(ICameraDeviceCallbacks callbacks,
-            String cameraId,
-            String opPackageName,
-            @nullable String featureId,
+            @utf8InCpp String cameraId,
+            @utf8InCpp String opPackageName,
+            @nullable @utf8InCpp String featureId,
             int clientUid, int oomScoreOffset,
             int targetSdkVersion,
             boolean overrideToPortrait);
@@ -138,7 +139,7 @@ interface ICameraService
      * Read the static camera metadata for a camera device.
      * Only supported for device HAL versions >= 3.2
      */
-    CameraMetadataNative getCameraCharacteristics(String cameraId, int targetSdkVersion,
+    CameraMetadataNative getCameraCharacteristics(@utf8InCpp String cameraId, int targetSdkVersion,
             boolean overrideToPortrait);
 
     /**
@@ -159,7 +160,7 @@ interface ICameraService
     /**
      * Read the legacy camera1 parameters into a String
      */
-    String getLegacyParameters(int cameraId);
+    @utf8InCpp String getLegacyParameters(int cameraId);
 
     /**
      * apiVersion constants for supportsCameraApi
@@ -168,21 +169,21 @@ interface ICameraService
     const int API_VERSION_2 = 2;
 
     // Determines if a particular API version is supported directly for a cameraId.
-    boolean supportsCameraApi(String cameraId, int apiVersion);
+    boolean supportsCameraApi(@utf8InCpp String cameraId, int apiVersion);
     // Determines if a cameraId is a hidden physical camera of a logical multi-camera.
-    boolean isHiddenPhysicalCamera(String cameraId);
+    boolean isHiddenPhysicalCamera(@utf8InCpp String cameraId);
     // Inject the external camera to replace the internal camera session.
-    ICameraInjectionSession injectCamera(String packageName, String internalCamId,
-            String externalCamId, in ICameraInjectionCallback CameraInjectionCallback);
+    ICameraInjectionSession injectCamera(@utf8InCpp String packageName, @utf8InCpp String internalCamId,
+            @utf8InCpp String externalCamId, in ICameraInjectionCallback CameraInjectionCallback);
 
-    void setTorchMode(String cameraId, boolean enabled, IBinder clientBinder);
+    void setTorchMode(@utf8InCpp String cameraId, boolean enabled, IBinder clientBinder);
 
     // Change the brightness level of the flash unit associated with cameraId to strengthLevel.
     // If the torch is in OFF state and strengthLevel > 0 then the torch will also be turned ON.
-    void turnOnTorchWithStrengthLevel(String cameraId, int strengthLevel, IBinder clientBinder);
+    void turnOnTorchWithStrengthLevel(@utf8InCpp String cameraId, int strengthLevel, IBinder clientBinder);
 
     // Get the brightness level of the flash unit associated with cameraId.
-    int getTorchStrengthLevel(String cameraId);
+    int getTorchStrengthLevel(@utf8InCpp String cameraId);
 
     /**
      * Notify the camera service of a system event.  Should only be called from system_server.
@@ -213,6 +214,26 @@ interface ICameraService
      * Callers require the android.permission.CAMERA_SEND_SYSTEM_EVENTS permission.
      */
     oneway void notifyDeviceStateChange(long newState);
+
+    /**
+     * Report Extension specific metrics to camera service for logging. This should only be called
+     * by CameraExtensionSession to log extension metrics. All calls after the first must set
+     * CameraExtensionSessionStats.key to the value returned by this function.
+     *
+     * Each subsequent call fully overwrites the existing CameraExtensionSessionStats for the
+     * current session, so the caller is responsible for keeping the stats complete.
+     *
+     * Due to cameraservice and cameraservice_proxy architecture, there is no guarantee that
+     * {@code stats} will be logged immediately (or at all). CameraService will log whatever
+     * extension stats it has at the time of camera session closing which may be before the app
+     * process receives a session/device closed callback; so CameraExtensionSession
+     * should send metrics to the cameraservice preriodically, and cameraservice must handle calls
+     * to this function from sessions that have not been logged yet and from sessions that have
+     * already been closed.
+     *
+     * @return the key that must be used to report updates to previously reported stats.
+     */
+    @utf8InCpp String reportExtensionSessionStats(in CameraExtensionSessionStats stats);
 
     // Bitfield constants for notifyDeviceStateChange
     // All bits >= 32 are for custom vendor states

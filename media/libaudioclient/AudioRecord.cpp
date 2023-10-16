@@ -560,6 +560,21 @@ status_t AudioRecord::setMarkerPosition(uint32_t marker)
     return NO_ERROR;
 }
 
+uint32_t AudioRecord::getHalSampleRate() const
+{
+    return mHalSampleRate;
+}
+
+uint32_t AudioRecord::getHalChannelCount() const
+{
+    return mHalChannelCount;
+}
+
+audio_format_t AudioRecord::getHalFormat() const
+{
+    return mHalFormat;
+}
+
 status_t AudioRecord::getMarkerPosition(uint32_t *marker) const
 {
     if (marker == NULL) {
@@ -745,7 +760,7 @@ status_t AudioRecord::dump(int fd, const Vector<String16>& args __unused) const
                         mInput, mLatency, mSelectedDeviceId, mRoutedDeviceId);
     result.appendFormat("  mic direction(%d) mic field dimension(%f)",
                         mSelectedMicDirection, mSelectedMicFieldDimension);
-    ::write(fd, result.string(), result.size());
+    ::write(fd, result.c_str(), result.size());
     return NO_ERROR;
 }
 
@@ -878,6 +893,9 @@ status_t AudioRecord::createRecord_l(const Modulo<uint32_t> &epoch)
     mServerFrameSize = audio_bytes_per_frame(
             audio_channel_count_from_in_mask(mServerConfig.channel_mask), mServerConfig.format);
     mServerSampleSize = audio_bytes_per_sample(mServerConfig.format);
+    mHalSampleRate = output.halConfig.sample_rate;
+    mHalChannelCount = audio_channel_count_from_in_mask(output.halConfig.channel_mask);
+    mHalFormat = output.halConfig.format;
 
     if (output.cblk == 0) {
         errorMessage = StringPrintf("%s(%d): Could not get control block", __func__, mPortId);

@@ -81,6 +81,12 @@ status_t AudioPolicyService::AudioPolicyClient::openOutput(audio_module_handle_t
         *halConfig = VALUE_OR_RETURN_STATUS(
                 aidl2legacy_AudioConfig_audio_config_t(response.config, false /*isInput*/));
         *latencyMs = VALUE_OR_RETURN_STATUS(convertIntegral<uint32_t>(response.latencyMs));
+
+        audio_config_base_t config = {.sample_rate = halConfig->sample_rate,
+            .channel_mask = halConfig->channel_mask,
+            .format = halConfig->format,
+        };
+        mAudioPolicyService->registerOutput(*output, config, flags);
     }
     return status;
 }
@@ -103,7 +109,7 @@ status_t AudioPolicyService::AudioPolicyClient::closeOutput(audio_io_handle_t ou
     if (af == 0) {
         return PERMISSION_DENIED;
     }
-
+    mAudioPolicyService->unregisterOutput(output);
     return af->closeOutput(output);
 }
 
@@ -180,21 +186,11 @@ status_t AudioPolicyService::AudioPolicyClient::setStreamVolume(audio_stream_typ
                                                delay_ms);
 }
 
-status_t AudioPolicyService::AudioPolicyClient::invalidateStream(audio_stream_type_t stream)
-{
-    sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
-    if (af == 0) {
-        return PERMISSION_DENIED;
-    }
-
-    return af->invalidateStream(stream);
-}
-
 void AudioPolicyService::AudioPolicyClient::setParameters(audio_io_handle_t io_handle,
                    const String8& keyValuePairs,
                    int delay_ms)
 {
-    mAudioPolicyService->setParameters(io_handle, keyValuePairs.string(), delay_ms);
+    mAudioPolicyService->setParameters(io_handle, keyValuePairs.c_str(), delay_ms);
 }
 
 String8 AudioPolicyService::AudioPolicyClient::getParameters(audio_io_handle_t io_handle,
@@ -332,6 +328,16 @@ status_t AudioPolicyService::AudioPolicyClient::setDeviceConnectedState(
         return PERMISSION_DENIED;
     }
     return af->setDeviceConnectedState(port, state);
+}
+
+status_t AudioPolicyService::AudioPolicyClient::invalidateTracks(
+        const std::vector<audio_port_handle_t>& portIds) {
+    sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
+    if (af == 0) {
+        return PERMISSION_DENIED;
+    }
+
+    return af->invalidateTracks(portIds);
 }
 
 } // namespace android

@@ -21,6 +21,7 @@
 #include <camera/camera2/OutputConfiguration.h>
 #include <camera/camera2/SessionConfiguration.h>
 #include <camera/camera2/SubmitInfo.h>
+#include <camera/StringUtils.h>
 #include <aidl/android/hardware/camera/device/ICameraDevice.h>
 #include <android/hardware/camera/device/3.4/ICameraDeviceSession.h>
 #include <android/hardware/camera/device/3.7/ICameraDeviceSession.h>
@@ -37,17 +38,18 @@
 
 #define STATUS_ERROR(errorCode, errorString) \
     binder::Status::fromServiceSpecificError(errorCode, \
-            String8::format("%s:%d: %s", __FUNCTION__, __LINE__, errorString))
+            fmt::sprintf("%s:%d: %s", __FUNCTION__, __LINE__, errorString).c_str())
 
 #define STATUS_ERROR_FMT(errorCode, errorString, ...) \
     binder::Status::fromServiceSpecificError(errorCode, \
-            String8::format("%s:%d: " errorString, __FUNCTION__, __LINE__, \
-                    __VA_ARGS__))
+            fmt::sprintf("%s:%d: " errorString, __FUNCTION__, __LINE__, \
+                    __VA_ARGS__).c_str())
 
 namespace android {
 namespace camera3 {
 
-typedef std::function<CameraMetadata (const String8 &, bool overrideForPerfClass)> metadataGetter;
+typedef std::function<CameraMetadata (const std::string &, bool overrideForPerfClass)>
+        metadataGetter;
 
 class StreamConfiguration {
 public:
@@ -96,12 +98,13 @@ bool isPublicFormat(int32_t format);
 binder::Status createSurfaceFromGbp(
         camera3::OutputStreamInfo& streamInfo, bool isStreamInfoValid,
         sp<Surface>& surface, const sp<IGraphicBufferProducer>& gbp,
-        const String8 &logicalCameraId, const CameraMetadata &physicalCameraMetadata,
+        const std::string &logicalCameraId, const CameraMetadata &physicalCameraMetadata,
         const std::vector<int32_t> &sensorPixelModesUsed,  int64_t dynamicRangeProfile,
-        int64_t streamUseCase, int timestampBase, int mirrorMode);
+        int64_t streamUseCase, int timestampBase, int mirrorMode,
+        int32_t colorSpace);
 
 //check if format is 10-bit output compatible
-bool is10bitCompatibleFormat(int32_t format);
+bool is10bitCompatibleFormat(int32_t format, android_dataspace_t dataSpace);
 
 // check if the dynamic range requires 10-bit output
 bool is10bitDynamicRangeProfile(int64_t dynamicRangeProfile);
@@ -109,29 +112,37 @@ bool is10bitDynamicRangeProfile(int64_t dynamicRangeProfile);
 // Check if the device supports a given dynamicRangeProfile
 bool isDynamicRangeProfileSupported(int64_t dynamicRangeProfile, const CameraMetadata& staticMeta);
 
+bool deviceReportsColorSpaces(const CameraMetadata& staticMeta);
+
+bool isColorSpaceSupported(int32_t colorSpace, int32_t format, android_dataspace dataSpace,
+        int64_t dynamicRangeProfile, const CameraMetadata& staticMeta);
+
+bool dataSpaceFromColorSpace(android_dataspace *dataSpace, int32_t colorSpace);
+
 bool isStreamUseCaseSupported(int64_t streamUseCase, const CameraMetadata &deviceInfo);
 
 void mapStreamInfo(const OutputStreamInfo &streamInfo,
-        camera3::camera_stream_rotation_t rotation, String8 physicalId,
+        camera3::camera_stream_rotation_t rotation, const std::string &physicalId,
         int32_t groupId, aidl::android::hardware::camera::device::Stream *stream /*out*/);
 
 // Check that the physicalCameraId passed in is spported by the camera
 // device.
 binder::Status checkPhysicalCameraId(
-const std::vector<std::string> &physicalCameraIds, const String8 &physicalCameraId,
-const String8 &logicalCameraId);
+const std::vector<std::string> &physicalCameraIds, const std::string &physicalCameraId,
+const std::string &logicalCameraId);
 
 binder::Status checkSurfaceType(size_t numBufferProducers,
 bool deferredConsumer, int surfaceType);
 
 binder::Status checkOperatingMode(int operatingMode,
-const CameraMetadata &staticInfo, const String8 &cameraId);
+const CameraMetadata &staticInfo, const std::string &cameraId);
 
 binder::Status
 convertToHALStreamCombination(
     const SessionConfiguration& sessionConfiguration,
-    const String8 &logicalCameraId, const CameraMetadata &deviceInfo,
-    metadataGetter getMetadata, const std::vector<std::string> &physicalCameraIds,
+    const std::string &logicalCameraId, const CameraMetadata &deviceInfo,
+    bool isCompositeJpegRDisabled, metadataGetter getMetadata,
+    const std::vector<std::string> &physicalCameraIds,
     aidl::android::hardware::camera::device::StreamConfiguration &streamConfiguration,
     bool overrideForPerfClass, bool *earlyExit);
 
@@ -139,7 +150,7 @@ StreamConfigurationPair getStreamConfigurationPair(const CameraMetadata &metadat
 
 status_t checkAndOverrideSensorPixelModesUsed(
         const std::vector<int32_t> &sensorPixelModesUsed, int format, int width, int height,
-        const CameraMetadata &staticInfo, bool flexibleConsumer,
+        const CameraMetadata &staticInfo,
         std::unordered_set<int32_t> *overriddenSensorPixelModesUsed);
 
 bool targetPerfClassPrimaryCamera(

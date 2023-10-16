@@ -20,7 +20,6 @@
 #include <list>
 
 #include <utils/RefBase.h>
-#include <utils/String8.h>
 #include <utils/String16.h>
 #include <utils/Vector.h>
 #include <utils/KeyedVector.h>
@@ -99,11 +98,12 @@ class CameraDeviceBase : public virtual FrameProducer {
      */
     virtual metadata_vendor_id_t getVendorTagId() const = 0;
 
-    virtual status_t initialize(sp<CameraProviderManager> manager, const String8& monitorTags) = 0;
+    virtual status_t initialize(sp<CameraProviderManager> manager,
+            const std::string& monitorTags) = 0;
     virtual status_t disconnect() = 0;
 
     virtual status_t dump(int fd, const Vector<String16> &args) = 0;
-    virtual status_t startWatchingTags(const String8 &tags) = 0;
+    virtual status_t startWatchingTags(const std::string &tags) = 0;
     virtual status_t stopWatchingTags() = 0;
     virtual status_t dumpWatchedEventsToVector(std::vector<std::string> &out) = 0;
 
@@ -111,7 +111,9 @@ class CameraDeviceBase : public virtual FrameProducer {
      * The physical camera device's static characteristics metadata buffer, or
      * the logical camera's static characteristics if physical id is empty.
      */
-    virtual const CameraMetadata& infoPhysical(const String8& physicalId) const = 0;
+    virtual const CameraMetadata& infoPhysical(const std::string& physicalId) const = 0;
+
+    virtual bool isCompositeJpegRDisabled() const { return false; };
 
     struct PhysicalCameraSettings {
         std::string cameraId;
@@ -126,6 +128,9 @@ class CameraDeviceBase : public virtual FrameProducer {
         int32_t mOriginalTestPatternMode = 0;
         int32_t mOriginalTestPatternData[4] = {};
 
+        // Original value of SETTINGS_OVERRIDE so that they can be restored if
+        // camera service isn't overwriting the app value.
+        int32_t mOriginalSettingsOverride = ANDROID_CONTROL_SETTINGS_OVERRIDE_OFF;
     };
     typedef List<PhysicalCameraSettings> PhysicalCameraSettingsList;
 
@@ -183,7 +188,7 @@ class CameraDeviceBase : public virtual FrameProducer {
     virtual status_t createStream(sp<Surface> consumer,
             uint32_t width, uint32_t height, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
-            const String8& physicalCameraId,
+            const std::string& physicalCameraId,
             const std::unordered_set<int32_t>  &sensorPixelModesUsed,
             std::vector<int> *surfaceIds = nullptr,
             int streamSetId = camera3::CAMERA3_STREAM_SET_ID_INVALID,
@@ -192,7 +197,10 @@ class CameraDeviceBase : public virtual FrameProducer {
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO) = 0;
+            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+            int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+            bool useReadoutTimestamp = false)
+            = 0;
 
     /**
      * Create an output stream of the requested size, format, rotation and
@@ -204,7 +212,7 @@ class CameraDeviceBase : public virtual FrameProducer {
     virtual status_t createStream(const std::vector<sp<Surface>>& consumers,
             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
-            const String8& physicalCameraId,
+            const std::string& physicalCameraId,
             const std::unordered_set<int32_t> &sensorPixelModesUsed,
             std::vector<int> *surfaceIds = nullptr,
             int streamSetId = camera3::CAMERA3_STREAM_SET_ID_INVALID,
@@ -213,7 +221,10 @@ class CameraDeviceBase : public virtual FrameProducer {
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO) = 0;
+            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+            int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+            bool useReadoutTimestamp = false)
+            = 0;
 
     /**
      * Create an input stream of width, height, and format.
@@ -235,11 +246,13 @@ class CameraDeviceBase : public virtual FrameProducer {
         bool dataSpaceOverridden;
         android_dataspace originalDataSpace;
         int64_t dynamicRangeProfile;
+        int32_t colorSpace;
 
         StreamInfo() : width(0), height(0), format(0), formatOverridden(false), originalFormat(0),
                 dataSpace(HAL_DATASPACE_UNKNOWN), dataSpaceOverridden(false),
                 originalDataSpace(HAL_DATASPACE_UNKNOWN),
-                dynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD){}
+                dynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD),
+                colorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED) {}
         /**
          * Check whether the format matches the current or the original one in case
          * it got overridden.
@@ -434,6 +447,14 @@ class CameraDeviceBase : public virtual FrameProducer {
             camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropValue) = 0;
 
     /**
+     * Set the current behavior for the AUTOFRAMING control when in AUTO.
+     *
+     * The value must be one of the AUTOFRAMING_* values besides AUTO.
+     */
+    virtual status_t setAutoframingAutoBehavior(
+            camera_metadata_enum_android_control_autoframing_t autoframingValue) = 0;
+
+    /**
      * Whether camera muting (producing black-only output) is supported.
      *
      * Calling setCameraMute(true) when this returns false will return an
@@ -449,6 +470,14 @@ class CameraDeviceBase : public virtual FrameProducer {
     virtual status_t setCameraMute(bool enabled) = 0;
 
     /**
+     * Whether the camera device supports zoom override.
+     */
+    virtual bool supportsZoomOverride() = 0;
+
+    // Set/reset zoom override
+    virtual status_t setZoomOverride(int32_t zoomOverride) = 0;
+
+    /**
      * Enable/disable camera service watchdog
      */
     virtual status_t setCameraServiceWatchdog(bool enabled) = 0;
@@ -457,6 +486,11 @@ class CameraDeviceBase : public virtual FrameProducer {
      * Get the status tracker of the camera device
      */
     virtual wp<camera3::StatusTracker> getStatusTracker() = 0;
+
+    /**
+     * If the device is in eror state
+     */
+    virtual bool hasDeviceError() = 0;
 
     /**
      * Set bitmask for image dump flag
@@ -476,7 +510,7 @@ class CameraDeviceBase : public virtual FrameProducer {
      * The injection camera session to replace the internal camera
      * session.
      */
-    virtual status_t injectCamera(const String8& injectedCamId,
+    virtual status_t injectCamera(const std::string& injectedCamId,
             sp<CameraProviderManager> manager) = 0;
 
     /**

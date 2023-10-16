@@ -182,6 +182,12 @@ struct CodecBase : public AHandler, /* static */ ColorUtils {
          * Notify MediaCodec that the first tunnel frame is ready.
          */
         virtual void onFirstTunnelFrameReady() = 0;
+        /**
+         * Notify MediaCodec that there are metrics to be updated.
+         *
+         * @param updatedMetrics metrics need to be updated.
+         */
+        virtual void onMetricsUpdated(const sp<AMessage> &updatedMetrics) = 0;
     };
 
     /**
@@ -385,7 +391,8 @@ public:
             size_t offset,
             const CryptoPlugin::SubSample *subSamples,
             size_t numSubSamples,
-            const sp<MediaCodecBuffer> &buffer) {
+            const sp<MediaCodecBuffer> &buffer,
+            AString* errorDetailMsg) {
         (void)memory;
         (void)secure;
         (void)key;
@@ -396,6 +403,7 @@ public:
         (void)subSamples;
         (void)numSubSamples;
         (void)buffer;
+        (void)errorDetailMsg;
         return -ENOSYS;
     }
     /**

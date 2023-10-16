@@ -142,7 +142,7 @@ ACameraMetadata::derivePhysicalCameraIds() {
         if (ids[i] == '\0') {
             if (start != i) {
                 mStaticPhysicalCameraIdValues.push_back(String8((const char *)ids+start));
-                mStaticPhysicalCameraIds.push_back(mStaticPhysicalCameraIdValues.back().string());
+                mStaticPhysicalCameraIds.push_back(mStaticPhysicalCameraIdValues.back().c_str());
             }
             start = i+1;
         }
@@ -537,6 +537,8 @@ ACameraMetadata::isCaptureRequestTag(const uint32_t tag) {
         case ACAMERA_CONTROL_ENABLE_ZSL:
         case ACAMERA_CONTROL_EXTENDED_SCENE_MODE:
         case ACAMERA_CONTROL_ZOOM_RATIO:
+        case ACAMERA_CONTROL_SETTINGS_OVERRIDE:
+        case ACAMERA_CONTROL_AUTOFRAMING:
         case ACAMERA_EDGE_MODE:
         case ACAMERA_FLASH_MODE:
         case ACAMERA_HOT_PIXEL_MODE:
@@ -585,6 +587,7 @@ std::unordered_set<uint32_t> ACameraMetadata::sSystemTags ({
     ANDROID_CONTROL_SCENE_MODE_OVERRIDES,
     ANDROID_CONTROL_AE_PRECAPTURE_ID,
     ANDROID_CONTROL_AF_TRIGGER_ID,
+    ANDROID_CONTROL_SETTINGS_OVERRIDING_FRAME_NUMBER,
     ANDROID_DEMOSAIC_MODE,
     ANDROID_EDGE_STRENGTH,
     ANDROID_FLASH_FIRING_POWER,
