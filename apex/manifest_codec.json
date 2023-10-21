@@ -3,7 +3,7 @@
 
   // Placeholder module version to be replaced during build.
   // Do not change!
-  "version": 341213000,
+  "version": 341214000,
 
   "requireNativeLibs": [
     ":sphal"
