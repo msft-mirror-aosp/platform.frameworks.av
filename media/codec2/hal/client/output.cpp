@@ -16,7 +16,9 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "Codec2-OutputBufferQueue"
+#define ATRACE_TAG  ATRACE_TAG_VIDEO
 #include <android-base/logging.h>
+#include <utils/Trace.h>
 
 #include <android/hardware/graphics/bufferqueue/2.0/IGraphicBufferProducer.h>
 #include <codec2/hidl/output.h>
@@ -336,9 +338,25 @@ void OutputBufferQueue::expireOldWaiters() {
 }
 
 void OutputBufferQueue::stop() {
-    std::scoped_lock<std::mutex> l(mMutex);
-    mStopped = true;
-    mOwner.reset(); // destructor of the block will not triger IGBP::cancel()
+    std::shared_ptr<C2SurfaceSyncMemory> oldMem;
+    {
+        std::scoped_lock<std::mutex> l(mMutex);
+        if (mStopped) {
+            return;
+        }
+        mStopped = true;
+        mOwner.reset(); // destructor of the block will not trigger IGBP::cancel()
+        // basically configuring null surface
+        oldMem = mSyncMem;
+        mSyncMem.reset();
+        mIgbp.clear();
+        mGeneration = 0;
+        mBqId = 0;
+    }
+    {
+        std::scoped_lock<std::mutex> l(mOldMutex);
+        mOldMem = oldMem;
+    }
 }
 
 bool OutputBufferQueue::registerBuffer(const C2ConstGraphicBlock& block) {
@@ -388,6 +406,7 @@ status_t OutputBufferQueue::outputBuffer(
     uint32_t generation;
     uint64_t bqId;
     int32_t bqSlot;
+    ScopedTrace trace(ATRACE_TAG,"Codec2-OutputBufferQueue::outputBuffer");
     bool display = V1_0::utils::displayBufferQueueBlock(block);
     if (!getBufferQueueAssignment(block, &generation, &bqId, &bqSlot) ||
         bqId == 0) {
