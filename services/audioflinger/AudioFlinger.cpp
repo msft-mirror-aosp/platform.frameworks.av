@@ -27,6 +27,7 @@
 //#define BUFLOG_NDEBUG 0
 #include <afutils/BufLog.h>
 #include <afutils/DumpTryLock.h>
+#include <afutils/NBAIO_Tee.h>
 #include <afutils/Permission.h>
 #include <afutils/PropertyUtils.h>
 #include <afutils/TypedLogger.h>
@@ -2090,7 +2091,8 @@ void AudioFlinger::removeNotificationClient(pid_t pid)
     }
 }
 
-void AudioFlinger::ioConfigChanged(audio_io_config_event_t event,
+// Hold either AudioFlinger::mutex or ThreadBase::mutex
+void AudioFlinger::ioConfigChanged_l(audio_io_config_event_t event,
                                    const sp<AudioIoDescriptor>& ioDesc,
                                    pid_t pid) {
     media::AudioIoConfigEvent eventAidl = VALUE_OR_FATAL(
@@ -2262,8 +2264,8 @@ status_t AudioFlinger::createRecord(const media::CreateRecordRequest& _input,
     }
     adjAttributionSource = afutils::checkAttributionSourcePackage(
             adjAttributionSource);
-    // we don't yet support anything other than linear PCM
-    if (!audio_is_valid_format(input.config.format) || !audio_is_linear_pcm(input.config.format)) {
+    // further format checks are performed by createRecordTrack_l()
+    if (!audio_is_valid_format(input.config.format)) {
         ALOGE("createRecord() invalid format %#x", input.config.format);
         lStatus = BAD_VALUE;
         goto Exit;
@@ -2944,7 +2946,7 @@ status_t AudioFlinger::openOutput(const media::OpenOutputRequest& request,
             latencyMs = playbackThread->latency();
 
             // notify client processes of the new output creation
-            playbackThread->ioConfigChanged(AUDIO_OUTPUT_OPENED);
+            playbackThread->ioConfigChanged_l(AUDIO_OUTPUT_OPENED);
 
             // the first primary output opened designates the primary hw device if no HW module
             // named "primary" was already loaded.
@@ -2958,7 +2960,7 @@ status_t AudioFlinger::openOutput(const media::OpenOutputRequest& request,
                 mHardwareStatus = AUDIO_HW_IDLE;
             }
         } else {
-            thread->ioConfigChanged(AUDIO_OUTPUT_OPENED);
+            thread->ioConfigChanged_l(AUDIO_OUTPUT_OPENED);
         }
         response->output = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
         response->config = VALUE_OR_RETURN_STATUS(
@@ -2991,7 +2993,7 @@ audio_io_handle_t AudioFlinger::openDuplicateOutput(audio_io_handle_t output1,
     thread->addOutputTrack(thread2);
     mPlaybackThreads.add(id, thread);
     // notify client processes of the new output creation
-    thread->ioConfigChanged(AUDIO_OUTPUT_OPENED);
+    thread->ioConfigChanged_l(AUDIO_OUTPUT_OPENED);
     return id;
 }
 
@@ -3051,7 +3053,7 @@ status_t AudioFlinger::closeOutput_nonvirtual(audio_io_handle_t output)
             mMmapThreads.removeItem(output);
             ALOGD("closing mmapThread %p", mmapThread.get());
         }
-        ioConfigChanged(AUDIO_OUTPUT_CLOSED, sp<AudioIoDescriptor>::make(output));
+        ioConfigChanged_l(AUDIO_OUTPUT_CLOSED, sp<AudioIoDescriptor>::make(output));
         mPatchPanel->notifyStreamClosed(output);
     }
     // The thread entity (active unit of execution) is no longer running here,
@@ -3154,7 +3156,7 @@ status_t AudioFlinger::openInput(const media::OpenInputRequest& request,
 
     if (thread != 0) {
         // notify client processes of the new input creation
-        thread->ioConfigChanged(AUDIO_INPUT_OPENED);
+        thread->ioConfigChanged_l(AUDIO_INPUT_OPENED);
         return NO_ERROR;
     }
     return NO_INIT;
@@ -3313,7 +3315,7 @@ status_t AudioFlinger::closeInput_nonvirtual(audio_io_handle_t input)
             dumpToThreadLog_l(mmapThread);
             mMmapThreads.removeItem(input);
         }
-        ioConfigChanged(AUDIO_INPUT_CLOSED, sp<AudioIoDescriptor>::make(input));
+        ioConfigChanged_l(AUDIO_INPUT_CLOSED, sp<AudioIoDescriptor>::make(input));
     }
     // FIXME: calling thread->exit() without mutex() held should not be needed anymore now that
     // we have a different lock for notification client
@@ -3693,7 +3695,8 @@ DeviceTypeSet AudioFlinger::primaryOutputDevice_l() const
         return {};
     }
 
-    return thread->outDeviceTypes();
+    audio_utils::lock_guard l(thread->mutex());
+    return thread->outDeviceTypes_l();
 }
 
 IAfPlaybackThread* AudioFlinger::fastPlaybackThread_l() const
@@ -4487,8 +4490,9 @@ bool AudioFlinger::isNonOffloadableGlobalEffectEnabled_l() const
     }
 
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
-        sp<IAfEffectChain> ec =
-                mPlaybackThreads.valueAt(i)->getEffectChain_l(AUDIO_SESSION_OUTPUT_MIX);
+        const auto thread = mPlaybackThreads.valueAt(i);
+        audio_utils::lock_guard l(thread->mutex());
+        const sp<IAfEffectChain> ec = thread->getEffectChain_l(AUDIO_SESSION_OUTPUT_MIX);
         if (ec != 0 && ec->isNonOffloadableEnabled()) {
             return true;
         }
@@ -4747,16 +4751,6 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
     }, mediautils::TimeCheck::kDefaultTimeoutDuration,
     mediautils::TimeCheck::kDefaultSecondChanceDuration,
     true /* crashOnTimeout */);
-
-    // Make sure we connect to Audio Policy Service before calling into AudioFlinger:
-    //  - AudioFlinger can call into Audio Policy Service with its global mutex held
-    //  - If this is the first time Audio Policy Service is queried from inside audioserver process
-    //  this will trigger Audio Policy Manager initialization.
-    //  - Audio Policy Manager initialization calls into AudioFlinger which will try to lock
-    //  its global mutex and a deadlock will occur.
-    if (IPCThreadState::self()->getCallingPid() != getpid()) {
-        AudioSystem::get_audio_policy_service();
-    }
 
     return delegate();
 }
