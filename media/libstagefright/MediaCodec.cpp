@@ -79,6 +79,7 @@
 #include <media/stagefright/MediaErrors.h>
 #include <media/stagefright/OMXClient.h>
 #include <media/stagefright/PersistentSurface.h>
+#include <media/stagefright/RenderedFrameInfo.h>
 #include <media/stagefright/SurfaceUtils.h>
 #include <nativeloader/dlext_namespaces.h>
 #include <private/android_filesystem_config.h>
@@ -210,6 +211,7 @@ static const char *kCodecShapingEnhanced = "android.media.mediacodec.shaped";
 // Render metrics
 static const char *kCodecPlaybackDurationSec = "android.media.mediacodec.playback-duration-sec";
 static const char *kCodecFirstRenderTimeUs = "android.media.mediacodec.first-render-time-us";
+static const char *kCodecLastRenderTimeUs = "android.media.mediacodec.last-render-time-us";
 static const char *kCodecFramesReleased = "android.media.mediacodec.frames-released";
 static const char *kCodecFramesRendered = "android.media.mediacodec.frames-rendered";
 static const char *kCodecFramesDropped = "android.media.mediacodec.frames-dropped";
@@ -243,7 +245,7 @@ static const char *kCodecJudderScoreHistogramBuckets =
         "android.media.mediacodec.judder-score-histogram-buckets";
 // Freeze event
 static const char *kCodecFreezeEventCount = "android.media.mediacodec.freeze-event-count";
-static const char *kFreezeEventKeyName = "freeze";
+static const char *kFreezeEventKeyName = "videofreeze";
 static const char *kFreezeEventInitialTimeUs = "android.media.mediacodec.freeze.initial-time-us";
 static const char *kFreezeEventDurationMs = "android.media.mediacodec.freeze.duration-ms";
 static const char *kFreezeEventCount = "android.media.mediacodec.freeze.count";
@@ -255,7 +257,7 @@ static const char *kFreezeEventDetailsDistanceMs =
         "android.media.mediacodec.freeze.details-distance-ms";
 // Judder event
 static const char *kCodecJudderEventCount = "android.media.mediacodec.judder-event-count";
-static const char *kJudderEventKeyName = "judder";
+static const char *kJudderEventKeyName = "videojudder";
 static const char *kJudderEventInitialTimeUs = "android.media.mediacodec.judder.initial-time-us";
 static const char *kJudderEventDurationMs = "android.media.mediacodec.judder.duration-ms";
 static const char *kJudderEventCount = "android.media.mediacodec.judder.count";
@@ -822,6 +824,37 @@ private:
     const sp<AMessage> mNotify;
 };
 
+class OnBufferReleasedListener : public ::android::BnProducerListener{
+private:
+    uint32_t mGeneration;
+    std::weak_ptr<BufferChannelBase> mBufferChannel;
+
+    void notifyBufferReleased() {
+        auto p = mBufferChannel.lock();
+        if (p) {
+            p->onBufferReleasedFromOutputSurface(mGeneration);
+        }
+    }
+
+public:
+    explicit OnBufferReleasedListener(
+            uint32_t generation,
+            const std::shared_ptr<BufferChannelBase> &bufferChannel)
+            : mGeneration(generation), mBufferChannel(bufferChannel) {}
+
+    virtual ~OnBufferReleasedListener() = default;
+
+    void onBufferReleased() override {
+        notifyBufferReleased();
+    }
+
+    void onBufferDetached([[maybe_unused]] int slot) override {
+        notifyBufferReleased();
+    }
+
+    bool needsReleaseNotify() override { return true; }
+};
+
 class BufferCallback : public CodecBase::BufferCallback {
 public:
     explicit BufferCallback(const sp<AMessage> &notify);
@@ -880,7 +913,7 @@ public:
             const sp<AMessage> &outputFormat) override;
     virtual void onInputSurfaceDeclined(status_t err) override;
     virtual void onSignaledInputEOS(status_t err) override;
-    virtual void onOutputFramesRendered(const std::list<FrameRenderTracker::Info> &done) override;
+    virtual void onOutputFramesRendered(const std::list<RenderedFrameInfo> &done) override;
     virtual void onOutputBuffersChanged() override;
     virtual void onFirstTunnelFrameReady() override;
     virtual void onMetricsUpdated(const sp<AMessage> &updatedMetrics) override;
@@ -990,7 +1023,7 @@ void CodecCallback::onSignaledInputEOS(status_t err) {
     notify->post();
 }
 
-void CodecCallback::onOutputFramesRendered(const std::list<FrameRenderTracker::Info> &done) {
+void CodecCallback::onOutputFramesRendered(const std::list<RenderedFrameInfo> &done) {
     sp<AMessage> notify(mNotify->dup());
     notify->setInt32("what", kWhatOutputFramesRendered);
     if (MediaCodec::CreateFramesRenderedMessage(done, notify)) {
@@ -1017,12 +1050,19 @@ void CodecCallback::onMetricsUpdated(const sp<AMessage> &updatedMetrics) {
     notify->post();
 }
 
-static MediaResourceSubType toMediaResourceSubType(MediaCodec::Domain domain) {
+static MediaResourceSubType toMediaResourceSubType(bool isHardware, MediaCodec::Domain domain) {
     switch (domain) {
-        case MediaCodec::DOMAIN_VIDEO: return MediaResourceSubType::kVideoCodec;
-        case MediaCodec::DOMAIN_AUDIO: return MediaResourceSubType::kAudioCodec;
-        case MediaCodec::DOMAIN_IMAGE: return MediaResourceSubType::kImageCodec;
-        default:                       return MediaResourceSubType::kUnspecifiedSubType;
+    case MediaCodec::DOMAIN_VIDEO:
+        return isHardware? MediaResourceSubType::kHwVideoCodec :
+                           MediaResourceSubType::kSwVideoCodec;
+    case MediaCodec::DOMAIN_AUDIO:
+        return isHardware? MediaResourceSubType::kHwAudioCodec :
+                           MediaResourceSubType::kSwAudioCodec;
+    case MediaCodec::DOMAIN_IMAGE:
+        return isHardware? MediaResourceSubType::kHwImageCodec :
+                           MediaResourceSubType::kSwImageCodec;
+    default:
+        return MediaResourceSubType::kUnspecifiedSubType;
     }
 }
 
@@ -1306,6 +1346,7 @@ void MediaCodec::updateMediametrics() {
         const VideoRenderQualityMetrics &m = mVideoRenderQualityTracker.getMetrics();
         if (m.frameReleasedCount > 0) {
             mediametrics_setInt64(mMetricsHandle, kCodecFirstRenderTimeUs, m.firstRenderTimeUs);
+            mediametrics_setInt64(mMetricsHandle, kCodecLastRenderTimeUs, m.lastRenderTimeUs);
             mediametrics_setInt64(mMetricsHandle, kCodecFramesReleased, m.frameReleasedCount);
             mediametrics_setInt64(mMetricsHandle, kCodecFramesRendered, m.frameRenderedCount);
             mediametrics_setInt64(mMetricsHandle, kCodecFramesSkipped, m.frameSkippedCount);
@@ -1791,7 +1832,7 @@ void MediaCodec::statsBufferSent(int64_t presentationUs, const sp<MediaCodecBuff
 
     if (mBatteryChecker != nullptr) {
         mBatteryChecker->onCodecActivity([this] () {
-            mResourceManagerProxy->addResource(MediaResource::VideoBatteryResource());
+            mResourceManagerProxy->addResource(MediaResource::VideoBatteryResource(mIsHardware));
         });
     }
 
@@ -1863,7 +1904,7 @@ void MediaCodec::statsBufferReceived(int64_t presentationUs, const sp<MediaCodec
 
     if (mBatteryChecker != nullptr) {
         mBatteryChecker->onCodecActivity([this] () {
-            mResourceManagerProxy->addResource(MediaResource::VideoBatteryResource());
+            mResourceManagerProxy->addResource(MediaResource::VideoBatteryResource(mIsHardware));
         });
     }
 
@@ -2118,13 +2159,16 @@ status_t MediaCodec::init(const AString &name) {
         mBatteryChecker = new BatteryChecker(new AMessage(kWhatCheckBatteryStats, this));
     }
 
-    std::vector<MediaResourceParcel> resources;
-    resources.push_back(MediaResource::CodecResource(secureCodec, toMediaResourceSubType(mDomain)));
-
     // If the ComponentName is not set yet, use the name passed by the user.
     if (mComponentName.empty()) {
+        mIsHardware = !MediaCodecList::isSoftwareCodec(name);
         mResourceManagerProxy->setCodecName(name.c_str());
     }
+
+    std::vector<MediaResourceParcel> resources;
+    resources.push_back(MediaResource::CodecResource(secureCodec,
+                                                     toMediaResourceSubType(mIsHardware, mDomain)));
+
     for (int i = 0; i <= kMaxRetry; ++i) {
         if (i > 0) {
             // Don't try to reclaim resource for the first time.
@@ -2368,7 +2412,7 @@ status_t MediaCodec::configure(
     status_t err;
     std::vector<MediaResourceParcel> resources;
     resources.push_back(MediaResource::CodecResource(mFlags & kFlagIsSecure,
-            toMediaResourceSubType(mDomain)));
+            toMediaResourceSubType(mIsHardware, mDomain)));
     if (mDomain == DOMAIN_VIDEO || mDomain == DOMAIN_IMAGE) {
         // Don't know the buffer size at this point, but it's fine to use 1 because
         // the reclaimResource call doesn't consider the requester's buffer size for now.
@@ -2973,7 +3017,7 @@ status_t MediaCodec::start() {
     status_t err;
     std::vector<MediaResourceParcel> resources;
     resources.push_back(MediaResource::CodecResource(mFlags & kFlagIsSecure,
-            toMediaResourceSubType(mDomain)));
+            toMediaResourceSubType(mIsHardware, mDomain)));
     if (mDomain == DOMAIN_VIDEO || mDomain == DOMAIN_IMAGE) {
         // Don't know the buffer size at this point, but it's fine to use 1 because
         // the reclaimResource call doesn't consider the requester's buffer size for now.
@@ -3729,9 +3773,8 @@ MediaCodec::DequeueOutputResult MediaCodec::handleDequeueOutputBuffer(
 
 
 inline void MediaCodec::initClientConfigParcel(ClientConfigParcel& clientConfig) {
-    clientConfig.codecType = toMediaResourceSubType(mDomain);
+    clientConfig.codecType = toMediaResourceSubType(mIsHardware, mDomain);
     clientConfig.isEncoder = mFlags & kFlagIsEncoder;
-    clientConfig.isHardware = !MediaCodecList::isSoftwareCodec(mComponentName);
     clientConfig.width = mWidth;
     clientConfig.height = mHeight;
     clientConfig.timeStamp = systemTime(SYSTEM_TIME_MONOTONIC) / 1000LL;
@@ -3960,6 +4003,7 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                     CHECK(msg->findString("componentName", &mComponentName));
 
                     if (mComponentName.c_str()) {
+                        mIsHardware = !MediaCodecList::isSoftwareCodec(mComponentName);
                         mediametrics_setCString(mMetricsHandle, kCodecCodec,
                                                 mComponentName.c_str());
                         // Update the codec name.
@@ -3987,7 +4031,7 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                                           MediaCodecList::isSoftwareCodec(mComponentName) ? 0 : 1);
 
                     mResourceManagerProxy->addResource(MediaResource::CodecResource(
-                            mFlags & kFlagIsSecure, toMediaResourceSubType(mDomain)));
+                            mFlags & kFlagIsSecure, toMediaResourceSubType(mIsHardware, mDomain)));
 
                     postPendingRepliesAndDeferredMessages("kWhatComponentAllocated");
                     break;
@@ -4671,6 +4715,8 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                     PostReplyWithError(replyID, err);
                     break;
                 }
+                uint32_t generation = mSurfaceGeneration;
+                format->setInt32("native-window-generation", generation);
             } else {
                 // we are not using surface so this variable is not used, but initialize sensibly anyway
                 mAllowFrameDroppingBySurface = false;
@@ -4799,7 +4845,8 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                         mErrorLog.log(LOG_TAG, "Unsetting surface is not supported");
                         err = BAD_VALUE;
                     } else {
-                        err = connectToSurface(surface);
+                        uint32_t generation;
+                        err = connectToSurface(surface, &generation);
                         if (err == ALREADY_EXISTS) {
                             // reconnecting to same surface
                             err = OK;
@@ -4814,12 +4861,13 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                                     mSoftRenderer = new SoftwareRenderer(surface);
                                     // TODO: check if this was successful
                                 } else {
-                                    err = mCodec->setSurface(surface);
+                                    err = mCodec->setSurface(surface, generation);
                                 }
                             }
                             if (err == OK) {
                                 (void)disconnectFromSurface();
                                 mSurface = surface;
+                                mSurfaceGeneration = generation;
                             }
                             mReliabilityContextMetrics.setOutputSurfaceCount++;
                         }
@@ -5057,15 +5105,17 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                     mReleaseSurface.reset(new ReleaseSurface(usage));
                 }
                 if (mSurface != mReleaseSurface->getSurface()) {
-                    status_t err = connectToSurface(mReleaseSurface->getSurface());
+                    uint32_t generation;
+                    status_t err = connectToSurface(mReleaseSurface->getSurface(), &generation);
                     ALOGW_IF(err != OK, "error connecting to release surface: err = %d", err);
                     if (err == OK && !(mFlags & kFlagUsesSoftwareRenderer)) {
-                        err = mCodec->setSurface(mReleaseSurface->getSurface());
+                        err = mCodec->setSurface(mReleaseSurface->getSurface(), generation);
                         ALOGW_IF(err != OK, "error setting release surface: err = %d", err);
                     }
                     if (err == OK) {
                         (void)disconnectFromSurface();
                         mSurface = mReleaseSurface->getSurface();
+                        mSurfaceGeneration = generation;
                     } else {
                         // We were not able to switch the surface, so force
                         // synchronous release.
@@ -5506,7 +5556,7 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
             if (mBatteryChecker != nullptr) {
                 mBatteryChecker->onCheckBatteryTimer(msg, [this] () {
                     mResourceManagerProxy->removeResource(
-                            MediaResource::VideoBatteryResource());
+                            MediaResource::VideoBatteryResource(mIsHardware));
                 });
             }
             break;
@@ -6139,12 +6189,10 @@ status_t MediaCodec::handleLeftover(size_t index) {
     return onQueueInputBuffer(msg);
 }
 
-//static
-size_t MediaCodec::CreateFramesRenderedMessage(
-        const std::list<FrameRenderTracker::Info> &done, sp<AMessage> &msg) {
+template<typename T>
+static size_t CreateFramesRenderedMessageInternal(const std::list<T> &done, sp<AMessage> &msg) {
     size_t index = 0;
-    for (std::list<FrameRenderTracker::Info>::const_iterator it = done.cbegin();
-            it != done.cend(); ++it) {
+    for (typename std::list<T>::const_iterator it = done.cbegin(); it != done.cend(); ++it) {
         if (it->getRenderTimeNs() < 0) {
             continue; // dropped frame from tracking
         }
@@ -6153,6 +6201,18 @@ size_t MediaCodec::CreateFramesRenderedMessage(
         ++index;
     }
     return index;
+}
+
+//static
+size_t MediaCodec::CreateFramesRenderedMessage(
+        const std::list<RenderedFrameInfo> &done, sp<AMessage> &msg) {
+    return CreateFramesRenderedMessageInternal(done, msg);
+}
+
+//static
+size_t MediaCodec::CreateFramesRenderedMessage(
+        const std::list<FrameRenderTracker::Info> &done, sp<AMessage> &msg) {
+    return CreateFramesRenderedMessageInternal(done, msg);
 }
 
 status_t MediaCodec::onReleaseOutputBuffer(const sp<AMessage> &msg) {
@@ -6246,7 +6306,9 @@ status_t MediaCodec::onReleaseOutputBuffer(const sp<AMessage> &msg) {
             // presentation timestamp is used instead, which almost certainly occurs in the past,
             // since it's almost always a zero-based offset from the start of the stream. In these
             // scenarios, we expect the frame to be rendered with no delay.
-            int64_t delayUs = noRenderTime ? 0 : renderTimeNs / 1000 - ALooper::GetNowUs();
+            int64_t nowUs = ALooper::GetNowUs();
+            int64_t renderTimeUs = renderTimeNs / 1000;
+            int64_t delayUs = renderTimeUs < nowUs ? 0 : renderTimeUs - nowUs;
             delayUs += 100 * 1000; /* 100ms in microseconds */
             status_t err =
                     mMsgPollForRenderedBuffers->postUnique(/* token= */ mMsgPollForRenderedBuffers,
@@ -6323,7 +6385,7 @@ ssize_t MediaCodec::dequeuePortBuffer(int32_t portIndex) {
     return index;
 }
 
-status_t MediaCodec::connectToSurface(const sp<Surface> &surface) {
+status_t MediaCodec::connectToSurface(const sp<Surface> &surface, uint32_t *generation) {
     status_t err = OK;
     if (surface != NULL) {
         uint64_t oldId, newId;
@@ -6345,21 +6407,26 @@ status_t MediaCodec::connectToSurface(const sp<Surface> &surface) {
             // number. Rely on the fact that max supported process id by Linux is 2^22.
             // PID is never 0 so we don't have to worry that we use the default generation of 0.
             // TODO: come up with a unique scheme if other producers also set the generation number.
-            static uint32_t mSurfaceGeneration = 0;
-            uint32_t generation = (getpid() << 10) | (++mSurfaceGeneration & ((1 << 10) - 1));
-            surface->setGenerationNumber(generation);
-            ALOGI("[%s] setting surface generation to %u", mComponentName.c_str(), generation);
+            static uint32_t sSurfaceGeneration = 0;
+            *generation = (getpid() << 10) | (++sSurfaceGeneration & ((1 << 10) - 1));
+            surface->setGenerationNumber(*generation);
+            ALOGI("[%s] setting surface generation to %u", mComponentName.c_str(), *generation);
 
             // HACK: clear any free buffers. Remove when connect will automatically do this.
             // This is needed as the consumer may be holding onto stale frames that it can reattach
             // to this surface after disconnect/connect, and those free frames would inherit the new
             // generation number. Disconnecting after setting a unique generation prevents this.
             nativeWindowDisconnect(surface.get(), "connectToSurface(reconnect)");
-            err = nativeWindowConnect(surface.get(), "connectToSurface(reconnect)");
+            sp<IProducerListener> listener =
+                    new OnBufferReleasedListener(*generation, mBufferChannel);
+            err = surfaceConnectWithListener(
+                    surface, listener, "connectToSurface(reconnect-with-listener)");
         }
 
         if (err != OK) {
-            ALOGE("nativeWindowConnect returned an error: %s (%d)", strerror(-err), err);
+            *generation = 0;
+            ALOGE("nativeWindowConnect/surfaceConnectWithListener returned an error: %s (%d)",
+                    strerror(-err), err);
         } else {
             if (!mAllowFrameDroppingBySurface) {
                 disableLegacyBufferDropPostQ(surface);
@@ -6385,6 +6452,7 @@ status_t MediaCodec::disconnectFromSurface() {
         }
         // assume disconnected even on error
         mSurface.clear();
+        mSurfaceGeneration = 0;
         mIsSurfaceToDisplay = false;
     }
     return err;
@@ -6396,9 +6464,11 @@ status_t MediaCodec::handleSetSurface(const sp<Surface> &surface) {
         (void)disconnectFromSurface();
     }
     if (surface != NULL) {
-        err = connectToSurface(surface);
+        uint32_t generation;
+        err = connectToSurface(surface, &generation);
         if (err == OK) {
             mSurface = surface;
+            mSurfaceGeneration = generation;
         }
     }
     return err;

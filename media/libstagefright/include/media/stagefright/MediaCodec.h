@@ -64,6 +64,7 @@ class CryptoAsync;
 class MediaCodecBuffer;
 class IMemory;
 struct PersistentSurface;
+class RenderedFrameInfo;
 class SoftwareRenderer;
 class Surface;
 namespace hardware {
@@ -281,6 +282,8 @@ struct MediaCodec : public AHandler {
     // by adding rendered frame information to a base notification message. Returns the number
     // of frames that were rendered.
     static size_t CreateFramesRenderedMessage(
+            const std::list<RenderedFrameInfo> &done, sp<AMessage> &msg);
+    static size_t CreateFramesRenderedMessage(
             const std::list<FrameRenderTracker::Info> &done, sp<AMessage> &msg);
 
     static status_t CanFetchLinearBlock(
@@ -446,6 +449,7 @@ private:
     int64_t mPresentationTimeUs = 0;
     status_t mStickyError;
     sp<Surface> mSurface;
+    uint32_t mSurfaceGeneration = 0;
     SoftwareRenderer *mSoftRenderer;
 
     Mutex mMetricsLock;
@@ -614,7 +618,7 @@ private:
     status_t queueCSDInputBuffer(size_t bufferIndex);
 
     status_t handleSetSurface(const sp<Surface> &surface);
-    status_t connectToSurface(const sp<Surface> &surface);
+    status_t connectToSurface(const sp<Surface> &surface, uint32_t *generation);
     status_t disconnectFromSurface();
 
     bool hasCryptoOrDescrambler() {
@@ -720,6 +724,7 @@ private:
 
     // An unique ID for the codec - Used by the metrics.
     uint64_t mCodecId = 0;
+    bool     mIsHardware = false;
 
     std::function<sp<CodecBase>(const AString &, const char *)> mGetCodecBase;
     std::function<status_t(const AString &, sp<MediaCodecInfo> *)> mGetCodecInfo;
