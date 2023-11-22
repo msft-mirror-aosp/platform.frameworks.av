@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 The Android Open Source Project
+ * Copyright 2015 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,24 @@
  * limitations under the License.
  */
 
-package android.media;
+#ifndef RENDERED_FRAME_INFO_H
+#define RENDERED_FRAME_INFO_H
 
-/**
- * The spatialization mode supported by the spatializer stage effect implementation.
- * Used by methods of the ISpatializer interface.
- * {@hide}
- */
-@Backing(type="byte")
-enum SpatializationMode {
-    /** The spatializer supports binaural mode (over headphones type devices). */
-    SPATIALIZER_BINAURAL = 0,
-    /** The spatializer supports transaural mode (over speaker type devices). */
-    SPATIALIZER_TRANSAURAL = 1,
-}
+namespace android {
+
+class RenderedFrameInfo {
+public:
+    RenderedFrameInfo(int64_t mediaTimeUs, int64_t renderTimeNs)
+        : mMediaTimeUs(mediaTimeUs), mRenderTimeNs(renderTimeNs) {}
+
+    int64_t getMediaTimeUs() const  { return mMediaTimeUs; }
+    nsecs_t getRenderTimeNs() const { return mRenderTimeNs;}
+
+private:
+    int64_t mMediaTimeUs;
+    nsecs_t mRenderTimeNs;
+};
+
+} // android
+
+#endif // RENDERED_FRAME_INFO_H

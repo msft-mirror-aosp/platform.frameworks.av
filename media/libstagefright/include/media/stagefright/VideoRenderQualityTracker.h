@@ -38,6 +38,9 @@ struct VideoRenderQualityMetrics {
     // The render time of the first video frame.
     int64_t firstRenderTimeUs;
 
+    // The render time of the last video frame.
+    int64_t lastRenderTimeUs;
+
     // The number of frames released to be rendered.
     int64_t frameReleasedCount;
 
@@ -59,6 +62,11 @@ struct VideoRenderQualityMetrics {
     // The frame rate as detected by looking at the actual render time, as returned by the system
     // post-render.
     float actualFrameRate;
+
+    // The amount of content duration skipped by the app after a pause when video was trying to
+    // resume. This sometimes happen when catching up to the audio position which continued playing
+    // after video pauses.
+    int32_t maxContentDroppedAfterPauseMs;
 
     // A histogram of the durations of freezes due to dropped/skipped frames.
     MediaHistogram<int32_t> freezeDurationMsHistogram;
@@ -152,6 +160,11 @@ public:
         // seeking forward.
         int32_t liveContentFrameDropToleranceUs;
 
+        // The amount of time it takes for audio to stop playback after a pause is initiated. Used
+        // for providing some allowance of dropped video frames to catch back up to the audio
+        // position when resuming playback.
+        int32_t pauseAudioLatencyUs;
+
         // Freeze configuration
         //
         // The values used to distribute freeze durations across a histogram.
@@ -197,6 +210,21 @@ public:
         // The maximum distance in time between two judder occurrences such that both will be
         // lumped into the same judder event.
         int32_t judderEventDistanceToleranceMs;
+        //
+        // Whether or not Perfetto trace trigger is enabled.
+        bool traceTriggerEnabled;
+        //
+        // The throttle time for Perfetto trace trigger to avoid triggering multiple traces for
+        // the same event in a short time.
+        int32_t traceTriggerThrottleMs;
+        //
+        // The minimum frame render duration to recognize video freeze event to collect trace.
+        int32_t traceMinFreezeDurationMs;
+        //
+        // The maximum frame render duration to recognize video freeze event. A frame render
+        // duration that is larger than the max duration would not trigger trace collection for
+        // video freeze because it's highly possible a video pause.
+        int32_t traceMaxFreezeDurationMs;
     };
 
     struct FreezeEvent {
@@ -253,8 +281,11 @@ public:
         Details details;
     };
 
+    typedef void (*TraceTriggerFn)();
+
     VideoRenderQualityTracker();
-    VideoRenderQualityTracker(const Configuration &configuration);
+    VideoRenderQualityTracker(const Configuration &configuration,
+                              const TraceTriggerFn traceTriggerFn = nullptr);
 
     // Called when a tunnel mode frame has been queued.
     void onTunnelFrameQueued(int64_t contentTimeUs);
@@ -373,6 +404,14 @@ private:
                                         JudderEvent &e, const VideoRenderQualityMetrics & m,
                                         const Configuration &c, JudderEvent *judderEventOut);
 
+    // Trigger trace collection for video freeze.
+    static void triggerTrace();
+
+    // Trigger collection of a Perfetto Always-On-Tracing (AOT) trace file for video freeze,
+    // triggerTimeUs is used as a throttle to avoid triggering multiple traces in a short time.
+    static void triggerTraceWithThrottle(TraceTriggerFn traceTriggerFn,
+                                         const Configuration &c, const int64_t triggerTimeUs);
+
     // Check to see if a discontinuity has occurred by examining the content time and the
     // app-desired render time. If so, reset some internal state.
     bool resetIfDiscontinuity(int64_t contentTimeUs, int64_t desiredRenderTimeUs);
@@ -390,6 +429,9 @@ private:
 
     // Configurable elements of the metrics algorithms.
     const Configuration mConfiguration;
+
+    // The function for triggering trace collection for video freeze.
+    const TraceTriggerFn mTraceTriggerFn;
 
     // Metrics are updated every time a frame event occurs - skipped, dropped, rendered.
     VideoRenderQualityMetrics mMetrics;
@@ -409,8 +451,8 @@ private:
     // The render duration of the playback.
     int64_t mRenderDurationMs;
 
-    // True if the previous frame was dropped.
-    bool mWasPreviousFrameDropped;
+    // The duration of the content that was dropped.
+    int64_t mDroppedContentDurationUs;
 
     // The freeze event that's currently being tracked.
     FreezeEvent mFreezeEvent;
@@ -442,6 +484,9 @@ private:
     // Frame durations derived from timestamps captured by the display subsystem, indicating the
     // wall clock atime at which the frame is actually rendered.
     FrameDurationUs mActualFrameDurationUs;
+
+    // Token of async atrace for video frame dropped/skipped by the app.
+    int64_t mTraceFrameSkippedToken= -1;
 };
 
 }  // namespace android

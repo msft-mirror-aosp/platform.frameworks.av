@@ -2570,6 +2570,7 @@ bool EffectChain::setVolume_l(uint32_t *left, uint32_t *right, bool force)
             uint32_t rightZero = 0;
             volumeControlEffect->setVolume(&leftZero, &rightZero, true /*controller*/);
         }
+        mVolumeControlEffect = volumeControlEffect;
     }
     mLeftVolume = newLeft;
     mRightVolume = newRight;
@@ -3084,7 +3085,10 @@ uint32_t EffectChain::EffectCallback::sampleRate() const {
     return t->sampleRate();
 }
 
-audio_channel_mask_t EffectChain::EffectCallback::inChannelMask(int id) const {
+audio_channel_mask_t EffectChain::EffectCallback::inChannelMask(int id) const
+NO_THREAD_SAFETY_ANALYSIS
+// calling function 'hasAudioSession_l' requires holding mutex 'ThreadBase_Mutex' exclusively
+{
     const sp<IAfThreadBase> t = thread().promote();
     if (t == nullptr) {
         return AUDIO_CHANNEL_NONE;
@@ -3120,7 +3124,10 @@ uint32_t EffectChain::EffectCallback::inChannelCount(int id) const {
     return audio_channel_count_from_out_mask(inChannelMask(id));
 }
 
-audio_channel_mask_t EffectChain::EffectCallback::outChannelMask() const {
+audio_channel_mask_t EffectChain::EffectCallback::outChannelMask() const
+NO_THREAD_SAFETY_ANALYSIS
+// calling function 'hasAudioSession_l' requires holding mutex 'ThreadBase_Mutex' exclusively
+{
     const sp<IAfThreadBase> t = thread().promote();
     if (t == nullptr) {
         return AUDIO_CHANNEL_NONE;

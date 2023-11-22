@@ -27,6 +27,7 @@
 //#define BUFLOG_NDEBUG 0
 #include <afutils/BufLog.h>
 #include <afutils/DumpTryLock.h>
+#include <afutils/NBAIO_Tee.h>
 #include <afutils/Permission.h>
 #include <afutils/PropertyUtils.h>
 #include <afutils/TypedLogger.h>
@@ -189,6 +190,7 @@ BINDER_METHOD_ENTRY(isBluetoothVariableLatencyEnabled) \
 BINDER_METHOD_ENTRY(supportsBluetoothVariableLatency) \
 BINDER_METHOD_ENTRY(getSoundDoseInterface) \
 BINDER_METHOD_ENTRY(getAudioPolicyConfig) \
+BINDER_METHOD_ENTRY(getAudioMixPort) \
 
 // singleton for Binder Method Statistics for IAudioFlinger
 static auto& getIAudioFlingerStatistics() {
@@ -1888,7 +1890,7 @@ size_t AudioFlinger::getInputBufferSize(uint32_t sampleRate, audio_format_t form
         return 0;
     }
     if ((sampleRate == 0) ||
-            !audio_is_valid_format(format) || !audio_has_proportional_frames(format) ||
+            !audio_is_valid_format(format) ||
             !audio_is_input_channel(channelMask)) {
         return 0;
     }
@@ -1911,6 +1913,10 @@ size_t AudioFlinger::getInputBufferSize(uint32_t sampleRate, audio_format_t form
 
     std::vector<audio_format_t> formats = {format};
     if (format != AUDIO_FORMAT_PCM_16_BIT) {
+        // For compressed format, buffer size may be queried using PCM. Allow this for compatibility
+        // in cases the primary hw dev does not support the format.
+        // TODO: replace with a table of formats and nominal buffer sizes (based on nominal bitrate
+        // and codec frame size).
         formats.push_back(AUDIO_FORMAT_PCM_16_BIT);
     }
 
@@ -2089,7 +2095,8 @@ void AudioFlinger::removeNotificationClient(pid_t pid)
     }
 }
 
-void AudioFlinger::ioConfigChanged(audio_io_config_event_t event,
+// Hold either AudioFlinger::mutex or ThreadBase::mutex
+void AudioFlinger::ioConfigChanged_l(audio_io_config_event_t event,
                                    const sp<AudioIoDescriptor>& ioDesc,
                                    pid_t pid) {
     media::AudioIoConfigEvent eventAidl = VALUE_OR_FATAL(
@@ -2261,8 +2268,8 @@ status_t AudioFlinger::createRecord(const media::CreateRecordRequest& _input,
     }
     adjAttributionSource = afutils::checkAttributionSourcePackage(
             adjAttributionSource);
-    // we don't yet support anything other than linear PCM
-    if (!audio_is_valid_format(input.config.format) || !audio_is_linear_pcm(input.config.format)) {
+    // further format checks are performed by createRecordTrack_l()
+    if (!audio_is_valid_format(input.config.format)) {
         ALOGE("createRecord() invalid format %#x", input.config.format);
         lStatus = BAD_VALUE;
         goto Exit;
@@ -2943,7 +2950,7 @@ status_t AudioFlinger::openOutput(const media::OpenOutputRequest& request,
             latencyMs = playbackThread->latency();
 
             // notify client processes of the new output creation
-            playbackThread->ioConfigChanged(AUDIO_OUTPUT_OPENED);
+            playbackThread->ioConfigChanged_l(AUDIO_OUTPUT_OPENED);
 
             // the first primary output opened designates the primary hw device if no HW module
             // named "primary" was already loaded.
@@ -2957,7 +2964,7 @@ status_t AudioFlinger::openOutput(const media::OpenOutputRequest& request,
                 mHardwareStatus = AUDIO_HW_IDLE;
             }
         } else {
-            thread->ioConfigChanged(AUDIO_OUTPUT_OPENED);
+            thread->ioConfigChanged_l(AUDIO_OUTPUT_OPENED);
         }
         response->output = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
         response->config = VALUE_OR_RETURN_STATUS(
@@ -2990,7 +2997,7 @@ audio_io_handle_t AudioFlinger::openDuplicateOutput(audio_io_handle_t output1,
     thread->addOutputTrack(thread2);
     mPlaybackThreads.add(id, thread);
     // notify client processes of the new output creation
-    thread->ioConfigChanged(AUDIO_OUTPUT_OPENED);
+    thread->ioConfigChanged_l(AUDIO_OUTPUT_OPENED);
     return id;
 }
 
@@ -3050,7 +3057,7 @@ status_t AudioFlinger::closeOutput_nonvirtual(audio_io_handle_t output)
             mMmapThreads.removeItem(output);
             ALOGD("closing mmapThread %p", mmapThread.get());
         }
-        ioConfigChanged(AUDIO_OUTPUT_CLOSED, sp<AudioIoDescriptor>::make(output));
+        ioConfigChanged_l(AUDIO_OUTPUT_CLOSED, sp<AudioIoDescriptor>::make(output));
         mPatchPanel->notifyStreamClosed(output);
     }
     // The thread entity (active unit of execution) is no longer running here,
@@ -3153,7 +3160,7 @@ status_t AudioFlinger::openInput(const media::OpenInputRequest& request,
 
     if (thread != 0) {
         // notify client processes of the new input creation
-        thread->ioConfigChanged(AUDIO_INPUT_OPENED);
+        thread->ioConfigChanged_l(AUDIO_INPUT_OPENED);
         return NO_ERROR;
     }
     return NO_INIT;
@@ -3312,7 +3319,7 @@ status_t AudioFlinger::closeInput_nonvirtual(audio_io_handle_t input)
             dumpToThreadLog_l(mmapThread);
             mMmapThreads.removeItem(input);
         }
-        ioConfigChanged(AUDIO_INPUT_CLOSED, sp<AudioIoDescriptor>::make(input));
+        ioConfigChanged_l(AUDIO_INPUT_CLOSED, sp<AudioIoDescriptor>::make(input));
     }
     // FIXME: calling thread->exit() without mutex() held should not be needed anymore now that
     // we have a different lock for notification client
@@ -3692,7 +3699,8 @@ DeviceTypeSet AudioFlinger::primaryOutputDevice_l() const
         return {};
     }
 
-    return thread->outDeviceTypes();
+    audio_utils::lock_guard l(thread->mutex());
+    return thread->outDeviceTypes_l();
 }
 
 IAfPlaybackThread* AudioFlinger::fastPlaybackThread_l() const
@@ -4269,7 +4277,7 @@ Register:
 
     response->id = idOut;
     response->enabled = enabledOut != 0;
-    response->effect = handle->asIEffect();
+    response->effect = handle.get() ? handle->asIEffect() : nullptr;
     response->desc = VALUE_OR_RETURN_STATUS(
             legacy2aidl_effect_descriptor_t_EffectDescriptor(descOut));
 
@@ -4486,8 +4494,9 @@ bool AudioFlinger::isNonOffloadableGlobalEffectEnabled_l() const
     }
 
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
-        sp<IAfEffectChain> ec =
-                mPlaybackThreads.valueAt(i)->getEffectChain_l(AUDIO_SESSION_OUTPUT_MIX);
+        const auto thread = mPlaybackThreads.valueAt(i);
+        audio_utils::lock_guard l(thread->mutex());
+        const sp<IAfEffectChain> ec = thread->getEffectChain_l(AUDIO_SESSION_OUTPUT_MIX);
         if (ec != 0 && ec->isNonOffloadableEnabled()) {
             return true;
         }
@@ -4607,6 +4616,24 @@ status_t AudioFlinger::listAudioPatches(
     return mPatchPanel->listAudioPatches_l(num_patches, patches);
 }
 
+/**
+ * Get the attributes of the mix port when connecting to the given device port.
+ */
+status_t AudioFlinger::getAudioMixPort(const struct audio_port_v7 *devicePort,
+                                       struct audio_port_v7 *mixPort) const {
+    if (status_t status = AudioValidator::validateAudioPort(*devicePort); status != NO_ERROR) {
+        ALOGE("%s, invalid device port, status=%d", __func__, status);
+        return status;
+    }
+    if (status_t status = AudioValidator::validateAudioPort(*mixPort); status != NO_ERROR) {
+        ALOGE("%s, invalid mix port, status=%d", __func__, status);
+        return status;
+    }
+
+    audio_utils::lock_guard _l(mutex());
+    return mPatchPanel->getAudioMixPort_l(devicePort, mixPort);
+}
+
 // ----------------------------------------------------------------------------
 
 status_t AudioFlinger::onTransactWrapper(TransactionCode code,
@@ -4640,6 +4667,7 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         case TransactionCode::GET_SUPPORTED_LATENCY_MODES:
         case TransactionCode::INVALIDATE_TRACKS:
         case TransactionCode::GET_AUDIO_POLICY_CONFIG:
+        case TransactionCode::GET_AUDIO_MIX_PORT:
             ALOGW("%s: transaction %d received from PID %d",
                   __func__, code, IPCThreadState::self()->getCallingPid());
             // return status only for non void methods
@@ -4727,16 +4755,6 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
     }, mediautils::TimeCheck::kDefaultTimeoutDuration,
     mediautils::TimeCheck::kDefaultSecondChanceDuration,
     true /* crashOnTimeout */);
-
-    // Make sure we connect to Audio Policy Service before calling into AudioFlinger:
-    //  - AudioFlinger can call into Audio Policy Service with its global mutex held
-    //  - If this is the first time Audio Policy Service is queried from inside audioserver process
-    //  this will trigger Audio Policy Manager initialization.
-    //  - Audio Policy Manager initialization calls into AudioFlinger which will try to lock
-    //  its global mutex and a deadlock will occur.
-    if (IPCThreadState::self()->getCallingPid() != getpid()) {
-        AudioSystem::get_audio_policy_service();
-    }
 
     return delegate();
 }

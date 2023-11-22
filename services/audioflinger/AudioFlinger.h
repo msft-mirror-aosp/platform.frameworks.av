@@ -255,6 +255,10 @@ private:
     status_t getAudioPolicyConfig(media::AudioPolicyConfig* config) final
             EXCLUDES_AudioFlinger_Mutex;
 
+    // Get the attributes of the mix port when connecting to the given device port.
+    status_t getAudioMixPort(const struct audio_port_v7* devicePort,
+                             struct audio_port_v7* mixPort) const final EXCLUDES_AudioFlinger_Mutex;
+
     status_t onTransactWrapper(TransactionCode code, const Parcel& data, uint32_t flags,
             const std::function<status_t()>& delegate) final EXCLUDES_AudioFlinger_Mutex;
 
@@ -338,7 +342,8 @@ private:
 
     // ----- begin IAfThreadCallback interface
 
-    bool isNonOffloadableGlobalEffectEnabled_l() const final REQUIRES(mutex());
+    bool isNonOffloadableGlobalEffectEnabled_l() const final
+            REQUIRES(mutex()) EXCLUDES_ThreadBase_Mutex;
     bool btNrecIsOff() const final { return mBtNrecIsOff.load(); }
     float masterVolume_l() const final REQUIRES(mutex());
     bool masterMute_l() const final REQUIRES(mutex());
@@ -383,7 +388,8 @@ private:
             const audioflinger::SyncEventCallback& callBack,
             const wp<IAfTrackBase>& cookie) final EXCLUDES_AudioFlinger_Mutex;
 
-    void ioConfigChanged(audio_io_config_event_t event,
+    // Hold either AudioFlinger::mutex or ThreadBase::mutex
+    void ioConfigChanged_l(audio_io_config_event_t event,
             const sp<AudioIoDescriptor>& ioDesc,
             pid_t pid = 0) final EXCLUDES_AudioFlinger_ClientMutex;
     void onNonOffloadableGlobalEffectEnable() final EXCLUDES_AudioFlinger_Mutex;

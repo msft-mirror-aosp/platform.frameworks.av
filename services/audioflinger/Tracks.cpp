@@ -113,8 +113,7 @@ TrackBase::TrackBase(
         mChannelCount(isOut ?
                 audio_channel_count_from_out_mask(channelMask) :
                 audio_channel_count_from_in_mask(channelMask)),
-        mFrameSize(audio_has_proportional_frames(format) ?
-                mChannelCount * audio_bytes_per_sample(format) : sizeof(int8_t)),
+        mFrameSize(audio_bytes_per_frame(mChannelCount, format)),
         mFrameCount(frameCount),
         mSessionId(sessionId),
         mIsOut(isOut),
@@ -451,6 +450,10 @@ Status TrackHandle::getTimestamp(media::AudioTimestampInternal* timestamp,
     if (*_aidl_return != OK) {
         return Status::ok();
     }
+
+    // restrict position modulo INT_MAX to avoid integer sanitization abort
+    legacy.mPosition &= INT_MAX;
+
     *timestamp = legacy2aidl_AudioTimestamp_AudioTimestampInternal(legacy).value();
     return Status::ok();
 }
@@ -1170,9 +1173,11 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
     if (thread != 0) {
         if (isOffloaded()) {
             audio_utils::lock_guard _laf(thread->afThreadCallback()->mutex());
+            const bool nonOffloadableGlobalEffectEnabled =
+                    thread->afThreadCallback()->isNonOffloadableGlobalEffectEnabled_l();
             audio_utils::lock_guard _lth(thread->mutex());
             sp<IAfEffectChain> ec = thread->getEffectChain_l(mSessionId);
-            if (thread->afThreadCallback()->isNonOffloadableGlobalEffectEnabled_l() ||
+            if (nonOffloadableGlobalEffectEnabled ||
                     (ec != 0 && ec->isNonOffloadableEnabled())) {
                 invalidate();
                 return PERMISSION_DENIED;
