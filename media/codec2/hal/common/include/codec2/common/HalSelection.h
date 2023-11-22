@@ -1,11 +1,11 @@
-/**
- * Copyright (c) 2019, The Android Open Source Project
+/*
+ * Copyright 2018 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *      http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,20 +14,14 @@
  * limitations under the License.
  */
 
-package android.media;
+#ifndef CODEC2_HAL_SELECTION_H
+#define CODEC2_HAL_SELECTION_H
 
-/**
- * Sub-type enums of media resources.
- *
- * {@hide}
- */
-@Backing(type="int")
-enum MediaResourceSubType {
-    kUnspecifiedSubType = 0,
-    kHwAudioCodec = 1,
-    kSwAudioCodec = 2,
-    kHwVideoCodec = 3,
-    kSwVideoCodec = 4,
-    kHwImageCodec = 5,
-    kSwImageCodec = 6,
-}
+namespace android {
+
+// Returns true iff AIDL c2 HAL is selected for the system
+bool IsCodec2AidlHalSelected();
+
+}  // namespace android
+
+#endif  // CODEC2_HAL_SELECTION_H
