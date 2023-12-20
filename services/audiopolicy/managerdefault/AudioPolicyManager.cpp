@@ -3638,9 +3638,13 @@ status_t AudioPolicyManager::registerPolicyMixes(const Vector<AudioMix>& mixes)
             outputConfig.channel_mask = AUDIO_CHANNEL_OUT_STEREO;
             inputConfig.channel_mask = AUDIO_CHANNEL_IN_STEREO;
             rSubmixModule->addOutputProfile(address.c_str(), &outputConfig,
-                    AUDIO_DEVICE_OUT_REMOTE_SUBMIX, address);
+                    AUDIO_DEVICE_OUT_REMOTE_SUBMIX, address,
+                    audio_is_linear_pcm(outputConfig.format)
+                        ? AUDIO_OUTPUT_FLAG_NONE : AUDIO_OUTPUT_FLAG_DIRECT);
             rSubmixModule->addInputProfile(address.c_str(), &inputConfig,
-                    AUDIO_DEVICE_IN_REMOTE_SUBMIX, address);
+                    AUDIO_DEVICE_IN_REMOTE_SUBMIX, address,
+                    audio_is_linear_pcm(inputConfig.format)
+                        ? AUDIO_INPUT_FLAG_NONE : AUDIO_INPUT_FLAG_DIRECT);
 
             if ((res = setDeviceConnectionStateInt(deviceTypeToMakeAvailable,
                     AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
@@ -4397,8 +4401,8 @@ audio_direct_mode_t AudioPolicyManager::getDirectPlaybackSupport(const audio_att
             if (!mAvailableOutputDevices.containsAtLeastOne(curProfile->getSupportedDevices())) {
                 continue;
             }
-            if ((curProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD)
-                        != AUDIO_OUTPUT_FLAG_NONE) {
+            if (offloadPossible && ((curProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD)
+                        != AUDIO_OUTPUT_FLAG_NONE)) {
                 if ((directMode & AUDIO_DIRECT_OFFLOAD_GAPLESS_SUPPORTED)
                         != AUDIO_DIRECT_NOT_SUPPORTED) {
                     // Already reports offload gapless supported. No need to report offload support.
