@@ -3,7 +3,7 @@
 
   // Placeholder module version to be replaced during build.
   // Do not change!
-  "version": 341513100,
+  "version": 341513600,
 
   "requireNativeLibs": [
     "libandroid.so",
