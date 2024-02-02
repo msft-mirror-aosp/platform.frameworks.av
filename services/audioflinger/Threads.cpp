@@ -185,7 +185,7 @@ static const nsecs_t kDirectMinSleepTimeUs = 10000;
 // Minimum amount of time between checking to see if the timestamp is advancing
 // for underrun detection. If we check too frequently, we may not detect a
 // timestamp update and will falsely detect underrun.
-static const nsecs_t kMinimumTimeBetweenTimestampChecksNs = 150 /* ms */ * 1000;
+static constexpr nsecs_t kMinimumTimeBetweenTimestampChecksNs = 150 /* ms */ * 1'000'000;
 
 // The universal constant for ubiquitous 20ms value. The value of 20ms seems to provide a good
 // balance between power consumption and latency, and allows threads to be scheduled reliably
@@ -1942,7 +1942,7 @@ ssize_t ThreadBase::ActiveTracks<T>::add(const sp<T>& track) {
     logTrack("add", track);
     mActiveTracksGeneration++;
     mLatestActiveTrack = track;
-    ++mBatteryCounter[track->uid()].second;
+    track->beginBatteryAttribution();
     mHasChanged = true;
     return mActiveTracks.add(track);
 }
@@ -1956,7 +1956,7 @@ ssize_t ThreadBase::ActiveTracks<T>::remove(const sp<T>& track) {
     }
     logTrack("remove", track);
     mActiveTracksGeneration++;
-    --mBatteryCounter[track->uid()].second;
+    track->endBatteryAttribution();
     // mLatestActiveTrack is not cleared even if is the same as track.
     mHasChanged = true;
 #ifdef TEE_SINK
@@ -1969,14 +1969,13 @@ ssize_t ThreadBase::ActiveTracks<T>::remove(const sp<T>& track) {
 template <typename T>
 void ThreadBase::ActiveTracks<T>::clear() {
     for (const sp<T> &track : mActiveTracks) {
-        BatteryNotifier::getInstance().noteStopAudio(track->uid());
+        track->endBatteryAttribution();
         logTrack("clear", track);
     }
     mLastActiveTracksGeneration = mActiveTracksGeneration;
     if (!mActiveTracks.empty()) { mHasChanged = true; }
     mActiveTracks.clear();
     mLatestActiveTrack.clear();
-    mBatteryCounter.clear();
 }
 
 template <typename T>
@@ -1986,27 +1985,6 @@ void ThreadBase::ActiveTracks<T>::updatePowerState_l(
     if (mActiveTracksGeneration != mLastActiveTracksGeneration || force) {
         thread->updateWakeLockUids_l(getWakeLockUids());
         mLastActiveTracksGeneration = mActiveTracksGeneration;
-    }
-
-    // Updates BatteryNotifier uids
-    for (auto it = mBatteryCounter.begin(); it != mBatteryCounter.end();) {
-        const uid_t uid = it->first;
-        ssize_t &previous = it->second.first;
-        ssize_t &current = it->second.second;
-        if (current > 0) {
-            if (previous == 0) {
-                BatteryNotifier::getInstance().noteStartAudio(uid);
-            }
-            previous = current;
-            ++it;
-        } else if (current == 0) {
-            if (previous > 0) {
-                BatteryNotifier::getInstance().noteStopAudio(uid);
-            }
-            it = mBatteryCounter.erase(it); // std::map<> is stable on iterator erase.
-        } else /* (current < 0) */ {
-            LOG_ALWAYS_FATAL("negative battery count %zd", current);
-        }
     }
 }
 
@@ -4178,7 +4156,7 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
             setHalLatencyMode_l();
 
             for (const auto &track : mActiveTracks ) {
-                track->updateTeePatches();
+                track->updateTeePatches_l();
             }
 
             // signal actual start of output stream when the render position reported by the kernel
@@ -9566,10 +9544,24 @@ void RecordThread::ioConfigChanged_l(audio_io_config_event_t event, pid_t pid,
 
 void RecordThread::readInputParameters_l()
 {
-    status_t result = mInput->stream->getAudioProperties(&mSampleRate, &mChannelMask, &mHALFormat);
-    LOG_ALWAYS_FATAL_IF(result != OK, "Error retrieving audio properties from HAL: %d", result);
-    mFormat = mHALFormat;
+    const audio_config_base_t audioConfig = mInput->getAudioProperties();
+    mSampleRate = audioConfig.sample_rate;
+    mChannelMask = audioConfig.channel_mask;
+    if (!audio_is_input_channel(mChannelMask)) {
+        LOG_ALWAYS_FATAL("Channel mask %#x not valid for input", mChannelMask);
+    }
+
     mChannelCount = audio_channel_count_from_in_mask(mChannelMask);
+
+    // Get actual HAL format.
+    status_t result = mInput->stream->getAudioProperties(nullptr, nullptr, &mHALFormat);
+    LOG_ALWAYS_FATAL_IF(result != OK, "Error when retrieving input stream format: %d", result);
+    // Get format from the shim, which will be different than the HAL format
+    // if recording compressed audio from IEC61937 wrapped sources.
+    mFormat = audioConfig.format;
+    if (!audio_is_valid_format(mFormat)) {
+        LOG_ALWAYS_FATAL("Format %#x not valid for input", mFormat);
+    }
     if (audio_is_linear_pcm(mFormat)) {
         LOG_ALWAYS_FATAL_IF(mChannelCount > FCC_LIMIT, "HAL channel count %d > %d",
                 mChannelCount, FCC_LIMIT);
@@ -9577,8 +9569,7 @@ void RecordThread::readInputParameters_l()
         // Can have more that FCC_LIMIT channels in encoded streams.
         ALOGI("HAL format %#x is not linear pcm", mFormat);
     }
-    result = mInput->stream->getFrameSize(&mFrameSize);
-    LOG_ALWAYS_FATAL_IF(result != OK, "Error retrieving frame size from HAL: %d", result);
+    mFrameSize = mInput->getFrameSize();
     LOG_ALWAYS_FATAL_IF(mFrameSize <= 0, "Error frame size was %zu but must be greater than zero",
             mFrameSize);
     result = mInput->stream->getBufferSize(&mBufferSize);

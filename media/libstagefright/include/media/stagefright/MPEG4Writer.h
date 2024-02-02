@@ -77,9 +77,9 @@ public:
     virtual void setStartTimeOffsetMs(int ms) { mStartTimeOffsetMs = ms; }
     virtual int32_t getStartTimeOffsetMs() const { return mStartTimeOffsetMs; }
     virtual status_t setNextFd(int fd);
-    bool isSampleMetadataValid([[maybe_unused]] size_t trackIndex, int64_t timeUs) override {
-        return timeUs >= 0;
-    }
+    // Returns true if the timestamp is valid which is compatible with the Mpeg4.
+    // Note that this overloads that method in the base class.
+    bool isSampleMetadataValid(size_t trackIndex, int64_t timeUs) override;
 
 protected:
     virtual ~MPEG4Writer();

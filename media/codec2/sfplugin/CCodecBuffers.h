@@ -20,6 +20,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <C2Config.h>
 #include <DataConverter.h>
@@ -33,6 +34,8 @@ namespace android {
 struct ICrypto;
 class MemoryDealer;
 class SkipCutBuffer;
+class MultiAccessUnitSkipCutBuffer;
+struct AccessUnitInfo;
 
 constexpr size_t kLinearBufferSize = 1048576;
 // This can fit an 8K frame.
@@ -80,6 +83,16 @@ public:
      * Examine image data from the buffer and update the format if necessary.
      */
     void handleImageData(const sp<Codec2Buffer> &buffer);
+
+    /**
+     * Get the first pixel format of a metric session.
+     */
+    virtual uint32_t getPixelFormatIfApplicable();
+
+    /**
+     * Reset the pixel format when a new metric session started.
+     */
+    virtual bool resetPixelFormatIfApplicable();
 
 protected:
     std::string mComponentName; ///< name of component for debugging
@@ -372,12 +385,16 @@ public:
             sp<MediaCodecBuffer>* outBuffer);
 
 protected:
-    sp<SkipCutBuffer> mSkipCutBuffer;
+
+    sp<MultiAccessUnitSkipCutBuffer> mSkipCutBuffer;
 
     /**
      * Update the SkipCutBuffer object. No-op if it's never initialized.
      */
     void updateSkipCutBuffer(int32_t sampleRate, int32_t channelCount);
+
+    bool submit(const sp<MediaCodecBuffer> &buffer, int32_t sampleRate,
+            int32_t channelCount, std::shared_ptr<const C2AccessUnitInfos::output> &infos);
 
     /**
      * Submit buffer to SkipCutBuffer object, if initialized.
@@ -938,12 +955,17 @@ public:
 
     size_t numActiveSlots() const final;
 
+    uint32_t getPixelFormatIfApplicable() override;
+
+    bool resetPixelFormatIfApplicable() override;
+
 protected:
     sp<Codec2Buffer> createNewBuffer() override;
 
 private:
     FlexBuffersImpl mImpl;
     std::shared_ptr<LocalBufferPool> mLocalBufferPool;
+    uint32_t mPixelFormat;
 };
 
 class DummyInputBuffers : public InputBuffers {
@@ -1064,7 +1086,8 @@ class FlexOutputBuffers : public OutputBuffers {
 public:
     FlexOutputBuffers(const char *componentName, const char *name = "Output[]")
         : OutputBuffers(componentName, name),
-          mImpl(mName) { }
+          mImpl(mName),
+          mPixelFormat(0) { }
 
     status_t registerBuffer(
             const std::shared_ptr<C2Buffer> &buffer,
@@ -1107,8 +1130,20 @@ public:
      */
     virtual std::function<sp<Codec2Buffer>()> getAlloc() = 0;
 
+    uint32_t getPixelFormatIfApplicable() override;
+
+    bool resetPixelFormatIfApplicable() override;
 private:
     FlexBuffersImpl mImpl;
+
+    uint32_t mPixelFormat;
+
+    /**
+     * extract pixel format from C2Buffer when register.
+     *
+     * \param buffer   The C2Buffer used to extract pixel format.
+     */
+    bool extractPixelFormatFromC2Buffer(const std::shared_ptr<C2Buffer> &buffer);
 };
 
 class LinearOutputBuffers : public FlexOutputBuffers {

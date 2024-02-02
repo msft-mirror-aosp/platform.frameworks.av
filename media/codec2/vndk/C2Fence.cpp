@@ -26,6 +26,8 @@
 #include <C2FenceFactory.h>
 #include <C2SurfaceSyncObj.h>
 
+#include <utility>
+
 #define MAX_FENCE_FDS 1
 
 class C2Fence::Impl {
@@ -333,7 +335,8 @@ C2Fence _C2FenceFactory::CreateSyncFence(int fenceFd) {
             p.reset();
         }
     } else {
-        ALOGE("Create sync fence from invalid fd");
+        ALOGV("Create sync fence from invalid fd");
+        return C2Fence();
     }
     return C2Fence(p);
 }
@@ -485,17 +488,26 @@ public:
         mValid = (mPipeFd.get() >= 0);
     }
 
+    PipeFenceImpl(::android::base::unique_fd &&ufd) : mPipeFd{std::move(ufd)} {
+        mValid = (mPipeFd.get() >= 0);
+    }
+
 private:
     friend struct _C2FenceFactory;
     static constexpr int kPipeFenceWaitLimitSecs = 5;
 
     mutable std::atomic<bool> mValid;
-    ::android::base::unique_fd mPipeFd;
+    const ::android::base::unique_fd mPipeFd;
 };
 
 C2Fence _C2FenceFactory::CreatePipeFence(int fd) {
+    ::android::base::unique_fd ufd{fd};
+    return CreatePipeFence(std::move(ufd));
+}
+
+C2Fence _C2FenceFactory::CreatePipeFence(::android::base::unique_fd &&ufd) {
     std::shared_ptr<_C2FenceFactory::PipeFenceImpl> impl =
-        std::make_shared<_C2FenceFactory::PipeFenceImpl>(fd);
+        std::make_shared<_C2FenceFactory::PipeFenceImpl>(std::move(ufd));
     std::shared_ptr<C2Fence::Impl> p = std::static_pointer_cast<C2Fence::Impl>(impl);
     if (!p) {
         ALOGE("PipeFence creation failure");
@@ -520,7 +532,9 @@ C2Fence _C2FenceFactory::CreateFromNativeHandle(const native_handle_t* handle) {
             p = SyncFenceImpl::CreateFromNativeHandle(handle);
             break;
         default:
-            ALOGD("Unsupported fence type %d", type);
+            ALOGV("Unsupported fence type %d", type);
+            // If this is malformed-handle close the handle here.
+            (void) native_handle_close(handle);
             // return a null-fence in this case
             break;
     }

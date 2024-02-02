@@ -105,14 +105,14 @@ static const DynamicsProcessing::EqBandConfig kEqBandConfigMin =
         DynamicsProcessing::EqBandConfig({.channel = 0,
                                           .band = 0,
                                           .enable = false,
-                                          .cutoffFrequencyHz = 20,
+                                          .cutoffFrequencyHz = 0,
                                           .gainDb = -200});
 
 static const DynamicsProcessing::EqBandConfig kEqBandConfigMax =
         DynamicsProcessing::EqBandConfig({.channel = std::numeric_limits<int>::max(),
                                           .band = std::numeric_limits<int>::max(),
                                           .enable = true,
-                                          .cutoffFrequencyHz = 20000.1,
+                                          .cutoffFrequencyHz = 192000,
                                           .gainDb = 200});
 
 static const Range::DynamicsProcessingRange kPreEqBandConfigRange = {
@@ -129,7 +129,7 @@ static const Range::DynamicsProcessingRange kMbcBandConfigRange = {
                         {.channel = 0,
                          .band = 0,
                          .enable = false,
-                         .cutoffFrequencyHz = 20,
+                         .cutoffFrequencyHz = 0,
                          .attackTimeMs = 0,
                          .releaseTimeMs = 0,
                          .ratio = 1,
@@ -144,7 +144,7 @@ static const Range::DynamicsProcessingRange kMbcBandConfigRange = {
                         {.channel = std::numeric_limits<int>::max(),
                          .band = std::numeric_limits<int>::max(),
                          .enable = true,
-                         .cutoffFrequencyHz = 20000.1,
+                         .cutoffFrequencyHz = 192000,
                          .attackTimeMs = 60000,
                          .releaseTimeMs = 60000,
                          .ratio = 50,
@@ -211,11 +211,12 @@ ndk::ScopedAStatus DynamicsProcessingImpl::open(const Parameter::Common& common,
     RETURN_IF(common.input.base.format.pcm != common.output.base.format.pcm ||
                       common.input.base.format.pcm != PcmType::FLOAT_32_BIT,
               EX_ILLEGAL_ARGUMENT, "dataMustBe32BitsFloat");
+    std::lock_guard lg(mImplMutex);
     RETURN_OK_IF(mState != State::INIT);
-    auto context = createContext(common);
-    RETURN_IF(!context, EX_NULL_POINTER, "createContextFailed");
+    mImplContext = createContext(common);
+    RETURN_IF(!mContext || !mImplContext, EX_NULL_POINTER, "createContextFailed");
+    mEventFlag = mImplContext->getStatusEventFlag();
 
-    RETURN_IF_ASTATUS_NOT_OK(setParameterCommon(common), "setCommParamErr");
     if (specific.has_value()) {
         RETURN_IF_ASTATUS_NOT_OK(setParameterSpecific(specific.value()), "setSpecParamErr");
     } else {
@@ -227,8 +228,8 @@ ndk::ScopedAStatus DynamicsProcessingImpl::open(const Parameter::Common& common,
     }
 
     mState = State::IDLE;
-    context->dupeFmq(ret);
-    RETURN_IF(createThread(context, getEffectName()) != RetCode::SUCCESS, EX_UNSUPPORTED_OPERATION,
+    mContext->dupeFmq(ret);
+    RETURN_IF(createThread(getEffectName()) != RetCode::SUCCESS, EX_UNSUPPORTED_OPERATION,
               "FailedToCreateWorker");
     return ndk::ScopedAStatus::ok();
 }
@@ -443,7 +444,7 @@ RetCode DynamicsProcessingImpl::releaseContext() {
 IEffect::Status DynamicsProcessingImpl::effectProcessImpl(float* in, float* out, int samples) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, samples);
+    return mContext->dpeProcess(in, out, samples);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

@@ -25,6 +25,8 @@
 #include <atomic>
 #include <list>
 #include <numeric>
+#include <thread>
+#include <chrono>
 
 #include <C2AllocatorGralloc.h>
 #include <C2PlatformSupport.h>
@@ -86,6 +88,28 @@ const static size_t kDequeueTimeoutNs = 0;
 static bool areRenderMetricsEnabled() {
     std::string v = GetServerConfigurableFlag("media_native", "render_metrics_enabled", "false");
     return v == "true";
+}
+
+// Flags can come with individual BufferInfos
+// when used with large frame audio
+constexpr static std::initializer_list<std::pair<uint32_t, uint32_t>> flagList = {
+        {BUFFER_FLAG_CODEC_CONFIG, C2FrameData::FLAG_CODEC_CONFIG},
+        {BUFFER_FLAG_END_OF_STREAM, C2FrameData::FLAG_END_OF_STREAM},
+        {BUFFER_FLAG_DECODE_ONLY, C2FrameData::FLAG_DROP_FRAME}
+};
+
+static uint32_t convertFlags(uint32_t flags, bool toC2) {
+    return std::transform_reduce(
+            flagList.begin(), flagList.end(),
+            0u,
+            std::bit_or{},
+            [flags, toC2](const std::pair<uint32_t, uint32_t> &entry) {
+                if (toC2) {
+                    return (flags & entry.first) ? entry.second : 0;
+                } else {
+                    return (flags & entry.second) ? entry.first : 0;
+                }
+            });
 }
 
 }  // namespace
@@ -243,7 +267,8 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
     if (buffer->meta()->findInt32("decode-only", &tmp) && tmp) {
         flags |= C2FrameData::FLAG_DROP_FRAME;
     }
-    ALOGV("[%s] queueInputBuffer: buffer->size() = %zu", mName, buffer->size());
+    ALOGV("[%s] queueInputBuffer: buffer->size() = %zu time: %lld",
+            mName, buffer->size(), (long long)timeUs);
     std::list<std::unique_ptr<C2Work>> items;
     std::unique_ptr<C2Work> work(new C2Work);
     work->input.ordinal.timestamp = timeUs;
@@ -293,6 +318,34 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
                 Mutexed<OutputSurface>::Locked output(mOutputSurface);
                 uint64_t frameIndex = work->input.ordinal.frameIndex.peeku();
                 output->rotation[frameIndex] = rotation;
+            }
+            sp<RefBase> obj;
+            if (buffer->meta()->findObject("accessUnitInfo", &obj)) {
+                ALOGV("Filling C2Info from multiple access units");
+                sp<WrapperObject<std::vector<AccessUnitInfo>>> infos{
+                        (decltype(infos.get()))obj.get()};
+                std::vector<AccessUnitInfo> &accessUnitInfoVec = infos->value;
+                std::vector<C2AccessUnitInfosStruct> multipleAccessUnitInfos;
+                uint32_t outFlags = 0;
+                for (int i = 0; i < accessUnitInfoVec.size(); i++) {
+                    outFlags = 0;
+                    outFlags = convertFlags(accessUnitInfoVec[i].mFlags, true);
+                    if (eos && (outFlags & C2FrameData::FLAG_END_OF_STREAM)) {
+                        outFlags &= (~C2FrameData::FLAG_END_OF_STREAM);
+                    }
+                    multipleAccessUnitInfos.emplace_back(
+                            outFlags,
+                            accessUnitInfoVec[i].mSize,
+                            accessUnitInfoVec[i].mTimestamp);
+                    ALOGV("%d) flags: %d, size: %d, time: %llu",
+                            i, outFlags, accessUnitInfoVec[i].mSize,
+                            (long long)accessUnitInfoVec[i].mTimestamp);
+
+                }
+                const std::shared_ptr<C2AccessUnitInfos::input> c2AccessUnitInfos =
+                        C2AccessUnitInfos::input::AllocShared(
+                                multipleAccessUnitInfos.size(), 0u, multipleAccessUnitInfos);
+                c2buffer->setInfo(c2AccessUnitInfos);
             }
             work->input.buffers.push_back(c2buffer);
             if (encryptedBlock) {
@@ -1131,7 +1184,14 @@ void CCodecBufferChannel::pollForRenderedBuffers() {
 }
 
 void CCodecBufferChannel::onBufferReleasedFromOutputSurface(uint32_t generation) {
-    mComponent->onBufferReleasedFromOutputSurface(generation);
+    // Note: Since this is called asynchronously from IProducerListener not
+    // knowing the internal state of CCodec/CCodecBufferChannel,
+    // prevent mComponent from being destroyed by holding the shared reference
+    // during this interface being executed.
+    std::shared_ptr<Codec2Client::Component> comp = mComponent;
+    if (comp) {
+        comp->onBufferReleasedFromOutputSurface(generation);
+    }
 }
 
 status_t CCodecBufferChannel::discardBuffer(const sp<MediaCodecBuffer> &buffer) {
@@ -1595,8 +1655,14 @@ status_t CCodecBufferChannel::start(
                     padding = 0;
                 }
                 if (delay || padding) {
-                    // We need write access to the buffers, and we're already in
-                    // array mode.
+                    // We need write access to the buffers, so turn them into array mode.
+                    // TODO: b/321930152 - define SkipCutOutputBuffers that takes output from
+                    // component, runs it through SkipCutBuffer and allocate local buffer to be
+                    // used by fwk. Make initSkipCutBuffer() return OutputBuffers similar to
+                    // toArrayMode().
+                    if (!output->buffers->isArrayMode()) {
+                        output->buffers = output->buffers->toArrayMode(numOutputSlots);
+                    }
                     output->buffers->initSkipCutBuffer(delay, padding, sampleRate, channelCount);
                 }
             }
@@ -1630,22 +1696,31 @@ status_t CCodecBufferChannel::start(
 }
 
 status_t CCodecBufferChannel::prepareInitialInputBuffers(
-        std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers) {
+        std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers, bool retry) {
     if (mInputSurface) {
         return OK;
     }
 
     size_t numInputSlots = mInput.lock()->numSlots;
-
-    {
-        Mutexed<Input>::Locked input(mInput);
-        while (clientInputBuffers->size() < numInputSlots) {
-            size_t index;
-            sp<MediaCodecBuffer> buffer;
-            if (!input->buffers->requestNewBuffer(&index, &buffer)) {
-                break;
+    int retryCount = 1;
+    for (; clientInputBuffers->empty() && retryCount >= 0; retryCount--) {
+        {
+            Mutexed<Input>::Locked input(mInput);
+            while (clientInputBuffers->size() < numInputSlots) {
+                size_t index;
+                sp<MediaCodecBuffer> buffer;
+                if (!input->buffers->requestNewBuffer(&index, &buffer)) {
+                    break;
+                }
+                clientInputBuffers->emplace(index, buffer);
             }
-            clientInputBuffers->emplace(index, buffer);
+        }
+        if (!retry || (retryCount <= 0)) {
+            break;
+        }
+        if (clientInputBuffers->empty()) {
+            // wait: buffer may be in transit from component.
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
         }
     }
     if (clientInputBuffers->empty()) {
@@ -2241,12 +2316,34 @@ void CCodecBufferChannel::sendOutputBuffers() {
         case OutputBuffers::DISCARD:
             break;
         case OutputBuffers::NOTIFY_CLIENT:
+        {
             // TRICKY: we want popped buffers reported in order, so sending
             // the callback while holding the lock here. This assumes that
             // onOutputBufferAvailable() does not block. onOutputBufferAvailable()
             // callbacks are always sent with the Output lock held.
+            if (c2Buffer) {
+                std::shared_ptr<const C2AccessUnitInfos::output> bufferMetadata =
+                        std::static_pointer_cast<const C2AccessUnitInfos::output>(
+                        c2Buffer->getInfo(C2AccessUnitInfos::output::PARAM_TYPE));
+                if (bufferMetadata && bufferMetadata->flexCount() > 0) {
+                    uint32_t flag = 0;
+                    std::vector<AccessUnitInfo> accessUnitInfos;
+                    for (int nMeta = 0; nMeta < bufferMetadata->flexCount(); nMeta++) {
+                        const C2AccessUnitInfosStruct &bufferMetadataStruct =
+                                bufferMetadata->m.values[nMeta];
+                        flag = convertFlags(bufferMetadataStruct.flags, false);
+                        accessUnitInfos.emplace_back(flag,
+                                static_cast<size_t>(bufferMetadataStruct.size),
+                                static_cast<size_t>(bufferMetadataStruct.timestamp));
+                    }
+                    sp<WrapperObject<std::vector<AccessUnitInfo>>> obj{
+                        new WrapperObject<std::vector<AccessUnitInfo>>{accessUnitInfos}};
+                    outBuffer->meta()->setObject("accessUnitInfo", obj);
+                }
+            }
             mCallback->onOutputBufferAvailable(index, outBuffer);
             break;
+        }
         case OutputBuffers::REALLOCATE:
             if (++reallocTryNum > kMaxReallocTry) {
                 output.unlock();
@@ -2370,6 +2467,46 @@ void CCodecBufferChannel::setCrypto(const sp<ICrypto> &crypto) {
 
 void CCodecBufferChannel::setDescrambler(const sp<IDescrambler> &descrambler) {
     mDescrambler = descrambler;
+}
+
+uint32_t CCodecBufferChannel::getBuffersPixelFormat(bool isEncoder) {
+    if (isEncoder) {
+        return getInputBuffersPixelFormat();
+    } else {
+        return getOutputBuffersPixelFormat();
+    }
+}
+
+uint32_t CCodecBufferChannel::getInputBuffersPixelFormat() {
+    Mutexed<Input>::Locked input(mInput);
+    if (input->buffers == nullptr) {
+        return PIXEL_FORMAT_UNKNOWN;
+    }
+    return input->buffers->getPixelFormatIfApplicable();
+}
+
+uint32_t CCodecBufferChannel::getOutputBuffersPixelFormat() {
+    Mutexed<Output>::Locked output(mOutput);
+    if (output->buffers == nullptr) {
+        return PIXEL_FORMAT_UNKNOWN;
+    }
+    return output->buffers->getPixelFormatIfApplicable();
+}
+
+void CCodecBufferChannel::resetBuffersPixelFormat(bool isEncoder) {
+    if (isEncoder) {
+        Mutexed<Input>::Locked input(mInput);
+        if (input->buffers == nullptr) {
+            return;
+        }
+        input->buffers->resetPixelFormatIfApplicable();
+    } else {
+        Mutexed<Output>::Locked output(mOutput);
+        if (output->buffers == nullptr) {
+            return;
+        }
+        output->buffers->resetPixelFormatIfApplicable();
+    }
 }
 
 status_t toStatusT(c2_status_t c2s, c2_operation_t c2op) {

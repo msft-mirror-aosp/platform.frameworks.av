@@ -45,6 +45,8 @@ class DynamicsProcessingContext final : public EffectContext {
 
     // override EffectContext::setCommon to update mChannelCount
     RetCode setCommon(const Parameter::Common& common) override;
+    RetCode setVolumeStereo(const Parameter::VolumeStereo& volumeStereo) override;
+    Parameter::VolumeStereo getVolumeStereo() override;
 
     RetCode setEngineArchitecture(const DynamicsProcessing::EngineArchitecture& engineArchitecture);
     RetCode setPreEq(const std::vector<DynamicsProcessing::ChannelConfig>& eqChannels);
@@ -66,13 +68,13 @@ class DynamicsProcessingContext final : public EffectContext {
     std::vector<DynamicsProcessing::LimiterConfig> getLimiter();
     std::vector<DynamicsProcessing::InputGain> getInputGain();
 
-    IEffect::Status lvmProcess(float* in, float* out, int samples);
+    IEffect::Status dpeProcess(float* in, float* out, int samples);
 
   private:
     static constexpr float kPreferredProcessingDurationMs = 10.0f;
     static constexpr int kBandCount = 5;
     std::mutex mMutex;
-    size_t mChannelCount GUARDED_BY(mMutex) = 0;
+    int mChannelCount GUARDED_BY(mMutex) = 0;
     DynamicsProcessingState mState GUARDED_BY(mMutex) = DYNAMICS_PROCESSING_STATE_UNINITIALIZED;
     std::unique_ptr<dp_fx::DPFrequency> mDpFreq GUARDED_BY(mMutex) = nullptr;
     bool mEngineInited GUARDED_BY(mMutex) = false;

@@ -29,9 +29,6 @@
 #include <chrono>
 #include <fstream>
 
-#define FLAG_NON_DISPLAY_FRAME (1 << 4)
-#define FLAG_CONFIG_DATA (1 << 5)
-
 #define MAX_RETRY 20
 #define TIME_OUT 400ms
 #define MAX_INPUT_BUFFERS 8
@@ -53,10 +50,20 @@ extern std::string sResourceDir;
 // Component name prefix
 extern std::string sComponentNamePrefix;
 
+enum c2_vts_flags_t {
+    VTS_BIT_FLAG_SYNC_FRAME = 1,
+    VTS_BIT_FLAG_NO_SHOW_FRAME = 2,
+    VTS_BIT_FLAG_CSD_FRAME = 3,
+    VTS_BIT_FLAG_LARGE_AUDIO_FRAME = 4,
+};
+
 struct FrameInfo {
     int bytesCount;
-    uint32_t flags;
+    uint32_t vtsFlags;
     int64_t timestamp;
+    // This is used when access-units are marked with
+    // VTS_BIT_FLAG_LARGE_AUDIO_FRAME
+    std::vector<C2AccessUnitInfosStruct> largeFrameInfo;
 };
 
 template <typename... T>
@@ -83,7 +90,6 @@ struct CodecListener : public android::Codec2Client::Listener {
     virtual void onWorkDone(const std::weak_ptr<android::Codec2Client::Component>& comp,
                             std::list<std::unique_ptr<C2Work>>& workItems) override {
         /* TODO */
-        ALOGD("onWorkDone called");
         (void)comp;
         if (callBack) callBack(workItems);
     }
@@ -100,7 +106,6 @@ struct CodecListener : public android::Codec2Client::Listener {
                          uint32_t errorCode) override {
         /* TODO */
         (void)comp;
-        ALOGD("onError called");
         if (errorCode != 0) ALOGE("Error : %u", errorCode);
     }
 
@@ -165,4 +170,7 @@ int32_t populateInfoVector(std::string info, android::Vector<FrameInfo>* frameIn
 void verifyFlushOutput(std::list<std::unique_ptr<C2Work>>& flushedWork,
                        std::list<std::unique_ptr<C2Work>>& workQueue,
                        std::list<uint64_t>& flushedIndices, std::mutex& queueLock);
+
+int mapInfoFlagstoVtsFlags(int infoFlags);
+
 #endif  // MEDIA_C2_HIDL_TEST_COMMON_H
