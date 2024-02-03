@@ -67,7 +67,8 @@ c2_status_t static CreateGraphicBlockFromAhwb(AHardwareBuffer *ahwb,
             return err;
         }
         std::shared_ptr<C2IgbaBlockPoolData> poolData =
-                std::make_shared<C2IgbaBlockPoolData>(ahwb, igba);
+                std::make_shared<C2IgbaBlockPoolData>(
+                        ahwb, const_cast<std::shared_ptr<C2IGBA>&>(igba));
         *block = _C2BlockFactory::CreateGraphicBlock(alloc, poolData);
         return C2_OK;
     } else {
@@ -79,7 +80,7 @@ c2_status_t static CreateGraphicBlockFromAhwb(AHardwareBuffer *ahwb,
 
 C2IgbaBlockPoolData::C2IgbaBlockPoolData(
         const AHardwareBuffer *buffer,
-        const std::shared_ptr<C2IGBA> &igba) : mOwned(true), mBuffer(buffer), mIgba(igba) {
+        std::shared_ptr<C2IGBA> &igba) : mOwned(true), mBuffer(buffer), mIgba(igba) {
     CHECK(mBuffer);
     AHardwareBuffer_acquire(const_cast<AHardwareBuffer *>(mBuffer));
 }
@@ -115,6 +116,10 @@ void C2IgbaBlockPoolData::disown() {
     mOwned = false;
 }
 
+void C2IgbaBlockPoolData::registerIgba(std::shared_ptr<C2IGBA> &igba) {
+    mIgba = igba;
+}
+
 std::shared_ptr<C2GraphicBlock> _C2BlockFactory::CreateGraphicBlock(AHardwareBuffer *ahwb) {
     // TODO: get proper allocator? and synchronization? or allocator-less?
     static std::shared_ptr<C2AllocatorAhwb> sAllocator = std::make_shared<C2AllocatorAhwb>(0);
@@ -148,22 +153,30 @@ void _C2BlockFactory::DisownIgbaBlock(
     }
 }
 
+void _C2BlockFactory::RegisterIgba(
+        const std::shared_ptr<_C2BlockPoolData>& data,
+        std::shared_ptr<C2IGBA> &igba) {
+    if (data && data->getType() == _C2BlockPoolData::TYPE_AHWBUFFER) {
+        const std::shared_ptr<C2IgbaBlockPoolData> poolData =
+                std::static_pointer_cast<C2IgbaBlockPoolData>(data);
+        poolData->registerIgba(igba);
+    }
+}
+
 C2IgbaBlockPool::C2IgbaBlockPool(
         const std::shared_ptr<C2Allocator> &allocator,
         const std::shared_ptr<C2IGBA> &igba,
+        ::android::base::unique_fd &&ufd,
         const local_id_t localId) : mAllocator(allocator), mIgba(igba), mLocalId(localId) {
     if (!mIgba) {
         mValid = false;
         return;
     }
-    // TODO: Remove IPC (This is a nested IPC call during c2aidl creatBlockPool().
-    ::ndk::ScopedFileDescriptor fd;
-    ::ndk::ScopedAStatus status = mIgba->getWaitableFd(&fd);
-    if (!status.isOk()) {
+    if (ufd.get() < 0) {
         mValid = false;
         return;
     }
-    mWaitFence = _C2FenceFactory::CreatePipeFence(fd.release());
+    mWaitFence = _C2FenceFactory::CreatePipeFence(std::move(ufd));
     if (!mWaitFence.valid()) {
         mValid = false;
         return;
@@ -179,28 +192,25 @@ c2_status_t C2IgbaBlockPool::fetchGraphicBlock(
     c2_status_t res = _fetchGraphicBlock(
             width, height, format, usage, kBlockingFetchTimeoutNs, &origId, block, &fence);
 
-    if (res == C2_BLOCKING) {
-        return C2_TIMED_OUT;
+    if (res == C2_TIMED_OUT) {
+        // SyncFence waiting timeout.
+        // Usually HAL treats C2_TIMED_OUT as an irrecoverable error.
+        // We want HAL to re-try.
+        return C2_BLOCKING;
     }
-    if (res != C2_OK) {
-        return res;
-    }
-    // TODO: bundle the fence to the block. Are API changes required?
-    res = fence.wait(kSyncFenceWaitNs);
-    if (res != C2_OK) {
-        bool aidlRet = true;
-        ::ndk::ScopedAStatus status = mIgba->deallocate(origId, &aidlRet);
-        ALOGE("Waiting a sync fence failed %d aidl(%d: %d)",
-              res, status.isOk(), aidlRet);
-    }
-    return C2_OK;
+    return res;
 }
 
 c2_status_t C2IgbaBlockPool::fetchGraphicBlock(
         uint32_t width, uint32_t height, uint32_t format, C2MemoryUsage usage,
         std::shared_ptr<C2GraphicBlock> *block, C2Fence *fence) {
     uint64_t origId;
-    return _fetchGraphicBlock(width, height, format, usage, 0LL, &origId, block, fence);
+    c2_status_t res = _fetchGraphicBlock(width, height, format, usage, 0LL, &origId, block, fence);
+    if (res == C2_TIMED_OUT) {
+        *fence = C2Fence();
+        return C2_BLOCKING;
+    }
+    return res;
 }
 
 c2_status_t C2IgbaBlockPool::_fetchGraphicBlock(
@@ -250,10 +260,27 @@ c2_status_t C2IgbaBlockPool::_fetchGraphicBlock(
             }
         }
 
-        *fence = _C2FenceFactory::CreateSyncFence(allocation.fence.release());
+        C2Fence syncFence  = _C2FenceFactory::CreateSyncFence(allocation.fence.release());
         AHardwareBuffer *ahwb = allocation.buffer.release(); // This is acquired.
         CHECK(AHardwareBuffer_getId(ahwb, origId) == ::android::OK);
-        c2_status_t res = CreateGraphicBlockFromAhwb(ahwb, mAllocator, mIgba, block);
+
+        // We are waiting for SyncFence here for backward compatibility.
+        // H/W based Sync Fence could be returned to improve pipeline latency.
+        //
+        // TODO: Add a component configuration for returning sync fence
+        // from fetchGraphicBlock() as the C2Fence output param(b/322283520).
+        // In the case C2_OK along with GraphicBlock must be returned together.
+        c2_status_t res = syncFence.wait(kSyncFenceWaitNs);
+        if (res != C2_OK) {
+            AHardwareBuffer_release(ahwb);
+            bool aidlRet = true;
+            ::ndk::ScopedAStatus status = mIgba->deallocate(*origId, &aidlRet);
+            ALOGE("Waiting a sync fence failed %d aidl(%d: %d)",
+                  res, status.isOk(), aidlRet);
+            return C2_TIMED_OUT;
+        }
+
+        res = CreateGraphicBlockFromAhwb(ahwb, mAllocator, mIgba, block);
         AHardwareBuffer_release(ahwb);
         if (res != C2_OK) {
             bool aidlRet = true;

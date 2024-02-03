@@ -24,7 +24,6 @@
 
 #include <aidl/android/hardware/audio/core/IModule.h>
 #include <android/binder_manager.h>
-#include <binder/IServiceManager.h>
 #include <media/AidlConversionNdkCpp.h>
 #include <media/AidlConversionUtil.h>
 #include <utils/Log.h>
@@ -113,29 +112,6 @@ status_t DevicesFactoryHalAidl::openDevice(const char *name, sp<DeviceHalInterfa
     }
     *device = sp<DeviceHalAidl>::make(name, service, getVendorExtension());
     return OK;
-}
-
-status_t DevicesFactoryHalAidl::getHalPids(std::vector<pid_t> *pids) {
-    if (pids == nullptr) {
-        return BAD_VALUE;
-    }
-    // The functionality for retrieving debug infos of services is not exposed via the NDK.
-    sp<IServiceManager> sm = defaultServiceManager();
-    if (sm == nullptr) {
-        return NO_INIT;
-    }
-    std::set<pid_t> pidsSet;
-    const auto moduleServiceName = std::string(IModule::descriptor) + "/";
-    auto debugInfos = sm->getServiceDebugInfo();
-    for (const auto& info : debugInfos) {
-        if (info.pid > 0 &&
-                info.name.size() > moduleServiceName.size() && // '>' as there must be instance name
-                info.name.substr(0, moduleServiceName.size()) == moduleServiceName) {
-            pidsSet.insert(info.pid);
-        }
-    }
-    *pids = {pidsSet.begin(), pidsSet.end()};
-    return NO_ERROR;
 }
 
 status_t DevicesFactoryHalAidl::setCallbackOnce(sp<DevicesFactoryHalCallback> callback) {

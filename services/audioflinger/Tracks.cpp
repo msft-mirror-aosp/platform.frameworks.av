@@ -895,12 +895,12 @@ void Track::destroy()
             audio_utils::lock_guard _l(thread->mutex());
             auto* const playbackThread = thread->asIAfPlaybackThread().get();
             wasActive = playbackThread->destroyTrack_l(this);
+            forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->destroy(); });
         }
         if (isExternalTrack() && !wasActive) {
             AudioSystem::releaseOutput(mPortId);
         }
     }
-    forEachTeePatchTrack([](auto patchTrack) { patchTrack->destroy(); });
 }
 
 void Track::appendDumpHeader(String8& result) const
@@ -1081,7 +1081,13 @@ void Track::interceptBuffer(
         // Additionally PatchProxyBufferProvider::obtainBuffer (called by PathTrack::getNextBuffer)
         // does not allow 0 frame size request contrary to getNextBuffer
     }
-    for (auto& teePatch : mTeePatches) {
+    TeePatches teePatches;
+    if (mTeePatchesRWLock.tryReadLock() == NO_ERROR) {
+        // Cache a copy of tee patches in case it is updated while using.
+        teePatches = mTeePatches;
+        mTeePatchesRWLock.unlock();
+    }
+    for (auto& teePatch : teePatches) {
         IAfPatchRecord* patchRecord = teePatch.patchRecord.get();
         const size_t framesWritten = patchRecord->writeFrames(
                 sourceBuffer.i8, frameCount, mFrameSize);
@@ -1094,7 +1100,7 @@ void Track::interceptBuffer(
     using namespace std::chrono_literals;
     // Average is ~20us per track, this should virtually never be logged (Logging takes >200us)
     ALOGD_IF(spent > 500us, "%s: took %lldus to intercept %zu tracks", __func__,
-             spent.count(), mTeePatches.size());
+             spent.count(), teePatches.size());
 }
 
 // ExtendedAudioBufferProvider interface
@@ -1275,12 +1281,13 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
             buffer.mFrameCount = 1;
             (void) mAudioTrackServerProxy->obtainBuffer(&buffer, true /*ackFlush*/);
         }
+        if (status == NO_ERROR) {
+            forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->start(); });
+        }
     } else {
         status = BAD_VALUE;
     }
     if (status == NO_ERROR) {
-        forEachTeePatchTrack([](auto patchTrack) { patchTrack->start(); });
-
         // send format to AudioManager for playback activity monitoring
         const sp<IAudioManager> audioManager =
                 thread->afThreadCallback()->getOrCreateAudioManager();
@@ -1331,8 +1338,8 @@ void Track::stop()
             ALOGV("%s(%d): not stopping/stopped => stopping/stopped on thread %d",
                     __func__, mId, (int)mThreadIoHandle);
         }
+        forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->stop(); });
     }
-    forEachTeePatchTrack([](auto patchTrack) { patchTrack->stop(); });
 }
 
 void Track::pause()
@@ -1367,9 +1374,9 @@ void Track::pause()
         default:
             break;
         }
+        // Pausing the TeePatch to avoid a glitch on underrun, at the cost of buffered audio loss.
+        forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->pause(); });
     }
-    // Pausing the TeePatch to avoid a glitch on underrun, at the cost of buffered audio loss.
-    forEachTeePatchTrack([](auto patchTrack) { patchTrack->pause(); });
 }
 
 void Track::flush()
@@ -1430,9 +1437,10 @@ void Track::flush()
         // before mixer thread can run. This is important when offloading
         // because the hardware buffer could hold a large amount of audio
         playbackThread->broadcast_l();
+        // Flush the Tee to avoid on resume playing old data and glitching on the transition to
+        // new data
+        forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->flush(); });
     }
-    // Flush the Tee to avoid on resume playing old data and glitching on the transition to new data
-    forEachTeePatchTrack([](auto patchTrack) { patchTrack->flush(); });
 }
 
 // must be called with thread lock held
@@ -1611,19 +1619,22 @@ void Track::copyMetadataTo(MetadataInserter& backInserter) const
     *backInserter++ = metadata;
 }
 
-void Track::updateTeePatches() {
+void Track::updateTeePatches_l() {
     if (mTeePatchesToUpdate.has_value()) {
-        forEachTeePatchTrack([](auto patchTrack) { patchTrack->destroy(); });
-        mTeePatches = mTeePatchesToUpdate.value();
+        forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->destroy(); });
+        {
+            RWLock::AutoWLock writeLock(mTeePatchesRWLock);
+            mTeePatches = std::move(mTeePatchesToUpdate.value());
+        }
         if (mState == TrackBase::ACTIVE || mState == TrackBase::RESUMING ||
                 mState == TrackBase::STOPPING_1) {
-            forEachTeePatchTrack([](auto patchTrack) { patchTrack->start(); });
+            forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->start(); });
         }
         mTeePatchesToUpdate.reset();
     }
 }
 
-void Track::setTeePatchesToUpdate(TeePatches teePatchesToUpdate) {
+void Track::setTeePatchesToUpdate_l(TeePatches teePatchesToUpdate) {
     ALOGW_IF(mTeePatchesToUpdate.has_value(),
              "%s, existing tee patches to update will be ignored", __func__);
     mTeePatchesToUpdate = std::move(teePatchesToUpdate);

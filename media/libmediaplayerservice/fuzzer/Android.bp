@@ -124,14 +124,19 @@ cc_fuzz {
     ],
     defaults: [
         "libmediaplayerserviceFuzzer_defaults",
+        "libmediaplayerservice_defaults",
     ],
     static_libs: [
         "libplayerservice_datasource",
     ],
     shared_libs: [
+        "libmediaplayerservice",
         "libdatasource",
         "libdrmframework",
+        "libstagefright_httplive",
+        "libmediaextractorservice",
     ],
+    include_dirs: ["frameworks/av/services/mediaextractor"],
 }
 
 cc_fuzz {
@@ -174,6 +179,7 @@ cc_fuzz {
         "libnetd_client",
         "libpowermanager",
         "libstagefright_httplive",
+        "libaudiohal@7.0",
     ],
 }
 

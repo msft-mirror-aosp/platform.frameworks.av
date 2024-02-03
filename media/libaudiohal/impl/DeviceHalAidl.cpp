@@ -448,6 +448,7 @@ status_t DeviceHalAidl::openOutputStream(
     }
     *config = VALUE_OR_RETURN_STATUS(
             ::aidl::android::aidl2legacy_AudioConfig_audio_config_t(aidlConfig, isInput));
+    if (mixPortConfig.id == 0) return BAD_VALUE;  // HAL suggests a different config.
     ::aidl::android::hardware::audio::core::IModule::OpenOutputStreamArguments args;
     args.portConfigId = mixPortConfig.id;
     const bool isOffload = isBitPositionFlagSet(
@@ -520,6 +521,7 @@ status_t DeviceHalAidl::openInputStream(
     }
     *config = VALUE_OR_RETURN_STATUS(
             ::aidl::android::aidl2legacy_AudioConfig_audio_config_t(aidlConfig, isInput));
+    if (mixPortConfig.id == 0) return BAD_VALUE;  // HAL suggests a different config.
     ::aidl::android::hardware::audio::core::IModule::OpenInputStreamArguments args;
     args.portConfigId = mixPortConfig.id;
     RecordTrackMetadata aidlTrackMetadata{
@@ -704,8 +706,7 @@ status_t DeviceHalAidl::setAudioPortConfig(const struct audio_port_config* confi
                     *config, isInput, 0 /*portId*/));
     AudioPortConfig portConfig;
     std::lock_guard l(mLock);
-    return mMapper.findOrCreatePortConfig(
-            requestedPortConfig, std::set<int32_t>(), &portConfig);
+    return mMapper.setPortConfig(requestedPortConfig, std::set<int32_t>(), &portConfig);
 }
 
 MicrophoneInfoProvider::Info const* DeviceHalAidl::getMicrophoneInfo() {
@@ -777,7 +778,7 @@ status_t DeviceHalAidl::addDeviceEffect(
     Hal2AidlMapper::Cleanups cleanups(mMapperAccessor);
     {
         std::lock_guard l(mLock);
-        RETURN_STATUS_IF_ERROR(mMapper.findOrCreatePortConfig(
+        RETURN_STATUS_IF_ERROR(mMapper.setPortConfig(
                     requestedPortConfig, {} /*destinationPortIds*/, &devicePortConfig, &cleanups));
     }
     auto aidlEffect = sp<effect::EffectHalAidl>::cast(effect);
@@ -902,15 +903,39 @@ status_t DeviceHalAidl::getSoundDoseInterface(const std::string& module,
 }
 
 status_t DeviceHalAidl::prepareToDisconnectExternalDevice(const struct audio_port_v7* port) {
-    // There is not AIDL API defined for `prepareToDisconnectExternalDevice`.
-    // Call `setConnectedState` instead.
-    // TODO(b/279824103): call prepareToDisconnectExternalDevice when it is added.
-    RETURN_STATUS_IF_ERROR(setConnectedState(port, false /*connected*/));
-    std::lock_guard l(mLock);
-    mDeviceDisconnectionNotified.insert(port->id);
-    // Return that there was no error as otherwise the disconnection procedure will not be
-    // considered complete for upper layers, and 'setConnectedState' will not be called again
-    return OK;
+    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
+    TIME_CHECK();
+    if (mModule == nullptr) return NO_INIT;
+    if (port == nullptr) {
+        return BAD_VALUE;
+    }
+    const bool isInput = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::portDirection(port->role, port->type)) ==
+                    ::aidl::android::AudioPortDirection::INPUT;
+    AudioPort aidlPort = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::legacy2aidl_audio_port_v7_AudioPort(*port, isInput));
+    if (aidlPort.ext.getTag() != AudioPortExt::device) {
+        ALOGE("%s: provided port is not a device port (module %s): %s",
+              __func__, mInstance.c_str(), aidlPort.toString().c_str());
+        return BAD_VALUE;
+    }
+    status_t status = NO_ERROR;
+    {
+        std::lock_guard l(mLock);
+        status = mMapper.prepareToDisconnectExternalDevice(aidlPort);
+    }
+    if (status == UNKNOWN_TRANSACTION) {
+        // If there is not AIDL API defined for `prepareToDisconnectExternalDevice`.
+        // Call `setConnectedState` instead.
+        RETURN_STATUS_IF_ERROR(setConnectedState(port, false /*connected*/));
+        std::lock_guard l(mLock);
+        mDeviceDisconnectionNotified.insert(port->id);
+        // Return that there was no error as otherwise the disconnection procedure will not be
+        // considered complete for upper layers, and 'setConnectedState' will not be called again
+        return OK;
+    } else {
+        return status;
+    }
 }
 
 status_t DeviceHalAidl::setConnectedState(const struct audio_port_v7 *port, bool connected) {
@@ -924,11 +949,10 @@ status_t DeviceHalAidl::setConnectedState(const struct audio_port_v7 *port, bool
         std::lock_guard l(mLock);
         if (mDeviceDisconnectionNotified.erase(port->id) > 0) {
             // For device disconnection, APM will first call `prepareToDisconnectExternalDevice`
-            // and then call `setConnectedState`. However, there is no API for
-            // `prepareToDisconnectExternalDevice` yet. In that case, `setConnectedState` will be
-            // called when calling `prepareToDisconnectExternalDevice`. Do not call to the HAL if
-            // previous call is successful. Also remove the cache here to avoid a large cache after
-            // a long run.
+            // and then call `setConnectedState`. If `prepareToDisconnectExternalDevice` doesn't
+            // exit, `setConnectedState` will be called when calling
+            // `prepareToDisconnectExternalDevice`. Do not call to the HAL if previous call is
+            // successful. Also remove the cache here to avoid a large cache after a long run.
             return OK;
         }
     }
@@ -950,7 +974,7 @@ status_t DeviceHalAidl::setSimulateDeviceConnections(bool enabled) {
     if (mModule == nullptr) return NO_INIT;
     {
         std::lock_guard l(mLock);
-        mMapper.resetUnusedPatchesAndPortConfigs();
+        mMapper.resetUnusedPatchesPortConfigsAndPorts();
     }
     ModuleDebug debug{ .simulateDeviceConnections = enabled };
     status_t status = statusTFromBinderStatus(mModule->setModuleDebug(debug));

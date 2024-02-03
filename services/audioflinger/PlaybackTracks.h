@@ -23,6 +23,7 @@
 #include <audio_utils/mutex.h>
 #include <audio_utils/LinearMap.h>
 #include <binder/AppOpsManager.h>
+#include <utils/RWLock.h>
 
 namespace android {
 
@@ -193,8 +194,8 @@ public:
     sp<os::ExternalVibration> getExternalVibration() const final { return mExternalVibration; }
 
             // This function should be called with holding thread lock.
-    void updateTeePatches() final;
-    void setTeePatchesToUpdate(TeePatches teePatchesToUpdate) final;
+    void updateTeePatches_l() final;
+    void setTeePatchesToUpdate_l(TeePatches teePatchesToUpdate) final;
 
     void tallyUnderrunFrames(size_t frames) final {
        if (isOut()) { // we expect this from output tracks only
@@ -349,8 +350,10 @@ protected:
 
 private:
     void                interceptBuffer(const AudioBufferProvider::Buffer& buffer);
+    // Must hold thread lock to access tee patches
     template <class F>
-    void                forEachTeePatchTrack(F f) {
+    void                forEachTeePatchTrack_l(F f) {
+        RWLock::AutoRLock readLock(mTeePatchesRWLock);
         for (auto& tp : mTeePatches) { f(tp.patchTrack); }
     };
 
@@ -386,6 +389,7 @@ private:
     audio_output_flags_t mFlags;
     TeePatches mTeePatches;
     std::optional<TeePatches> mTeePatchesToUpdate;
+    RWLock              mTeePatchesRWLock;
     const float         mSpeed;
     const bool          mIsSpatialized;
     const bool          mIsBitPerfect;

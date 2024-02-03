@@ -275,7 +275,7 @@ class Camera3Device :
      * and defaults to NONE.
      */
     status_t setRotateAndCropAutoBehavior(
-            camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropValue);
+            camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropValue, bool fromHal);
 
     /**
      * Set the current behavior for the AUTOFRAMING control when in AUTO.
@@ -651,6 +651,8 @@ class Camera3Device :
         bool                                mAutoframingAuto;
         // Indicates that the auto framing value within 'mSettingsList' was modified
         bool                                mAutoframingChanged = false;
+        // Indicates that the camera test pattern setting is modified
+        bool                                mTestPatternChanged = false;
 
         // Whether this capture request has its zoom ratio set to 1.0x before
         // the framework overrides it for camera HAL consumption.
@@ -1151,6 +1153,7 @@ class Camera3Device :
         Condition          mLatestRequestSignal;
         // android.request.id for latest process_capture_request
         int32_t            mLatestRequestId;
+        int32_t            mLatestFailedRequestId;
         CameraMetadata     mLatestRequest;
         std::unordered_map<std::string, CameraMetadata> mLatestPhysicalRequest;
 
