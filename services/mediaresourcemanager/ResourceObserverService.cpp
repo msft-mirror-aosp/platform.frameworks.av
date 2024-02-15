@@ -41,7 +41,8 @@ static std::vector<MediaObservableEvent> sEvents = {
 };
 
 static MediaObservableType getObservableType(const MediaResourceParcel& res) {
-    if (res.subType == MediaResourceSubType::kVideoCodec) {
+    if (res.subType == MediaResourceSubType::kHwVideoCodec ||
+        res.subType == MediaResourceSubType::kSwVideoCodec) {
         if (res.type == MediaResourceType::kNonSecureCodec) {
             return MediaObservableType::kVideoNonSecureCodec;
         }
@@ -122,7 +123,7 @@ binder_status_t ResourceObserverService::dump(
                 "can't dump ResourceManagerService from pid=%d, uid=%d\n",
                 AIBinder_getCallingPid(),
                 AIBinder_getCallingUid());
-        write(fd, result.string(), result.size());
+        write(fd, result.c_str(), result.size());
         return PERMISSION_DENIED;
     }
 
@@ -138,7 +139,7 @@ binder_status_t ResourceObserverService::dump(
                 String8 enabledEventsStr;
                 for (auto &event : sEvents) {
                     if (((uint64_t)observable.eventFilter & (uint64_t)event) != 0) {
-                        if (!enabledEventsStr.isEmpty()) {
+                        if (!enabledEventsStr.empty()) {
                             enabledEventsStr.append("|");
                         }
                         enabledEventsStr.append(toString(event).c_str());
@@ -150,7 +151,7 @@ binder_status_t ResourceObserverService::dump(
         }
     }
 
-    write(fd, result.string(), result.size());
+    write(fd, result.c_str(), result.size());
     return OK;
 }
 
@@ -285,9 +286,9 @@ void ResourceObserverService::notifyObservers(
     {
         std::scoped_lock lock{mObserverLock};
 
-        for (auto &res : resources) {
+        for (const MediaResourceParcel& res : resources.getResources()) {
             // Skip if this resource doesn't map to any observable type.
-            MediaObservableType observableType = getObservableType(res.second);
+            MediaObservableType observableType = getObservableType(res);
             if (observableType == MediaObservableType::kInvalid) {
                 continue;
             }
@@ -302,9 +303,9 @@ void ResourceObserverService::notifyObservers(
                 auto calleeIt = calleeList.find(subscriber.first);
                 if (calleeIt == calleeList.end()) {
                     calleeList.emplace(subscriber.first, CalleeInfo{
-                        subscriber.second, {{observableType, res.second.value}}});
+                        subscriber.second, {{observableType, res.value}}});
                 } else {
-                    calleeIt->second.monitors.push_back({observableType, res.second.value});
+                    calleeIt->second.monitors.push_back({observableType, res.value});
                 }
             }
         }

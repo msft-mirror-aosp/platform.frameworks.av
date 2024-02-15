@@ -52,14 +52,7 @@ cc_library {
         "libstagefright_bufferpool@2.0.1",
         "libui",
     ],
-
-    // Device does not boot when global ThinLTO is enabled for this library.
-    // http://b/170595429
-    lto: {
-        never: true,
-    },
 }
-
 
 // DO NOT DEPEND ON THIS DIRECTLY
 // use libcodec2-hidl-defaults instead
@@ -71,7 +64,6 @@ cc_library {
         "//apex_available:platform",
         "com.android.media.swcodec",
     ],
-
 
     defaults: ["hidl_defaults"],
 
@@ -103,6 +95,7 @@ cc_library {
         "android.hardware.media.omx@1.0",
         "libbase",
         "libcodec2",
+        "libcodec2_hal_common",
         "libcodec2_hidl@1.0",
         "libcodec2_hidl_plugin_stub",
         "libcodec2_vndk",
@@ -179,4 +172,3 @@ cc_defaults {
         "libhidlbase",
     ],
 }
-

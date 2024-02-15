@@ -18,6 +18,8 @@
 #define LOG_TAG "codec2_hidl_hal_video_enc_test"
 
 #include <android-base/logging.h>
+#include <android/binder_process.h>
+#include <codec2/common/HalSelection.h>
 #include <gtest/gtest.h>
 #include <hidl/GtestPrinter.h>
 #include <stdio.h>
@@ -70,7 +72,9 @@ class Codec2VideoEncHidlTestBase : public ::testing::Test {
         std::shared_ptr<C2AllocatorStore> store = android::GetCodec2PlatformAllocatorStore();
         CHECK_EQ(store->fetchAllocator(C2AllocatorStore::DEFAULT_GRAPHIC, &mGraphicAllocator),
                  C2_OK);
-        mGraphicPool = std::make_shared<C2PooledBlockPool>(mGraphicAllocator, mBlockPoolId++);
+        C2PooledBlockPool::BufferPoolVer ver = ::android::IsCodec2AidlHalSelected() ?
+                C2PooledBlockPool::VER_AIDL2 : C2PooledBlockPool::VER_HIDL;
+        mGraphicPool = std::make_shared<C2PooledBlockPool>(mGraphicAllocator, mBlockPoolId++, ver);
         ASSERT_NE(mGraphicPool, nullptr);
 
         std::vector<std::unique_ptr<C2Param>> queried;
@@ -500,7 +504,7 @@ TEST_P(Codec2VideoEncEncodeTest, EncodeTest) {
     description("Encodes input file");
     if (mDisableTest) GTEST_SKIP() << "Test is disabled";
 
-    bool signalEOS = std::get<3>(GetParam());
+    bool signalEOS = std::get<2>(GetParam());
     // Send an empty frame to receive CSD data from encoder.
     bool sendEmptyFirstFrame = std::get<3>(GetParam());
     mConfigBPictures = std::get<4>(GetParam());
@@ -930,5 +934,6 @@ int main(int argc, char** argv) {
     }
 
     ::testing::InitGoogleTest(&argc, argv);
+    ABinderProcess_startThreadPool();
     return RUN_ALL_TESTS();
 }

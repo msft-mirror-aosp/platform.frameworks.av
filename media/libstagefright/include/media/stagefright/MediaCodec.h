@@ -28,6 +28,7 @@
 #include <media/MediaMetrics.h>
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/AHandler.h>
+#include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/CodecErrorLog.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <media/stagefright/MediaHistogram.h>
@@ -56,7 +57,9 @@ struct AReplyToken;
 struct AString;
 struct BatteryChecker;
 class BufferChannelBase;
+struct AccessUnitInfo;
 struct CodecBase;
+struct CodecCryptoInfo;
 struct CodecParameterDescriptor;
 class IBatteryStats;
 struct ICrypto;
@@ -64,6 +67,7 @@ class CryptoAsync;
 class MediaCodecBuffer;
 class IMemory;
 struct PersistentSurface;
+class RenderedFrameInfo;
 class SoftwareRenderer;
 class Surface;
 namespace hardware {
@@ -76,6 +80,9 @@ struct IDescrambler;
 using hardware::cas::native::V1_0::IDescrambler;
 using aidl::android::media::MediaResourceParcel;
 using aidl::android::media::ClientConfigParcel;
+
+typedef WrapperObject<std::vector<AccessUnitInfo>> BufferInfosWrapper;
+typedef WrapperObject<std::vector<std::unique_ptr<CodecCryptoInfo>>> CryptoInfosWrapper;
 
 struct MediaCodec : public AHandler {
     enum Domain {
@@ -114,6 +121,7 @@ struct MediaCodec : public AHandler {
         CB_OUTPUT_FORMAT_CHANGED = 4,
         CB_RESOURCE_RECLAIMED = 5,
         CB_CRYPTO_ERROR = 6,
+        CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
     };
 
     static const pid_t kNoPid = -1;
@@ -184,6 +192,13 @@ struct MediaCodec : public AHandler {
             uint32_t flags,
             AString *errorDetailMsg = NULL);
 
+    status_t queueInputBuffers(
+            size_t index,
+            size_t offset,
+            size_t size,
+            const sp<BufferInfosWrapper> &accessUnitInfo,
+            AString *errorDetailMsg = NULL);
+
     status_t queueSecureInputBuffer(
             size_t index,
             size_t offset,
@@ -197,11 +212,18 @@ struct MediaCodec : public AHandler {
             uint32_t flags,
             AString *errorDetailMsg = NULL);
 
+    status_t queueSecureInputBuffers(
+            size_t index,
+            size_t offset,
+            size_t size,
+            const sp<BufferInfosWrapper> &accessUnitInfo,
+            const sp<CryptoInfosWrapper> &cryptoInfos,
+            AString *errorDetailMsg = NULL);
+
     status_t queueBuffer(
             size_t index,
             const std::shared_ptr<C2Buffer> &buffer,
-            int64_t presentationTimeUs,
-            uint32_t flags,
+            const sp<BufferInfosWrapper> &bufferInfos,
             const sp<AMessage> &tunings,
             AString *errorDetailMsg = NULL);
 
@@ -209,14 +231,9 @@ struct MediaCodec : public AHandler {
             size_t index,
             const sp<hardware::HidlMemory> &memory,
             size_t offset,
-            const CryptoPlugin::SubSample *subSamples,
-            size_t numSubSamples,
-            const uint8_t key[16],
-            const uint8_t iv[16],
-            CryptoPlugin::Mode mode,
-            const CryptoPlugin::Pattern &pattern,
-            int64_t presentationTimeUs,
-            uint32_t flags,
+            size_t size,
+            const sp<BufferInfosWrapper> &bufferInfos,
+            const sp<CryptoInfosWrapper> &cryptoInfos,
             const sp<AMessage> &tunings,
             AString *errorDetailMsg = NULL);
 
@@ -281,6 +298,8 @@ struct MediaCodec : public AHandler {
     // by adding rendered frame information to a base notification message. Returns the number
     // of frames that were rendered.
     static size_t CreateFramesRenderedMessage(
+            const std::list<RenderedFrameInfo> &done, sp<AMessage> &msg);
+    static size_t CreateFramesRenderedMessage(
             const std::list<FrameRenderTracker::Info> &done, sp<AMessage> &msg);
 
     static status_t CanFetchLinearBlock(
@@ -316,6 +335,12 @@ private:
     // used by ResourceManagerClient
     status_t reclaim(bool force = false);
     friend struct ResourceManagerClient;
+
+    // to create the metrics associated with this codec.
+    // Any error in this function will be captured by the output argument err.
+    mediametrics_handle_t createMediaMetrics(const sp<AMessage>& format,
+                                             uint32_t flags,
+                                             status_t* err);
 
 private:
     enum State {
@@ -446,6 +471,7 @@ private:
     int64_t mPresentationTimeUs = 0;
     status_t mStickyError;
     sp<Surface> mSurface;
+    uint32_t mSurfaceGeneration = 0;
     SoftwareRenderer *mSoftRenderer;
 
     Mutex mMetricsLock;
@@ -458,6 +484,7 @@ private:
     void resetMetricsFields();
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
+    void updateCodecImportance(const sp<AMessage>& msg);
     void onGetMetrics(const sp<AMessage>& msg);
     constexpr const char *asString(TunnelPeekState state, const char *default_string="?");
     void updateTunnelPeek(const sp<AMessage> &msg);
@@ -472,7 +499,7 @@ private:
     sp<AMessage> mAsyncReleaseCompleteNotification;
     sp<AMessage> mOnFirstTunnelFrameReadyNotification;
 
-    sp<ResourceManagerServiceProxy> mResourceManagerProxy;
+    std::shared_ptr<ResourceManagerServiceProxy> mResourceManagerProxy;
 
     Domain mDomain;
     AString mLogSessionId;
@@ -556,6 +583,7 @@ private:
     int32_t mTunneledInputHeight;
     bool mTunneled;
     TunnelPeekState mTunnelPeekState;
+    bool mTunnelPeekEnabled;
 
     sp<IDescrambler> mDescrambler;
 
@@ -572,6 +600,7 @@ private:
     sp<ALooper> mCryptoLooper;
 
     bool mIsSurfaceToDisplay;
+    bool mAreRenderMetricsEnabled;
     PlaybackDurationAccumulator mPlaybackDurationAccumulator;
     VideoRenderQualityTracker mVideoRenderQualityTracker;
 
@@ -613,7 +642,7 @@ private:
     status_t queueCSDInputBuffer(size_t bufferIndex);
 
     status_t handleSetSurface(const sp<Surface> &surface);
-    status_t connectToSurface(const sp<Surface> &surface);
+    status_t connectToSurface(const sp<Surface> &surface, uint32_t *generation);
     status_t disconnectFromSurface();
 
     bool hasCryptoOrDescrambler() {
@@ -719,6 +748,7 @@ private:
 
     // An unique ID for the codec - Used by the metrics.
     uint64_t mCodecId = 0;
+    bool     mIsHardware = false;
 
     std::function<sp<CodecBase>(const AString &, const char *)> mGetCodecBase;
     std::function<status_t(const AString &, sp<MediaCodecInfo> *)> mGetCodecInfo;

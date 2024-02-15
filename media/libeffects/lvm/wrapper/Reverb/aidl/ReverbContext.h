@@ -81,7 +81,12 @@ class ReverbContext final : public EffectContext {
     bool getEnvironmentalReverbBypass() const { return mBypass; }
 
     RetCode setVolumeStereo(const Parameter::VolumeStereo& volumeStereo) override;
-    Parameter::VolumeStereo getVolumeStereo() override { return mVolumeStereo; }
+    Parameter::VolumeStereo getVolumeStereo() override {
+        if (isAuxiliary()) {
+            return mVolumeStereo;
+        }
+        return {1.0f, 1.0f};
+    }
 
     RetCode setReflectionsDelay(int delay) {
         mReflectionsDelayMs = delay;
@@ -95,7 +100,7 @@ class ReverbContext final : public EffectContext {
     }
     bool getReflectionsLevel() const { return mReflectionsLevelMb; }
 
-    IEffect::Status lvmProcess(float* in, float* out, int samples);
+    IEffect::Status process(float* in, float* out, int samples);
 
   private:
     static constexpr inline float kUnitVolume = 1;
@@ -156,7 +161,7 @@ class ReverbContext final : public EffectContext {
     std::mutex mMutex;
     const lvm::ReverbEffectType mType;
     bool mEnabled = false;
-    LVREV_Handle_t mInstance GUARDED_BY(mMutex);
+    LVREV_Handle_t mInstance GUARDED_BY(mMutex) = LVM_NULL;
 
     int mRoomLevel = 0;
     int mRoomHfLevel = 0;

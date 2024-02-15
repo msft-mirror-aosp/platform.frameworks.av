@@ -69,9 +69,9 @@ cc_defaults {
 
     fuzz_config: {
         cc: [
-            "android-media-fuzzing-reports@google.com",
+            "android-media-playback+bugs@google.com",
         ],
-        componentid: 155276,
+        componentid: 817235,
         hotlists: [
             "4593311",
         ],
@@ -189,6 +189,8 @@ cc_fuzz {
     ],
 
     dictionary: "mkv_extractor_fuzzer.dict",
+
+    corpus: ["corpus/*"],
 }
 
 cc_fuzz {

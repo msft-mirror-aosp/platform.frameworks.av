@@ -31,6 +31,7 @@
 
 #include <android/hardware/camera2/ICameraDeviceCallbacks.h>
 #include <android/binder_ibinder_platform.h>
+#include <camera/StringUtils.h>
 
 #include "device3/aidl/AidlCamera3OfflineSession.h"
 #include "device3/Camera3OutputStream.h"
@@ -47,7 +48,7 @@ namespace android {
 
 AidlCamera3OfflineSession::~AidlCamera3OfflineSession() {
     ATRACE_CALL();
-    ALOGV("%s: Tearing down aidl offline session for camera id %s", __FUNCTION__, mId.string());
+    ALOGV("%s: Tearing down aidl offline session for camera id %s", __FUNCTION__, mId.c_str());
     Camera3OfflineSession::disconnectImpl();
 }
 
@@ -113,7 +114,7 @@ status_t AidlCamera3OfflineSession::initialize(wp<NotificationListener> listener
 
     std::string activePhysicalId(""); // Unused
     AidlCaptureOutputStates states {
-      {mId,
+      { mId,
         mOfflineReqsLock, mLastCompletedRegularFrameNumber,
         mLastCompletedReprocessFrameNumber, mLastCompletedZslFrameNumber,
         mOfflineReqs, mOutputLock, mResultQueue, mResultSignal,
@@ -121,7 +122,7 @@ status_t AidlCamera3OfflineSession::initialize(wp<NotificationListener> listener
         mNextReprocessShutterFrameNumber, mNextZslStillShutterFrameNumber,
         mNextResultFrameNumber,
         mNextReprocessResultFrameNumber, mNextZslStillResultFrameNumber,
-        mUseHalBufManager, mUsePartialResult, mNeedFixupMonochromeTags,
+        mUseHalBufManager, mHalBufManagedStreamIds, mUsePartialResult, mNeedFixupMonochromeTags,
         mNumPartialResults, mVendorTagId, mDeviceInfo, mPhysicalDeviceInfoMap,
         mDistortionMappers, mZoomRatioMappers, mRotateAndCropMappers,
         mTagMonitor, mInputStream, mOutputStreams, mSessionStatsBuilder, listener, *this,
@@ -160,7 +161,7 @@ status_t AidlCamera3OfflineSession::initialize(wp<NotificationListener> listener
 
     std::string activePhysicalId(""); // Unused
     AidlCaptureOutputStates states {
-      {mId,
+      { mId,
         mOfflineReqsLock, mLastCompletedRegularFrameNumber,
         mLastCompletedReprocessFrameNumber, mLastCompletedZslFrameNumber,
         mOfflineReqs, mOutputLock, mResultQueue, mResultSignal,
@@ -168,7 +169,7 @@ status_t AidlCamera3OfflineSession::initialize(wp<NotificationListener> listener
         mNextReprocessShutterFrameNumber, mNextZslStillShutterFrameNumber,
         mNextResultFrameNumber,
         mNextReprocessResultFrameNumber, mNextZslStillResultFrameNumber,
-        mUseHalBufManager, mUsePartialResult, mNeedFixupMonochromeTags,
+        mUseHalBufManager, mHalBufManagedStreamIds, mUsePartialResult, mNeedFixupMonochromeTags,
         mNumPartialResults, mVendorTagId, mDeviceInfo, mPhysicalDeviceInfoMap,
         mDistortionMappers, mZoomRatioMappers, mRotateAndCropMappers,
         mTagMonitor, mInputStream, mOutputStreams, mSessionStatsBuilder, listener, *this,
@@ -176,7 +177,7 @@ status_t AidlCamera3OfflineSession::initialize(wp<NotificationListener> listener
         /*overrideToPortrait*/false, activePhysicalId}, mResultMetadataQueue
     };
     for (const auto& msg : msgs) {
-        camera3::notify(states, msg);
+        camera3::notify(states, msg, mSensorReadoutTimestampSupported);
     }
     return ::ndk::ScopedAStatus::ok();
 }
@@ -207,7 +208,8 @@ status_t AidlCamera3OfflineSession::initialize(wp<NotificationListener> listener
     }
 
     RequestBufferStates states {
-        mId, mRequestBufferInterfaceLock, mUseHalBufManager, mOutputStreams, mSessionStatsBuilder,
+        mId, mRequestBufferInterfaceLock, mUseHalBufManager,
+        mHalBufManagedStreamIds, mOutputStreams, mSessionStatsBuilder,
         *this, mBufferRecords, *this};
     camera3::requestStreamBuffers(states, bufReqs, buffers, status);
     return ::ndk::ScopedAStatus::ok();
@@ -240,7 +242,7 @@ status_t AidlCamera3OfflineSession::initialize(wp<NotificationListener> listener
     }
 
     ReturnBufferStates states {
-        mId, mUseHalBufManager, mOutputStreams, mSessionStatsBuilder,
+        mId, mUseHalBufManager, mHalBufManagedStreamIds, mOutputStreams, mSessionStatsBuilder,
         mBufferRecords};
 
     camera3::returnStreamBuffers(states, buffers);

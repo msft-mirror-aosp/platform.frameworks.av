@@ -26,6 +26,33 @@
 #include <chrono>
 #include <C2SurfaceSyncObj.h>
 
+namespace {
+static inline void timespec_add_ms(timespec& ts, size_t ms) {
+    constexpr int kNanoSecondsPerSec = 1000000000;
+    ts.tv_sec  += ms / 1000;
+    ts.tv_nsec += (ms % 1000) * 1000000;
+    if (ts.tv_nsec >= kNanoSecondsPerSec) {
+        ts.tv_sec++;
+        ts.tv_nsec -= kNanoSecondsPerSec;
+    }
+}
+
+/*
+ * lhs < rhs:  return <0
+ * lhs == rhs: return 0
+ * lhs > rhs:  return >0
+ */
+static inline int timespec_compare(const timespec& lhs, const timespec& rhs) {
+    if (lhs.tv_sec < rhs.tv_sec) {
+        return -1;
+    }
+    if (lhs.tv_sec > rhs.tv_sec) {
+        return 1;
+    }
+    return lhs.tv_nsec - rhs.tv_nsec;
+}
+}
+
 const native_handle_t C2SurfaceSyncMemory::HandleSyncMem::cHeader = {
     C2SurfaceSyncMemory::HandleSyncMem::version,
     C2SurfaceSyncMemory::HandleSyncMem::numFds,
@@ -114,8 +141,8 @@ C2SyncVariables *C2SurfaceSyncMemory::mem() {
 }
 
 namespace {
-    constexpr int kSpinNumForLock = 100;
-    constexpr int kSpinNumForUnlock = 200;
+    constexpr int kSpinNumForLock = 0;
+    constexpr int kSpinNumForUnlock = 0;
 
     enum : uint32_t {
         FUTEX_UNLOCKED = 0,
@@ -125,32 +152,65 @@ namespace {
 }
 
 int C2SyncVariables::lock() {
-    uint32_t old;
+    uint32_t old = FUTEX_UNLOCKED;
+
+    // see if we can lock uncontended immediately (if previously unlocked)
+    if (mLock.compare_exchange_strong(old, FUTEX_LOCKED_UNCONTENDED)) {
+        return 0;
+    }
+
+    // spin to see if we can get it with a short wait without involving kernel
     for (int i = 0; i < kSpinNumForLock; i++) {
-        old = 0;
+        sched_yield();
+
+        old = FUTEX_UNLOCKED;
         if (mLock.compare_exchange_strong(old, FUTEX_LOCKED_UNCONTENDED)) {
             return 0;
         }
-        sched_yield();
     }
 
-    if (old == FUTEX_LOCKED_UNCONTENDED)
+    // still locked, if other side thinks it was uncontended, now it is contended, so let them
+    // know that they need to wake us up.
+    if (old == FUTEX_LOCKED_UNCONTENDED) {
         old = mLock.exchange(FUTEX_LOCKED_CONTENDED);
+        // It is possible that the other holder released the lock at this very moment (and old
+        // becomes UNLOCKED), If so, we will not involve the kernel to wait for the lock to be
+        // released, but are still marking our lock contended (even though we are the only
+        // holders.)
+    }
 
-    while (old) {
-        (void) syscall(__NR_futex, &mLock, FUTEX_WAIT, FUTEX_LOCKED_CONTENDED, NULL, NULL, 0);
+    // while the futex is still locked by someone else
+    while (old != FUTEX_UNLOCKED) {
+        // wait until other side releases the lock (and still contented)
+        (void)syscall(__NR_futex, &mLock, FUTEX_WAIT, FUTEX_LOCKED_CONTENDED, NULL, NULL, 0);
+        // try to relock
         old = mLock.exchange(FUTEX_LOCKED_CONTENDED);
     }
     return 0;
 }
 
 int C2SyncVariables::unlock() {
-    if (mLock.exchange(FUTEX_UNLOCKED) == FUTEX_LOCKED_UNCONTENDED) return 0;
+    // TRICKY: here we assume that we are holding this lock
 
+    // unlock the lock immediately (since we were holding it)
+    // If it is (still) locked uncontested, we are done (no need to involve the kernel)
+    if (mLock.exchange(FUTEX_UNLOCKED) == FUTEX_LOCKED_UNCONTENDED) {
+        return 0;
+    }
+
+    // We don't need to spin for unlock as here we know already we have a waiter who we need to
+    // wake up. This code was here in case someone just happened to lock this lock (uncontested)
+    // before we would wake up other waiters to avoid a syscall. It is unsure if this ever gets
+    // exercised or if this is the behavior we want. (Note that if this code is removed, the same
+    // situation is still handled in lock() by the woken up waiter that realizes that the lock is
+    // now taken.)
     for (int i = 0; i < kSpinNumForUnlock; i++) {
-        if (mLock.load()) {
+        // here we seem to check if someone relocked this lock, and if they relocked uncontested,
+        // we up it to contested (since there are other waiters.)
+        if (mLock.load() != FUTEX_UNLOCKED) {
             uint32_t old = FUTEX_LOCKED_UNCONTENDED;
             mLock.compare_exchange_strong(old, FUTEX_LOCKED_CONTENDED);
+            // this is always true here so we return immediately
             if (old) {
                 return 0;
             }
@@ -158,7 +218,8 @@ int C2SyncVariables::unlock() {
         sched_yield();
     }
 
-    (void) syscall(__NR_futex, &mLock, FUTEX_WAKE, 1, NULL, NULL, 0);
+    // wake up one waiter
+    (void)syscall(__NR_futex, &mLock, FUTEX_WAKE, 1, NULL, NULL, 0);
     return 0;
 }
 
@@ -250,6 +311,26 @@ void C2SyncVariables::notifyAll() {
     this->unlock();
 }
 
+void C2SyncVariables::invalidate() {
+    mCond++;
+    (void) syscall(__NR_futex, &mCond, FUTEX_REQUEUE, INT_MAX, (void *)INT_MAX, &mLock, 0);
+}
+
+void C2SyncVariables::clearLockIfNecessary() {
+    // Note: After waiting for 30ms without acquiring the lock,
+    // we will consider the lock is dangling.
+    // Since the lock duration is very brief to manage the counter,
+    // waiting for 30ms should be more than enough.
+    constexpr size_t kTestLockDurationMs = 30;
+
+    bool locked = tryLockFor(kTestLockDurationMs);
+    unlock();
+
+    if (!locked) {
+        ALOGW("A dead process might be holding the lock");
+    }
+}
+
 int C2SyncVariables::signal() {
     mCond++;
 
@@ -273,4 +354,36 @@ int C2SyncVariables::wait() {
         (void) syscall(__NR_futex, &mLock, FUTEX_WAIT, FUTEX_LOCKED_CONTENDED, NULL, NULL, 0);
     }
     return 0;
+}
+
+bool C2SyncVariables::tryLockFor(size_t ms) {
+    uint32_t old = FUTEX_UNLOCKED;
+
+    if (mLock.compare_exchange_strong(old, FUTEX_LOCKED_UNCONTENDED)) {
+        return true;
+    }
+
+    if (old == FUTEX_LOCKED_UNCONTENDED) {
+        old = mLock.exchange(FUTEX_LOCKED_CONTENDED);
+    }
+
+    struct timespec wait{
+            static_cast<time_t>(ms / 1000),
+            static_cast<long>((ms % 1000) * 1000000)};
+    struct timespec end;
+    clock_gettime(CLOCK_REALTIME, &end);
+    timespec_add_ms(end, ms);
+
+    while (old != FUTEX_UNLOCKED) { // case of EINTR being returned;
+        (void)syscall(__NR_futex, &mLock, FUTEX_WAIT, FUTEX_LOCKED_CONTENDED, &wait, NULL, 0);
+        old = mLock.exchange(FUTEX_LOCKED_CONTENDED);
+
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
+        if (timespec_compare(now, end) >= 0) {
+            break;
+        }
+    }
+
+    return old == FUTEX_UNLOCKED;
 }

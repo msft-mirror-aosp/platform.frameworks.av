@@ -25,6 +25,7 @@
 #include <hidl/Utils.h>
 #include <android/hardware/camera/device/3.2/types.h>
 #include <android-base/properties.h>
+#include <utils/Utils.h>
 
 namespace android {
 namespace frameworks {
@@ -58,7 +59,7 @@ HidlCameraDeviceUser::HidlCameraDeviceUser(
     const sp<hardware::camera2::ICameraDeviceUser> &deviceRemote)
   : mDeviceRemote(deviceRemote) {
     mInitSuccess = initDevice();
-    mVndkVersion = base::GetIntProperty("ro.vndk.version", __ANDROID_API_FUTURE__);
+    mVndkVersion = getVNDKVersionFromProp(__ANDROID_API_FUTURE__);
 }
 
 bool HidlCameraDeviceUser::initDevice() {
@@ -112,7 +113,7 @@ bool HidlCameraDeviceUser::copyPhysicalCameraSettings(
         physicalCameraSettings->emplace_back();
         CaptureRequest::PhysicalCameraSettings &physicalCameraSetting =
             physicalCameraSettings->back();
-        physicalCameraSetting.id = e.id.c_str();
+        physicalCameraSetting.id = e.id;
 
         // Read the settings either from the fmq or straightaway from the
         // request. We don't need any synchronization, since submitRequestList

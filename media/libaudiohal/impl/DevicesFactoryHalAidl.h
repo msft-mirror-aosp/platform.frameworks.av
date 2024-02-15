@@ -17,6 +17,7 @@
 #pragma once
 
 #include <aidl/android/hardware/audio/core/IConfig.h>
+#include <aidl/android/media/audio/IHalAdapterVendorExtension.h>
 #include <media/audiohal/DevicesFactoryHalInterface.h>
 #include <utils/RefBase.h>
 
@@ -34,8 +35,6 @@ class DevicesFactoryHalAidl : public DevicesFactoryHalInterface
     // necessary to release references to the returned object.
     status_t openDevice(const char *name, sp<DeviceHalInterface> *device) override;
 
-    status_t getHalPids(std::vector<pid_t> *pids) override;
-
     status_t setCallbackOnce(sp<DevicesFactoryHalCallback> callback) override;
 
     android::detail::AudioHalVersionInfo getHalVersion() const override;
@@ -46,6 +45,8 @@ class DevicesFactoryHalAidl : public DevicesFactoryHalInterface
 
   private:
     const std::shared_ptr<::aidl::android::hardware::audio::core::IConfig> mConfig;
+    const std::shared_ptr<::aidl::android::media::audio::IHalAdapterVendorExtension> mVendorExt;
+
     ~DevicesFactoryHalAidl() = default;
 };
 

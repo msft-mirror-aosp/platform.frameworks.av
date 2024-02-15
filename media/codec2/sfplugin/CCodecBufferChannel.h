@@ -62,8 +62,8 @@ public:
     void setCrypto(const sp<ICrypto> &crypto) override;
     void setDescrambler(const sp<IDescrambler> &descrambler) override;
 
-    virtual status_t queueInputBuffer(const sp<MediaCodecBuffer> &buffer) override;
-    virtual status_t queueSecureInputBuffer(
+    status_t queueInputBuffer(const sp<MediaCodecBuffer> &buffer) override;
+    status_t queueSecureInputBuffer(
             const sp<MediaCodecBuffer> &buffer,
             bool secure,
             const uint8_t *key,
@@ -73,10 +73,14 @@ public:
             const CryptoPlugin::SubSample *subSamples,
             size_t numSubSamples,
             AString *errorDetailMsg) override;
-    virtual status_t attachBuffer(
+    status_t queueSecureInputBuffers(
+            const sp<MediaCodecBuffer> &buffer,
+            bool secure,
+            AString *errorDetailMsg) override;
+    status_t attachBuffer(
             const std::shared_ptr<C2Buffer> &c2Buffer,
             const sp<MediaCodecBuffer> &buffer) override;
-    virtual status_t attachEncryptedBuffer(
+    status_t attachEncryptedBuffer(
             const sp<hardware::HidlMemory> &memory,
             bool secure,
             const uint8_t *key,
@@ -88,12 +92,19 @@ public:
             size_t numSubSamples,
             const sp<MediaCodecBuffer> &buffer,
             AString* errorDetailMsg) override;
-    virtual status_t renderOutputBuffer(
+    status_t attachEncryptedBuffers(
+            const sp<hardware::HidlMemory> &memory,
+            size_t offset,
+            const sp<MediaCodecBuffer> &buffer,
+            bool secure,
+            AString* errorDetailMsg) override;
+    status_t renderOutputBuffer(
             const sp<MediaCodecBuffer> &buffer, int64_t timestampNs) override;
-    virtual void pollForRenderedBuffers() override;
-    virtual status_t discardBuffer(const sp<MediaCodecBuffer> &buffer) override;
-    virtual void getInputBufferArray(Vector<sp<MediaCodecBuffer>> *array) override;
-    virtual void getOutputBufferArray(Vector<sp<MediaCodecBuffer>> *array) override;
+    void pollForRenderedBuffers() override;
+    void onBufferReleasedFromOutputSurface(uint32_t generation) override;
+    status_t discardBuffer(const sp<MediaCodecBuffer> &buffer) override;
+    void getInputBufferArray(Vector<sp<MediaCodecBuffer>> *array) override;
+    void getOutputBufferArray(Vector<sp<MediaCodecBuffer>> *array) override;
 
     // Methods below are interface for CCodec to use.
 
@@ -105,7 +116,7 @@ public:
     /**
      * Set output graphic surface for rendering.
      */
-    status_t setSurface(const sp<Surface> &surface, bool pushBlankBuffer);
+    status_t setSurface(const sp<Surface> &surface, uint32_t generation, bool pushBlankBuffer);
 
     /**
      * Set GraphicBufferSource object from which the component extracts input
@@ -140,7 +151,8 @@ public:
      *                                  initial input buffers.
      */
     status_t prepareInitialInputBuffers(
-            std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers);
+            std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers,
+            bool retry = false);
 
     /**
      * Request initial input buffers as prepared in clientInputBuffers.
@@ -206,7 +218,20 @@ public:
 
     void setMetaMode(MetaMode mode);
 
+    /**
+     * get pixel format from output buffers.
+     *
+     * @return 0 if no valid pixel format found.
+     */
+    uint32_t getBuffersPixelFormat(bool isEncoder);
+
+    void resetBuffersPixelFormat(bool isEncoder);
+
 private:
+    uint32_t getInputBuffersPixelFormat();
+
+    uint32_t getOutputBuffersPixelFormat();
+
     class QueueGuard;
 
     /**
@@ -302,6 +327,7 @@ private:
     std::shared_ptr<C2BlockPool> mInputAllocator;
     QueueSync mQueueSync;
     std::vector<std::unique_ptr<C2Param>> mParamsToBeSet;
+    sp<AMessage> mOutputFormat;
 
     struct Input {
         Input();
@@ -334,6 +360,7 @@ private:
     sp<MemoryDealer> makeMemoryDealer(size_t heapSize);
 
     std::deque<TrackedFrame> mTrackedFrames;
+    bool mAreRenderMetricsEnabled;
     bool mIsSurfaceToDisplay;
     bool mHasPresentFenceTimes;
 

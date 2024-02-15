@@ -25,6 +25,8 @@
 
 #include <hidl/HidlTransportSupport.h>
 
+#include <utils/Utils.h>
+
 namespace android {
 namespace frameworks {
 namespace cameraservice {
@@ -56,8 +58,8 @@ sp<HidlCameraService> HidlCameraService::getInstance(android::CameraService *cs)
 }
 
 HidlCameraService::HidlCameraService(android::CameraService *cs) : mAidlICameraService(cs) {
-    mVndkVersion = base::GetIntProperty("ro.vndk.version", __ANDROID_API_FUTURE__);
-};
+    mVndkVersion = getVNDKVersionFromProp(__ANDROID_API_FUTURE__);
+}
 
 Return<void>
 HidlCameraService::getCameraCharacteristics(const hidl_string& cameraId,
@@ -65,7 +67,7 @@ HidlCameraService::getCameraCharacteristics(const hidl_string& cameraId,
     android::CameraMetadata cameraMetadata;
     HStatus status = HStatus::NO_ERROR;
     binder::Status serviceRet =
-        mAidlICameraService->getCameraCharacteristics(String16(cameraId.c_str()),
+        mAidlICameraService->getCameraCharacteristics(cameraId,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
                 &cameraMetadata);
     HCameraMetadata hidlMetadata;
@@ -78,7 +80,7 @@ HidlCameraService::getCameraCharacteristics(const hidl_string& cameraId,
                 break;
             default:
                 ALOGE("Get camera characteristics from camera service failed: %s",
-                      serviceRet.toString8().string());
+                      serviceRet.toString8().c_str());
                 status = B2HStatus(serviceRet);
           }
         _hidl_cb(status, hidlMetadata);
@@ -116,7 +118,7 @@ Return<void> HidlCameraService::connectDevice(const sp<HCameraDeviceCallback>& h
     }
     sp<hardware::camera2::ICameraDeviceCallbacks> callbacks = hybridCallbacks;
     binder::Status serviceRet = mAidlICameraService->connectDevice(
-            callbacks, String16(cameraId.c_str()), String16(""), {},
+            callbacks, cameraId, std::string(), {},
             hardware::ICameraService::USE_CALLING_UID, 0/*oomScoreOffset*/,
             /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
             /*out*/&deviceRemote);
@@ -242,7 +244,7 @@ HStatus HidlCameraService::addListenerInternal(const sp<T>& hCsListener,
             [this](const hardware::CameraStatus& s) {
                 bool supportsHAL3 = false;
                 binder::Status sRet =
-                            mAidlICameraService->supportsCameraApi(String16(s.cameraId),
+                            mAidlICameraService->supportsCameraApi(s.cameraId,
                                     hardware::ICameraService::API_VERSION_2, &supportsHAL3);
                 return !sRet.isOk() || !supportsHAL3;
             }), cameraStatusAndIds->end());
@@ -307,7 +309,7 @@ Return<void> HidlCameraService::getCameraVendorTagSections(getCameraVendorTagSec
         }
         hVendorTagSections.resize(numSections);
         for (size_t s = 0; s < numSections; s++) {
-            hVendorTagSections[s].sectionName = (*sectionNames)[s].string();
+            hVendorTagSections[s].sectionName = (*sectionNames)[s].c_str();
             hVendorTagSections[s].tags = tagsBySection[s];
         }
         HProviderIdAndVendorTagSections &hProviderIdAndVendorTagSections =

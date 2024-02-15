@@ -297,6 +297,10 @@ int MtpFfsHandle::start(bool ptp) {
 }
 
 void MtpFfsHandle::close() {
+    auto timeout = std::chrono::seconds(2);
+    std::unique_lock lk(m);
+    cv.wait_for(lk, timeout ,[this]{return child_threads==0;});
+
     io_destroy(mCtx);
     closeEndpoints();
     closeConfig();
@@ -587,6 +591,9 @@ int MtpFfsHandle::sendFile(mtp_file_range mfr) {
 
     // Send the header data
     mtp_data_header *header = reinterpret_cast<mtp_data_header*>(mIobuf[0].bufs.data());
+    if (header == NULL) {
+        return -1;
+    }
     header->length = htole32(given_length);
     header->type = htole16(2); // data packet
     header->command = htole16(mfr.command);
@@ -669,6 +676,11 @@ int MtpFfsHandle::sendEvent(mtp_event me) {
     char *temp = new char[me.length];
     memcpy(temp, me.data, me.length);
     me.data = temp;
+
+    std::unique_lock lk(m);
+    child_threads++;
+    lk.unlock();
+
     std::thread t([this, me]() { return this->doSendEvent(me); });
     t.detach();
     return 0;
@@ -680,6 +692,11 @@ void MtpFfsHandle::doSendEvent(mtp_event me) {
     if (static_cast<unsigned>(ret) != length)
         PLOG(ERROR) << "Mtp error sending event thread!";
     delete[] reinterpret_cast<char*>(me.data);
+
+    std::unique_lock lk(m);
+    child_threads--;
+    lk.unlock();
+    cv.notify_one();
 }
 
 } // namespace android

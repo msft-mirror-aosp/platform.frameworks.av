@@ -25,6 +25,8 @@
 #include <atomic>
 #include <list>
 #include <numeric>
+#include <thread>
+#include <chrono>
 
 #include <C2AllocatorGralloc.h>
 #include <C2PlatformSupport.h>
@@ -67,6 +69,7 @@ using hardware::hidl_string;
 using hardware::hidl_vec;
 using hardware::fromHeap;
 using hardware::HidlMemory;
+using server_configurable_flags::GetServerConfigurableFlag;
 
 using namespace hardware::cas::V1_0;
 using namespace hardware::cas::native::V1_0;
@@ -81,6 +84,33 @@ constexpr size_t kSmoothnessFactor = 4;
 // This is for keeping IGBP's buffer dropping logic in legacy mode other
 // than making it non-blocking. Do not change this value.
 const static size_t kDequeueTimeoutNs = 0;
+
+static bool areRenderMetricsEnabled() {
+    std::string v = GetServerConfigurableFlag("media_native", "render_metrics_enabled", "false");
+    return v == "true";
+}
+
+// Flags can come with individual BufferInfos
+// when used with large frame audio
+constexpr static std::initializer_list<std::pair<uint32_t, uint32_t>> flagList = {
+        {BUFFER_FLAG_CODEC_CONFIG, C2FrameData::FLAG_CODEC_CONFIG},
+        {BUFFER_FLAG_END_OF_STREAM, C2FrameData::FLAG_END_OF_STREAM},
+        {BUFFER_FLAG_DECODE_ONLY, C2FrameData::FLAG_DROP_FRAME}
+};
+
+static uint32_t convertFlags(uint32_t flags, bool toC2) {
+    return std::transform_reduce(
+            flagList.begin(), flagList.end(),
+            0u,
+            std::bit_or{},
+            [flags, toC2](const std::pair<uint32_t, uint32_t> &entry) {
+                if (toC2) {
+                    return (flags & entry.first) ? entry.second : 0;
+                } else {
+                    return (flags & entry.second) ? entry.first : 0;
+                }
+            });
+}
 
 }  // namespace
 
@@ -148,6 +178,7 @@ CCodecBufferChannel::CCodecBufferChannel(
       mCCodecCallback(callback),
       mFrameIndex(0u),
       mFirstValidFrameIndex(0u),
+      mAreRenderMetricsEnabled(areRenderMetricsEnabled()),
       mIsSurfaceToDisplay(false),
       mHasPresentFenceTimes(false),
       mRenderingDepth(3u),
@@ -174,8 +205,7 @@ CCodecBufferChannel::CCodecBufferChannel(
         Mutexed<BlockPools>::Locked pools(mBlockPools);
         pools->outputPoolId = C2BlockPool::BASIC_LINEAR;
     }
-    std::string value = server_configurable_flags::GetServerConfigurableFlag(
-            "media_native", "ccodec_rendering_depth", "3");
+    std::string value = GetServerConfigurableFlag("media_native", "ccodec_rendering_depth", "3");
     android::base::ParseInt(value, &mRenderingDepth);
     mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + mRenderingDepth;
 }
@@ -237,7 +267,8 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
     if (buffer->meta()->findInt32("decode-only", &tmp) && tmp) {
         flags |= C2FrameData::FLAG_DROP_FRAME;
     }
-    ALOGV("[%s] queueInputBuffer: buffer->size() = %zu", mName, buffer->size());
+    ALOGV("[%s] queueInputBuffer: buffer->size() = %zu time: %lld",
+            mName, buffer->size(), (long long)timeUs);
     std::list<std::unique_ptr<C2Work>> items;
     std::unique_ptr<C2Work> work(new C2Work);
     work->input.ordinal.timestamp = timeUs;
@@ -287,6 +318,34 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
                 Mutexed<OutputSurface>::Locked output(mOutputSurface);
                 uint64_t frameIndex = work->input.ordinal.frameIndex.peeku();
                 output->rotation[frameIndex] = rotation;
+            }
+            sp<RefBase> obj;
+            if (buffer->meta()->findObject("accessUnitInfo", &obj)) {
+                ALOGV("Filling C2Info from multiple access units");
+                sp<WrapperObject<std::vector<AccessUnitInfo>>> infos{
+                        (decltype(infos.get()))obj.get()};
+                std::vector<AccessUnitInfo> &accessUnitInfoVec = infos->value;
+                std::vector<C2AccessUnitInfosStruct> multipleAccessUnitInfos;
+                uint32_t outFlags = 0;
+                for (int i = 0; i < accessUnitInfoVec.size(); i++) {
+                    outFlags = 0;
+                    outFlags = convertFlags(accessUnitInfoVec[i].mFlags, true);
+                    if (eos && (outFlags & C2FrameData::FLAG_END_OF_STREAM)) {
+                        outFlags &= (~C2FrameData::FLAG_END_OF_STREAM);
+                    }
+                    multipleAccessUnitInfos.emplace_back(
+                            outFlags,
+                            accessUnitInfoVec[i].mSize,
+                            accessUnitInfoVec[i].mTimestamp);
+                    ALOGV("%d) flags: %d, size: %d, time: %llu",
+                            i, outFlags, accessUnitInfoVec[i].mSize,
+                            (long long)accessUnitInfoVec[i].mTimestamp);
+
+                }
+                const std::shared_ptr<C2AccessUnitInfos::input> c2AccessUnitInfos =
+                        C2AccessUnitInfos::input::AllocShared(
+                                multipleAccessUnitInfos.size(), 0u, multipleAccessUnitInfos);
+                c2buffer->setInfo(c2AccessUnitInfos);
             }
             work->input.buffers.push_back(c2buffer);
             if (encryptedBlock) {
@@ -422,6 +481,130 @@ int32_t CCodecBufferChannel::getHeapSeqNum(const sp<HidlMemory> &memory) {
         heapSeqNum = it->second;
     }
     return heapSeqNum;
+}
+
+typedef WrapperObject<std::vector<AccessUnitInfo>> BufferInfosWrapper;
+typedef WrapperObject<std::vector<std::unique_ptr<CodecCryptoInfo>>> CryptoInfosWrapper;
+status_t CCodecBufferChannel::attachEncryptedBuffers(
+        const sp<hardware::HidlMemory> &memory,
+        size_t offset,
+        const sp<MediaCodecBuffer> &buffer,
+        bool secure,
+        AString* errorDetailMsg) {
+    static const C2MemoryUsage kDefaultReadWriteUsage{
+        C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
+    if (!hasCryptoOrDescrambler()) {
+        ALOGE("attachEncryptedBuffers requires Crypto/descrambler object");
+        return -ENOSYS;
+    }
+    size_t size = 0;
+    CHECK(buffer->meta()->findSize("ssize", &size));
+    if (size == 0) {
+        buffer->setRange(0, 0);
+        return OK;
+    }
+    sp<RefBase> obj;
+    CHECK(buffer->meta()->findObject("cryptoInfos", &obj));
+    sp<CryptoInfosWrapper> cryptoInfos{(CryptoInfosWrapper *)obj.get()};
+    CHECK(buffer->meta()->findObject("accessUnitInfo", &obj));
+    sp<BufferInfosWrapper> bufferInfos{(BufferInfosWrapper *)obj.get()};
+    if (secure || (mCrypto == nullptr)) {
+        if (cryptoInfos->value.size() != 1) {
+            ALOGE("Cannot decrypt multiple access units");
+            return -ENOSYS;
+        }
+        // we are dealing with just one cryptoInfo or descrambler.
+        std::unique_ptr<CodecCryptoInfo> info = std::move(cryptoInfos->value[0]);
+        if (info == nullptr) {
+            ALOGE("Cannot decrypt, CryptoInfos are null.");
+            return -ENOSYS;
+        }
+        return attachEncryptedBuffer(
+                memory,
+                secure,
+                info->mKey,
+                info->mIv,
+                info->mMode,
+                info->mPattern,
+                offset,
+                info->mSubSamples,
+                info->mNumSubSamples,
+                buffer,
+                errorDetailMsg);
+    }
+    std::shared_ptr<C2BlockPool> pool = mBlockPools.lock()->inputPool;
+    std::shared_ptr<C2LinearBlock> block;
+    c2_status_t err = pool->fetchLinearBlock(
+            size,
+            kDefaultReadWriteUsage,
+            &block);
+    if (err != C2_OK) {
+        ALOGI("[%s] attachEncryptedBuffers: fetchLinearBlock failed: size = %zu (%s) err = %d",
+              mName, size, secure ? "secure" : "non-secure", err);
+        return NO_MEMORY;
+    }
+    ensureDecryptDestination(size);
+    C2WriteView wView = block->map().get();
+    if (wView.error() != C2_OK) {
+        ALOGI("[%s] attachEncryptedBuffers: block map error: %d (non-secure)",
+              mName, wView.error());
+        return UNKNOWN_ERROR;
+    }
+
+    ssize_t result = -1;
+    ssize_t codecDataOffset = 0;
+    size_t inBufferOffset = 0;
+    size_t outBufferSize = 0;
+    uint32_t cryptoInfoIdx = 0;
+    int32_t heapSeqNum = getHeapSeqNum(memory);
+    hardware::drm::V1_0::SharedBuffer src{(uint32_t)heapSeqNum, offset, size};
+    hardware::drm::V1_0::DestinationBuffer dst;
+    dst.type = DrmBufferType::SHARED_MEMORY;
+    IMemoryToSharedBuffer(
+            mDecryptDestination, mHeapSeqNum, &dst.nonsecureMemory);
+    for (int i = 0; i < bufferInfos->value.size(); i++) {
+        if (bufferInfos->value[i].mSize > 0) {
+            std::unique_ptr<CodecCryptoInfo> info = std::move(cryptoInfos->value[cryptoInfoIdx++]);
+            result = mCrypto->decrypt(
+                    (uint8_t*)info->mKey,
+                    (uint8_t*)info->mIv,
+                    info->mMode,
+                    info->mPattern,
+                    src,
+                    inBufferOffset,
+                    info->mSubSamples,
+                    info->mNumSubSamples,
+                    dst,
+                    errorDetailMsg);
+            inBufferOffset += bufferInfos->value[i].mSize;
+            if (result < 0) {
+                ALOGI("[%s] attachEncryptedBuffers: decrypt failed: result = %zd",
+                        mName, result);
+                return result;
+            }
+            if (wView.error() == C2_OK) {
+                if (wView.size() < result) {
+                    ALOGI("[%s] attachEncryptedBuffers: block size too small:"
+                            "size=%u result=%zd (non-secure)", mName, wView.size(), result);
+                    return UNKNOWN_ERROR;
+                }
+                memcpy(wView.data(), mDecryptDestination->unsecurePointer(), result);
+                bufferInfos->value[i].mSize = result;
+                wView.setOffset(wView.offset() + result);
+            }
+            outBufferSize += result;
+        }
+    }
+    if (wView.error() == C2_OK) {
+        wView.setOffset(0);
+    }
+    std::shared_ptr<C2Buffer> c2Buffer{C2Buffer::CreateLinearBuffer(
+            block->share(codecDataOffset, outBufferSize - codecDataOffset, C2Fence{}))};
+    if (!buffer->copy(c2Buffer)) {
+        ALOGI("[%s] attachEncryptedBuffers: buffer copy failed", mName);
+        return -ENOSYS;
+    }
+    return OK;
 }
 
 status_t CCodecBufferChannel::attachEncryptedBuffer(
@@ -592,6 +775,8 @@ status_t CCodecBufferChannel::queueSecureInputBuffer(
     size_t bufferSize = 0;
     c2_status_t blockRes = C2_OK;
     bool copied = false;
+    ScopedTrace trace(ATRACE_TAG, android::base::StringPrintf(
+            "CCodecBufferChannel::decrypt(%s)", mName).c_str());
     if (mSendEncryptedInfoBuffer) {
         static const C2MemoryUsage kDefaultReadWriteUsage{
             C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
@@ -713,6 +898,138 @@ status_t CCodecBufferChannel::queueSecureInputBuffer(
 
     buffer->setRange(codecDataOffset, result - codecDataOffset);
 
+    return queueInputBufferInternal(buffer, block, bufferSize);
+}
+
+status_t CCodecBufferChannel::queueSecureInputBuffers(
+        const sp<MediaCodecBuffer> &buffer,
+        bool secure,
+        AString *errorDetailMsg) {
+    QueueGuard guard(mSync);
+    if (!guard.isRunning()) {
+        ALOGD("[%s] No more buffers should be queued at current state.", mName);
+        return -ENOSYS;
+    }
+
+    if (!hasCryptoOrDescrambler()) {
+        ALOGE("queueSecureInputBuffers requires a Crypto/descrambler Object");
+        return -ENOSYS;
+    }
+    sp<RefBase> obj;
+    CHECK(buffer->meta()->findObject("cryptoInfos", &obj));
+    sp<CryptoInfosWrapper> cryptoInfos{(CryptoInfosWrapper *)obj.get()};
+    CHECK(buffer->meta()->findObject("accessUnitInfo", &obj));
+    sp<BufferInfosWrapper> bufferInfos{(BufferInfosWrapper *)obj.get()};
+    if (secure || mCrypto == nullptr) {
+        if (cryptoInfos->value.size() != 1) {
+            ALOGE("Cannot decrypt multiple access units on native handles");
+            return -ENOSYS;
+        }
+        std::unique_ptr<CodecCryptoInfo> info = std::move(cryptoInfos->value[0]);
+        if (info == nullptr) {
+            ALOGE("Cannot decrypt, CryptoInfos are null");
+            return -ENOSYS;
+        }
+        return queueSecureInputBuffer(
+                buffer,
+                secure,
+                info->mKey,
+                info->mIv,
+                info->mMode,
+                info->mPattern,
+                info->mSubSamples,
+                info->mNumSubSamples,
+                errorDetailMsg);
+    }
+    sp<EncryptedLinearBlockBuffer> encryptedBuffer((EncryptedLinearBlockBuffer *)buffer.get());
+
+    std::shared_ptr<C2LinearBlock> block;
+    size_t allocSize = buffer->size();
+    size_t bufferSize = 0;
+    c2_status_t blockRes = C2_OK;
+    bool copied = false;
+    ScopedTrace trace(ATRACE_TAG, android::base::StringPrintf(
+            "CCodecBufferChannel::decrypt(%s)", mName).c_str());
+    if (mSendEncryptedInfoBuffer) {
+        static const C2MemoryUsage kDefaultReadWriteUsage{
+            C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
+        constexpr int kAllocGranule0 = 1024 * 64;
+        constexpr int kAllocGranule1 = 1024 * 1024;
+        std::shared_ptr<C2BlockPool> pool = mBlockPools.lock()->inputPool;
+        // round up encrypted sizes to limit fragmentation and encourage buffer reuse
+        if (allocSize <= kAllocGranule1) {
+            bufferSize = align(allocSize, kAllocGranule0);
+        } else {
+            bufferSize = align(allocSize, kAllocGranule1);
+        }
+        blockRes = pool->fetchLinearBlock(
+                bufferSize, kDefaultReadWriteUsage, &block);
+
+        if (blockRes == C2_OK) {
+            C2WriteView view = block->map().get();
+            if (view.error() == C2_OK && view.size() == bufferSize) {
+                copied = true;
+                // TODO: only copy clear sections
+                memcpy(view.data(), buffer->data(), allocSize);
+            }
+        }
+    }
+
+    if (!copied) {
+        block.reset();
+    }
+    // size of cryptoInfo and accessUnitInfo should be the same?
+    ssize_t result = -1;
+    ssize_t codecDataOffset = 0;
+    size_t inBufferOffset = 0;
+    size_t outBufferSize = 0;
+    uint32_t cryptoInfoIdx = 0;
+    {
+        // scoped this block to enable destruction of mappedBlock
+        std::unique_ptr<EncryptedLinearBlockBuffer::MappedBlock> mappedBlock = nullptr;
+        hardware::drm::V1_0::DestinationBuffer destination;
+        destination.type = DrmBufferType::SHARED_MEMORY;
+        IMemoryToSharedBuffer(
+                mDecryptDestination, mHeapSeqNum, &destination.nonsecureMemory);
+        encryptedBuffer->getMappedBlock(&mappedBlock);
+        hardware::drm::V1_0::SharedBuffer source;
+        encryptedBuffer->fillSourceBuffer(&source);
+        for (int i = 0 ; i < bufferInfos->value.size(); i++) {
+            if (bufferInfos->value[i].mSize > 0) {
+                std::unique_ptr<CodecCryptoInfo> info =
+                        std::move(cryptoInfos->value[cryptoInfoIdx++]);
+                if (info->mNumSubSamples == 1
+                        && info->mSubSamples[0].mNumBytesOfClearData == 0
+                        && info->mSubSamples[0].mNumBytesOfEncryptedData == 0) {
+                    // no data so we only populate the bufferInfo
+                    result = 0;
+                } else {
+                    result = mCrypto->decrypt(
+                            (uint8_t*)info->mKey,
+                            (uint8_t*)info->mIv,
+                            info->mMode,
+                            info->mPattern,
+                            source,
+                            inBufferOffset,
+                            info->mSubSamples,
+                            info->mNumSubSamples,
+                            destination,
+                            errorDetailMsg);
+                    inBufferOffset += bufferInfos->value[i].mSize;
+                    if (result < 0) {
+                        ALOGI("[%s] decrypt failed: result=%zd", mName, result);
+                        return result;
+                    }
+                    if (destination.type == DrmBufferType::SHARED_MEMORY && mappedBlock) {
+                        mappedBlock->copyDecryptedContent(mDecryptDestination, result);
+                    }
+                    bufferInfos->value[i].mSize = result;
+                    outBufferSize += result;
+                }
+            }
+        }
+        buffer->setRange(codecDataOffset, outBufferSize - codecDataOffset);
+    }
     return queueInputBufferInternal(buffer, block, bufferSize);
 }
 
@@ -996,7 +1313,7 @@ status_t CCodecBufferChannel::renderOutputBuffer(
 
     int64_t mediaTimeUs = 0;
     (void)buffer->meta()->findInt64("timeUs", &mediaTimeUs);
-    if (mIsSurfaceToDisplay) {
+    if (mAreRenderMetricsEnabled && mIsSurfaceToDisplay) {
         trackReleasedFrame(qbo, mediaTimeUs, timestampNs);
         processRenderedFrames(qbo.frameTimestamps);
     } else {
@@ -1036,6 +1353,15 @@ void CCodecBufferChannel::trackReleasedFrame(const IGraphicBufferProducer::Queue
     if (desiredRenderTimeNs < nowNs) {
         desiredRenderTimeNs = nowNs;
     }
+
+    // If the render time is more than a second from now, then pretend the frame is supposed to be
+    // rendered immediately, because that's what SurfaceFlinger heuristics will do. This is a tight
+    // coupling, but is really the only way to optimize away unnecessary present fence checks in
+    // processRenderedFrames.
+    if (desiredRenderTimeNs > nowNs + 1*1000*1000*1000LL) {
+        desiredRenderTimeNs = nowNs;
+    }
+
     // We've just queued a frame to the surface, so keep track of it and later check to see if it is
     // actually rendered.
     TrackedFrame frame;
@@ -1111,6 +1437,17 @@ void CCodecBufferChannel::pollForRenderedBuffers() {
     FrameEventHistoryDelta delta;
     mComponent->pollForRenderedFrames(&delta);
     processRenderedFrames(delta);
+}
+
+void CCodecBufferChannel::onBufferReleasedFromOutputSurface(uint32_t generation) {
+    // Note: Since this is called asynchronously from IProducerListener not
+    // knowing the internal state of CCodec/CCodecBufferChannel,
+    // prevent mComponent from being destroyed by holding the shared reference
+    // during this interface being executed.
+    std::shared_ptr<Codec2Client::Component> comp = mComponent;
+    if (comp) {
+        comp->onBufferReleasedFromOutputSurface(generation);
+    }
 }
 
 status_t CCodecBufferChannel::discardBuffer(const sp<MediaCodecBuffer> &buffer) {
@@ -1574,8 +1911,14 @@ status_t CCodecBufferChannel::start(
                     padding = 0;
                 }
                 if (delay || padding) {
-                    // We need write access to the buffers, and we're already in
-                    // array mode.
+                    // We need write access to the buffers, so turn them into array mode.
+                    // TODO: b/321930152 - define SkipCutOutputBuffers that takes output from
+                    // component, runs it through SkipCutBuffer and allocate local buffer to be
+                    // used by fwk. Make initSkipCutBuffer() return OutputBuffers similar to
+                    // toArrayMode().
+                    if (!output->buffers->isArrayMode()) {
+                        output->buffers = output->buffers->toArrayMode(numOutputSlots);
+                    }
                     output->buffers->initSkipCutBuffer(delay, padding, sampleRate, channelCount);
                 }
             }
@@ -1598,7 +1941,8 @@ status_t CCodecBufferChannel::start(
         watcher->inputDelay(inputDelayValue)
                 .pipelineDelay(pipelineDelayValue)
                 .outputDelay(outputDelayValue)
-                .smoothnessFactor(kSmoothnessFactor);
+                .smoothnessFactor(kSmoothnessFactor)
+                .tunneled(mTunneled);
         watcher->flush();
     }
 
@@ -1608,22 +1952,31 @@ status_t CCodecBufferChannel::start(
 }
 
 status_t CCodecBufferChannel::prepareInitialInputBuffers(
-        std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers) {
+        std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers, bool retry) {
     if (mInputSurface) {
         return OK;
     }
 
     size_t numInputSlots = mInput.lock()->numSlots;
-
-    {
-        Mutexed<Input>::Locked input(mInput);
-        while (clientInputBuffers->size() < numInputSlots) {
-            size_t index;
-            sp<MediaCodecBuffer> buffer;
-            if (!input->buffers->requestNewBuffer(&index, &buffer)) {
-                break;
+    int retryCount = 1;
+    for (; clientInputBuffers->empty() && retryCount >= 0; retryCount--) {
+        {
+            Mutexed<Input>::Locked input(mInput);
+            while (clientInputBuffers->size() < numInputSlots) {
+                size_t index;
+                sp<MediaCodecBuffer> buffer;
+                if (!input->buffers->requestNewBuffer(&index, &buffer)) {
+                    break;
+                }
+                clientInputBuffers->emplace(index, buffer);
             }
-            clientInputBuffers->emplace(index, buffer);
+        }
+        if (!retry || (retryCount <= 0)) {
+            break;
+        }
+        if (clientInputBuffers->empty()) {
+            // wait: buffer may be in transit from component.
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
         }
     }
     if (clientInputBuffers->empty()) {
@@ -2007,6 +2360,7 @@ bool CCodecBufferChannel::handleWork(
             newInputDelay.value_or(input->inputDelay) +
             newPipelineDelay.value_or(input->pipelineDelay) +
             kSmoothnessFactor;
+        input->inputDelay = newInputDelay.value_or(input->inputDelay);
         if (input->buffers->isArrayMode()) {
             if (input->numSlots >= newNumSlots) {
                 input->numExtraSlots = 0;
@@ -2145,8 +2499,15 @@ bool CCodecBufferChannel::handleWork(
 
     if (notifyClient && !buffer && !flags) {
         if (mTunneled && drop && outputFormat) {
-            ALOGV("[%s] onWorkDone: Keep tunneled, drop frame with format change (%lld)",
-                  mName, work->input.ordinal.frameIndex.peekull());
+            if (mOutputFormat != outputFormat) {
+                ALOGV("[%s] onWorkDone: Keep tunneled, drop frame with format change (%lld)",
+                      mName, work->input.ordinal.frameIndex.peekull());
+                mOutputFormat = outputFormat;
+            } else {
+                ALOGV("[%s] onWorkDone: Not reporting output buffer without format change (%lld)",
+                      mName, work->input.ordinal.frameIndex.peekull());
+                notifyClient = false;
+            }
         } else {
             ALOGV("[%s] onWorkDone: Not reporting output buffer (%lld)",
                   mName, work->input.ordinal.frameIndex.peekull());
@@ -2211,12 +2572,34 @@ void CCodecBufferChannel::sendOutputBuffers() {
         case OutputBuffers::DISCARD:
             break;
         case OutputBuffers::NOTIFY_CLIENT:
+        {
             // TRICKY: we want popped buffers reported in order, so sending
             // the callback while holding the lock here. This assumes that
             // onOutputBufferAvailable() does not block. onOutputBufferAvailable()
             // callbacks are always sent with the Output lock held.
+            if (c2Buffer) {
+                std::shared_ptr<const C2AccessUnitInfos::output> bufferMetadata =
+                        std::static_pointer_cast<const C2AccessUnitInfos::output>(
+                        c2Buffer->getInfo(C2AccessUnitInfos::output::PARAM_TYPE));
+                if (bufferMetadata && bufferMetadata->flexCount() > 0) {
+                    uint32_t flag = 0;
+                    std::vector<AccessUnitInfo> accessUnitInfos;
+                    for (int nMeta = 0; nMeta < bufferMetadata->flexCount(); nMeta++) {
+                        const C2AccessUnitInfosStruct &bufferMetadataStruct =
+                                bufferMetadata->m.values[nMeta];
+                        flag = convertFlags(bufferMetadataStruct.flags, false);
+                        accessUnitInfos.emplace_back(flag,
+                                static_cast<size_t>(bufferMetadataStruct.size),
+                                static_cast<size_t>(bufferMetadataStruct.timestamp));
+                    }
+                    sp<WrapperObject<std::vector<AccessUnitInfo>>> obj{
+                        new WrapperObject<std::vector<AccessUnitInfo>>{accessUnitInfos}};
+                    outBuffer->meta()->setObject("accessUnitInfo", obj);
+                }
+            }
             mCallback->onOutputBufferAvailable(index, outBuffer);
             break;
+        }
         case OutputBuffers::REALLOCATE:
             if (++reallocTryNum > kMaxReallocTry) {
                 output.unlock();
@@ -2248,12 +2631,8 @@ void CCodecBufferChannel::sendOutputBuffers() {
     }
 }
 
-status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface, bool pushBlankBuffer) {
-    static std::atomic_uint32_t surfaceGeneration{0};
-    uint32_t generation = (getpid() << 10) |
-            ((surfaceGeneration.fetch_add(1, std::memory_order_relaxed) + 1)
-                & ((1 << 10) - 1));
-
+status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface,
+                                         uint32_t generation, bool pushBlankBuffer) {
     sp<IGraphicBufferProducer> producer;
     int maxDequeueCount;
     sp<Surface> oldSurface;
@@ -2267,7 +2646,6 @@ status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface, bool pus
         newSurface->setDequeueTimeout(kDequeueTimeoutNs);
         newSurface->setMaxDequeuedBufferCount(maxDequeueCount);
         producer = newSurface->getIGraphicBufferProducer();
-        producer->setGenerationNumber(generation);
     } else {
         ALOGE("[%s] setting output surface to null", mName);
         return INVALID_OPERATION;
@@ -2345,6 +2723,46 @@ void CCodecBufferChannel::setCrypto(const sp<ICrypto> &crypto) {
 
 void CCodecBufferChannel::setDescrambler(const sp<IDescrambler> &descrambler) {
     mDescrambler = descrambler;
+}
+
+uint32_t CCodecBufferChannel::getBuffersPixelFormat(bool isEncoder) {
+    if (isEncoder) {
+        return getInputBuffersPixelFormat();
+    } else {
+        return getOutputBuffersPixelFormat();
+    }
+}
+
+uint32_t CCodecBufferChannel::getInputBuffersPixelFormat() {
+    Mutexed<Input>::Locked input(mInput);
+    if (input->buffers == nullptr) {
+        return PIXEL_FORMAT_UNKNOWN;
+    }
+    return input->buffers->getPixelFormatIfApplicable();
+}
+
+uint32_t CCodecBufferChannel::getOutputBuffersPixelFormat() {
+    Mutexed<Output>::Locked output(mOutput);
+    if (output->buffers == nullptr) {
+        return PIXEL_FORMAT_UNKNOWN;
+    }
+    return output->buffers->getPixelFormatIfApplicable();
+}
+
+void CCodecBufferChannel::resetBuffersPixelFormat(bool isEncoder) {
+    if (isEncoder) {
+        Mutexed<Input>::Locked input(mInput);
+        if (input->buffers == nullptr) {
+            return;
+        }
+        input->buffers->resetPixelFormatIfApplicable();
+    } else {
+        Mutexed<Output>::Locked output(mOutput);
+        if (output->buffers == nullptr) {
+            return;
+        }
+        output->buffers->resetPixelFormatIfApplicable();
+    }
 }
 
 status_t toStatusT(c2_status_t c2s, c2_operation_t c2op) {

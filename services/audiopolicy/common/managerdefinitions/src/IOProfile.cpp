@@ -33,17 +33,17 @@ IOProfile::IOProfile(const std::string &name, audio_port_role_t role)
     }
 }
 
-bool IOProfile::isCompatibleProfile(const DeviceVector &devices,
-                                    uint32_t samplingRate,
-                                    uint32_t *updatedSamplingRate,
-                                    audio_format_t format,
-                                    audio_format_t *updatedFormat,
-                                    audio_channel_mask_t channelMask,
-                                    audio_channel_mask_t *updatedChannelMask,
-                                    // FIXME type punning here
-                                    uint32_t flags,
-                                    bool exactMatchRequiredForInputFlags) const
-{
+IOProfile::CompatibilityScore IOProfile::getCompatibilityScore(
+        const android::DeviceVector &devices,
+        uint32_t samplingRate,
+        uint32_t *updatedSamplingRate,
+        audio_format_t format,
+        audio_format_t *updatedFormat,
+        audio_channel_mask_t channelMask,
+        audio_channel_mask_t *updatedChannelMask,
+        // FIXME type punning here
+        uint32_t flags,
+        bool exactMatchRequiredForInputFlags) const {
     const bool isPlaybackThread =
             getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SOURCE;
     const bool isRecordThread =
@@ -51,13 +51,13 @@ bool IOProfile::isCompatibleProfile(const DeviceVector &devices,
     ALOG_ASSERT(isPlaybackThread != isRecordThread);
     if (!areAllDevicesSupported(devices) ||
             !isCompatibleProfileForFlags(flags, exactMatchRequiredForInputFlags)) {
-        return false;
+        return NO_MATCH;
     }
 
     if (!audio_is_valid_format(format) ||
             (isPlaybackThread && (samplingRate == 0 || !audio_is_output_channel(channelMask))) ||
             (isRecordThread && (!audio_is_input_channel(channelMask)))) {
-         return false;
+         return NO_MATCH;
     }
 
     audio_format_t myUpdatedFormat = format;
@@ -69,32 +69,40 @@ bool IOProfile::isCompatibleProfile(const DeviceVector &devices,
         .channel_mask = channelMask,
         .format = format,
     };
+    auto result = NO_MATCH;
     if (isRecordThread)
     {
         if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
             if (checkExactAudioProfile(&config) != NO_ERROR) {
-                return false;
+                return result;
             }
+            result = EXACT_MATCH;
+        } else if (checkExactAudioProfile(&config) == NO_ERROR) {
+            result = EXACT_MATCH;
         } else if (checkCompatibleAudioProfile(
-                myUpdatedSamplingRate, myUpdatedChannelMask, myUpdatedFormat) != NO_ERROR) {
-            return false;
+                myUpdatedSamplingRate, myUpdatedChannelMask, myUpdatedFormat) == NO_ERROR) {
+            result = PARTIAL_MATCH;
+        } else {
+            return result;
         }
     } else {
-        if (checkExactAudioProfile(&config) != NO_ERROR) {
-            return false;
+        if (checkExactAudioProfile(&config) == NO_ERROR) {
+            result = EXACT_MATCH;
+        } else {
+            return result;
         }
     }
 
-    if (updatedSamplingRate != NULL) {
+    if (updatedSamplingRate != nullptr) {
         *updatedSamplingRate = myUpdatedSamplingRate;
     }
-    if (updatedFormat != NULL) {
+    if (updatedFormat != nullptr) {
         *updatedFormat = myUpdatedFormat;
     }
-    if (updatedChannelMask != NULL) {
+    if (updatedChannelMask != nullptr) {
         *updatedChannelMask = myUpdatedChannelMask;
     }
-    return true;
+    return result;
 }
 
 bool IOProfile::areAllDevicesSupported(const DeviceVector &devices) const {
@@ -156,9 +164,9 @@ void IOProfile::toSupportedMixerAttributes(
         for (const auto sampleRate : profile->getSampleRates()) {
             for (const auto channelMask : profile->getChannels()) {
                 const audio_config_base_t config = {
-                        .format = profile->getFormat(),
                         .sample_rate = sampleRate,
-                        .channel_mask = channelMask
+                        .channel_mask = channelMask,
+                        .format = profile->getFormat(),
                 };
                 for (const auto mixerBehavior : mMixerBehaviors) {
                     mixerAttributes->push_back({
@@ -166,6 +174,49 @@ void IOProfile::toSupportedMixerAttributes(
                         .mixer_behavior = mixerBehavior
                     });
                 }
+            }
+        }
+    }
+}
+
+void IOProfile::refreshMixerBehaviors() {
+    if (getRole() == AUDIO_PORT_ROLE_SOURCE) {
+        mMixerBehaviors.clear();
+        mMixerBehaviors.insert(AUDIO_MIXER_BEHAVIOR_DEFAULT);
+        if (mFlags.output & AUDIO_OUTPUT_FLAG_BIT_PERFECT) {
+            mMixerBehaviors.insert(AUDIO_MIXER_BEHAVIOR_BIT_PERFECT);
+        }
+    }
+}
+
+status_t IOProfile::readFromParcelable(const media::AudioPortFw &parcelable) {
+    status_t status = AudioPort::readFromParcelable(parcelable);
+    if (status == OK) {
+        refreshMixerBehaviors();
+    }
+    return status;
+}
+
+void IOProfile::importAudioPort(const audio_port_v7 &port) {
+    if (mProfiles.hasDynamicFormat()) {
+        std::set<audio_format_t> formats;
+        for (size_t i = 0; i < port.num_audio_profiles; ++i) {
+            formats.insert(port.audio_profiles[i].format);
+        }
+        addProfilesForFormats(mProfiles, FormatVector(formats.begin(), formats.end()));
+    }
+    for (audio_format_t format : mProfiles.getSupportedFormats()) {
+        for (size_t i = 0; i < port.num_audio_profiles; ++i) {
+            if (port.audio_profiles[i].format == format) {
+                ChannelMaskSet channelMasks(port.audio_profiles[i].channel_masks,
+                        port.audio_profiles[i].channel_masks +
+                                port.audio_profiles[i].num_channel_masks);
+                SampleRateSet sampleRates(port.audio_profiles[i].sample_rates,
+                        port.audio_profiles[i].sample_rates +
+                                port.audio_profiles[i].num_sample_rates);
+                addDynamicAudioProfileAndSort(
+                        mProfiles, sp<AudioProfile>::make(
+                                format, channelMasks, sampleRates));
             }
         }
     }
@@ -195,6 +246,10 @@ void IOProfile::dump(String8 *dst, int spaces) const
             spaces - 2, "", maxActiveCount, curActiveCount);
     dst->appendFormat("%*s- recommendedMuteDurationMs: %u ms\n",
             spaces - 2, "", recommendedMuteDurationMs);
+    if (hasDynamicAudioProfile() && !mMixerBehaviors.empty()) {
+        dst->appendFormat("%*s- mixerBehaviors: %s\n",
+                spaces - 2, "", dumpMixerBehaviors(mMixerBehaviors).c_str());
+    }
 }
 
 void IOProfile::log()

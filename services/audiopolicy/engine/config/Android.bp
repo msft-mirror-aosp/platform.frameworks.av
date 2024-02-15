@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_android_media_audio_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -22,11 +23,13 @@ cc_library {
         "-Wextra",
     ],
     shared_libs: [
-        "libmedia_helper",
-        "libxml2",
-        "libutils",
-        "liblog",
+        "libaudio_aidl_conversion_common_cpp",
+        "libaudiopolicycomponents",
         "libcutils",
+        "liblog",
+        "libmedia_helper",
+        "libutils",
+        "libxml2",
     ],
     header_libs: [
         "libaudio_system_headers",

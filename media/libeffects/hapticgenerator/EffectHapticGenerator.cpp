@@ -28,12 +28,12 @@
 
 #include <errno.h>
 #include <inttypes.h>
-#include <math.h>
 
 #include <android-base/parsedouble.h>
 #include <android-base/properties.h>
 #include <audio_effects/effect_hapticgenerator.h>
 #include <audio_utils/format.h>
+#include <audio_utils/safe_math.h>
 #include <system/audio.h>
 
 static constexpr float DEFAULT_RESONANT_FREQUENCY = 150.0f;
@@ -317,7 +317,7 @@ int HapticGenerator_SetParameter(struct HapticGeneratorContext *context,
         }
         int id = *(int *) value;
         os::HapticScale hapticIntensity = static_cast<os::HapticScale>(*((int *) value + 1));
-        ALOGD("Setting haptic intensity as %d", hapticIntensity);
+        ALOGD("Setting haptic intensity as %d", static_cast<int>(hapticIntensity));
         if (hapticIntensity == os::HapticScale::MUTE) {
             context->param.id2Intensity.erase(id);
         } else {
@@ -338,8 +338,9 @@ int HapticGenerator_SetParameter(struct HapticGeneratorContext *context,
         const float qFactor = *((float *) value + 1);
         const float maxAmplitude = *((float *) value + 2);
         context->param.resonantFrequency =
-                isnan(resonantFrequency) ? DEFAULT_RESONANT_FREQUENCY : resonantFrequency;
-        context->param.bsfZeroQ = isnan(qFactor) ? DEFAULT_BSF_POLE_Q : qFactor;
+                audio_utils::safe_isnan(resonantFrequency) ? DEFAULT_RESONANT_FREQUENCY
+                                                           : resonantFrequency;
+        context->param.bsfZeroQ = audio_utils::safe_isnan(qFactor) ? DEFAULT_BSF_ZERO_Q : qFactor;
         context->param.bsfPoleQ = context->param.bsfZeroQ / 2.0f;
         context->param.maxHapticAmplitude = maxAmplitude;
         ALOGD("Updating vibrator info, resonantFrequency=%f, bsfZeroQ=%f, bsfPoleQ=%f, "

@@ -44,6 +44,8 @@ namespace V1_2 {
 namespace utils {
 
 using namespace ::android;
+using ::android::MultiAccessUnitInterface;
+using ::android::MultiAccessUnitHelper;
 
 // ComponentListener wrapper
 struct Component::Listener : public C2Component::Listener {
@@ -135,6 +137,52 @@ protected:
     wp<IComponentListener> mListener;
 };
 
+// Component listener for handle multiple access-units
+struct MultiAccessUnitListener : public Component::Listener {
+    MultiAccessUnitListener(const sp<Component> &component,
+            const std::shared_ptr<MultiAccessUnitHelper> &helper):
+        Listener(component), mHelper(helper) {
+    }
+
+    virtual void onError_nb(
+            std::weak_ptr<C2Component> c2component,
+            uint32_t errorCode) override {
+        if (mHelper) {
+            std::list<std::unique_ptr<C2Work>> worklist;
+            mHelper->error(&worklist);
+            if (!worklist.empty()) {
+                Listener::onWorkDone_nb(c2component, std::move(worklist));
+            }
+        }
+        Listener::onError_nb(c2component, errorCode);
+    }
+
+    virtual void onTripped_nb(
+            std::weak_ptr<C2Component> c2component,
+            std::vector<std::shared_ptr<C2SettingResult>> c2settingResult
+            ) override {
+        Listener::onTripped_nb(c2component,
+                c2settingResult);
+    }
+
+    virtual void onWorkDone_nb(
+            std::weak_ptr<C2Component> c2component,
+            std::list<std::unique_ptr<C2Work>> c2workItems) override {
+        if (mHelper) {
+            std::list<std::unique_ptr<C2Work>> processedWork;
+            mHelper->gather(c2workItems, &processedWork);
+            if (!processedWork.empty()) {
+                Listener::onWorkDone_nb(c2component, std::move(processedWork));
+            }
+        } else {
+            Listener::onWorkDone_nb(c2component, std::move(c2workItems));
+        }
+    }
+
+    protected:
+        std::shared_ptr<MultiAccessUnitHelper> mHelper;
+};
+
 // Component::Sink
 struct Component::Sink : public IInputSink {
     std::shared_ptr<Component> mComponent;
@@ -208,18 +256,57 @@ Component::Component(
         const sp<::android::hardware::media::bufferpool::V2_0::
         IClientManager>& clientPoolManager)
       : mComponent{component},
-        mInterface{new ComponentInterface(component->intf(),
-                                          store->getParameterCache())},
         mListener{listener},
         mStore{store},
         mBufferPoolSender{clientPoolManager} {
     // Retrieve supported parameters from store
     // TODO: We could cache this per component/interface type
+    if (MultiAccessUnitHelper::isEnabledOnPlatform()) {
+        c2_status_t err = C2_OK;
+        C2ComponentDomainSetting domain;
+        std::vector<std::unique_ptr<C2Param>> heapParams;
+        err = component->intf()->query_vb({&domain}, {}, C2_MAY_BLOCK, &heapParams);
+        if (err == C2_OK && (domain.value == C2Component::DOMAIN_AUDIO)) {
+            std::vector<std::shared_ptr<C2ParamDescriptor>> params;
+            bool isComponentSupportsLargeAudioFrame = false;
+            component->intf()->querySupportedParams_nb(&params);
+            for (const auto &paramDesc : params) {
+                if (paramDesc->name().compare(C2_PARAMKEY_OUTPUT_LARGE_FRAME) == 0) {
+                    isComponentSupportsLargeAudioFrame = true;
+                    LOG(VERBOSE) << "Underlying component supports large frame audio";
+                    break;
+                }
+            }
+            if (!isComponentSupportsLargeAudioFrame) {
+                mMultiAccessUnitIntf = std::make_shared<MultiAccessUnitInterface>(
+                        component->intf(),
+                        std::static_pointer_cast<C2ReflectorHelper>(
+                                GetCodec2PlatformComponentStore()->getParamReflector()));
+            }
+        }
+    }
+    mInterface = new ComponentInterface(
+            component->intf(), mMultiAccessUnitIntf, store->getParameterCache());
     mInit = mInterface->status();
 }
 
 c2_status_t Component::status() const {
     return mInit;
+}
+
+void Component::onDeathReceived() {
+    {
+        std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
+        mClientDied = true;
+        for (auto it = mBlockPools.begin(); it != mBlockPools.end(); ++it) {
+            if (it->second->getAllocatorId() == C2PlatformAllocatorStore::BUFFERQUEUE) {
+                std::shared_ptr<C2BufferQueueBlockPool> bqPool =
+                        std::static_pointer_cast<C2BufferQueueBlockPool>(it->second);
+                bqPool->invalidate();
+            }
+        }
+    }
+    release();
 }
 
 // Methods from ::android::hardware::media::c2::V1_1::IComponent
@@ -237,7 +324,19 @@ Return<Status> Component::queue(const WorkBundle& workBundle) {
                     registerFrameData(mListener, work->input);
         }
     }
-
+    c2_status_t err = C2_OK;
+    if (mMultiAccessUnitHelper) {
+        std::list<std::list<std::unique_ptr<C2Work>>> c2worklists;
+        mMultiAccessUnitHelper->scatter(c2works, &c2worklists);
+        for (auto &c2worklist : c2worklists) {
+            err = mComponent->queue_nb(&c2worklist);
+            if (err != C2_OK) {
+                LOG(ERROR) << "Error Queuing to component.";
+                break;
+            }
+        }
+        return static_cast<Status>(err);
+    }
     return static_cast<Status>(mComponent->queue_nb(&c2works));
 }
 
@@ -246,7 +345,9 @@ Return<void> Component::flush(flush_cb _hidl_cb) {
     c2_status_t c2res = mComponent->flush_sm(
             C2Component::FLUSH_COMPONENT,
             &c2flushedWorks);
-
+    if (mMultiAccessUnitHelper) {
+        c2res = mMultiAccessUnitHelper->flush(&c2flushedWorks);
+    }
     // Unregister input buffers.
     for (const std::unique_ptr<C2Work>& work : c2flushedWorks) {
         if (work) {
@@ -409,9 +510,19 @@ Return<void> Component::createBlockPool(
         blockPool = nullptr;
     }
     if (blockPool) {
-        mBlockPoolsMutex.lock();
-        mBlockPools.emplace(blockPool->getLocalId(), blockPool);
-        mBlockPoolsMutex.unlock();
+        bool emplaced = false;
+        {
+            mBlockPoolsMutex.lock();
+            if (!mClientDied) {
+                mBlockPools.emplace(blockPool->getLocalId(), blockPool);
+                emplaced = true;
+            }
+            mBlockPoolsMutex.unlock();
+        }
+        if (!emplaced) {
+            blockPool.reset();
+            status = C2_BAD_STATE;
+        }
     } else if (status == C2_OK) {
         status = C2_CORRUPTED;
     }
@@ -444,6 +555,9 @@ Return<Status> Component::reset() {
         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
         mBlockPools.clear();
     }
+    if (mMultiAccessUnitHelper) {
+        mMultiAccessUnitHelper->reset();
+    }
     InputBufferManager::unregisterFrameData(mListener);
     return status;
 }
@@ -453,6 +567,9 @@ Return<Status> Component::release() {
     {
         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
         mBlockPools.clear();
+    }
+    if (mMultiAccessUnitHelper) {
+        mMultiAccessUnitHelper->reset();
     }
     InputBufferManager::unregisterFrameData(mListener);
     return status;
@@ -514,7 +631,12 @@ std::shared_ptr<C2Component> Component::findLocalComponent(
 }
 
 void Component::initListener(const sp<Component>& self) {
-    std::shared_ptr<C2Component::Listener> c2listener =
+    std::shared_ptr<C2Component::Listener> c2listener;
+    if (mMultiAccessUnitIntf) {
+        mMultiAccessUnitHelper = std::make_shared<MultiAccessUnitHelper>(mMultiAccessUnitIntf);
+    }
+    c2listener = mMultiAccessUnitHelper ?
+            std::make_shared<MultiAccessUnitListener>(self, mMultiAccessUnitHelper) :
             std::make_shared<Listener>(self);
     c2_status_t res = mComponent->setListener_vb(c2listener, C2_DONT_BLOCK);
     if (res != C2_OK) {
@@ -532,8 +654,8 @@ void Component::initListener(const sp<Component>& self) {
                 ) override {
             auto strongComponent = component.promote();
             if (strongComponent) {
-                LOG(INFO) << "Client died ! release the component !!";
-                strongComponent->release();
+                LOG(INFO) << "Client died ! notify and release the component !!";
+                strongComponent->onDeathReceived();
             } else {
                 LOG(ERROR) << "Client died ! no component to release !!";
             }

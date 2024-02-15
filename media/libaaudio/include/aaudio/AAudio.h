@@ -539,6 +539,22 @@ enum {
      * Available since API level 29.
      */
     AAUDIO_INPUT_PRESET_VOICE_PERFORMANCE = 10,
+
+    /**
+     * Use this preset for an echo canceller to capture the reference signal.
+     * Reserved for system components.
+     * Requires CAPTURE_AUDIO_OUTPUT permission
+     * Available since API level 35.
+     */
+    AAUDIO_INPUT_PRESET_SYSTEM_ECHO_REFERENCE = 1997,
+
+    /**
+     * Use this preset for preemptible, low-priority software hotword detection.
+     * Reserved for system components.
+     * Requires CAPTURE_AUDIO_HOTWORD permission.
+     * Available since API level 35.
+     */
+    AAUDIO_INPUT_PRESET_SYSTEM_HOTWORD = 1999,
 };
 typedef int32_t aaudio_input_preset_t;
 
@@ -623,6 +639,11 @@ typedef int32_t aaudio_session_id_t;
  * (e.g. a USB audio interface, a DAC connected to headphones) to
  * specify allowable configurations of a particular device.
  *
+ * Channel masks are for input only, output only, or both input and output.
+ * These channel masks are different than those defined in AudioFormat.java.
+ * If an app gets a channel mask from Java API and wants to use it in AAudio,
+ * conversion should be done by the app.
+ *
  * Added in API level 32.
  */
 enum {
@@ -630,10 +651,6 @@ enum {
      * Invalid channel mask
      */
     AAUDIO_CHANNEL_INVALID = -1,
-
-    /**
-     * Output audio channel mask
-     */
     AAUDIO_CHANNEL_FRONT_LEFT = 1 << 0,
     AAUDIO_CHANNEL_FRONT_RIGHT = 1 << 1,
     AAUDIO_CHANNEL_FRONT_CENTER = 1 << 2,
@@ -661,62 +678,112 @@ enum {
     AAUDIO_CHANNEL_FRONT_WIDE_LEFT = 1 << 24,
     AAUDIO_CHANNEL_FRONT_WIDE_RIGHT = 1 << 25,
 
+    /**
+     * Supported for Input and Output
+     */
     AAUDIO_CHANNEL_MONO = AAUDIO_CHANNEL_FRONT_LEFT,
+    /**
+     * Supported for Input and Output
+     */
     AAUDIO_CHANNEL_STEREO = AAUDIO_CHANNEL_FRONT_LEFT |
                             AAUDIO_CHANNEL_FRONT_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_2POINT1 = AAUDIO_CHANNEL_FRONT_LEFT |
                              AAUDIO_CHANNEL_FRONT_RIGHT |
                              AAUDIO_CHANNEL_LOW_FREQUENCY,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_TRI = AAUDIO_CHANNEL_FRONT_LEFT |
                          AAUDIO_CHANNEL_FRONT_RIGHT |
                          AAUDIO_CHANNEL_FRONT_CENTER,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_TRI_BACK = AAUDIO_CHANNEL_FRONT_LEFT |
                               AAUDIO_CHANNEL_FRONT_RIGHT |
                               AAUDIO_CHANNEL_BACK_CENTER,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_3POINT1 = AAUDIO_CHANNEL_FRONT_LEFT |
                              AAUDIO_CHANNEL_FRONT_RIGHT |
                              AAUDIO_CHANNEL_FRONT_CENTER |
                              AAUDIO_CHANNEL_LOW_FREQUENCY,
+    /**
+     * Supported for Input and Output
+     */
     AAUDIO_CHANNEL_2POINT0POINT2 = AAUDIO_CHANNEL_FRONT_LEFT |
                                    AAUDIO_CHANNEL_FRONT_RIGHT |
                                    AAUDIO_CHANNEL_TOP_SIDE_LEFT |
                                    AAUDIO_CHANNEL_TOP_SIDE_RIGHT,
+    /**
+     * Supported for Input and Output
+     */
     AAUDIO_CHANNEL_2POINT1POINT2 = AAUDIO_CHANNEL_2POINT0POINT2 |
                                    AAUDIO_CHANNEL_LOW_FREQUENCY,
+    /**
+     * Supported for Input and Output
+     */
     AAUDIO_CHANNEL_3POINT0POINT2 = AAUDIO_CHANNEL_FRONT_LEFT |
                                    AAUDIO_CHANNEL_FRONT_RIGHT |
                                    AAUDIO_CHANNEL_FRONT_CENTER |
                                    AAUDIO_CHANNEL_TOP_SIDE_LEFT |
                                    AAUDIO_CHANNEL_TOP_SIDE_RIGHT,
+    /**
+     * Supported for Input and Output
+     */
     AAUDIO_CHANNEL_3POINT1POINT2 = AAUDIO_CHANNEL_3POINT0POINT2 |
                                    AAUDIO_CHANNEL_LOW_FREQUENCY,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_QUAD = AAUDIO_CHANNEL_FRONT_LEFT |
                           AAUDIO_CHANNEL_FRONT_RIGHT |
                           AAUDIO_CHANNEL_BACK_LEFT |
                           AAUDIO_CHANNEL_BACK_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_QUAD_SIDE = AAUDIO_CHANNEL_FRONT_LEFT |
                                AAUDIO_CHANNEL_FRONT_RIGHT |
                                AAUDIO_CHANNEL_SIDE_LEFT |
                                AAUDIO_CHANNEL_SIDE_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_SURROUND = AAUDIO_CHANNEL_FRONT_LEFT |
                               AAUDIO_CHANNEL_FRONT_RIGHT |
                               AAUDIO_CHANNEL_FRONT_CENTER |
                               AAUDIO_CHANNEL_BACK_CENTER,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_PENTA = AAUDIO_CHANNEL_QUAD |
                            AAUDIO_CHANNEL_FRONT_CENTER,
-    // aka 5POINT1_BACK
+    /**
+     * Supported for Input and Output. aka 5POINT1_BACK
+     */
     AAUDIO_CHANNEL_5POINT1 = AAUDIO_CHANNEL_FRONT_LEFT |
                              AAUDIO_CHANNEL_FRONT_RIGHT |
                              AAUDIO_CHANNEL_FRONT_CENTER |
                              AAUDIO_CHANNEL_LOW_FREQUENCY |
                              AAUDIO_CHANNEL_BACK_LEFT |
                              AAUDIO_CHANNEL_BACK_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_5POINT1_SIDE = AAUDIO_CHANNEL_FRONT_LEFT |
                                   AAUDIO_CHANNEL_FRONT_RIGHT |
                                   AAUDIO_CHANNEL_FRONT_CENTER |
                                   AAUDIO_CHANNEL_LOW_FREQUENCY |
                                   AAUDIO_CHANNEL_SIDE_LEFT |
                                   AAUDIO_CHANNEL_SIDE_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_6POINT1 = AAUDIO_CHANNEL_FRONT_LEFT |
                              AAUDIO_CHANNEL_FRONT_RIGHT |
                              AAUDIO_CHANNEL_FRONT_CENTER |
@@ -724,32 +791,55 @@ enum {
                              AAUDIO_CHANNEL_BACK_LEFT |
                              AAUDIO_CHANNEL_BACK_RIGHT |
                              AAUDIO_CHANNEL_BACK_CENTER,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_7POINT1 = AAUDIO_CHANNEL_5POINT1 |
                              AAUDIO_CHANNEL_SIDE_LEFT |
                              AAUDIO_CHANNEL_SIDE_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_5POINT1POINT2 = AAUDIO_CHANNEL_5POINT1 |
                                    AAUDIO_CHANNEL_TOP_SIDE_LEFT |
                                    AAUDIO_CHANNEL_TOP_SIDE_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_5POINT1POINT4 = AAUDIO_CHANNEL_5POINT1 |
                                    AAUDIO_CHANNEL_TOP_FRONT_LEFT |
                                    AAUDIO_CHANNEL_TOP_FRONT_RIGHT |
                                    AAUDIO_CHANNEL_TOP_BACK_LEFT |
                                    AAUDIO_CHANNEL_TOP_BACK_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_7POINT1POINT2 = AAUDIO_CHANNEL_7POINT1 |
                                    AAUDIO_CHANNEL_TOP_SIDE_LEFT |
                                    AAUDIO_CHANNEL_TOP_SIDE_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_7POINT1POINT4 = AAUDIO_CHANNEL_7POINT1 |
                                    AAUDIO_CHANNEL_TOP_FRONT_LEFT |
                                    AAUDIO_CHANNEL_TOP_FRONT_RIGHT |
                                    AAUDIO_CHANNEL_TOP_BACK_LEFT |
                                    AAUDIO_CHANNEL_TOP_BACK_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_9POINT1POINT4 = AAUDIO_CHANNEL_7POINT1POINT4 |
                                    AAUDIO_CHANNEL_FRONT_WIDE_LEFT |
                                    AAUDIO_CHANNEL_FRONT_WIDE_RIGHT,
+    /**
+     * Supported for only Output
+     */
     AAUDIO_CHANNEL_9POINT1POINT6 = AAUDIO_CHANNEL_9POINT1POINT4 |
                                    AAUDIO_CHANNEL_TOP_SIDE_LEFT |
                                    AAUDIO_CHANNEL_TOP_SIDE_RIGHT,
-
+    /**
+     * Supported for only Input
+     */
     AAUDIO_CHANNEL_FRONT_BACK = AAUDIO_CHANNEL_FRONT_CENTER |
                                 AAUDIO_CHANNEL_BACK_CENTER,
 };
@@ -1921,9 +2011,19 @@ AAUDIO_API aaudio_session_id_t AAudioStream_getSessionId(AAudioStream* _Nonnull 
         __INTRODUCED_IN(28);
 
 /**
- * Passes back the time at which a particular frame was presented.
+ * Returns the time at which a particular frame was played on a speaker or headset,
+ * or was recorded on a microphone.
+ *
  * This can be used to synchronize audio with video or MIDI.
  * It can also be used to align a recorded stream with a playback stream.
+ *
+ * The framePosition is an index into the stream of audio data.
+ * The first frame played or recorded is at framePosition 0.
+ *
+ * These framePositions are the same units that you get from AAudioStream_getFramesRead()
+ * or AAudioStream_getFramesWritten().
+ * A "frame" is a set of audio sample values that are played simultaneously.
+ * For example, a stereo stream has two samples in a frame, left and right.
  *
  * Timestamps are only valid when the stream is in {@link #AAUDIO_STREAM_STATE_STARTED}.
  * {@link #AAUDIO_ERROR_INVALID_STATE} will be returned if the stream is not started.
@@ -1940,8 +2040,8 @@ AAUDIO_API aaudio_session_id_t AAudioStream_getSessionId(AAudioStream* _Nonnull 
  *
  * @param stream reference provided by AAudioStreamBuilder_openStream()
  * @param clockid CLOCK_MONOTONIC or CLOCK_BOOTTIME
- * @param framePosition pointer to a variable to receive the position
- * @param timeNanoseconds pointer to a variable to receive the time
+ * @param[out] framePosition pointer to a variable to receive the position
+ * @param[out] timeNanoseconds pointer to a variable to receive the time
  * @return {@link #AAUDIO_OK} or a negative error
  */
 AAUDIO_API aaudio_result_t AAudioStream_getTimestamp(AAudioStream* _Nonnull stream,

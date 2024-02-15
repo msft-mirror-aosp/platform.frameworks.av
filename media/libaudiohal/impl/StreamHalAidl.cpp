@@ -32,6 +32,7 @@
 #include <utils/Log.h>
 
 #include "DeviceHalAidl.h"
+#include "EffectHalAidl.h"
 #include "StreamHalAidl.h"
 
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
@@ -43,6 +44,7 @@ using ::aidl::android::hardware::audio::core::IStreamOut;
 using ::aidl::android::hardware::audio::core::StreamDescriptor;
 using ::aidl::android::hardware::audio::core::MmapBufferDescriptor;
 using ::aidl::android::media::audio::common::MicrophoneDynamicInfo;
+using ::aidl::android::media::audio::IHalAdapterVendorExtension;
 
 namespace android {
 
@@ -73,12 +75,15 @@ std::shared_ptr<IStreamCommon> StreamHalAidl::getStreamCommon(const std::shared_
 StreamHalAidl::StreamHalAidl(
         std::string_view className, bool isInput, const audio_config& config,
         int32_t nominalLatency, StreamContextAidl&& context,
-        const std::shared_ptr<IStreamCommon>& stream)
+        const std::shared_ptr<IStreamCommon>& stream,
+        const std::shared_ptr<IHalAdapterVendorExtension>& vext)
         : ConversionHelperAidl(className),
           mIsInput(isInput),
           mConfig(configToBase(config)),
           mContext(std::move(context)),
-          mStream(stream) {
+          mStream(stream),
+          mVendorExt(vext) {
+    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     {
         std::lock_guard l(mLock);
         mLastReply.latencyMs = nominalLatency;
@@ -93,6 +98,7 @@ StreamHalAidl::StreamHalAidl(
 }
 
 StreamHalAidl::~StreamHalAidl() {
+    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     if (mStream != nullptr) {
         ndk::ScopedAStatus status = mStream->close();
         ALOGE_IF(!status.isOk(), "%s: status %s", __func__, status.getDescription().c_str());
@@ -125,7 +131,6 @@ status_t StreamHalAidl::getAudioProperties(audio_config_base_t *configBase) {
 status_t StreamHalAidl::setParameters(const String8& kvPairs) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-
     AudioParameter parameters(kvPairs);
     ALOGD("%s: parameters: %s", __func__, parameters.toString().c_str());
 
@@ -134,18 +139,18 @@ status_t StreamHalAidl::setParameters(const String8& kvPairs) {
             [&](int hwAvSyncId) {
                 return statusTFromBinderStatus(mStream->updateHwAvSyncId(hwAvSyncId));
             }));
-
-    ALOGW_IF(parameters.size() != 0, "%s: unknown parameters, ignored: %s",
-            __func__, parameters.toString().c_str());
-    return OK;
+    return parseAndSetVendorParameters(mVendorExt, mStream, parameters);
 }
 
 status_t StreamHalAidl::getParameters(const String8& keys __unused, String8 *values) {
-    ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
-    values->clear();
-    // AIDL HAL doesn't support getParameters API.
-    return INVALID_OPERATION;
+    if (!mStream) return NO_INIT;
+    if (values == nullptr) {
+        return BAD_VALUE;
+    }
+    AudioParameter parameterKeys(keys), result;
+    *values = result.toString();
+    return parseAndGetVendorParameters(mVendorExt, mStream, parameterKeys, values);
 }
 
 status_t StreamHalAidl::getFrameSize(size_t *size) {
@@ -160,20 +165,26 @@ status_t StreamHalAidl::getFrameSize(size_t *size) {
     return OK;
 }
 
-status_t StreamHalAidl::addEffect(sp<EffectHalInterface> effect __unused) {
+status_t StreamHalAidl::addEffect(sp<EffectHalInterface> effect) {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    if (effect == nullptr) {
+        return BAD_VALUE;
+    }
+    auto aidlEffect = sp<effect::EffectHalAidl>::cast(effect);
+    return statusTFromBinderStatus(mStream->addEffect(aidlEffect->getIEffect()));
 }
 
-status_t StreamHalAidl::removeEffect(sp<EffectHalInterface> effect __unused) {
+status_t StreamHalAidl::removeEffect(sp<EffectHalInterface> effect) {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    ALOGE("%s not implemented yet", __func__);
-    return OK;
+    if (effect == nullptr) {
+        return BAD_VALUE;
+    }
+    auto aidlEffect = sp<effect::EffectHalAidl>::cast(effect);
+    return statusTFromBinderStatus(mStream->removeEffect(aidlEffect->getIEffect()));
 }
 
 status_t StreamHalAidl::standby() {
@@ -184,7 +195,7 @@ status_t StreamHalAidl::standby() {
     StreamDescriptor::Reply reply;
     switch (state) {
         case StreamDescriptor::State::ACTIVE:
-            if (status_t status = pause(&reply); status != OK) return status;
+            RETURN_STATUS_IF_ERROR(pause(&reply));
             if (reply.state != StreamDescriptor::State::PAUSED) {
                 ALOGE("%s: unexpected stream state: %s (expected PAUSED)",
                         __func__, toString(reply.state).c_str());
@@ -194,7 +205,7 @@ status_t StreamHalAidl::standby() {
         case StreamDescriptor::State::PAUSED:
         case StreamDescriptor::State::DRAIN_PAUSED:
             if (mIsInput) return flush();
-            if (status_t status = flush(&reply); status != OK) return status;
+            RETURN_STATUS_IF_ERROR(flush(&reply));
             if (reply.state != StreamDescriptor::State::IDLE) {
                 ALOGE("%s: unexpected stream state: %s (expected IDLE)",
                         __func__, toString(reply.state).c_str());
@@ -202,10 +213,8 @@ status_t StreamHalAidl::standby() {
             }
             FALLTHROUGH_INTENDED;
         case StreamDescriptor::State::IDLE:
-            if (status_t status = sendCommand(makeHalCommand<HalCommand::Tag::standby>(),
-                            &reply, true /*safeFromNonWorkerThread*/); status != OK) {
-                return status;
-            }
+            RETURN_STATUS_IF_ERROR(sendCommand(makeHalCommand<HalCommand::Tag::standby>(),
+                            &reply, true /*safeFromNonWorkerThread*/));
             if (reply.state != StreamDescriptor::State::STANDBY) {
                 ALOGE("%s: unexpected stream state: %s (expected STANDBY)",
                         __func__, toString(reply.state).c_str());
@@ -225,7 +234,9 @@ status_t StreamHalAidl::dump(int fd, const Vector<String16>& args) {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    return mStream->dump(fd, Args(args).args(), args.size());
+    status_t status = mStream->dump(fd, Args(args).args(), args.size());
+    mStreamPowerLog.dump(fd);
+    return status;
 }
 
 status_t StreamHalAidl::start() {
@@ -235,10 +246,7 @@ status_t StreamHalAidl::start() {
     const auto state = getState();
     StreamDescriptor::Reply reply;
     if (state == StreamDescriptor::State::STANDBY) {
-        if (status_t status = sendCommand(makeHalCommand<HalCommand::Tag::start>(), &reply, true);
-                status != OK) {
-            return status;
-        }
+        RETURN_STATUS_IF_ERROR(sendCommand(makeHalCommand<HalCommand::Tag::start>(), &reply, true));
         return sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), &reply, true);
     }
 
@@ -255,10 +263,11 @@ status_t StreamHalAidl::getLatency(uint32_t *latency) {
     ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
-    if (status_t status = updateCountersIfNeeded(&reply); status != OK) {
-        return status;
-    }
-    *latency = std::max<int32_t>(0, reply.latencyMs);
+    RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
+    *latency = std::clamp(std::max<int32_t>(0, reply.latencyMs), 1, 3000);
+    ALOGW_IF(reply.latencyMs != static_cast<int32_t>(*latency),
+             "Suspicious latency value reported by HAL: %d, clamped to %u", reply.latencyMs,
+             *latency);
     return OK;
 }
 
@@ -266,11 +275,9 @@ status_t StreamHalAidl::getObservablePosition(int64_t *frames, int64_t *timestam
     ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
-    if (status_t status = updateCountersIfNeeded(&reply); status != OK) {
-        return status;
-    }
-    *frames = reply.observable.frames;
-    *timestamp = reply.observable.timeNs;
+    RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
+    *frames = std::max<int64_t>(0, reply.observable.frames);
+    *timestamp = std::max<int64_t>(0, reply.observable.timeNs);
     return OK;
 }
 
@@ -279,12 +286,9 @@ status_t StreamHalAidl::getHardwarePosition(int64_t *frames, int64_t *timestamp)
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     // TODO: switch to updateCountersIfNeeded once we sort out mWorkerTid initialization
-    if (status_t status = sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(), &reply, true);
-            status != OK) {
-        return status;
-    }
-    *frames = reply.hardware.frames;
-    *timestamp = reply.hardware.timeNs;
+    RETURN_STATUS_IF_ERROR(sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(), &reply, true));
+    *frames = std::max<int64_t>(0, reply.hardware.frames);
+    *timestamp = std::max<int64_t>(0, reply.hardware.timeNs);
     return OK;
 }
 
@@ -292,10 +296,8 @@ status_t StreamHalAidl::getXruns(int32_t *frames) {
     ALOGV("%p %s::%s", this, getClassName().c_str(), __func__);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
-    if (status_t status = updateCountersIfNeeded(&reply); status != OK) {
-        return status;
-    }
-    *frames = reply.xrunFrames;
+    RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
+    *frames = std::max<int32_t>(0, reply.xrunFrames);
     return OK;
 }
 
@@ -310,10 +312,7 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
     // stream state), however this scenario wasn't supported by the HIDL HAL.
     if (getState() == StreamDescriptor::State::STANDBY) {
         StreamDescriptor::Reply reply;
-        if (status_t status = sendCommand(makeHalCommand<HalCommand::Tag::start>(), &reply);
-                status != OK) {
-            return status;
-        }
+        RETURN_STATUS_IF_ERROR(sendCommand(makeHalCommand<HalCommand::Tag::start>(), &reply));
         if (reply.state != StreamDescriptor::State::IDLE) {
             ALOGE("%s: failed to get the stream out of standby, actual state: %s",
                     __func__, toString(reply.state).c_str());
@@ -332,9 +331,7 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
         }
     }
     StreamDescriptor::Reply reply;
-    if (status_t status = sendCommand(burst, &reply); status != OK) {
-        return status;
-    }
+    RETURN_STATUS_IF_ERROR(sendCommand(burst, &reply));
     *transferred = reply.fmqByteCount;
     if (mIsInput) {
         LOG_ALWAYS_FATAL_IF(*transferred > bytes,
@@ -372,11 +369,8 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
             if (state == StreamDescriptor::State::IDLE) {
                 StreamDescriptor::Reply localReply{};
                 StreamDescriptor::Reply* innerReply = reply ?: &localReply;
-                if (status_t status =
-                        sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), innerReply);
-                        status != OK) {
-                    return status;
-                }
+                RETURN_STATUS_IF_ERROR(
+                        sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), innerReply));
                 if (innerReply->state != StreamDescriptor::State::ACTIVE) {
                     ALOGE("%s: unexpected stream state: %s (expected ACTIVE)",
                             __func__, toString(innerReply->state).c_str());
@@ -439,10 +433,7 @@ status_t StreamHalAidl::getMmapPosition(struct audio_mmap_position *position) {
         return BAD_VALUE;
     }
     int64_t aidlPosition = 0, aidlTimestamp = 0;
-    if (status_t status = getHardwarePosition(&aidlPosition, &aidlTimestamp); status != OK) {
-        return status;
-    }
-
+    RETURN_STATUS_IF_ERROR(getHardwarePosition(&aidlPosition, &aidlTimestamp));
     position->time_nanoseconds = aidlTimestamp;
     position->position_frames = static_cast<int32_t>(aidlPosition);
     return OK;
@@ -490,6 +481,11 @@ status_t StreamHalAidl::sendCommand(
     }
     {
         std::lock_guard l(mLock);
+        // Not every command replies with 'latencyMs' field filled out, substitute the last
+        // returned value in that case.
+        if (reply->latencyMs <= 0) {
+            reply->latencyMs = mLastReply.latencyMs;
+        }
         mLastReply = *reply;
     }
     switch (reply->status) {
@@ -533,9 +529,11 @@ StreamOutHalAidl::legacy2aidl_SourceMetadata(const StreamOutHalInterface::Source
 
 StreamOutHalAidl::StreamOutHalAidl(
         const audio_config& config, StreamContextAidl&& context, int32_t nominalLatency,
-        const std::shared_ptr<IStreamOut>& stream, const sp<CallbackBroker>& callbackBroker)
+        const std::shared_ptr<IStreamOut>& stream,
+        const std::shared_ptr<IHalAdapterVendorExtension>& vext,
+        const sp<CallbackBroker>& callbackBroker)
         : StreamHalAidl("StreamOutHalAidl", false /*isInput*/, config, nominalLatency,
-                std::move(context), getStreamCommon(stream)),
+                std::move(context), getStreamCommon(stream), vext),
           mStream(stream), mCallbackBroker(callbackBroker) {
     // Initialize the offload metadata
     mOffloadMetadata.sampleRate = static_cast<int32_t>(config.sample_rate);
@@ -593,10 +591,8 @@ status_t StreamOutHalAidl::getRenderPosition(uint32_t *dspFrames) {
         return BAD_VALUE;
     }
     int64_t aidlFrames = 0, aidlTimestamp = 0;
-    if (status_t status = getObservablePosition(&aidlFrames, &aidlTimestamp); status != OK) {
-        return OK;
-    }
-    *dspFrames = std::clamp<int64_t>(aidlFrames, 0, UINT32_MAX);
+    RETURN_STATUS_IF_ERROR(getObservablePosition(&aidlFrames, &aidlTimestamp));
+    *dspFrames = static_cast<uint32_t>(aidlFrames);
     return OK;
 }
 
@@ -665,10 +661,8 @@ status_t StreamOutHalAidl::getPresentationPosition(uint64_t *frames, struct time
         return BAD_VALUE;
     }
     int64_t aidlFrames = 0, aidlTimestamp = 0;
-    if (status_t status = getObservablePosition(&aidlFrames, &aidlTimestamp); status != OK) {
-        return status;
-    }
-    *frames = std::max<int64_t>(0, aidlFrames);
+    RETURN_STATUS_IF_ERROR(getObservablePosition(&aidlFrames, &aidlTimestamp));
+    *frames = aidlFrames;
     timestamp->tv_sec = aidlTimestamp / NANOS_PER_SECOND;
     timestamp->tv_nsec = aidlTimestamp - timestamp->tv_sec * NANOS_PER_SECOND;
     return OK;
@@ -794,7 +788,7 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
     if (VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
                 parameters, String8(AudioParameter::keyOffloadCodecAverageBitRate),
                 [&](int value) {
-                    return value > 0 ?
+                    return value >= 0 ?
                             mOffloadMetadata.averageBitRatePerSecond = value, OK : BAD_VALUE;
                 }))) {
         updateMetadata = true;
@@ -816,6 +810,7 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
                         mOffloadMetadata.channelMask = VALUE_OR_RETURN_STATUS(
                                 ::aidl::android::legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
                                         channel_mask, false /*isInput*/));
+                        return OK;
                     }
                     return BAD_VALUE;
                 }))) {
@@ -825,7 +820,7 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
                 parameters, String8(AudioParameter::keyOffloadCodecDelaySamples),
                 [&](int value) {
                     // The legacy keys are misnamed, the value is in frames.
-                    return value > 0 ? mOffloadMetadata.delayFrames = value, OK : BAD_VALUE;
+                    return value >= 0 ? mOffloadMetadata.delayFrames = value, OK : BAD_VALUE;
                 }))) {
         updateMetadata = true;
     }
@@ -833,7 +828,7 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
                 parameters, String8(AudioParameter::keyOffloadCodecPaddingSamples),
                 [&](int value) {
                     // The legacy keys are misnamed, the value is in frames.
-                    return value > 0 ? mOffloadMetadata.paddingFrames = value, OK : BAD_VALUE;
+                    return value >= 0 ? mOffloadMetadata.paddingFrames = value, OK : BAD_VALUE;
                 }))) {
         updateMetadata = true;
     }
@@ -861,9 +856,11 @@ StreamInHalAidl::legacy2aidl_SinkMetadata(const StreamInHalInterface::SinkMetada
 
 StreamInHalAidl::StreamInHalAidl(
         const audio_config& config, StreamContextAidl&& context, int32_t nominalLatency,
-        const std::shared_ptr<IStreamIn>& stream, const sp<MicrophoneInfoProvider>& micInfoProvider)
+        const std::shared_ptr<IStreamIn>& stream,
+        const std::shared_ptr<IHalAdapterVendorExtension>& vext,
+        const sp<MicrophoneInfoProvider>& micInfoProvider)
         : StreamHalAidl("StreamInHalAidl", true /*isInput*/, config, nominalLatency,
-                std::move(context), getStreamCommon(stream)),
+                std::move(context), getStreamCommon(stream), vext),
           mStream(stream), mMicInfoProvider(micInfoProvider) {}
 
 status_t StreamInHalAidl::setGain(float gain) {
@@ -884,9 +881,7 @@ status_t StreamInHalAidl::getInputFramesLost(uint32_t *framesLost) {
         return BAD_VALUE;
     }
     int32_t aidlXruns = 0;
-    if (status_t status = getXruns(&aidlXruns); status != OK) {
-        return status;
-    }
+    RETURN_STATUS_IF_ERROR(getXruns(&aidlXruns));
     *framesLost = std::max<int32_t>(0, aidlXruns);
     return OK;
 }

@@ -18,10 +18,9 @@ package android.media;
 
 import android.content.AttributionSourceState;
 
-import android.media.AudioAttributesEx;
-import android.media.AudioAttributesInternal;
 import android.media.AudioDirectMode;
 import android.media.AudioMix;
+import android.media.AudioMixUpdate;
 import android.media.AudioMixerAttributesInternal;
 import android.media.AudioOffloadMode;
 import android.media.AudioPatchFw;
@@ -43,6 +42,7 @@ import android.media.IAudioPolicyServiceClient;
 import android.media.ICaptureStateListener;
 import android.media.INativeSpatializerCallback;
 import android.media.SoundTriggerSession;
+import android.media.audio.common.AudioAttributes;
 import android.media.audio.common.AudioConfig;
 import android.media.audio.common.AudioConfigBase;
 import android.media.audio.common.AudioDevice;
@@ -85,7 +85,7 @@ interface IAudioPolicyService {
 
     int /* audio_io_handle_t */ getOutput(AudioStreamType stream);
 
-    GetOutputForAttrResponse getOutputForAttr(in AudioAttributesInternal attr,
+    GetOutputForAttrResponse getOutputForAttr(in AudioAttributes attr,
                                               int /* audio_session_t */ session,
                                               in AttributionSourceState attributionSource,
                                               in AudioConfig config,
@@ -98,7 +98,7 @@ interface IAudioPolicyService {
 
     void releaseOutput(int /* audio_port_handle_t */ portId);
 
-    GetInputForAttrResponse getInputForAttr(in AudioAttributesInternal attr,
+    GetInputForAttrResponse getInputForAttr(in AudioAttributes attr,
                                             int /* audio_io_handle_t */ input,
                                             int /* audio_unique_id_t */ riid,
                                             int /* audio_session_t */ session,
@@ -125,20 +125,20 @@ interface IAudioPolicyService {
     int getStreamVolumeIndex(AudioStreamType stream,
                              in AudioDeviceDescription device);
 
-    void setVolumeIndexForAttributes(in AudioAttributesInternal attr,
+    void setVolumeIndexForAttributes(in AudioAttributes attr,
                                      in AudioDeviceDescription device,
                                      int index);
 
-    int getVolumeIndexForAttributes(in AudioAttributesInternal attr,
+    int getVolumeIndexForAttributes(in AudioAttributes attr,
                                     in AudioDeviceDescription device);
 
-    int getMaxVolumeIndexForAttributes(in AudioAttributesInternal attr);
+    int getMaxVolumeIndexForAttributes(in AudioAttributes attr);
 
-    int getMinVolumeIndexForAttributes(in AudioAttributesInternal attr);
+    int getMinVolumeIndexForAttributes(in AudioAttributes attr);
 
     int /* product_strategy_t */ getStrategyForStream(AudioStreamType stream);
 
-    AudioDevice[] getDevicesForAttributes(in AudioAttributesInternal attr, boolean forVolume);
+    AudioDevice[] getDevicesForAttributes(in AudioAttributes attr, boolean forVolume);
 
     int /* audio_io_handle_t */ getOutputForEffect(in EffectDescriptor desc);
 
@@ -200,7 +200,7 @@ interface IAudioPolicyService {
      * Check if direct playback is possible for given format, sample rate, channel mask and flags.
      */
     boolean isDirectOutputSupported(in AudioConfigBase config,
-                                    in AudioAttributesInternal attributes);
+                                    in AudioAttributes attributes);
 
     /**
      * List currently attached audio ports and their attributes. Returns the generation.
@@ -263,6 +263,10 @@ interface IAudioPolicyService {
 
     void registerPolicyMixes(in AudioMix[] mixes, boolean registration);
 
+    List<AudioMix> getRegisteredPolicyMixes();
+
+    void updatePolicyMixes(in AudioMixUpdate[] updates);
+
     void setUidDeviceAffinities(int /* uid_t */ uid, in AudioDevice[] devices);
 
     void removeUidDeviceAffinities(int /* uid_t */ uid);
@@ -272,7 +276,7 @@ interface IAudioPolicyService {
     void removeUserIdDeviceAffinities(int userId);
 
     int /* audio_port_handle_t */ startAudioSource(in AudioPortConfigFw source,
-                                                   in AudioAttributesInternal attributes);
+                                                   in AudioAttributes attributes);
 
     void stopAudioSource(int /* audio_port_handle_t */ portId);
 
@@ -333,10 +337,10 @@ interface IAudioPolicyService {
 
     AudioProductStrategy[] listAudioProductStrategies();
     int /* product_strategy_t */ getProductStrategyFromAudioAttributes(
-            in AudioAttributesInternal aa, boolean fallbackOnDefault);
+            in AudioAttributes aa, boolean fallbackOnDefault);
 
     AudioVolumeGroup[] listAudioVolumeGroups();
-    int /* volume_group_t */ getVolumeGroupFromAudioAttributes(in AudioAttributesInternal aa,
+    int /* volume_group_t */ getVolumeGroupFromAudioAttributes(in AudioAttributes aa,
                                                                boolean fallbackOnDefault);
 
     void setRttEnabled(boolean enabled);
@@ -397,21 +401,21 @@ interface IAudioPolicyService {
      * supported criteria. For instance, supplying no argument will tell if spatialization is
      * supported or not in general.
      */
-    boolean canBeSpatialized(in @nullable AudioAttributesInternal attr,
+    boolean canBeSpatialized(in @nullable AudioAttributes attr,
                              in @nullable AudioConfig config,
                              in AudioDevice[] devices);
 
     /**
      * Query how the direct playback is currently supported on the device.
      */
-    AudioDirectMode getDirectPlaybackSupport(in AudioAttributesInternal attr,
+    AudioDirectMode getDirectPlaybackSupport(in AudioAttributes attr,
                                               in AudioConfig config);
 
     /**
      * Query audio profiles available for direct playback on the current output device(s)
      * for the specified audio attributes.
      */
-    AudioProfile[] getDirectProfilesForAttributes(in AudioAttributesInternal attr);
+    AudioProfile[] getDirectProfilesForAttributes(in AudioAttributes attr);
 
     /**
      * Return a list of AudioMixerAttributes that can be used to set preferred mixer attributes
@@ -435,7 +439,7 @@ interface IAudioPolicyService {
      *            playback is routed to the given device.
      * @param mixerAttr the preferred mixer attributes.
      */
-    void setPreferredMixerAttributes(in AudioAttributesInternal attr,
+    void setPreferredMixerAttributes(in AudioAttributes attr,
                                      int /* audio_port_handle_t */ portId,
                                      int /* uid_t */ uid,
                                      in AudioMixerAttributesInternal mixerAttr);
@@ -449,7 +453,7 @@ interface IAudioPolicyService {
      * @param portId the port id of the device to be routed.
      */
     @nullable AudioMixerAttributesInternal getPreferredMixerAttributes(
-            in AudioAttributesInternal attr,
+            in AudioAttributes attr,
             int /* audio_port_handle_t */ portId);
 
     /**
@@ -462,7 +466,7 @@ interface IAudioPolicyService {
      *            preferred mixer attributes. The preferred mixer attributes will only be cleared
      *            if the uid is the same as the owner of current preferred mixer attributes.
      */
-    void clearPreferredMixerAttributes(in AudioAttributesInternal attr,
+    void clearPreferredMixerAttributes(in AudioAttributes attr,
                                        int /* audio_port_handle_t */ portId,
                                        int /* uid_t */ uid);
 

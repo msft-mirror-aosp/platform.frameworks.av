@@ -44,13 +44,14 @@ using utils::EffectParamWriter;
 
 status_t AidlConversionSpatializer::setParameter(EffectParamReader& param) {
     Parameter aidlParam = VALUE_OR_RETURN_STATUS(
-            ::aidl::android::legacy2aidl_EffectParameterReader_ParameterExtension(param));
+            ::aidl::android::legacy2aidl_EffectParameterReader_Parameter(param));
     return statusTFromBinderStatus(mEffect->setParameter(aidlParam));
 }
 
 status_t AidlConversionSpatializer::getParameter(EffectParamWriter& param) {
     DefaultExtension defaultExt;
     // read parameters into DefaultExtension vector<uint8_t>
+    defaultExt.bytes.resize(param.getParameterSize());
     if (OK != param.readFromParameter(defaultExt.bytes.data(), param.getParameterSize())) {
         ALOGE("%s invalid param %s", __func__, param.toString().c_str());
         param.setStatus(BAD_VALUE);
@@ -64,8 +65,7 @@ status_t AidlConversionSpatializer::getParameter(EffectParamWriter& param) {
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mEffect->getParameter(id, &aidlParam)));
     // copy the AIDL extension data back to effect_param_t
     return VALUE_OR_RETURN_STATUS(
-            ::aidl::android::aidl2legacy_ParameterExtension_EffectParameterWriter(aidlParam,
-                                                                                  param));
+            ::aidl::android::aidl2legacy_Parameter_EffectParameterWriter(aidlParam, param));
 }
 
 } // namespace effect

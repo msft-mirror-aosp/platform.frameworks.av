@@ -14,20 +14,21 @@
  * limitations under the License.
  */
 
-#include "ReverbTypes.h"
-#define LOG_TAG "EffectReverb"
-#include <Utils.h>
 #include <algorithm>
+#include <limits.h>
 #include <unordered_set>
 
-#include <android-base/logging.h>
-#include <fmq/AidlMessageQueue.h>
+#define LOG_TAG "EffectReverb"
+
 #include <audio_effects/effect_bassboost.h>
 #include <audio_effects/effect_equalizer.h>
 #include <audio_effects/effect_virtualizer.h>
+#include <android-base/logging.h>
+#include <fmq/AidlMessageQueue.h>
+#include <Utils.h>
 
 #include "EffectReverb.h"
-#include <limits.h>
+#include "ReverbTypes.h"
 
 using aidl::android::hardware::audio::effect::Descriptor;
 using aidl::android::hardware::audio::effect::EffectReverb;
@@ -357,10 +358,6 @@ std::shared_ptr<EffectContext> EffectReverb::createContext(const Parameter::Comm
     return mContext;
 }
 
-std::shared_ptr<EffectContext> EffectReverb::getContext() {
-    return mContext;
-}
-
 RetCode EffectReverb::releaseContext() {
     if (mContext) {
         mContext.reset();
@@ -393,7 +390,7 @@ ndk::ScopedAStatus EffectReverb::commandImpl(CommandId command) {
 IEffect::Status EffectReverb::effectProcessImpl(float* in, float* out, int sampleToProcess) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, sampleToProcess);
+    return mContext->process(in, out, sampleToProcess);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

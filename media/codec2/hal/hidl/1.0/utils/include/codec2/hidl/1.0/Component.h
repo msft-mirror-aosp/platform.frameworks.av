@@ -30,6 +30,8 @@
 #include <hidl/Status.h>
 #include <hwbinder/IBinder.h>
 
+#include <codec2/common/MultiAccessUnitHelper.h>
+
 #include <C2Component.h>
 #include <C2Buffer.h>
 #include <C2.h>
@@ -54,6 +56,8 @@ using ::android::hardware::Void;
 using ::android::hardware::IBinder;
 using ::android::sp;
 using ::android::wp;
+using ::android::MultiAccessUnitInterface;
+using ::android::MultiAccessUnitHelper;
 
 struct ComponentStore;
 
@@ -66,6 +70,8 @@ struct Component : public IComponent,
             const sp<::android::hardware::media::bufferpool::V2_0::
                 IClientManager>& clientPoolManager);
     c2_status_t status() const;
+    // Receives a death notification of the client.
+    void onDeathReceived();
 
     typedef ::android::hardware::graphics::bufferqueue::V1_0::
             IGraphicBufferProducer HGraphicBufferProducer1;
@@ -111,6 +117,8 @@ protected:
     std::shared_ptr<C2Component> mComponent;
     sp<ComponentInterface> mInterface;
     sp<IComponentListener> mListener;
+    std::shared_ptr<MultiAccessUnitInterface> mMultiAccessUnitIntf;
+    std::shared_ptr<MultiAccessUnitHelper> mMultiAccessUnitHelper;
     sp<ComponentStore> mStore;
     ::android::hardware::media::c2::V1_0::utils::DefaultBufferPoolSender
             mBufferPoolSender;
@@ -133,8 +141,11 @@ protected:
 
     struct Listener;
 
+    friend struct MultiAccessUnitListener;
+
     using HwDeathRecipient = ::android::hardware::hidl_death_recipient;
     sp<HwDeathRecipient> mDeathRecipient;
+    bool mClientDied{false};
 };
 
 }  // namespace utils
