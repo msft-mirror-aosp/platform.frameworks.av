@@ -25,6 +25,7 @@
 #include <C2Component.h>
 #include <C2PlatformSupport.h>
 
+#include <android/hidl/manager/1.2/IServiceManager.h>
 #include <codec2/hidl/1.0/ComponentStore.h>
 #include <codec2/hidl/1.1/ComponentStore.h>
 #include <codec2/hidl/1.2/ComponentStore.h>
@@ -818,31 +819,44 @@ extern "C" void RegisterCodecServices() {
     }
 
     bool registered = false;
-    if (platformVersion >= __ANDROID_API_V__) {
-        if (!aidlStore) {
-            aidlStore = ::ndk::SharedRefBase::make<c2_aidl::utils::ComponentStore>(
-                    std::make_shared<H2C2ComponentStore>(nullptr));
-        }
-        const std::string serviceName =
-            std::string(c2_aidl::IComponentStore::descriptor) + "/software";
-        binder_exception_t ex = AServiceManager_addService(
-                aidlStore->asBinder().get(), serviceName.c_str());
-        if (ex == EX_NONE) {
-            registered = true;
-        } else {
-            LOG(ERROR) << "Cannot register software Codec2 AIDL service.";
+    const std::string aidlServiceName =
+        std::string(c2_aidl::IComponentStore::descriptor) + "/software";
+    if (__builtin_available(android __ANDROID_API_S__, *)) {
+        if (AServiceManager_isDeclared(aidlServiceName.c_str())) {
+            if (!aidlStore) {
+                aidlStore = ::ndk::SharedRefBase::make<c2_aidl::utils::ComponentStore>(
+                        std::make_shared<H2C2ComponentStore>(nullptr));
+            }
+            binder_exception_t ex = AServiceManager_addService(
+                    aidlStore->asBinder().get(), aidlServiceName.c_str());
+            if (ex == EX_NONE) {
+                registered = true;
+            } else {
+                LOG(WARNING) << "Cannot register software Codec2 AIDL service. Exception: " << ex;
+            }
         }
     }
 
-    if (!hidlStore) {
-        hidlStore = ::android::sp<V1_2::utils::ComponentStore>::make(
-                std::make_shared<H2C2ComponentStore>(nullptr));
-        hidlVer = "1.2";
-    }
-    if (hidlStore->registerAsService("software") == android::OK) {
-        registered = true;
+    // If the software component store isn't declared in the manifest, we don't
+    // need to create the service and register it.
+    using ::android::hidl::manager::V1_2::IServiceManager;
+    IServiceManager::Transport transport =
+            android::hardware::defaultServiceManager1_2()->getTransport(
+                    V1_2::utils::ComponentStore::descriptor, "software");
+    if (transport == IServiceManager::Transport::HWBINDER) {
+        if (!hidlStore) {
+            hidlStore = ::android::sp<V1_2::utils::ComponentStore>::make(
+                    std::make_shared<H2C2ComponentStore>(nullptr));
+            hidlVer = "1.2";
+        }
+        if (hidlStore->registerAsService("software") == android::OK) {
+            registered = true;
+        } else {
+            LOG(ERROR) << "Cannot register software Codec2 v" << hidlVer << " service.";
+        }
     } else {
-        LOG(ERROR) << "Cannot register software Codec2 v" << hidlVer << " service.";
+        LOG(INFO) << "The HIDL software Codec2 service is deprecated"
+                     " so it is not being registered with hwservicemanager.";
     }
 
     if (registered) {
