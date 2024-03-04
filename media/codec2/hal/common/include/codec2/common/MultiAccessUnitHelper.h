@@ -41,14 +41,16 @@ struct MultiAccessUnitInterface : public C2InterfaceHelper {
     bool isParamSupported(C2Param::Index index);
     C2LargeFrame::output getLargeFrameParam() const;
     C2Component::kind_t kind() const;
+    bool isValidField(const C2ParamField &field) const;
 
 protected:
-    void getDecoderSampleRateAndChannelCount(
-            uint32_t &sampleRate_, uint32_t &channelCount_) const;
+    bool getDecoderSampleRateAndChannelCount(
+            uint32_t * const sampleRate_, uint32_t * const channelCount_) const;
     const std::shared_ptr<C2ComponentInterface> mC2ComponentIntf;
     std::shared_ptr<C2LargeFrame::output> mLargeFrameParams;
     C2ComponentKindSetting mKind;
     std::set<C2Param::Index> mSupportedParamIndexSet;
+    std::vector<C2ParamField> mParamFields;
 
     friend struct MultiAccessUnitHelper;
 };
