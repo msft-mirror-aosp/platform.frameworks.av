@@ -92,30 +92,62 @@ CameraMetadata createCaptureResultMetadata(
     const std::chrono::nanoseconds timestamp,
     const RequestSettings& requestSettings,
     const Resolution reportedSensorSize) {
-  std::unique_ptr<CameraMetadata> metadata =
+  // All of the keys used in the response needs to be referenced in
+  // availableResultKeys in CameraCharacteristics (see initCameraCharacteristics
+  // in VirtualCameraDevice.cc).
+  MetadataBuilder builder =
       MetadataBuilder()
           .setAberrationCorrectionMode(
               ANDROID_COLOR_CORRECTION_ABERRATION_MODE_OFF)
+          .setControlAeAvailableAntibandingModes(
+              {ANDROID_CONTROL_AE_ANTIBANDING_MODE_OFF})
+          .setControlAeAntibandingMode(ANDROID_CONTROL_AE_ANTIBANDING_MODE_OFF)
+          .setControlAeExposureCompensation(0)
+          .setControlAeLockAvailable(false)
+          .setControlAeLock(ANDROID_CONTROL_AE_LOCK_OFF)
           .setControlAeMode(ANDROID_CONTROL_AE_MODE_ON)
           .setControlAePrecaptureTrigger(
               ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
+          .setControlAeState(ANDROID_CONTROL_AE_STATE_INACTIVE)
           .setControlAfMode(ANDROID_CONTROL_AF_MODE_OFF)
+          .setControlAfTrigger(ANDROID_CONTROL_AF_TRIGGER_IDLE)
+          .setControlAfState(ANDROID_CONTROL_AF_STATE_INACTIVE)
           .setControlAwbMode(ANDROID_CONTROL_AWB_MODE_AUTO)
+          .setControlAwbLock(ANDROID_CONTROL_AWB_LOCK_OFF)
+          .setControlAwbState(ANDROID_CONTROL_AWB_STATE_INACTIVE)
+          .setControlCaptureIntent(requestSettings.captureIntent)
           .setControlEffectMode(ANDROID_CONTROL_EFFECT_MODE_OFF)
           .setControlMode(ANDROID_CONTROL_MODE_AUTO)
+          .setControlSceneMode(ANDROID_CONTROL_SCENE_MODE_DISABLED)
+          .setControlVideoStabilizationMode(
+              ANDROID_CONTROL_VIDEO_STABILIZATION_MODE_OFF)
           .setCropRegion(0, 0, reportedSensorSize.width,
                          reportedSensorSize.height)
           .setFaceDetectMode(ANDROID_STATISTICS_FACE_DETECT_MODE_OFF)
           .setFlashState(ANDROID_FLASH_STATE_UNAVAILABLE)
+          .setFlashMode(ANDROID_FLASH_MODE_OFF)
           .setFocalLength(VirtualCameraDevice::kFocalLength)
           .setJpegQuality(requestSettings.jpegQuality)
           .setJpegThumbnailSize(requestSettings.thumbnailResolution.width,
                                 requestSettings.thumbnailResolution.height)
           .setJpegThumbnailQuality(requestSettings.thumbnailJpegQuality)
+          .setLensOpticalStabilizationMode(
+              ANDROID_LENS_OPTICAL_STABILIZATION_MODE_OFF)
           .setNoiseReductionMode(ANDROID_NOISE_REDUCTION_MODE_OFF)
           .setPipelineDepth(kPipelineDepth)
           .setSensorTimestamp(timestamp)
-          .build();
+          .setStatisticsHotPixelMapMode(
+              ANDROID_STATISTICS_HOT_PIXEL_MAP_MODE_OFF)
+          .setStatisticsLensShadingMapMode(
+              ANDROID_STATISTICS_LENS_SHADING_MAP_MODE_OFF)
+          .setStatisticsSceneFlicker(ANDROID_STATISTICS_SCENE_FLICKER_NONE);
+
+  if (requestSettings.fpsRange.has_value()) {
+    builder.setControlAeTargetFpsRange(requestSettings.fpsRange.value());
+  }
+
+  std::unique_ptr<CameraMetadata> metadata = builder.build();
+
   if (metadata == nullptr) {
     ALOGE("%s: Failed to build capture result metadata", __func__);
     return CameraMetadata();
@@ -581,36 +613,35 @@ ndk::ScopedAStatus VirtualCameraRenderThread::renderIntoBlobStreamBuffer(
   std::shared_ptr<AHardwareBuffer> inHwBuffer = framebuffer->getHardwareBuffer();
   GraphicBuffer* gBuffer = GraphicBuffer::fromAHardwareBuffer(inHwBuffer.get());
 
-  std::optional<size_t> compressedSize;
-  if (gBuffer != nullptr) {
-    if (gBuffer->getPixelFormat() != HAL_PIXEL_FORMAT_YCbCr_420_888) {
-      // This should never happen since we're allocating the temporary buffer
-      // with YUV420 layout above.
-      ALOGE("%s: Cannot compress non-YUV buffer (pixelFormat %d)", __func__,
-            gBuffer->getPixelFormat());
-      return cameraStatus(Status::INTERNAL_ERROR);
-    }
-
-    YCbCrLockGuard yCbCrLock(inHwBuffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN);
-    if (yCbCrLock.getStatus() != OK) {
-      return cameraStatus(Status::INTERNAL_ERROR);
-    }
-
-    std::vector<uint8_t> app1ExifData =
-        createExif(Resolution(stream->width, stream->height),
-                   createThumbnail(requestSettings.thumbnailResolution,
-                                   requestSettings.thumbnailJpegQuality));
-    compressedSize = compressJpeg(
-        gBuffer->getWidth(), gBuffer->getHeight(), requestSettings.jpegQuality,
-        *yCbCrLock, app1ExifData, stream->bufferSize - sizeof(CameraBlob),
-        (*planesLock).planes[0].data);
-  } else {
-    std::vector<uint8_t> app1ExifData =
-        createExif(Resolution(stream->width, stream->height));
-    compressedSize = compressBlackJpeg(
-        stream->width, stream->height, requestSettings.jpegQuality, app1ExifData,
-        stream->bufferSize - sizeof(CameraBlob), (*planesLock).planes[0].data);
+  if (gBuffer == nullptr) {
+    ALOGE(
+        "%s: Encountered invalid temporary buffer while rendering JPEG "
+        "into BLOB stream",
+        __func__);
+    return cameraStatus(Status::INTERNAL_ERROR);
   }
+
+  if (gBuffer->getPixelFormat() != HAL_PIXEL_FORMAT_YCbCr_420_888) {
+    // This should never happen since we're allocating the temporary buffer
+    // with YUV420 layout above.
+    ALOGE("%s: Cannot compress non-YUV buffer (pixelFormat %d)", __func__,
+          gBuffer->getPixelFormat());
+    return cameraStatus(Status::INTERNAL_ERROR);
+  }
+
+  YCbCrLockGuard yCbCrLock(inHwBuffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN);
+  if (yCbCrLock.getStatus() != OK) {
+    return cameraStatus(Status::INTERNAL_ERROR);
+  }
+
+  std::vector<uint8_t> app1ExifData =
+      createExif(Resolution(stream->width, stream->height),
+                 createThumbnail(requestSettings.thumbnailResolution,
+                                 requestSettings.thumbnailJpegQuality));
+  std::optional<size_t> compressedSize = compressJpeg(
+      gBuffer->getWidth(), gBuffer->getHeight(), requestSettings.jpegQuality,
+      *yCbCrLock, app1ExifData, stream->bufferSize - sizeof(CameraBlob),
+      (*planesLock).planes[0].data);
 
   if (!compressedSize.has_value()) {
     ALOGE("%s: Failed to compress JPEG image", __func__);

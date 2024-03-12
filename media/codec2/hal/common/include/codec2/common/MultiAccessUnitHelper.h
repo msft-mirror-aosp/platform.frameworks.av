@@ -41,14 +41,16 @@ struct MultiAccessUnitInterface : public C2InterfaceHelper {
     bool isParamSupported(C2Param::Index index);
     C2LargeFrame::output getLargeFrameParam() const;
     C2Component::kind_t kind() const;
+    bool isValidField(const C2ParamField &field) const;
 
 protected:
-    void getDecoderSampleRateAndChannelCount(
-            uint32_t &sampleRate_, uint32_t &channelCount_) const;
+    bool getDecoderSampleRateAndChannelCount(
+            uint32_t * const sampleRate_, uint32_t * const channelCount_) const;
     const std::shared_ptr<C2ComponentInterface> mC2ComponentIntf;
     std::shared_ptr<C2LargeFrame::output> mLargeFrameParams;
     C2ComponentKindSetting mKind;
     std::set<C2Param::Index> mSupportedParamIndexSet;
+    std::vector<C2ParamField> mParamFields;
 
     friend struct MultiAccessUnitHelper;
 };
@@ -56,7 +58,8 @@ protected:
 struct MultiAccessUnitHelper {
 public:
     MultiAccessUnitHelper(
-            const std::shared_ptr<MultiAccessUnitInterface>& intf);
+            const std::shared_ptr<MultiAccessUnitInterface>& intf,
+            std::shared_ptr<C2BlockPool> &linearPool);
 
     virtual ~MultiAccessUnitHelper();
 
@@ -151,6 +154,11 @@ protected:
          */
         std::unique_ptr<C2Work> mLargeWork;
 
+        /*
+         * For holding a reference to the incoming buffer
+         */
+        std::vector<std::shared_ptr<C2Buffer>> mInputC2Ref;
+
         MultiAccessUnitInfo(C2WorkOrdinalStruct ordinal):inOrdinal(ordinal) {
 
         }
@@ -195,8 +203,6 @@ protected:
     C2BlockPool::local_id_t mBlockPoolId;
     // C2Blockpool for output buffer allocation
     std::shared_ptr<C2BlockPool> mLinearPool;
-    // Allocator for output buffer allocation
-    std::shared_ptr<C2Allocator> mLinearAllocator;
     // FrameIndex for the current outgoing work
     std::atomic_uint64_t mFrameIndex;
     // Mutex to protect mFrameHolder
