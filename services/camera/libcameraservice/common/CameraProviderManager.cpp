@@ -439,9 +439,8 @@ status_t  CameraProviderManager::createDefaultRequest(const std::string& cameraI
         return NAME_NOT_FOUND;
     }
 
-    camera_metadata_t *rawRequest;
     status_t res = deviceInfo->createDefaultRequest(templateId,
-            &rawRequest);
+            metadata);
 
     if (res == BAD_VALUE) {
         ALOGI("%s: template %d is not supported on this camera device",
@@ -452,9 +451,6 @@ status_t  CameraProviderManager::createDefaultRequest(const std::string& cameraI
                 templateId, strerror(-res), res);
         return res;
     }
-
-    set_camera_metadata_vendor_id(rawRequest, deviceInfo->mProviderTagid);
-    metadata->acquire(rawRequest);
 
     return OK;
 }
@@ -1862,7 +1858,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQuery
 
     auto& c = mCameraCharacteristics;
     status_t res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
-
+    mSessionConfigQueryVersion = versionCode;
     return res;
 }
 
