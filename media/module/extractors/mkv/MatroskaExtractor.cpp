@@ -2285,8 +2285,7 @@ void MatroskaExtractor::addTracks() {
             // Attempt to recover from VP9 track without codec private data
             err = synthesizeVP9(trackInfo, n);
             if (err != OK) {
-                mTracks.pop();
-                continue;
+                ALOGW("ignoring error %d in synthesizeVP9", err);
             }
         }
         // the TrackInfo owns the metadata now
