@@ -228,7 +228,7 @@ public:
     bool isOffloaded_l() const final
             REQUIRES(audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex;
     void addEffectToHal_l() final REQUIRES(audio_utils::EffectChain_Mutex);
-    void release_l() final REQUIRES(audio_utils::EffectChain_Mutex);
+    void release_l(const std::string& from = "") final REQUIRES(audio_utils::EffectChain_Mutex);
 
     sp<IAfEffectModule> asEffectModule() final { return this; }
 
@@ -307,7 +307,13 @@ private:
     // this tid is allowed to call setVolume() without acquiring the mutex.
     pid_t mSetVolumeReentrantTid = INVALID_PID;
 
+    // Cache the volume that has been set successfully.
     std::optional<std::vector<uint32_t>> mVolume;
+    // Cache the volume that returned from the effect when setting volume successfully. The value
+    // here is used to indicate the volume to apply before this effect.
+    std::optional<std::vector<uint32_t>> mReturnedVolume;
+    // TODO: b/315995877, remove this debugging string after root cause
+    std::string mEffectInterfaceDebug;
 };
 
 // The EffectHandle class implements the IEffect interface. It provides resources

@@ -29,6 +29,7 @@
 #include <media/AudioParameter.h>
 #include <mediautils/TimeCheck.h>
 #include <system/audio.h>
+#include <Utils.h>
 #include <utils/Log.h>
 
 #include "DeviceHalAidl.h"
@@ -36,13 +37,14 @@
 #include "StreamHalAidl.h"
 
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
+using ::aidl::android::hardware::audio::common::kDumpFromAudioServerArgument;
 using ::aidl::android::hardware::audio::common::PlaybackTrackMetadata;
 using ::aidl::android::hardware::audio::common::RecordTrackMetadata;
 using ::aidl::android::hardware::audio::core::IStreamCommon;
 using ::aidl::android::hardware::audio::core::IStreamIn;
 using ::aidl::android::hardware::audio::core::IStreamOut;
-using ::aidl::android::hardware::audio::core::StreamDescriptor;
 using ::aidl::android::hardware::audio::core::MmapBufferDescriptor;
+using ::aidl::android::hardware::audio::core::StreamDescriptor;
 using ::aidl::android::media::audio::common::MicrophoneDynamicInfo;
 using ::aidl::android::media::audio::IHalAdapterVendorExtension;
 
@@ -239,7 +241,9 @@ status_t StreamHalAidl::dump(int fd, const Vector<String16>& args) {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    status_t status = mStream->dump(fd, Args(args).args(), args.size());
+    Vector<String16> newArgs = args;
+    newArgs.push(String16(kDumpFromAudioServerArgument));
+    status_t status = mStream->dump(fd, Args(newArgs).args(), newArgs.size());
     mStreamPowerLog.dump(fd);
     return status;
 }
@@ -366,24 +370,26 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
     if (mIsInput) {
         return sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), reply);
     } else {
-        if (mContext.isAsynchronous()) {
+        if (const auto state = getState(); state == StreamDescriptor::State::IDLE) {
             // Handle pause-flush-resume sequence. 'flush' from PAUSED goes to
             // IDLE. We move here from IDLE to ACTIVE (same as 'start' from PAUSED).
-            const auto state = getState();
-            if (state == StreamDescriptor::State::IDLE) {
-                StreamDescriptor::Reply localReply{};
-                StreamDescriptor::Reply* innerReply = reply ?: &localReply;
-                RETURN_STATUS_IF_ERROR(
-                        sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), innerReply));
-                if (innerReply->state != StreamDescriptor::State::ACTIVE) {
-                    ALOGE("%s: unexpected stream state: %s (expected ACTIVE)",
-                            __func__, toString(innerReply->state).c_str());
-                    return INVALID_OPERATION;
-                }
-                return OK;
+            StreamDescriptor::Reply localReply{};
+            StreamDescriptor::Reply* innerReply = reply ?: &localReply;
+            RETURN_STATUS_IF_ERROR(
+                    sendCommand(makeHalCommand<HalCommand::Tag::burst>(0), innerReply));
+            if (innerReply->state != StreamDescriptor::State::ACTIVE) {
+                ALOGE("%s: unexpected stream state: %s (expected ACTIVE)",
+                        __func__, toString(innerReply->state).c_str());
+                return INVALID_OPERATION;
             }
+            return OK;
+        } else if (state == StreamDescriptor::State::PAUSED) {
+            return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
+        } else {
+            ALOGE("%s: unexpected stream state: %s (expected IDLE or PAUSED)",
+                        __func__, toString(state).c_str());
+            return INVALID_OPERATION;
         }
-        return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
     }
 }
 
@@ -415,8 +421,10 @@ status_t StreamHalAidl::exit() {
 
 void StreamHalAidl::onAsyncTransferReady() {
     if (auto state = getState(); state == StreamDescriptor::State::TRANSFERRING) {
-        // Retrieve the current state together with position counters.
-        updateCountersIfNeeded();
+        // Retrieve the current state together with position counters unconditionally
+        // to ensure that the state on our side gets updated.
+        sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(),
+                nullptr, true /*safeFromNonWorkerThread */);
     } else {
         ALOGW("%s: unexpected onTransferReady in the state %s", __func__, toString(state).c_str());
     }
@@ -424,8 +432,10 @@ void StreamHalAidl::onAsyncTransferReady() {
 
 void StreamHalAidl::onAsyncDrainReady() {
     if (auto state = getState(); state == StreamDescriptor::State::DRAINING) {
-        // Retrieve the current state together with position counters.
-        updateCountersIfNeeded();
+        // Retrieve the current state together with position counters unconditionally
+        // to ensure that the state on our side gets updated.
+        sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(),
+                nullptr, true /*safeFromNonWorkerThread */);
     } else {
         ALOGW("%s: unexpected onDrainReady in the state %s", __func__, toString(state).c_str());
     }
@@ -502,27 +512,31 @@ status_t StreamHalAidl::sendCommand(
                 "%s %s: must be invoked from the worker thread (%d)",
                 __func__, command.toString().c_str(), workerTid);
     }
-    if (!mContext.getCommandMQ()->writeBlocking(&command, 1)) {
-        ALOGE("%s: failed to write command %s to MQ", __func__, command.toString().c_str());
-        return NOT_ENOUGH_DATA;
-    }
     StreamDescriptor::Reply localReply{};
-    if (reply == nullptr) {
-        reply = &localReply;
-    }
-    if (!mContext.getReplyMQ()->readBlocking(reply, 1)) {
-        ALOGE("%s: failed to read from reply MQ, command %s", __func__, command.toString().c_str());
-        return NOT_ENOUGH_DATA;
-    }
     {
-        std::lock_guard l(mLock);
-        // Not every command replies with 'latencyMs' field filled out, substitute the last
-        // returned value in that case.
-        if (reply->latencyMs <= 0) {
-            reply->latencyMs = mLastReply.latencyMs;
+        std::lock_guard l(mCommandReplyLock);
+        if (!mContext.getCommandMQ()->writeBlocking(&command, 1)) {
+            ALOGE("%s: failed to write command %s to MQ", __func__, command.toString().c_str());
+            return NOT_ENOUGH_DATA;
         }
-        mLastReply = *reply;
-        mLastReplyExpirationNs = uptimeNanos() + mLastReplyLifeTimeNs;
+        if (reply == nullptr) {
+            reply = &localReply;
+        }
+        if (!mContext.getReplyMQ()->readBlocking(reply, 1)) {
+            ALOGE("%s: failed to read from reply MQ, command %s",
+                    __func__, command.toString().c_str());
+            return NOT_ENOUGH_DATA;
+        }
+        {
+            std::lock_guard l(mLock);
+            // Not every command replies with 'latencyMs' field filled out, substitute the last
+            // returned value in that case.
+            if (reply->latencyMs <= 0) {
+                reply->latencyMs = mLastReply.latencyMs;
+            }
+            mLastReply = *reply;
+            mLastReplyExpirationNs = uptimeNanos() + mLastReplyLifeTimeNs;
+        }
     }
     switch (reply->status) {
         case STATUS_OK: return OK;

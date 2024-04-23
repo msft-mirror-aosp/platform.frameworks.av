@@ -129,6 +129,11 @@ class MetadataBuilder {
       const std::vector<camera_metadata_enum_android_sensor_test_pattern_mode>&
           testPatternModes);
 
+  // See ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES in CameraCharacteristics.java
+  MetadataBuilder& setAvailableStreamUseCases(
+      const std::vector<
+          camera_metadata_enum_android_scaler_available_stream_use_cases>& availableUseCases);
+
   // See ANDROID_STATISTICS_FACE_DETECT_MODE in CaptureRequest.java.
   MetadataBuilder& setFaceDetectMode(
       camera_metadata_enum_android_statistics_face_detect_mode_t faceDetectMode);
@@ -474,6 +479,14 @@ std::optional<GpsCoordinates> getGpsCoordinates(
 
 std::optional<camera_metadata_enum_android_lens_facing> getLensFacing(
     const aidl::android::hardware::camera::device::CameraMetadata& metadata);
+
+std::optional<camera_metadata_enum_android_control_ae_precapture_trigger>
+getPrecaptureTrigger(
+    const aidl::android::hardware::camera::device::CameraMetadata& cameraMetadata);
+
+// Returns the virtual device id. This is not the camera id.
+std::optional<int32_t> getDeviceId(
+    const aidl::android::hardware::camera::device::CameraMetadata& cameraMetadata);
 
 }  // namespace virtualcamera
 }  // namespace companion

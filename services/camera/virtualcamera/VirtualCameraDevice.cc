@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "VirtualCameraService.h"
 #include "VirtualCameraSession.h"
 #include "aidl/android/companion/virtualcamera/SupportedStreamConfiguration.h"
 #include "aidl/android/companion/virtualcamera/VirtualCameraConfiguration.h"
@@ -244,6 +245,13 @@ std::optional<CameraMetadata> initCameraCharacteristics(
               {ANDROID_COLOR_CORRECTION_ABERRATION_MODE_OFF})
           .setAvailableNoiseReductionModes({ANDROID_NOISE_REDUCTION_MODE_OFF})
           .setAvailableFaceDetectModes({ANDROID_STATISTICS_FACE_DETECT_MODE_OFF})
+          .setAvailableStreamUseCases(
+              {ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_PREVIEW,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_STILL_CAPTURE,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_PREVIEW_VIDEO_STILL,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_CALL})
           .setAvailableTestPatternModes({ANDROID_SENSOR_TEST_PATTERN_MODE_OFF})
           .setAvailableMaxDigitalZoom(1.0)
           .setControlAvailableModes({ANDROID_CONTROL_MODE_AUTO})
@@ -568,12 +576,18 @@ ndk::ScopedAStatus VirtualCameraDevice::getTorchStrengthLevel(
   return cameraStatus(Status::OPERATION_NOT_SUPPORTED);
 }
 
-binder_status_t VirtualCameraDevice::dump(int fd, const char** args,
-                                          uint32_t numArgs) {
-  // TODO(b/301023410) Implement.
-  (void)fd;
-  (void)args;
-  (void)numArgs;
+binder_status_t VirtualCameraDevice::dump(int fd, const char**, uint32_t) {
+  ALOGD("Dumping virtual camera %d", mCameraId);
+  const char* indent = "  ";
+  const char* doubleIndent = "    ";
+  dprintf(fd, "%svirtual_camera %d belongs to virtual device %d\n", indent,
+          mCameraId,
+          getDeviceId(mCameraCharacteristics)
+              .value_or(VirtualCameraService::kDefaultDeviceId));
+  dprintf(fd, "%sSupportedStreamConfiguration:\n", indent);
+  for (auto& config : mSupportedInputConfigurations) {
+    dprintf(fd, "%s%s", doubleIndent, config.toString().c_str());
+  }
   return STATUS_OK;
 }
 
