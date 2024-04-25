@@ -42,6 +42,21 @@ struct ProfileLevel {
     }
 };
 
+struct Feature {
+    std::string mName;
+    int mValue;
+    bool mDefault;
+    bool mInternal;
+    Feature(std::string name, int value, bool def, bool internal) {
+        mName = name;
+        mValue = value;
+        mDefault = def;
+        mInternal = internal;
+    }
+    Feature(std::string name, int value, bool def) :
+        Feature(name, value, def, false /* internal */) {}
+};
+
 /**
  * Immutable class for describing the range of two numeric values.
  *
