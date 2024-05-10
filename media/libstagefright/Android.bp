@@ -137,7 +137,7 @@ cc_library_static {
             cflags: [
                 "-DDISABLE_AUDIO_SYSTEM_OFFLOAD",
             ],
-        }
+        },
     },
 }
 
@@ -238,6 +238,8 @@ cc_library {
         "CallbackMediaSource.cpp",
         "CameraSource.cpp",
         "CameraSourceTimeLapse.cpp",
+        "CodecErrorLog.cpp",
+        "CryptoAsync.cpp",
         "FrameDecoder.cpp",
         "HevcUtils.cpp",
         "InterfaceUtils.cpp",
@@ -270,6 +272,7 @@ cc_library {
         "Utils.cpp",
         "VideoFrameSchedulerBase.cpp",
         "VideoFrameScheduler.cpp",
+        "VideoRenderQualityTracker.cpp",
     ],
 
     shared_libs: [
@@ -311,9 +314,16 @@ cc_library {
         "framework-permission-aidl-cpp",
         "libaudioclient_aidl_conversion",
         "packagemanager_aidl-cpp",
+        "server_configurable_flags",
+        "aconfig_mediacodec_flags_c_lib",
+    ],
+
+    defaults: [
+        "aconfig_lib_cc_static_link.defaults",
     ],
 
     static_libs: [
+        "android.media.codec-aconfig-cc",
         "libstagefright_esds",
         "libstagefright_color_conversion",
         "libyuv_static",
@@ -326,7 +336,7 @@ cc_library {
         "libmedia_ndkformatpriv",
     ],
 
-    header_libs:[
+    header_libs: [
         "libmediadrm_headers",
         "libnativeloader-headers",
         "libstagefright_xmlparser_headers",

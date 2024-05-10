@@ -123,6 +123,8 @@ public:
                 bool doNotReconnect = false,
                 uint32_t suggestedFrameCount = 0) = 0;
 
+        virtual void        setPlayerIId(int32_t playerIId) = 0;
+
         virtual status_t    start() = 0;
 
         /* Input parameter |size| is in byte units stored in |buffer|.
@@ -147,7 +149,7 @@ public:
         virtual bool        needsTrailingPadding() { return true; }
 
         virtual status_t    setParameters(const String8& /* keyValuePairs */) { return NO_ERROR; }
-        virtual String8     getParameters(const String8& /* keys */) { return String8::empty(); }
+        virtual String8     getParameters(const String8& /* keys */) { return String8(); }
 
         virtual media::VolumeShaper::Status applyVolumeShaper(
                                     const sp<media::VolumeShaper::Configuration>& configuration,

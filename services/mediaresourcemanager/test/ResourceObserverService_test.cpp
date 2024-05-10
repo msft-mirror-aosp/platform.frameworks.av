@@ -118,22 +118,22 @@ const EventTracker::Event EventTracker::NoEvent;
 
 static MediaResource createSecureVideoCodecResource(int amount = 1) {
     return MediaResource(MediaResource::Type::kSecureCodec,
-        MediaResource::SubType::kVideoCodec, amount);
+        MediaResource::SubType::kHwVideoCodec, amount);
 }
 
 static MediaResource createNonSecureVideoCodecResource(int amount = 1) {
     return MediaResource(MediaResource::Type::kNonSecureCodec,
-        MediaResource::SubType::kVideoCodec, amount);
+        MediaResource::SubType::kHwVideoCodec, amount);
 }
 
 static MediaResource createSecureAudioCodecResource(int amount = 1) {
     return MediaResource(MediaResource::Type::kSecureCodec,
-        MediaResource::SubType::kAudioCodec, amount);
+        MediaResource::SubType::kHwAudioCodec, amount);
 }
 
 static MediaResource createNonSecureAudioCodecResource(int amount = 1) {
     return MediaResource(MediaResource::Type::kNonSecureCodec,
-        MediaResource::SubType::kAudioCodec, amount);
+        MediaResource::SubType::kHwAudioCodec, amount);
 }
 
 // Operators for GTest macros.
@@ -166,11 +166,14 @@ struct TestObserver : public BnResourceObserver, public EventTracker {
 
 class ResourceObserverServiceTest : public ResourceManagerServiceTestBase {
 public:
-    ResourceObserverServiceTest() : ResourceManagerServiceTestBase(),
-        mObserverService(::ndk::SharedRefBase::make<ResourceObserverService>()),
-        mTestObserver1(::ndk::SharedRefBase::make<TestObserver>("observer1")),
-        mTestObserver2(::ndk::SharedRefBase::make<TestObserver>("observer2")),
-        mTestObserver3(::ndk::SharedRefBase::make<TestObserver>("observer3")) {
+    ResourceObserverServiceTest() : ResourceManagerServiceTestBase() {}
+
+    void SetUp() override {
+        ResourceManagerServiceTestBase::SetUp();
+        mObserverService = ::ndk::SharedRefBase::make<ResourceObserverService>();
+        mTestObserver1 = ::ndk::SharedRefBase::make<TestObserver>("observer1");
+        mTestObserver2 = ::ndk::SharedRefBase::make<TestObserver>("observer2");
+        mTestObserver3 = ::ndk::SharedRefBase::make<TestObserver>("observer3");
         mService->setObserverService(mObserverService);
     }
 

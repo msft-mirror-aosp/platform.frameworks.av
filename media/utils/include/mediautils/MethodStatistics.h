@@ -59,7 +59,7 @@ public:
     void event(C&& code, FloatType executeMs) {
         std::lock_guard lg(mLock);
         auto it = mStatisticsMap.lower_bound(code);
-        if (it != mStatisticsMap.end() && it->first == code) {
+        if (it != mStatisticsMap.end() && it->first == static_cast<Code>(code)) {
             it->second.add(executeMs);
         } else {
             // StatsType ctor takes an optional array of data for initialization.
@@ -124,6 +124,7 @@ private:
 // Managed Statistics support.
 // Supported Modules
 #define METHOD_STATISTICS_MODULE_NAME_AUDIO_HIDL "AudioHidl"
+#define METHOD_STATISTICS_MODULE_NAME_AUDIO_AIDL "AudioAidl"
 
 // Returns a vector of class names for the module, or a nullptr if module not found.
 std::shared_ptr<std::vector<std::string>>

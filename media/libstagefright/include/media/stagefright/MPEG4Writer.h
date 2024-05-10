@@ -196,7 +196,9 @@ private:
     typedef key_value_pair_t< const char *, Vector<uint16_t> > ItemRefs;
     typedef struct _ItemInfo {
         bool isGrid() const { return !strcmp("grid", itemType); }
-        bool isImage() const { return !strcmp("hvc1", itemType) || isGrid(); }
+        bool isImage() const {
+            return !strcmp("hvc1", itemType) || !strcmp("av01", itemType) || isGrid();
+        }
         const char *itemType;
         uint16_t itemId;
         bool isPrimary;
@@ -224,10 +226,11 @@ private:
         int32_t width;
         int32_t height;
         int32_t rotation;
-        sp<ABuffer> hvcc;
+        sp<ABuffer> data;
     } ItemProperty;
 
     bool mHasFileLevelMeta;
+    bool mIsAvif; // used to differentiate HEIC and AVIF under the same OUTPUT_FORMAT_HEIF
     uint64_t mFileLevelMetaDataSize;
     bool mHasMoovBox;
     uint32_t mPrimaryItemId;
@@ -237,6 +240,8 @@ private:
     bool mHasRefs;
     std::map<uint32_t, ItemInfo> mItems;
     Vector<ItemProperty> mProperties;
+
+    bool mHasDolbyVision;
 
     // Writer thread handling
     status_t startWriterThread();

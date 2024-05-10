@@ -14,34 +14,37 @@
  * limitations under the License.
  */
 
-#include "ReverbTypes.h"
-#define LOG_TAG "EffectReverb"
-#include <Utils.h>
 #include <algorithm>
+#include <limits.h>
 #include <unordered_set>
 
-#include <android-base/logging.h>
-#include <fmq/AidlMessageQueue.h>
+#define LOG_TAG "EffectReverb"
+
 #include <audio_effects/effect_bassboost.h>
 #include <audio_effects/effect_equalizer.h>
 #include <audio_effects/effect_virtualizer.h>
+#include <android-base/logging.h>
+#include <fmq/AidlMessageQueue.h>
+#include <Utils.h>
 
 #include "EffectReverb.h"
-#include <limits.h>
+#include "ReverbTypes.h"
 
 using aidl::android::hardware::audio::effect::Descriptor;
 using aidl::android::hardware::audio::effect::EffectReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidAuxEnvReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidAuxPresetReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidInsertEnvReverb;
+using aidl::android::hardware::audio::effect::getEffectImplUuidInsertPresetReverb;
 using aidl::android::hardware::audio::effect::IEffect;
-using aidl::android::hardware::audio::effect::kAuxEnvReverbImplUUID;
-using aidl::android::hardware::audio::effect::kAuxPresetReverbImplUUID;
-using aidl::android::hardware::audio::effect::kInsertEnvReverbImplUUID;
-using aidl::android::hardware::audio::effect::kInsertPresetReverbImplUUID;
 using aidl::android::hardware::audio::effect::State;
 using aidl::android::media::audio::common::AudioUuid;
 
 bool isReverbUuidSupported(const AudioUuid* uuid) {
-    return (*uuid == kAuxEnvReverbImplUUID || *uuid == kInsertEnvReverbImplUUID ||
-            *uuid == kAuxPresetReverbImplUUID || *uuid == kInsertPresetReverbImplUUID);
+    return (*uuid == getEffectImplUuidAuxEnvReverb() ||
+            *uuid == getEffectImplUuidAuxPresetReverb() ||
+            *uuid == getEffectImplUuidInsertEnvReverb() ||
+            *uuid == getEffectImplUuidInsertPresetReverb());
 }
 
 extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
@@ -52,7 +55,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<EffectReverb>(*uuid);
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -61,18 +63,17 @@ extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
 }
 
 extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descriptor* _aidl_return) {
-    if (!in_impl_uuid || !isReverbUuidSupported(in_impl_uuid)) {
+    if (*in_impl_uuid == getEffectImplUuidAuxEnvReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxEnvReverbDesc;
+    } else if (*in_impl_uuid == getEffectImplUuidInsertEnvReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertEnvReverbDesc;
+    } else if (*in_impl_uuid == getEffectImplUuidAuxPresetReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxPresetReverbDesc;
+    } else if (*in_impl_uuid == getEffectImplUuidInsertPresetReverb()) {
+        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertPresetReverbDesc;
+    } else {
         LOG(ERROR) << __func__ << "uuid not supported";
         return EX_ILLEGAL_ARGUMENT;
-    }
-    if (*in_impl_uuid == kAuxEnvReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxEnvReverbDesc;
-    } else if (*in_impl_uuid == kInsertEnvReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertEnvReverbDesc;
-    } else if (*in_impl_uuid == kAuxPresetReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kAuxPresetReverbDesc;
-    } else if (*in_impl_uuid == kInsertPresetReverbImplUUID) {
-        *_aidl_return = aidl::android::hardware::audio::effect::lvm::kInsertPresetReverbDesc;
     }
     return EX_NONE;
 }
@@ -80,20 +81,19 @@ extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descrip
 namespace aidl::android::hardware::audio::effect {
 
 EffectReverb::EffectReverb(const AudioUuid& uuid) {
-    LOG(DEBUG) << __func__ << uuid.toString();
-    if (uuid == kAuxEnvReverbImplUUID) {
+    if (uuid == getEffectImplUuidAuxEnvReverb()) {
         mType = lvm::ReverbEffectType::AUX_ENV;
         mDescriptor = &lvm::kAuxEnvReverbDesc;
         mEffectName = &lvm::kAuxEnvReverbEffectName;
-    } else if (uuid == kInsertEnvReverbImplUUID) {
+    } else if (uuid == getEffectImplUuidInsertEnvReverb()) {
         mType = lvm::ReverbEffectType::INSERT_ENV;
         mDescriptor = &lvm::kInsertEnvReverbDesc;
         mEffectName = &lvm::kInsertEnvReverbEffectName;
-    } else if (uuid == kAuxPresetReverbImplUUID) {
+    } else if (uuid == getEffectImplUuidAuxPresetReverb()) {
         mType = lvm::ReverbEffectType::AUX_PRESET;
         mDescriptor = &lvm::kAuxPresetReverbDesc;
         mEffectName = &lvm::kAuxPresetReverbEffectName;
-    } else if (uuid == kInsertPresetReverbImplUUID) {
+    } else if (uuid == getEffectImplUuidInsertPresetReverb()) {
         mType = lvm::ReverbEffectType::INSERT_PRESET;
         mDescriptor = &lvm::kInsertPresetReverbDesc;
         mEffectName = &lvm::kInsertPresetReverbEffectName;
@@ -104,18 +104,16 @@ EffectReverb::EffectReverb(const AudioUuid& uuid) {
 
 EffectReverb::~EffectReverb() {
     cleanUp();
-    LOG(DEBUG) << __func__;
 }
 
 ndk::ScopedAStatus EffectReverb::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << _aidl_return->toString();
     *_aidl_return = *mDescriptor;
     return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus EffectReverb::setParameterSpecific(const Parameter::Specific& specific) {
-    LOG(DEBUG) << __func__ << " specific " << specific.toString();
+    LOG(VERBOSE) << __func__ << " specific " << specific.toString();
     RETURN_IF(!mContext, EX_NULL_POINTER, "nullContext");
 
     auto tag = specific.getTag();
@@ -356,10 +354,6 @@ std::shared_ptr<EffectContext> EffectReverb::createContext(const Parameter::Comm
     return mContext;
 }
 
-std::shared_ptr<EffectContext> EffectReverb::getContext() {
-    return mContext;
-}
-
 RetCode EffectReverb::releaseContext() {
     if (mContext) {
         mContext.reset();
@@ -392,7 +386,7 @@ ndk::ScopedAStatus EffectReverb::commandImpl(CommandId command) {
 IEffect::Status EffectReverb::effectProcessImpl(float* in, float* out, int sampleToProcess) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, sampleToProcess);
+    return mContext->process(in, out, sampleToProcess);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

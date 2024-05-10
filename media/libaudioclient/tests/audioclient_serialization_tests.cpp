@@ -15,18 +15,23 @@
  */
 
 //#define LOG_NDEBUG 0
-#define LOG_TAG "AudioClientSerializationUnitTests"
+#define LOG_TAG "AudioClientSerializationTests"
 
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
-
-#include <gtest/gtest.h>
+#include <vector>
 
 #include <android_audio_policy_configuration_V7_0-enums.h>
+#include <gtest/gtest.h>
+#include <media/AudioPolicy.h>
+#include <media/AudioProductStrategy.h>
+#include <media/AudioVolumeGroup.h>
+#include <media/VolumeGroupAttributes.h>
+#include <system/audio.h>
 #include <xsdc/XsdcSupport.h>
 
-#include "audio_test_utils.h"
+#include "test_execution_tracer.h"
 
 using namespace android;
 namespace xsd {
@@ -66,16 +71,16 @@ static const std::vector<audio_stream_type_t> kStreamtypes =
                  decltype(audio_stream_type_from_string)>(xsdc_enum_range<xsd::AudioStreamType>{},
                                                           audio_stream_type_from_string);
 
-static const std::vector<uint32_t> kMixMatchRules = {
-        RULE_MATCH_ATTRIBUTE_USAGE,
-        RULE_EXCLUDE_ATTRIBUTE_USAGE,
-        RULE_MATCH_ATTRIBUTE_CAPTURE_PRESET,
-        RULE_EXCLUDE_ATTRIBUTE_CAPTURE_PRESET,
-        RULE_MATCH_UID,
-        RULE_EXCLUDE_UID,
-        RULE_MATCH_USERID,
-        RULE_EXCLUDE_USERID,
-};
+static const std::vector<uint32_t> kMixMatchRules = {RULE_MATCH_ATTRIBUTE_USAGE,
+                                                     RULE_EXCLUDE_ATTRIBUTE_USAGE,
+                                                     RULE_MATCH_ATTRIBUTE_CAPTURE_PRESET,
+                                                     RULE_EXCLUDE_ATTRIBUTE_CAPTURE_PRESET,
+                                                     RULE_MATCH_UID,
+                                                     RULE_EXCLUDE_UID,
+                                                     RULE_MATCH_USERID,
+                                                     RULE_EXCLUDE_USERID,
+                                                     RULE_MATCH_AUDIO_SESSION_ID,
+                                                     RULE_EXCLUDE_AUDIO_SESSION_ID};
 
 // Generates a random string.
 std::string CreateRandomString(size_t n) {
@@ -103,7 +108,7 @@ void FillAudioAttributes::fillAudioAttributes(audio_attributes_t& attr) {
     attr.usage = kUsages[rand() % kUsages.size()];
     attr.source = kInputSources[rand() % kInputSources.size()];
     // attr.flags -> [0, (1 << (CAPTURE_PRIVATE + 1) - 1)]
-    attr.flags = static_cast<audio_flags_mask_t>(rand() & 0x3fff);
+    attr.flags = static_cast<audio_flags_mask_t>(rand() & 0x3ffd);  // exclude AUDIO_FLAG_SECURE
     sprintf(attr.tags, "%s",
             CreateRandomString((int)rand() % (AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1)).c_str());
 }
@@ -119,32 +124,33 @@ class SerializationTest : public FillAudioAttributes, public ::testing::Test {
 TEST_F(SerializationTest, AudioProductStrategyBinderization) {
     for (int j = 0; j < 512; j++) {
         const std::string name{"Test APSBinderization for seed::" + std::to_string(mSeed)};
-        std::vector<AudioAttributes> audioattributesvector;
+        SCOPED_TRACE(name);
+        std::vector<VolumeGroupAttributes> volumeGroupAttrVector;
         for (auto i = 0; i < 16; i++) {
             audio_attributes_t attributes;
             fillAudioAttributes(attributes);
-            AudioAttributes audioattributes{static_cast<volume_group_t>(rand()),
-                                            kStreamtypes[rand() % kStreamtypes.size()], attributes};
-            audioattributesvector.push_back(audioattributes);
+            VolumeGroupAttributes volumeGroupAttr{static_cast<volume_group_t>(rand()),
+                                                  kStreamtypes[rand() % kStreamtypes.size()],
+                                                  attributes};
+            volumeGroupAttrVector.push_back(volumeGroupAttr);
         }
         product_strategy_t psId = static_cast<product_strategy_t>(rand());
-        AudioProductStrategy aps{name, audioattributesvector, psId};
+        AudioProductStrategy aps{name, volumeGroupAttrVector, psId};
 
         Parcel p;
-        EXPECT_EQ(NO_ERROR, aps.writeToParcel(&p)) << name;
+        EXPECT_EQ(NO_ERROR, aps.writeToParcel(&p));
 
         AudioProductStrategy apsCopy;
         p.setDataPosition(0);
-        EXPECT_EQ(NO_ERROR, apsCopy.readFromParcel(&p)) << name;
-        EXPECT_EQ(apsCopy.getName(), name) << name;
-        EXPECT_EQ(apsCopy.getId(), psId) << name;
-        auto avec = apsCopy.getAudioAttributes();
-        EXPECT_EQ(avec.size(), audioattributesvector.size()) << name;
-        for (int i = 0; i < audioattributesvector.size(); i++) {
-            EXPECT_EQ(avec[i].getGroupId(), audioattributesvector[i].getGroupId()) << name;
-            EXPECT_EQ(avec[i].getStreamType(), audioattributesvector[i].getStreamType()) << name;
-            EXPECT_TRUE(avec[i].getAttributes() == audioattributesvector[i].getAttributes())
-                    << name;
+        EXPECT_EQ(NO_ERROR, apsCopy.readFromParcel(&p));
+        EXPECT_EQ(apsCopy.getName(), name);
+        EXPECT_EQ(apsCopy.getId(), psId);
+        auto avec = apsCopy.getVolumeGroupAttributes();
+        EXPECT_EQ(avec.size(), volumeGroupAttrVector.size());
+        for (int i = 0; i < std::min(avec.size(), volumeGroupAttrVector.size()); i++) {
+            EXPECT_EQ(avec[i].getGroupId(), volumeGroupAttrVector[i].getGroupId());
+            EXPECT_EQ(avec[i].getStreamType(), volumeGroupAttrVector[i].getStreamType());
+            EXPECT_TRUE(avec[i].getAttributes() == volumeGroupAttrVector[i].getAttributes());
         }
     }
 }
@@ -293,19 +299,25 @@ TEST_P(AudioAttributesParameterizedTest, AudioAttributesBinderization) {
     audio_stream_type_t stream = mAudioStream;
     audio_attributes_t attributes;
     fillAudioAttributes(attributes);
-    AudioAttributes audioattributes{groupId, stream, attributes};
+    VolumeGroupAttributes volumeGroupAttr{groupId, stream, attributes};
 
     Parcel p;
-    EXPECT_EQ(NO_ERROR, audioattributes.writeToParcel(&p)) << msg;
+    EXPECT_EQ(NO_ERROR, volumeGroupAttr.writeToParcel(&p)) << msg;
 
-    AudioAttributes audioattributesCopy;
+    VolumeGroupAttributes volumeGroupAttrCopy;
     p.setDataPosition(0);
-    EXPECT_EQ(NO_ERROR, audioattributesCopy.readFromParcel(&p)) << msg;
-    EXPECT_EQ(audioattributesCopy.getGroupId(), audioattributes.getGroupId()) << msg;
-    EXPECT_EQ(audioattributesCopy.getStreamType(), audioattributes.getStreamType()) << msg;
-    EXPECT_TRUE(audioattributesCopy.getAttributes() == attributes) << msg;
+    EXPECT_EQ(NO_ERROR, volumeGroupAttrCopy.readFromParcel(&p)) << msg;
+    EXPECT_EQ(volumeGroupAttrCopy.getGroupId(), volumeGroupAttr.getGroupId()) << msg;
+    EXPECT_EQ(volumeGroupAttrCopy.getStreamType(), volumeGroupAttr.getStreamType()) << msg;
+    EXPECT_TRUE(volumeGroupAttrCopy.getAttributes() == attributes) << msg;
 }
 
 // audioStream
 INSTANTIATE_TEST_SUITE_P(SerializationParameterizedTests, AudioAttributesParameterizedTest,
                          ::testing::Combine(testing::ValuesIn(kStreamtypes)));
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
+    return RUN_ALL_TESTS();
+}

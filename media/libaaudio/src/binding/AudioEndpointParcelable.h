@@ -53,7 +53,7 @@ public:
     int32_t addFileDescriptor(const android::base::unique_fd& fd, int32_t sizeInBytes);
 
     /**
-     * Close current data file descriptor. The duplicated file descriptor will be close.
+     * Close current data file descriptor. The duplicated file descriptor will be closed.
      */
     void closeDataFileDescriptor();
 
@@ -61,8 +61,10 @@ public:
      * Update current data file descriptor with given endpoint parcelable.
      * @param endpointParcelable an endpoint parcelable that contains new data file
      *                           descriptor information
+     * @return AAUDIO_OK if the data file descriptor updates successfully.
+     *         AAUDIO_ERROR_OUT_OF_RANGE if there is not enough space for the shared memory.
      */
-    void updateDataFileDescriptor(AudioEndpointParcelable* endpointParcelable);
+    aaudio_result_t updateDataFileDescriptor(AudioEndpointParcelable* endpointParcelable);
 
     aaudio_result_t resolve(EndpointDescriptor *descriptor);
     aaudio_result_t resolveDataQueue(RingBufferDescriptor *descriptor);
@@ -84,9 +86,10 @@ public: // TODO add getters
     RingBufferParcelable    mDownDataQueueParcelable;    // eg. playback
 
 private:
-    aaudio_result_t         validate() const;
+    // Return the first available shared memory position. Return -1 if all shared memories are
+    // in use.
+    int32_t getNextAvailableSharedMemoryPosition() const;
 
-    int32_t                 mNumSharedMemories = 0;
     SharedMemoryParcelable  mSharedMemories[MAX_SHARED_MEMORIES];
 };
 

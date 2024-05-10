@@ -270,7 +270,7 @@ status_t NuPlayer::GenericSource::initFromDataSource() {
     }
 
     ALOGV("initFromDataSource mSources.size(): %zu  mIsSecure: %d  mime[0]: %s", mSources.size(),
-            mIsSecure, (mMimes.isEmpty() ? "NONE" : mMimes[0].string()));
+            mIsSecure, (mMimes.isEmpty() ? "NONE" : mMimes[0].c_str()));
 
     if (mSources.size() == 0) {
         ALOGE("b/23705695");
@@ -292,12 +292,12 @@ status_t NuPlayer::GenericSource::getBufferingSettings(
         *buffering = mBufferingSettings;
     }
 
-    ALOGV("getBufferingSettings{%s}", buffering->toString().string());
+    ALOGV("getBufferingSettings{%s}", buffering->toString().c_str());
     return OK;
 }
 
 status_t NuPlayer::GenericSource::setBufferingSettings(const BufferingSettings& buffering) {
-    ALOGV("setBufferingSettings{%s}", buffering.toString().string());
+    ALOGV("setBufferingSettings{%s}", buffering.toString().c_str());
 
     Mutex::Autolock _l(mLock);
     mBufferingSettings = buffering;
@@ -992,6 +992,11 @@ sp<AMessage> NuPlayer::GenericSource::getTrackInfo(size_t trackIndex) const {
         format->setInt32("auto", !!isAutoselect);
         format->setInt32("default", !!isDefault);
         format->setInt32("forced", !!isForced);
+    } else if (trackType == MEDIA_TRACK_TYPE_AUDIO) {
+        int32_t hapticChannelCount;
+        if (meta->findInt32(kKeyHapticChannelCount, &hapticChannelCount)) {
+            format->setInt32("haptic-channel-count", hapticChannelCount);
+        }
     }
 
     return format;
@@ -1614,7 +1619,7 @@ status_t NuPlayer::GenericSource::prepareDrm(
         return status;
     }
     ALOGV("prepareDrm: createCryptoAndPlugin succeeded for uuid: %s",
-            DrmUUID::toHexString(uuid).string());
+            DrmUUID::toHexString(uuid).c_str());
 
     *outCrypto = crypto;
     // as long a there is an active crypto
@@ -1627,7 +1632,7 @@ status_t NuPlayer::GenericSource::prepareDrm(
     }
 
     // first mime in this list is either the video track, or the first audio track
-    const char *mime = mMimes[0].string();
+    const char *mime = mMimes[0].c_str();
     mIsSecure = crypto->requiresSecureDecoderComponent(mime);
     ALOGV("prepareDrm: requiresSecureDecoderComponent mime: %s  isSecure: %d",
             mime, mIsSecure);

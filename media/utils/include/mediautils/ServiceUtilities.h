@@ -108,6 +108,10 @@ bool modifyPhoneStateAllowed(const AttributionSourceState& attributionSource);
 bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSource);
 bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSource);
 void purgePermissionCache();
+bool mustAnonymizeBluetoothAddress(
+        const AttributionSourceState& attributionSource, const String16& caller);
+void anonymizeBluetoothAddress(char *address);
+
 int32_t getOpForSource(audio_source_t source);
 
 AttributionSourceState getCallingAttributionSource();
@@ -130,7 +134,7 @@ private:
     std::optional<bool> doIsAllowed(uid_t uid);
     sp<content::pm::IPackageManagerNative> retrievePackageManager();
     sp<content::pm::IPackageManagerNative> mPackageManager; // To check apps manifest
-    uint_t mPackageManagerErrors = 0;
+    unsigned int mPackageManagerErrors = 0;
     struct Package {
         std::string name;
         bool playbackCaptureAllowed = false;

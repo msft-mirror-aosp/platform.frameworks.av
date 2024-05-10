@@ -32,6 +32,7 @@
 #include <media/stagefright/foundation/ABuffer.h>
 #include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/foundation/AUtils.h>
+#include <media/stagefright/ACodec.h>
 #include <media/stagefright/MediaCodec.h>
 #include <media/MediaCodecBuffer.h>
 #include <system/window.h>
@@ -87,9 +88,11 @@ ACodecBufferChannel::BufferInfo::BufferInfo(
 }
 
 ACodecBufferChannel::ACodecBufferChannel(
-        const sp<AMessage> &inputBufferFilled, const sp<AMessage> &outputBufferDrained)
+        const sp<AMessage> &inputBufferFilled, const sp<AMessage> &outputBufferDrained,
+        const sp<AMessage> &pollForRenderedBuffers)
     : mInputBufferFilled(inputBufferFilled),
       mOutputBufferDrained(outputBufferDrained),
+      mPollForRenderedBuffers(pollForRenderedBuffers),
       mHeapSeqNum(-1) {
 }
 
@@ -113,6 +116,10 @@ status_t ACodecBufferChannel::queueInputBuffer(const sp<MediaCodecBuffer> &buffe
         int32_t csd;
         if (it->mClientBuffer->meta()->findInt32("csd", &csd)) {
             it->mCodecBuffer->meta()->setInt32("csd", csd);
+        }
+        int32_t decodeOnly;
+        if (it->mClientBuffer->meta()->findInt32("decode-only", &decodeOnly)) {
+            it->mCodecBuffer->meta()->setInt32("decode-only", decodeOnly);
         }
     }
     ALOGV("queueInputBuffer #%d", it->mBufferId);
@@ -263,6 +270,10 @@ status_t ACodecBufferChannel::queueSecureInputBuffer(
     if (it->mClientBuffer->meta()->findInt32("csd", &csd)) {
         it->mCodecBuffer->meta()->setInt32("csd", csd);
     }
+    int32_t decodeOnly;
+    if (it->mClientBuffer->meta()->findInt32("decode-only", &decodeOnly)) {
+        it->mCodecBuffer->meta()->setInt32("decode-only", decodeOnly);
+    }
 
     ALOGV("queueSecureInputBuffer #%d", it->mBufferId);
     sp<AMessage> msg = mInputBufferFilled->dup();
@@ -339,7 +350,8 @@ status_t ACodecBufferChannel::attachEncryptedBuffer(
         size_t offset,
         const CryptoPlugin::SubSample *subSamples,
         size_t numSubSamples,
-        const sp<MediaCodecBuffer> &buffer) {
+        const sp<MediaCodecBuffer> &buffer,
+        AString* errorDetailMsg) {
     std::shared_ptr<const std::vector<const BufferInfo>> array(
             std::atomic_load(&mInputBuffers));
     BufferInfoIterator it = findClientBuffer(array, buffer);
@@ -363,7 +375,6 @@ status_t ACodecBufferChannel::attachEncryptedBuffer(
     ssize_t result = -1;
     ssize_t codecDataOffset = 0;
     if (mCrypto != NULL) {
-        AString errorDetailMsg;
         hardware::drm::V1_0::DestinationBuffer destination;
         if (secure) {
             destination.type = DrmBufferType::NATIVE_HANDLE;
@@ -379,7 +390,7 @@ status_t ACodecBufferChannel::attachEncryptedBuffer(
 
         result = mCrypto->decrypt(key, iv, mode, pattern,
                 source, it->mClientBuffer->offset(),
-                subSamples, numSubSamples, destination, &errorDetailMsg);
+                subSamples, numSubSamples, destination, errorDetailMsg);
 
         if (result < 0) {
             return result;
@@ -433,7 +444,9 @@ status_t ACodecBufferChannel::attachEncryptedBuffer(
                     result = (ssize_t)_bytesWritten;
                     detailedError = _detailedError;
                 });
-
+        if (errorDetailMsg) {
+            errorDetailMsg->setTo(detailedError.c_str(), detailedError.size());
+        }
         if (!returnVoid.isOk() || status != Status::OK || result < 0) {
             ALOGE("descramble failed, trans=%s, status=%d, result=%zd",
                     returnVoid.description().c_str(), status, result);
@@ -475,6 +488,10 @@ status_t ACodecBufferChannel::renderOutputBuffer(
     msg->setInt64("timestampNs", timestampNs);
     msg->post();
     return OK;
+}
+
+void ACodecBufferChannel::pollForRenderedBuffers() {
+    mPollForRenderedBuffers->post();
 }
 
 status_t ACodecBufferChannel::discardBuffer(const sp<MediaCodecBuffer> &buffer) {
@@ -633,6 +650,9 @@ void ACodecBufferChannel::drainThisBuffer(
     }
     if (omxFlags & OMX_BUFFERFLAG_EOS) {
         flags |= MediaCodec::BUFFER_FLAG_EOS;
+    }
+    if (omxFlags & OMX_BUFFERFLAG_DECODEONLY) {
+        flags |= MediaCodec::BUFFER_FLAG_DECODE_ONLY;
     }
     it->mClientBuffer->meta()->setInt32("flags", flags);
 

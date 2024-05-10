@@ -37,14 +37,22 @@ public:
     // will calculate frame buffer size if |hasData| is set to true.
     VideoFrame(uint32_t width, uint32_t height,
             uint32_t displayWidth, uint32_t displayHeight,
+            uint32_t displayLeft, uint32_t displayTop,
             uint32_t tileWidth, uint32_t tileHeight,
             uint32_t angle, uint32_t bpp, uint32_t bitDepth, bool hasData, size_t iccSize):
         mWidth(width), mHeight(height),
         mDisplayWidth(displayWidth), mDisplayHeight(displayHeight),
+        mDisplayLeft(displayLeft), mDisplayTop(displayTop),
         mTileWidth(tileWidth), mTileHeight(tileHeight), mDurationUs(0),
-        mRotationAngle(angle), mBytesPerPixel(bpp), mRowBytes(bpp * width),
-        mSize(hasData ? (bpp * width * height) : 0),
-        mIccSize(iccSize), mBitDepth(bitDepth) {
+        mRotationAngle(angle), mBytesPerPixel(bpp), mIccSize(iccSize),
+        mBitDepth(bitDepth) {
+            uint32_t multVal;
+            mRowBytes = __builtin_mul_overflow(bpp, width, &multVal) ? 0 : multVal;
+            mSize = __builtin_mul_overflow(multVal, height, &multVal) ? 0 : multVal;
+            if (hasData && (mRowBytes == 0 || mSize == 0)) {
+                ALOGE("Frame rowBytes/ size overflow %dx%d bpp %d", width, height, bpp);
+                android_errorWriteLog(0x534e4554, "233006499");
+            }
     }
 
     void init(const VideoFrame& copy, const void* iccData, size_t iccSize) {
@@ -76,6 +84,8 @@ public:
     uint32_t mHeight;          // Decoded image height before rotation
     uint32_t mDisplayWidth;    // Display width before rotation
     uint32_t mDisplayHeight;   // Display height before rotation
+    uint32_t mDisplayLeft;     // Display left (column coordinate) before rotation
+    uint32_t mDisplayTop;      // Display top (row coordinate) before rotation
     uint32_t mTileWidth;       // Tile width (0 if image doesn't have grid)
     uint32_t mTileHeight;      // Tile height (0 if image doesn't have grid)
     int64_t  mDurationUs;      // Frame duration in microseconds
@@ -85,8 +95,6 @@ public:
     uint32_t mSize;            // Number of bytes of frame data
     uint32_t mIccSize;         // Number of bytes of ICC data
     uint32_t mBitDepth;        // number of bits per R / G / B channel
-
-    // Adding new items must be 64-bit aligned.
 };
 
 }; // namespace android

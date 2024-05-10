@@ -122,7 +122,7 @@ public:
             // monotonic computation.
             // we use lazy computation here - if we precompute in
             // a single pass, duplicate secant computations may be avoided.
-            S sec, sec0, sec1;
+            S sec{}, sec0{}, sec1{};  // initialization not needed, used for clang-tidy
             if (!catmullRom || monotonic) {
                 sec = (high->second - low->second) / interval;
                 sec0 = low2 != this->end()
@@ -204,7 +204,7 @@ public:
             mInterpolatorType = interpolatorType;
             return NO_ERROR;
         default:
-            ALOGE("invalid interpolatorType: %d", interpolatorType);
+            ALOGE("invalid interpolatorType: %d", static_cast<int>(interpolatorType));
             return BAD_VALUE;
         }
     }
@@ -269,7 +269,7 @@ public:
 
         // Note: We don't need to check size is within some bounds as
         // the Parcel read will fail if size is incorrectly specified too large.
-        float lastx;
+        float lastx = 0.f; // initialization not needed, used for clang tidy
         for (uint32_t i = 0; i < size; ++i) {
             float x = config.xy[i * 2];
             float y = config.xy[i * 2 + 1];

@@ -142,7 +142,7 @@ ACameraMetadata::derivePhysicalCameraIds() {
         if (ids[i] == '\0') {
             if (start != i) {
                 mStaticPhysicalCameraIdValues.push_back(String8((const char *)ids+start));
-                mStaticPhysicalCameraIds.push_back(mStaticPhysicalCameraIdValues.back().string());
+                mStaticPhysicalCameraIds.push_back(mStaticPhysicalCameraIdValues.back().c_str());
             }
             start = i+1;
         }
@@ -400,7 +400,6 @@ ACameraMetadata::getConstEntry(uint32_t tag, ACameraMetadata_const_entry* entry)
 
     camera_metadata_ro_entry rawEntry = static_cast<const CameraMetadata*>(mData.get())->find(tag);
     if (rawEntry.count == 0) {
-        ALOGE("%s: cannot find metadata tag %d", __FUNCTION__, tag);
         return ACAMERA_ERROR_METADATA_NOT_FOUND;
     }
     entry->tag = tag;
@@ -537,8 +536,11 @@ ACameraMetadata::isCaptureRequestTag(const uint32_t tag) {
         case ACAMERA_CONTROL_ENABLE_ZSL:
         case ACAMERA_CONTROL_EXTENDED_SCENE_MODE:
         case ACAMERA_CONTROL_ZOOM_RATIO:
+        case ACAMERA_CONTROL_SETTINGS_OVERRIDE:
+        case ACAMERA_CONTROL_AUTOFRAMING:
         case ACAMERA_EDGE_MODE:
         case ACAMERA_FLASH_MODE:
+        case ACAMERA_FLASH_STRENGTH_LEVEL:
         case ACAMERA_HOT_PIXEL_MODE:
         case ACAMERA_JPEG_GPS_COORDINATES:
         case ACAMERA_JPEG_GPS_PROCESSING_METHOD:
@@ -585,6 +587,7 @@ std::unordered_set<uint32_t> ACameraMetadata::sSystemTags ({
     ANDROID_CONTROL_SCENE_MODE_OVERRIDES,
     ANDROID_CONTROL_AE_PRECAPTURE_ID,
     ANDROID_CONTROL_AF_TRIGGER_ID,
+    ANDROID_CONTROL_SETTINGS_OVERRIDING_FRAME_NUMBER,
     ANDROID_DEMOSAIC_MODE,
     ANDROID_EDGE_STRENGTH,
     ANDROID_FLASH_FIRING_POWER,

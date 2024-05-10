@@ -17,21 +17,38 @@
 #ifndef ANDROID_STAGEFRIGHT_C2BLOCK_INTERNAL_H_
 #define ANDROID_STAGEFRIGHT_C2BLOCK_INTERNAL_H_
 
-#include <android/hardware/graphics/bufferqueue/2.0/IGraphicBufferProducer.h>
-
 #include <C2Buffer.h>
 
-namespace android {
-namespace hardware {
-namespace media {
-namespace bufferpool {
+#include <utils/RefBase.h>
 
+namespace android::hardware::graphics::bufferqueue::V2_0 {
+struct IGraphicBufferProducer;
+}
+
+// Note: HIDL-BufferPool and AIDL-BufferPool are not compatible
+namespace android::hardware::media::bufferpool {
+
+// BuffePool Data for HIDL-BufferPool
 struct BufferPoolData;
 
 }
+namespace aidl::android::hardware::media::bufferpool2 {
+
+// BuffePool Data for AIDL-BufferPool
+struct BufferPoolData;
+
 }
+
+namespace aidl::android::hardware::media::c2 {
+
+// IGraphicBufferAllocator for media.c2 aidl
+class IGraphicBufferAllocator;
 }
-}
+
+typedef struct AHardwareBuffer AHardwareBuffer;
+
+using bufferpool_BufferPoolData = android::hardware::media::bufferpool::BufferPoolData;
+using bufferpool2_BufferPoolData = aidl::android::hardware::media::bufferpool2::BufferPoolData;
 
 /**
  * Stores informations from C2BlockPool implementations which are required by C2Block.
@@ -40,6 +57,8 @@ struct C2_HIDE _C2BlockPoolData {
     enum type_t : int {
         TYPE_BUFFERPOOL = 0,
         TYPE_BUFFERQUEUE,
+        TYPE_BUFFERPOOL2, // AIDL-BufferPool
+        TYPE_AHWBUFFER, // AHardwareBuffer based block
     };
 
     virtual type_t getType() const = 0;
@@ -136,6 +155,7 @@ struct _C2BlockFactory {
     std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
             const C2Handle *handle);
 
+    // HIDL-BufferPool
     /**
      * Create a linear block from the received bufferpool data.
      *
@@ -147,7 +167,7 @@ struct _C2BlockFactory {
     static
     std::shared_ptr<C2LinearBlock> CreateLinearBlock(
             const C2Handle *handle,
-            const std::shared_ptr<android::hardware::media::bufferpool::BufferPoolData> &data);
+            const std::shared_ptr<bufferpool_BufferPoolData> &data);
 
     /**
      * Create a graphic block from the received bufferpool data.
@@ -160,7 +180,18 @@ struct _C2BlockFactory {
     static
     std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
             const C2Handle *handle,
-            const std::shared_ptr<android::hardware::media::bufferpool::BufferPoolData> &data);
+            const std::shared_ptr<bufferpool_BufferPoolData> &data);
+
+    /**
+     * Create a graphic block from the received AHardwareBuffer.
+     *
+     * \param buffer  AHardwareBuffer
+     *
+     * \return shared pointer to the graphic block. nullptr if there was not enough memory to
+     *         create this block.
+     */
+    static
+    std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(AHardwareBuffer *buffer);
 
     /**
      * Get bufferpool data from the blockpool data.
@@ -174,7 +205,48 @@ struct _C2BlockFactory {
     static
     bool GetBufferPoolData(
             const std::shared_ptr<const _C2BlockPoolData> &poolData,
-            std::shared_ptr<android::hardware::media::bufferpool::BufferPoolData> *bufferPoolData);
+            std::shared_ptr<bufferpool_BufferPoolData> *bufferPoolData);
+
+    // AIDL-BufferPool
+    /**
+     * Create a linear block from the received bufferpool data.
+     *
+     * \param data  bufferpool data to a linear block
+     *
+     * \return shared pointer to the linear block. nullptr if there was not enough memory to
+     *         create this block.
+     */
+    static
+    std::shared_ptr<C2LinearBlock> CreateLinearBlock(
+            const C2Handle *handle,
+            const std::shared_ptr<bufferpool2_BufferPoolData> &data);
+
+    /**
+     * Create a graphic block from the received bufferpool data.
+     *
+     * \param data  bufferpool data to a graphic block
+     *
+     * \return shared pointer to the graphic block. nullptr if there was not enough memory to
+     *         create this block.
+     */
+    static
+    std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
+            const C2Handle *handle,
+            const std::shared_ptr<bufferpool2_BufferPoolData> &data);
+
+    /**
+     * Get bufferpool data from the blockpool data.
+     *
+     * \param poolData          blockpool data
+     * \param bufferPoolData    pointer to bufferpool data where the bufferpool
+     *                          data is stored.
+     *
+     * \return {\code true} when there is valid bufferpool data, {\code false} otherwise.
+     */
+    static
+    bool GetBufferPoolData(
+            const std::shared_ptr<const _C2BlockPoolData> &poolData,
+            std::shared_ptr<bufferpool2_BufferPoolData> *bufferPoolData);
 
     /*
      * Life Cycle Management of BufferQueue-Based Blocks
@@ -381,6 +453,41 @@ struct _C2BlockFactory {
     static
     bool DisplayBlockToBufferQueue(
             const std::shared_ptr<_C2BlockPoolData>& poolData);
+
+    /**
+     * Retrieves a AHardwareBuffer from data of a graphic block which was
+     * allocated via IGBA based blockpool. Retrieved AHardwareBuffer handle
+     * does not have the ownership. poolData still has the ownership. Use
+     * AHardwareBuffer_acquire()/AHardwareBuffer_release if independent
+     * life-cycle/ownership is required.
+     *
+     * \param[in]   poolData  blockpool data.
+     * \param[out]  pBuf      ptr to AHardwareBuffer
+     *
+     * \return true if AHardwareBuffer was returned to output parameter, false
+     * otherwise.
+     */
+    static
+    bool GetAHardwareBuffer(
+            const std::shared_ptr<const _C2BlockPoolData>& poolData,
+            AHardwareBuffer **pBuf);
+
+    /**
+     * Mark a graphic block is not owned by the current process anymore.
+     * (Use this method after transfer is being completed.)
+     */
+    static void DisownIgbaBlock(
+            const std::shared_ptr<_C2BlockPoolData>& poolData);
+
+    /**
+     * When the client receives a block from HAL, the client needs to store
+     * IGraphicBufferAllocator from which the block was originally allocated.
+     * The stored \p igba will be used in the dtor to deallocate the buffer.
+     * (calling IGraphicBufferAllocator::deallocate to reclaim.)
+     */
+    static void RegisterIgba(
+            const std::shared_ptr<_C2BlockPoolData>& poolData,
+            std::shared_ptr<::aidl::android::hardware::media::c2::IGraphicBufferAllocator> &igba);
 };
 
 #endif // ANDROID_STAGEFRIGHT_C2BLOCK_INTERNAL_H_

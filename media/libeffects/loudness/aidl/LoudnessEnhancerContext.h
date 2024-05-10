@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <android-base/thread_annotations.h>
 #include <audio_effects/effect_loudnessenhancer.h>
 
 #include "dsp/core/dynamic_range_compression.h"
@@ -33,7 +32,7 @@ enum LoudnessEnhancerState {
 class LoudnessEnhancerContext final : public EffectContext {
   public:
     LoudnessEnhancerContext(int statusDepth, const Parameter::Common& common);
-    ~LoudnessEnhancerContext();
+    ~LoudnessEnhancerContext() = default;
 
     RetCode enable();
     RetCode disable();
@@ -42,16 +41,14 @@ class LoudnessEnhancerContext final : public EffectContext {
     RetCode setLeGain(int gainMb);
     int getLeGain() const { return mGain; }
 
-    IEffect::Status lvmProcess(float* in, float* out, int samples);
+    IEffect::Status process(float* in, float* out, int samples);
 
   private:
-    std::mutex mMutex;
-    LoudnessEnhancerState mState;
-    int mSampleRate;
-    int mGain;
+    LoudnessEnhancerState mState = LOUDNESS_ENHANCER_STATE_UNINITIALIZED;
+    int mGain = LOUDNESS_ENHANCER_DEFAULT_TARGET_GAIN_MB;
     // In this implementation, there is no coupling between the compression on the left and right
     // channels
-    std::unique_ptr<le_fx::AdaptiveDynamicRangeCompression> mCompressor GUARDED_BY(mMutex);
+    std::unique_ptr<le_fx::AdaptiveDynamicRangeCompression> mCompressor;
 
     void init_params();
 };

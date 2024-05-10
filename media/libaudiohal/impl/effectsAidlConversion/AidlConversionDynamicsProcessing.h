@@ -26,8 +26,9 @@ class AidlConversionDp : public EffectConversionHelperAidl {
   public:
     AidlConversionDp(std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
                      int32_t sessionId, int32_t ioId,
-                     const ::aidl::android::hardware::audio::effect::Descriptor& desc)
-        : EffectConversionHelperAidl(effect, sessionId, ioId, desc) {}
+                     const ::aidl::android::hardware::audio::effect::Descriptor& desc,
+                     bool isProxyEffect)
+        : EffectConversionHelperAidl(effect, sessionId, ioId, desc, isProxyEffect) {}
     ~AidlConversionDp() {}
 
   private:
@@ -36,18 +37,18 @@ class AidlConversionDp : public EffectConversionHelperAidl {
     status_t setParameter(utils::EffectParamReader& param) override;
     status_t getParameter(utils::EffectParamWriter& param) override;
 
-    aidl::ConversionResult<
+    ConversionResult<
             aidl::android::hardware::audio::effect::DynamicsProcessing::ChannelConfig>
     readChannelConfigFromParam(utils::EffectParamReader& param);
-    aidl::ConversionResult<aidl::android::hardware::audio::effect::DynamicsProcessing::EqBandConfig>
+    ConversionResult<aidl::android::hardware::audio::effect::DynamicsProcessing::EqBandConfig>
     readEqBandConfigFromParam(utils::EffectParamReader& param);
-    aidl::ConversionResult<
+    ConversionResult<
             aidl::android::hardware::audio::effect::DynamicsProcessing::MbcBandConfig>
     readMbcBandConfigFromParam(utils::EffectParamReader& param);
-    aidl::ConversionResult<
+    ConversionResult<
             aidl::android::hardware::audio::effect::DynamicsProcessing::LimiterConfig>
     readLimiterConfigFromParam(utils::EffectParamReader& param);
-    aidl::ConversionResult<
+    ConversionResult<
             aidl::android::hardware::audio::effect::DynamicsProcessing::EngineArchitecture>
     readEngineArchitectureFromParam(utils::EffectParamReader& param);
 

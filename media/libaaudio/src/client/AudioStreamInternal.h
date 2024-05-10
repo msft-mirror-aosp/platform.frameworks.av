@@ -22,8 +22,9 @@
 
 #include "binding/AudioEndpointParcelable.h"
 #include "binding/AAudioServiceInterface.h"
-#include "client/IsochronousClockModel.h"
+#include "client/AAudioFlowGraph.h"
 #include "client/AudioEndpoint.h"
+#include "client/IsochronousClockModel.h"
 #include "core/AudioStream.h"
 #include "utility/AudioClock.h"
 
@@ -48,7 +49,7 @@ public:
                                        int64_t *framePosition,
                                        int64_t *timeNanoseconds) override;
 
-    virtual aaudio_result_t updateStateMachine() override;
+    virtual aaudio_result_t processCommands() override;
 
     aaudio_result_t open(const AudioStreamBuilder &builder) override;
 
@@ -56,7 +57,11 @@ public:
 
     int32_t getBufferSize() const override;
 
+    int32_t getDeviceBufferSize() const;
+
     int32_t getBufferCapacity() const override;
+
+    int32_t getDeviceBufferCapacity() const override;
 
     int32_t getXRunCount() const override {
         return mXRunCount;
@@ -83,7 +88,11 @@ public:
     aaudio_result_t stopClient(audio_port_handle_t clientHandle);
 
     aaudio_handle_t getServiceHandle() const {
-        return mServiceStreamHandle;
+        return mServiceStreamHandleInfo.getHandle();
+    }
+
+    int32_t getServiceLifetimeId() const {
+        return mServiceStreamHandleInfo.getServiceLifetimeId();
     }
 
 protected:
@@ -110,8 +119,6 @@ protected:
 
     aaudio_result_t drainTimestampsFromService();
 
-    aaudio_result_t processCommands();
-
     aaudio_result_t stopCallback_l();
 
     virtual void prepareBuffersForStart() {}
@@ -131,8 +138,6 @@ protected:
     // Calculate timeout for an operation involving framesPerOperation.
     int64_t calculateReasonableTimeout(int32_t framesPerOperation);
 
-    int32_t getDeviceChannelCount() const { return mDeviceChannelCount; }
-
     /**
      * @return true if running in audio service, versus in app process
      */
@@ -150,7 +155,8 @@ protected:
 
     std::unique_ptr<AudioEndpoint> mAudioEndpoint;   // source for reads or sink for writes
 
-    aaudio_handle_t          mServiceStreamHandle; // opaque handle returned from service
+    // opaque handle returned from service
+    AAudioHandleInfo         mServiceStreamHandleInfo;
 
     int32_t                  mXRunCount = 0;      // how many underrun events?
 
@@ -173,6 +179,8 @@ protected:
 
     int64_t                  mLastFramesWritten = 0;
     int64_t                  mLastFramesRead = 0;
+
+    AAudioFlowGraph          mFlowGraph;
 
 private:
     /*
@@ -203,13 +211,10 @@ private:
 
     int64_t                  mServiceLatencyNanos = 0;
 
-    // Sometimes the hardware is operating with a different channel count from the app.
-    // Then we require conversion in AAudio.
-    int32_t                  mDeviceChannelCount = 0;
-
     int32_t                  mBufferSizeInFrames = 0; // local threshold to control latency
+    int32_t                  mDeviceBufferSizeInFrames = 0;
     int32_t                  mBufferCapacityInFrames = 0;
-
+    int32_t                  mDeviceBufferCapacityInFrames = 0;
 
 };
 

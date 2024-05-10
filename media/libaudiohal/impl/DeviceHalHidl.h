@@ -21,6 +21,7 @@
 #include PATH(android/hardware/audio/FILE_VERSION/IPrimaryDevice.h)
 #include <media/audiohal/DeviceHalInterface.h>
 #include <media/audiohal/EffectHalInterface.h>
+#include <media/audiohal/StreamHalInterface.h>
 
 #include "CoreConversionHelperHidl.h"
 
@@ -29,6 +30,12 @@ namespace android {
 class DeviceHalHidl : public DeviceHalInterface, public CoreConversionHelperHidl
 {
   public:
+    status_t getAudioPorts(std::vector<media::audio::common::AudioPort> *ports) override;
+
+    status_t getAudioRoutes(std::vector<media::AudioRoute> *routes) override;
+
+    status_t getSupportedModes(std::vector<media::audio::common::AudioMode> *modes) override;
+
     // Sets the value of 'devices' to a bitmask of 1 or more values of audio_devices_t.
     status_t getSupportedDevices(uint32_t *devices) override;
 
@@ -60,7 +67,7 @@ class DeviceHalHidl : public DeviceHalInterface, public CoreConversionHelperHidl
     status_t getParameters(const String8& keys, String8 *values) override;
 
     // Returns audio input buffer size according to parameters passed.
-    status_t getInputBufferSize(const struct audio_config* config, size_t* size) override;
+    status_t getInputBufferSize(struct audio_config* config, size_t* size) override;
 
     // Creates and opens the audio hardware output stream. The stream is closed
     // by releasing all references to the returned object.
@@ -99,8 +106,10 @@ class DeviceHalHidl : public DeviceHalInterface, public CoreConversionHelperHidl
     // List microphones
     status_t getMicrophones(std::vector<audio_microphone_characteristic_t>* microphones) override;
 
-    status_t addDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
-    status_t removeDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
+    status_t addDeviceEffect(
+            const struct audio_port_config *device, sp<EffectHalInterface> effect) override;
+    status_t removeDeviceEffect(
+            const struct audio_port_config *device, sp<EffectHalInterface> effect) override;
 
     status_t getMmapPolicyInfos(
             media::audio::common::AudioMMapPolicyType policyType __unused,
@@ -119,16 +128,26 @@ class DeviceHalHidl : public DeviceHalInterface, public CoreConversionHelperHidl
         return INVALID_OPERATION;
     }
 
-    int32_t supportsBluetoothVariableLatency(bool* supports __unused) override {
-        // TODO: Implement the HAL query when moving to AIDL HAL.
-        return INVALID_OPERATION;
-    }
+    status_t supportsBluetoothVariableLatency(bool* supports) override;
 
     status_t setConnectedState(const struct audio_port_v7 *port, bool connected) override;
+
+    status_t setSimulateDeviceConnections(bool enabled __unused) override {
+        // Only supported by AIDL HALs.
+        return INVALID_OPERATION;
+    }
 
     error::Result<audio_hw_sync_t> getHwAvSync() override;
 
     status_t dump(int fd, const Vector<String16>& args) override;
+
+    status_t getSoundDoseInterface(const std::string& module,
+                                   ::ndk::SpAIBinder* soundDoseBinder) override;
+
+    status_t prepareToDisconnectExternalDevice(const struct audio_port_v7* port) override;
+
+    status_t getAudioMixPort(const struct audio_port_v7* devicePort,
+                             struct audio_port_v7* mixPort) override;
 
   private:
     friend class DevicesFactoryHalHidl;
@@ -136,11 +155,17 @@ class DeviceHalHidl : public DeviceHalInterface, public CoreConversionHelperHidl
     // Null if it's not a primary device.
     sp<::android::hardware::audio::CPP_VERSION::IPrimaryDevice> mPrimaryDevice;
     bool supportsSetConnectedState7_1 = true;
+    class SoundDoseWrapper;
+    const std::unique_ptr<SoundDoseWrapper> mSoundDoseWrapper;
+    std::set<audio_port_handle_t> mDeviceDisconnectionNotified;
+    std::map<audio_io_handle_t, wp<StreamHalInterface>> mStreams;
 
     // Can not be constructed directly by clients.
     explicit DeviceHalHidl(const sp<::android::hardware::audio::CPP_VERSION::IDevice>& device);
     explicit DeviceHalHidl(
             const sp<::android::hardware::audio::CPP_VERSION::IPrimaryDevice>& device);
+
+    void cleanupStreams();
 
     // The destructor automatically closes the device.
     virtual ~DeviceHalHidl();

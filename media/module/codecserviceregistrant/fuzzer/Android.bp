@@ -34,6 +34,7 @@ cc_fuzz {
         "libmedia_headers",
     ],
     defaults: [
+        "libcodec2-aidl-defaults",
         "libcodec2-hidl-defaults",
     ],
     fuzz_config: {
@@ -41,5 +42,13 @@ cc_fuzz {
             "android-media-fuzzing-reports@google.com",
         ],
         componentid: 155276,
+        hotlists: [
+            "4593311",
+        ],
+        description: "The fuzzer targets the APIs of libmedia_codecserviceregistrant",
+        vector: "local_no_privileges_required",
+        service_privilege: "constrained",
+        users: "multi_user",
+        fuzzed_code_usage: "shipped",
     },
 }

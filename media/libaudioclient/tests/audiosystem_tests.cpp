@@ -14,16 +14,24 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "AudioSystemTest"
-
 #include <string.h>
 
+#include <set>
+
+#define LOG_TAG "AudioSystemTest"
+
 #include <gtest/gtest.h>
+#include <log/log.h>
+#include <media/AidlConversionCppNdk.h>
 #include <media/IAudioFlinger.h>
-#include <utils/Log.h>
 
 #include "audio_test_utils.h"
+#include "test_execution_tracer.h"
 
+using android::media::audio::common::AudioDeviceAddress;
+using android::media::audio::common::AudioDeviceDescription;
+using android::media::audio::common::AudioDeviceType;
+using android::media::audio::common::AudioPortExt;
 using namespace android;
 
 void anyPatchContainsInputDevice(audio_port_handle_t deviceId, bool& res) {
@@ -214,8 +222,11 @@ TEST_F(AudioSystemTest, StartAndStopAudioSource) {
         GTEST_SKIP() << "No ports returned by the audio system";
     }
 
+    bool sourceFound = false;
     for (const auto& port : ports) {
         if (port.role != AUDIO_PORT_ROLE_SOURCE || port.type != AUDIO_PORT_TYPE_DEVICE) continue;
+        if (port.ext.device.type != AUDIO_DEVICE_IN_FM_TUNER) continue;
+        sourceFound = true;
         sourcePortConfig = port.active_config;
 
         bool patchFound;
@@ -223,8 +234,9 @@ TEST_F(AudioSystemTest, StartAndStopAudioSource) {
         // start audio source.
         status_t ret =
                 AudioSystem::startAudioSource(&sourcePortConfig, &attributes, &sourcePortHandle);
-        EXPECT_EQ(OK, ret) << "AudioSystem::startAudioSource for source " << port.ext.device.address
-                           << " failed";
+        EXPECT_EQ(OK, ret) << "AudioSystem::startAudioSource for source "
+                           << audio_device_to_string(port.ext.device.type) << " failed";
+        if (ret != OK) continue;
 
         // verify that patch is established by the source port.
         ASSERT_NO_FATAL_FAILURE(anyPatchContainsInputDevice(port.id, patchFound));
@@ -233,12 +245,16 @@ TEST_F(AudioSystemTest, StartAndStopAudioSource) {
 
         if (sourcePortHandle != AUDIO_PORT_HANDLE_NONE) {
             ret = AudioSystem::stopAudioSource(sourcePortHandle);
-            EXPECT_EQ(OK, ret) << "AudioSystem::stopAudioSource for handle failed";
+            EXPECT_EQ(OK, ret) << "AudioSystem::stopAudioSource failed for handle "
+                               << sourcePortHandle;
         }
 
         // verify that no source port patch exists.
         ASSERT_NO_FATAL_FAILURE(anyPatchContainsInputDevice(port.id, patchFound));
         EXPECT_EQ(false, patchFound);
+    }
+    if (!sourceFound) {
+        GTEST_SKIP() << "No ports suitable for testing";
     }
 }
 
@@ -262,23 +278,30 @@ TEST_F(AudioSystemTest, CreateAndReleaseAudioPatch) {
         GTEST_SKIP() << "No output devices returned by the audio system";
     }
 
+    bool sourceFound = false, sinkFound = false;
     for (const auto& port : ports) {
         if (port.role == AUDIO_PORT_ROLE_SOURCE && port.type == AUDIO_PORT_TYPE_DEVICE) {
             sourcePort = port;
+            sourceFound = true;
         }
         if (port.role == AUDIO_PORT_ROLE_SINK && port.type == AUDIO_PORT_TYPE_DEVICE &&
             port.ext.device.type == AUDIO_DEVICE_OUT_SPEAKER) {
             sinkPort = port;
+            sinkFound = true;
         }
+        if (sourceFound && sinkFound) break;
+    }
+    if (!sourceFound || !sinkFound) {
+        GTEST_SKIP() << "No ports suitable for testing";
     }
 
     audioPatch.sources[0] = sourcePort.active_config;
     audioPatch.sinks[0] = sinkPort.active_config;
 
     status = AudioSystem::createAudioPatch(&audioPatch, &audioPatchHandle);
-    EXPECT_EQ(OK, status) << "AudioSystem::createAudiopatch failed between source "
-                          << sourcePort.ext.device.address << " and sink "
-                          << sinkPort.ext.device.address;
+    EXPECT_EQ(OK, status) << "AudioSystem::createAudioPatch failed between source "
+                          << audio_device_to_string(sourcePort.ext.device.type) << " and sink "
+                          << audio_device_to_string(sinkPort.ext.device.type);
 
     // verify that patch is established between source and the sink.
     ASSERT_NO_FATAL_FAILURE(anyPatchContainsInputDevice(sourcePort.id, patchFound));
@@ -287,8 +310,8 @@ TEST_F(AudioSystemTest, CreateAndReleaseAudioPatch) {
     EXPECT_NE(AUDIO_PORT_HANDLE_NONE, audioPatchHandle);
     status = AudioSystem::releaseAudioPatch(audioPatchHandle);
     EXPECT_EQ(OK, status) << "AudioSystem::releaseAudioPatch failed between source "
-                          << sourcePort.ext.device.address << " and sink "
-                          << sinkPort.ext.device.address;
+                          << audio_device_to_string(sourcePort.ext.device.type) << " and sink "
+                          << audio_device_to_string(sinkPort.ext.device.type);
 
     // verify that no patch is established between source and the sink after releaseAudioPatch.
     ASSERT_NO_FATAL_FAILURE(anyPatchContainsInputDevice(sourcePort.id, patchFound));
@@ -332,7 +355,7 @@ TEST_F(AudioSystemTest, GetDirectProfilesForAttributes) {
 
 bool isPublicStrategy(const AudioProductStrategy& strategy) {
     bool result = true;
-    for (auto& attribute : strategy.getAudioAttributes()) {
+    for (auto& attribute : strategy.getVolumeGroupAttributes()) {
         if (attribute.getAttributes() == AUDIO_ATTRIBUTES_INITIALIZER &&
             (uint32_t(attribute.getStreamType()) >= AUDIO_STREAM_PUBLIC_CNT)) {
             result = false;
@@ -371,7 +394,7 @@ TEST_F(AudioSystemTest, DevicesForRoleAndStrategy) {
     for (const auto& strategy : strategies) {
         if (!isPublicStrategy(strategy)) continue;
 
-        for (const auto& att : strategy.getAudioAttributes()) {
+        for (const auto& att : strategy.getVolumeGroupAttributes()) {
             if (strategy.attributesMatches(att.getAttributes(), attributes)) {
                 hasStrategyForMedia = true;
                 mediaStrategy = strategy;
@@ -405,8 +428,8 @@ TEST_F(AudioSystemTest, DevicesForRoleAndStrategy) {
         EXPECT_EQ(OK, AudioSystem::getDevicesForRoleAndStrategy(mediaStrategy.getId(),
                                                                 DEVICE_ROLE_PREFERRED, devices));
         EXPECT_EQ(devices, outputDevices);
-        EXPECT_EQ(OK, AudioSystem::removeDevicesRoleForStrategy(mediaStrategy.getId(),
-                                                                DEVICE_ROLE_PREFERRED));
+        EXPECT_EQ(OK, AudioSystem::clearDevicesRoleForStrategy(mediaStrategy.getId(),
+                                                               DEVICE_ROLE_PREFERRED));
         EXPECT_EQ(NAME_NOT_FOUND, AudioSystem::getDevicesForRoleAndStrategy(
                                           mediaStrategy.getId(), DEVICE_ROLE_PREFERRED, devices));
     }
@@ -570,4 +593,122 @@ TEST_F(AudioSystemTest, UserIdDeviceAffinities) {
     AudioDeviceTypeAddrVector outputDevices = {outputDevice};
     EXPECT_EQ(NO_ERROR, AudioSystem::setUserIdDeviceAffinities(userId, outputDevices));
     EXPECT_EQ(NO_ERROR, AudioSystem::removeUserIdDeviceAffinities(userId));
+}
+
+namespace {
+
+class WithSimulatedDeviceConnections {
+  public:
+    WithSimulatedDeviceConnections()
+        : mIsSupported(AudioSystem::setSimulateDeviceConnections(true) == OK) {}
+    ~WithSimulatedDeviceConnections() {
+        if (mIsSupported) {
+            if (status_t status = AudioSystem::setSimulateDeviceConnections(false); status != OK) {
+                ALOGE("Error restoring device connections simulation state: %d", status);
+            }
+        }
+    }
+    bool isSupported() const { return mIsSupported; }
+
+  private:
+    const bool mIsSupported;
+};
+
+android::media::audio::common::AudioPort GenerateUniqueDeviceAddress(
+        const android::media::audio::common::AudioPort& port) {
+    // Point-to-point connections do not use addresses.
+    static const std::set<std::string> kPointToPointConnections = {
+            AudioDeviceDescription::CONNECTION_ANALOG(), AudioDeviceDescription::CONNECTION_HDMI(),
+            AudioDeviceDescription::CONNECTION_HDMI_ARC(),
+            AudioDeviceDescription::CONNECTION_HDMI_EARC(),
+            AudioDeviceDescription::CONNECTION_SPDIF()};
+    static int nextId = 0;
+    using Tag = AudioDeviceAddress::Tag;
+    const auto& deviceDescription = port.ext.get<AudioPortExt::Tag::device>().device.type;
+    AudioDeviceAddress address;
+    if (kPointToPointConnections.count(deviceDescription.connection) == 0) {
+        switch (suggestDeviceAddressTag(deviceDescription)) {
+            case Tag::id:
+                address = AudioDeviceAddress::make<Tag::id>(std::to_string(++nextId));
+                break;
+            case Tag::mac:
+                address = AudioDeviceAddress::make<Tag::mac>(
+                        std::vector<uint8_t>{1, 2, 3, 4, 5, static_cast<uint8_t>(++nextId & 0xff)});
+                break;
+            case Tag::ipv4:
+                address = AudioDeviceAddress::make<Tag::ipv4>(
+                        std::vector<uint8_t>{192, 168, 0, static_cast<uint8_t>(++nextId & 0xff)});
+                break;
+            case Tag::ipv6:
+                address = AudioDeviceAddress::make<Tag::ipv6>(std::vector<int32_t>{
+                        0xfc00, 0x0123, 0x4567, 0x89ab, 0xcdef, 0, 0, ++nextId & 0xffff});
+                break;
+            case Tag::alsa:
+                address = AudioDeviceAddress::make<Tag::alsa>(std::vector<int32_t>{1, ++nextId});
+                break;
+        }
+    }
+    android::media::audio::common::AudioPort result = port;
+    result.ext.get<AudioPortExt::Tag::device>().device.address = std::move(address);
+    return result;
+}
+
+}  // namespace
+
+TEST_F(AudioSystemTest, SetDeviceConnectedState) {
+    WithSimulatedDeviceConnections connSim;
+    if (!connSim.isSupported()) {
+        GTEST_SKIP() << "Simulation of external device connections not supported";
+    }
+    std::vector<media::AudioPortFw> ports;
+    ASSERT_EQ(OK, AudioSystem::listDeclaredDevicePorts(media::AudioPortRole::NONE, &ports));
+    if (ports.empty()) {
+        GTEST_SKIP() << "No ports returned by the audio system";
+    }
+    const std::set<AudioDeviceType> typesToUse{
+            AudioDeviceType::IN_DEVICE,       AudioDeviceType::IN_HEADSET,
+            AudioDeviceType::IN_MICROPHONE,   AudioDeviceType::OUT_DEVICE,
+            AudioDeviceType::OUT_HEADPHONE,   AudioDeviceType::OUT_HEADSET,
+            AudioDeviceType::OUT_HEARING_AID, AudioDeviceType::OUT_SPEAKER};
+    std::vector<media::AudioPortFw> externalDevicePorts;
+    for (const auto& port : ports) {
+        if (const auto& device = port.hal.ext.get<AudioPortExt::device>().device;
+            !device.type.connection.empty() && typesToUse.count(device.type.type)) {
+            externalDevicePorts.push_back(port);
+        }
+    }
+    if (externalDevicePorts.empty()) {
+        GTEST_SKIP() << "No ports for considered non-attached devices";
+    }
+    for (auto& port : externalDevicePorts) {
+        android::media::audio::common::AudioPort aidlPort = GenerateUniqueDeviceAddress(port.hal);
+        SCOPED_TRACE(aidlPort.toString());
+        audio_devices_t type;
+        char address[AUDIO_DEVICE_MAX_ADDRESS_LEN];
+        status_t status = aidl2legacy_AudioDevice_audio_device(
+                aidlPort.ext.get<AudioPortExt::Tag::device>().device, &type, address);
+        ASSERT_EQ(OK, status);
+        audio_policy_dev_state_t deviceState = AudioSystem::getDeviceConnectionState(type, address);
+        EXPECT_EQ(AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE, deviceState);
+        if (deviceState != AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE) continue;
+        // !!! Instead of the default format, use each format from 'ext.encodedFormats'
+        // !!! if they are not empty
+        status = AudioSystem::setDeviceConnectionState(AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+                                                       aidlPort, AUDIO_FORMAT_DEFAULT);
+        EXPECT_EQ(OK, status);
+        if (status != OK) continue;
+        deviceState = AudioSystem::getDeviceConnectionState(type, address);
+        EXPECT_EQ(AUDIO_POLICY_DEVICE_STATE_AVAILABLE, deviceState);
+        status = AudioSystem::setDeviceConnectionState(AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
+                                                       aidlPort, AUDIO_FORMAT_DEFAULT);
+        EXPECT_EQ(OK, status);
+        deviceState = AudioSystem::getDeviceConnectionState(type, address);
+        EXPECT_EQ(AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE, deviceState);
+    }
+}
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
+    return RUN_ALL_TESTS();
 }

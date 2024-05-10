@@ -29,14 +29,14 @@ cc_library_headers {
     static_libs: [
         "audioflinger-aidl-cpp",
         "audiopolicy-aidl-cpp",
-        "spatializer-aidl-cpp",
         "av-types-aidl-cpp",
+        "spatializer-aidl-cpp",
     ],
     export_static_lib_headers: [
         "audioflinger-aidl-cpp",
         "audiopolicy-aidl-cpp",
-        "spatializer-aidl-cpp",
         "av-types-aidl-cpp",
+        "spatializer-aidl-cpp",
     ],
     target: {
         darwin: {
@@ -48,11 +48,11 @@ cc_library_headers {
 cc_library {
     name: "libaudiopolicy",
     srcs: [
-        "AudioAttributes.cpp",
         "AudioPolicy.cpp",
         "AudioProductStrategy.cpp",
         "AudioVolumeGroup.cpp",
-        "PolicyAidlConversion.cpp"
+        "PolicyAidlConversion.cpp",
+        "VolumeGroupAttributes.cpp",
     ],
     defaults: [
         "latest_android_media_audio_common_types_cpp_export_shared",
@@ -63,8 +63,8 @@ cc_library {
         "audiopolicy-aidl-cpp",
         "audiopolicy-types-aidl-cpp",
         "capture_state_listener-aidl-cpp",
-        "libaudiofoundation",
         "libaudioclient_aidl_conversion",
+        "libaudiofoundation",
         "libaudioutils",
         "libbinder",
         "libcutils",
@@ -72,8 +72,8 @@ cc_library {
         "libutils",
     ],
     cflags: [
-        "-Werror",
         "-Wall",
+        "-Werror",
     ],
     include_dirs: ["system/media/audio_utils/include"],
     export_include_dirs: ["include"],
@@ -83,8 +83,8 @@ cc_library {
         "audiopolicy-aidl-cpp",
         "audiopolicy-types-aidl-cpp",
         "capture_state_listener-aidl-cpp",
-        "libaudiofoundation",
         "libaudioclient_aidl_conversion",
+        "libaudiofoundation",
     ],
     header_libs: ["libaudioclient_headers"],
 }
@@ -112,9 +112,9 @@ cc_library {
         "AudioTrack.cpp",
         "AudioTrackShared.cpp",
         "IAudioFlinger.cpp",
-        "ToneGenerator.cpp",
         "PlayerBase.cpp",
         "RecordingActivityTracker.cpp",
+        "ToneGenerator.cpp",
         "TrackPlayerBase.cpp",
     ],
     defaults: [
@@ -124,16 +124,16 @@ cc_library {
         "audioclient-types-aidl-cpp",
         "audioflinger-aidl-cpp",
         "audiopolicy-aidl-cpp",
-        "spatializer-aidl-cpp",
         "audiopolicy-types-aidl-cpp",
         "av-types-aidl-cpp",
         "capture_state_listener-aidl-cpp",
+        "framework-permission-aidl-cpp",
         "libaudio_aidl_conversion_common_cpp",
         "libaudioclient_aidl_conversion",
         "libaudiofoundation",
-        "libaudioutils",
-        "libaudiopolicy",
         "libaudiomanager",
+        "libaudiopolicy",
+        "libaudioutils",
         "libbinder",
         "libcutils",
         "libdl",
@@ -145,24 +145,24 @@ cc_library {
         "libprocessgroup",
         "libshmemcompat",
         "libutils",
-        "framework-permission-aidl-cpp",
         "packagemanager_aidl-cpp",
+        "spatializer-aidl-cpp",
     ],
     export_shared_lib_headers: [
         "audioflinger-aidl-cpp",
         "audiopolicy-aidl-cpp",
-        "spatializer-aidl-cpp",
         "framework-permission-aidl-cpp",
         "libbinder",
         "libmediametrics",
+        "spatializer-aidl-cpp",
     ],
 
     include_dirs: [
         "frameworks/av/media/libnbaio/include_mono/",
     ],
     local_include_dirs: [
-        "include/media",
         "aidl",
+        "include/media",
     ],
     header_libs: [
         "libaudioclient_headers",
@@ -185,11 +185,12 @@ cc_library {
         "-Wall",
         "-Werror",
         "-Wno-error=deprecated-declarations",
+        "-Wthread-safety",
     ],
     sanitize: {
         misc_undefined: [
-            "unsigned-integer-overflow",
             "signed-integer-overflow",
+            "unsigned-integer-overflow",
         ],
     },
 }
@@ -217,6 +218,7 @@ cc_library {
     ],
     defaults: [
         "audio_aidl_conversion_common_default",
+        "audio_aidl_conversion_common_default_cpp",
         "latest_android_media_audio_common_types_cpp_export_shared",
     ],
 }
@@ -225,8 +227,8 @@ cc_library {
 filegroup {
     name: "libaudioclient_aidl",
     srcs: [
-        "aidl/android/media/IPlayer.aidl",
         "aidl/android/media/AudioHalVersion.aidl",
+        "aidl/android/media/IPlayer.aidl",
     ],
     path: "aidl",
 }
@@ -255,8 +257,10 @@ aidl_interface {
         "aidl/android/media/IEffect.aidl",
         "aidl/android/media/IEffectClient.aidl",
     ],
+    defaults: [
+        "latest_android_media_audio_common_types_import_interface",
+    ],
     imports: [
-        "android.media.audio.common.types-V2",
         "shared-file-region-aidl",
     ],
     backend: {
@@ -281,33 +285,38 @@ aidl_interface {
     double_loadable: true,
     local_include_dir: "aidl",
     srcs: [
-        "aidl/android/media/AudioAttributesInternal.aidl",
         "aidl/android/media/AudioClient.aidl",
         "aidl/android/media/AudioDirectMode.aidl",
-        "aidl/android/media/AudioFlag.aidl",
         "aidl/android/media/AudioGainSys.aidl",
         "aidl/android/media/AudioHalVersion.aidl",
+        "aidl/android/media/AudioHwModule.aidl",
         "aidl/android/media/AudioIoConfigEvent.aidl",
         "aidl/android/media/AudioIoDescriptor.aidl",
         "aidl/android/media/AudioPatchFw.aidl",
-        "aidl/android/media/AudioPortFw.aidl",
-        "aidl/android/media/AudioPortSys.aidl",
+        "aidl/android/media/AudioPolicyConfig.aidl",
         "aidl/android/media/AudioPortConfigFw.aidl",
         "aidl/android/media/AudioPortConfigSys.aidl",
         "aidl/android/media/AudioPortDeviceExtSys.aidl",
         "aidl/android/media/AudioPortExtSys.aidl",
+        "aidl/android/media/AudioPortFw.aidl",
         "aidl/android/media/AudioPortMixExtSys.aidl",
         "aidl/android/media/AudioPortRole.aidl",
+        "aidl/android/media/AudioPortSys.aidl",
         "aidl/android/media/AudioPortType.aidl",
         "aidl/android/media/AudioProfileSys.aidl",
+        "aidl/android/media/AudioRoute.aidl",
         "aidl/android/media/AudioTimestampInternal.aidl",
         "aidl/android/media/AudioUniqueIdUse.aidl",
         "aidl/android/media/AudioVibratorInfo.aidl",
+        "aidl/android/media/DeviceConnectedState.aidl",
         "aidl/android/media/EffectDescriptor.aidl",
+        "aidl/android/media/SurroundSoundConfig.aidl",
         "aidl/android/media/TrackSecondaryOutputInfo.aidl",
     ],
+    defaults: [
+        "latest_android_media_audio_common_types_import_interface",
+    ],
     imports: [
-        "android.media.audio.common.types-V2",
         "framework-permission-aidl",
     ],
     backend: {
@@ -323,6 +332,7 @@ aidl_interface {
         },
     },
 }
+
 aidl_interface {
     name: "audiopolicy-types-aidl",
     unstable: true,
@@ -338,6 +348,9 @@ aidl_interface {
         "aidl/android/media/AudioMixMatchCriterionValue.aidl",
         "aidl/android/media/AudioMixRouteFlag.aidl",
         "aidl/android/media/AudioMixType.aidl",
+        "aidl/android/media/AudioMixUpdate.aidl",
+        "aidl/android/media/AudioMixerAttributesInternal.aidl",
+        "aidl/android/media/AudioMixerBehavior.aidl",
         "aidl/android/media/AudioOffloadMode.aidl",
         "aidl/android/media/AudioPolicyDeviceState.aidl",
         "aidl/android/media/AudioPolicyForceUse.aidl",
@@ -346,12 +359,11 @@ aidl_interface {
         "aidl/android/media/AudioVolumeGroup.aidl",
         "aidl/android/media/DeviceRole.aidl",
         "aidl/android/media/SoundTriggerSession.aidl",
-        "aidl/android/media/SpatializationLevel.aidl",
-        "aidl/android/media/SpatializationMode.aidl",
-        "aidl/android/media/SpatializerHeadTrackingMode.aidl",
+    ],
+    defaults: [
+        "latest_android_media_audio_common_types_import_interface",
     ],
     imports: [
-        "android.media.audio.common.types-V2",
         "audioclient-types-aidl",
     ],
     backend: {
@@ -387,19 +399,25 @@ aidl_interface {
         "aidl/android/media/OpenOutputResponse.aidl",
         "aidl/android/media/RenderPosition.aidl",
 
-        "aidl/android/media/IAudioFlingerService.aidl",
         "aidl/android/media/IAudioFlingerClient.aidl",
+        "aidl/android/media/IAudioFlingerService.aidl",
         "aidl/android/media/IAudioRecord.aidl",
         "aidl/android/media/IAudioTrack.aidl",
         "aidl/android/media/IAudioTrackCallback.aidl",
+
+        "aidl/android/media/ISoundDose.aidl",
+        "aidl/android/media/ISoundDoseCallback.aidl",
+        "aidl/android/media/SoundDoseRecord.aidl",
+    ],
+    defaults: [
+        "latest_android_media_audio_common_types_import_interface",
     ],
     imports: [
-        "android.media.audio.common.types-V2",
         "audioclient-types-aidl",
         "av-types-aidl",
         "effect-aidl",
-        "shared-file-region-aidl",
         "framework-permission-aidl",
+        "shared-file-region-aidl",
     ],
     double_loadable: true,
     backend: {
@@ -426,12 +444,14 @@ aidl_interface {
         "aidl/android/media/GetInputForAttrResponse.aidl",
         "aidl/android/media/GetOutputForAttrResponse.aidl",
         "aidl/android/media/GetSpatializerResponse.aidl",
-        "aidl/android/media/RecordClientInfo.aidl",
         "aidl/android/media/IAudioPolicyService.aidl",
         "aidl/android/media/IAudioPolicyServiceClient.aidl",
+        "aidl/android/media/RecordClientInfo.aidl",
+    ],
+    defaults: [
+        "latest_android_media_audio_common_types_import_interface",
     ],
     imports: [
-        "android.media.audio.common.types-V2",
         "audioclient-types-aidl",
         "audiopolicy-types-aidl",
         "capture_state_listener-aidl",
@@ -465,6 +485,9 @@ aidl_interface {
         "aidl/android/media/ISpatializer.aidl",
         "aidl/android/media/ISpatializerHeadTrackingCallback.aidl",
     ],
+    defaults: [
+        "latest_android_media_audio_common_types_import_interface",
+    ],
     imports: [
         "audiopolicy-types-aidl",
     ],
@@ -478,6 +501,24 @@ aidl_interface {
                 "com.android.media",
             ],
         },
+        java: {
+            sdk_version: "module_current",
+        },
+    },
+}
+
+aidl_interface {
+    name: "sounddose-aidl",
+    unstable: true,
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/android/media/ISoundDose.aidl",
+        "aidl/android/media/ISoundDoseCallback.aidl",
+        "aidl/android/media/SoundDoseRecord.aidl",
+    ],
+
+    double_loadable: true,
+    backend: {
         java: {
             sdk_version: "module_current",
         },

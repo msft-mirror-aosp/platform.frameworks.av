@@ -16,7 +16,6 @@
 
 #pragma once
 
-#define __STDC_LIMIT_MACROS
 #include <inttypes.h>
 
 #include <sys/types.h>
@@ -102,9 +101,13 @@ public:
     void setVolume(float volumeDb) { mCurVolumeDb = volumeDb; }
     float getVolume() const { return mCurVolumeDb; }
 
+    void setIsVoice(bool isVoice) { mIsVoice = isVoice; }
+    bool isVoice() const { return mIsVoice; }
+
 private:
     int mMuteCount = 0; /**< mute request counter */
     float mCurVolumeDb = NAN; /**< current volume in dB. */
+    bool mIsVoice = false; /** true if this volume source is used for voice call volume */
 };
 /**
  * Note: volume activities shall be indexed by CurvesId if we want to allow multiple
@@ -162,7 +165,8 @@ public:
                            VolumeSource volumeSource, const StreamTypeVector &streams,
                            const DeviceTypeSet& deviceTypes,
                            uint32_t delayMs,
-                           bool force);
+                           bool force,
+                           bool isVoiceVolSrc = false);
 
     /**
      * @brief setStopTime set the stop time due to the client stoppage or a re routing of this
@@ -222,17 +226,25 @@ public:
     {
         return mVolumeActivities[vs].decMuteCount();
     }
-    void setCurVolume(VolumeSource vs, float volumeDb)
+    void setCurVolume(VolumeSource vs, float volumeDb, bool isVoiceVolSrc)
     {
         // Even if not activity for this source registered, need to create anyway
         mVolumeActivities[vs].setVolume(volumeDb);
+        mVolumeActivities[vs].setIsVoice(isVoiceVolSrc);
     }
     float getCurVolume(VolumeSource vs) const
     {
         return mVolumeActivities.find(vs) != std::end(mVolumeActivities) ?
                     mVolumeActivities.at(vs).getVolume() : NAN;
     }
-
+    VolumeSource getVoiceSource() {
+        for (const auto &iter : mVolumeActivities) {
+            if (iter.second.isVoice()) {
+                return iter.first;
+            }
+        }
+        return VOLUME_SOURCE_NONE;
+    }
     bool isStrategyActive(product_strategy_t ps, uint32_t inPastMs = 0, nsecs_t sysTime = 0) const
     {
         return mRoutingActivities.find(ps) != std::end(mRoutingActivities)?
@@ -301,6 +313,10 @@ public:
         return mActiveClients;
     }
 
+    // Returns 0 if not all active clients have the same exclusive preferred device
+    // or the number of active clients with the same exclusive preferred device
+    size_t sameExclusivePreferredDevicesCount() const;
+
     bool useHwGain() const
     {
         return !devices().isEmpty() ? devices().itemAt(0)->hasGainController() : false;
@@ -311,6 +327,13 @@ public:
     wp<AudioPolicyMix> mPolicyMix;  // non NULL when used by a dynamic policy
 
     virtual uint32_t getRecommendedMuteDurationMs() const { return 0; }
+    virtual std::string info() const {
+        std::string result;
+        result.append("[portId:" );
+        result.append(android::internal::ToString(getId()));
+        result.append("]");
+        return result;
+    }
 
 protected:
     const sp<PolicyAudioPort> mPolicyAudioPort;
@@ -377,7 +400,8 @@ public:
                            VolumeSource volumeSource, const StreamTypeVector &streams,
                            const DeviceTypeSet& device,
                            uint32_t delayMs,
-                           bool force);
+                           bool force,
+                           bool isVoiceVolSrc = false);
 
     virtual void toAudioPortConfig(struct audio_port_config *dstConfig,
                            const struct audio_port_config *srcConfig = NULL) const;
@@ -420,6 +444,15 @@ public:
     bool supportsAllDevices(const DeviceVector &devices) const;
 
     /**
+     * @brief supportsAtLeastOne checks if any device in devices is currently supported
+     * @param devices to be checked against
+     * @return true if the device is weakly supported by type (e.g. for non bus / rsubmix devices),
+     *         true if the device is supported (both type and address) for bus / remote submix
+     *         false otherwise
+     */
+    bool supportsAtLeastOne(const DeviceVector &devices) const;
+
+    /**
      * @brief supportsDevicesForPlayback
      * @param devices to be checked against
      * @return true if the devices is a supported combo for playback
@@ -440,6 +473,12 @@ public:
 
     void setTracksInvalidatedStatusByStrategy(product_strategy_t strategy);
 
+    bool isConfigurationMatched(const audio_config_base_t& config, audio_output_flags_t flags);
+
+    PortHandleVector getClientsForStream(audio_stream_type_t streamType) const;
+
+    virtual std::string info() const override;
+
     const sp<IOProfile> mProfile;          // I/O profile this output derives from
     audio_io_handle_t mIoHandle;           // output handle
     uint32_t mLatency;                  //
@@ -450,6 +489,7 @@ public:
     audio_session_t mDirectClientSession; // session id of the direct output client
     bool mPendingReopenToQueryProfiles = false;
     audio_channel_mask_t mMixerChannelMask = AUDIO_CHANNEL_NONE;
+    bool mUsePreferredMixerAttributes = false;
 };
 
 // Audio output driven by an input device directly.
@@ -466,7 +506,8 @@ public:
                            VolumeSource volumeSource, const StreamTypeVector &streams,
                            const DeviceTypeSet& deviceTypes,
                            uint32_t delayMs,
-                           bool force);
+                           bool force,
+                           bool isVoiceVolSrc = false);
 
     virtual void toAudioPortConfig(struct audio_port_config *dstConfig,
                            const struct audio_port_config *srcConfig = NULL) const;

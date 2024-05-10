@@ -18,17 +18,30 @@
 #define LOG_TAG "C2SoftGav1Dec"
 #include "C2SoftGav1Dec.h"
 
+#include <android-base/properties.h>
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
 #include <Codec2BufferUtils.h>
 #include <Codec2CommonUtils.h>
 #include <Codec2Mapper.h>
 #include <SimpleC2Interface.h>
+#include <libyuv.h>
 #include <log/log.h>
 #include <media/stagefright/foundation/AUtils.h>
 #include <media/stagefright/foundation/MediaDefs.h>
 
+// libyuv version required for I410ToAB30Matrix and I210ToAB30Matrix.
+#if LIBYUV_VERSION >= 1780
+#include <algorithm>
+#define HAVE_LIBYUV_I410_I210_TO_AB30 1
+#else
+#define HAVE_LIBYUV_I410_I210_TO_AB30 0
+#endif
+
 namespace android {
+
+// Property used to control the number of threads used in the gav1 decoder.
+constexpr char kNumThreadsProperty[] = "debug.c2.gav1.numthreads";
 
 // codecname set and passed in as a compile flag from Android.bp
 constexpr char COMPONENT_NAME[] = CODECNAME;
@@ -497,6 +510,10 @@ bool C2SoftGav1Dec::initDecoder() {
 
   libgav1::DecoderSettings settings = {};
   settings.threads = GetCPUCoreCount();
+  int32_t numThreads = android::base::GetIntProperty(kNumThreadsProperty, 0);
+  if (numThreads > 0 && numThreads < settings.threads) {
+    settings.threads = numThreads;
+  }
 
   ALOGV("Using libgav1 AV1 software decoder.");
   Libgav1StatusCode status = mCodecCtx->Init(&settings);
@@ -725,6 +742,37 @@ void C2SoftGav1Dec::getVuiParams(const libgav1::DecoderBuffer *buffer) {
     }
 }
 
+void C2SoftGav1Dec::setError(const std::unique_ptr<C2Work> &work, c2_status_t error) {
+    mSignalledError = true;
+    work->result = error;
+    work->workletsProcessed = 1u;
+}
+
+bool C2SoftGav1Dec::allocTmpFrameBuffer(size_t size) {
+    if (size > mTmpFrameBufferSize) {
+        mTmpFrameBuffer = std::make_unique<uint16_t[]>(size);
+        if (mTmpFrameBuffer == nullptr) {
+            mTmpFrameBufferSize = 0;
+            return false;
+        }
+        mTmpFrameBufferSize = size;
+    }
+    return true;
+}
+
+bool C2SoftGav1Dec::fillMonochromeRow(int value) {
+    const size_t tmpSize = mWidth;
+    const bool needFill = tmpSize > mTmpFrameBufferSize;
+    if (!allocTmpFrameBuffer(tmpSize)) {
+        ALOGE("Error allocating temp conversion buffer (%zu bytes)", tmpSize);
+        return false;
+    }
+    if (needFill) {
+        std::fill_n(mTmpFrameBuffer.get(), tmpSize, value);
+    }
+    return true;
+}
+
 bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
                                  const std::unique_ptr<C2Work> &work) {
   if (!(work && pool)) return false;
@@ -745,6 +793,16 @@ bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
   if (!buffer) {
     return false;
   }
+
+#if LIBYUV_VERSION < 1871
+  if (buffer->bitdepth > 10) {
+    ALOGE("bitdepth %d is not supported", buffer->bitdepth);
+    mSignalledError = true;
+    work->workletsProcessed = 1u;
+    work->result = C2_CORRUPTED;
+    return false;
+  }
+#endif
 
   const int width = buffer->displayed_width[0];
   const int height = buffer->displayed_height[0];
@@ -771,21 +829,25 @@ bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
   getHDRStaticParams(buffer, work);
   getHDR10PlusInfoData(buffer, work);
 
-  if (!(buffer->image_format == libgav1::kImageFormatYuv420 ||
+#if LIBYUV_VERSION < 1779
+  if (buffer->bitdepth == 10 &&
+      !(buffer->image_format == libgav1::kImageFormatYuv420 ||
         buffer->image_format == libgav1::kImageFormatMonochrome400)) {
-    ALOGE("image_format %d not supported", buffer->image_format);
+    ALOGE("image_format %d not supported for 10bit", buffer->image_format);
     mSignalledError = true;
     work->workletsProcessed = 1u;
     work->result = C2_CORRUPTED;
     return false;
   }
+#endif
+
   const bool isMonochrome =
       buffer->image_format == libgav1::kImageFormatMonochrome400;
 
   std::shared_ptr<C2GraphicBlock> block;
   uint32_t format = HAL_PIXEL_FORMAT_YV12;
   std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;
-  if (buffer->bitdepth == 10 && mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
+  if (buffer->bitdepth >= 10 && mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
     IntfImpl::Lock lock = mIntf->lock();
     codedColorAspects = mIntf->getColorAspects_l();
     bool allowRGBA1010102 = false;
@@ -795,14 +857,29 @@ bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
       allowRGBA1010102 = true;
     }
     format = getHalPixelFormatForBitDepth10(allowRGBA1010102);
+#if !HAVE_LIBYUV_I410_I210_TO_AB30
     if ((format == HAL_PIXEL_FORMAT_RGBA_1010102) &&
-        (buffer->image_format != libgav1::kImageFormatYuv420)) {
-        ALOGE("Only YUV420 output is supported when targeting RGBA_1010102");
+        (buffer->image_format != libgav1::kImageFormatYuv420) &&
+        (buffer->bitdepth == 10)) {
+        ALOGE("Only YUV420 output is supported for 10-bit when targeting RGBA_1010102");
       mSignalledError = true;
       work->result = C2_OMITTED;
       work->workletsProcessed = 1u;
       return false;
     }
+#endif
+  }
+  if (buffer->bitdepth == 12 && format == HAL_PIXEL_FORMAT_RGBA_1010102 &&
+      (buffer->image_format == libgav1::kImageFormatYuv422 ||
+       buffer->image_format == libgav1::kImageFormatYuv444)) {
+      // There are no 12-bit color conversion functions from YUV422/YUV444 to
+      // RGBA_1010102. Use 8-bit YV12 in this case.
+      format = HAL_PIXEL_FORMAT_YV12;
+  }
+  if (buffer->bitdepth == 12 && format == HAL_PIXEL_FORMAT_YCBCR_P010) {
+      // There are no 12-bit color conversion functions to P010. Use 8-bit YV12
+      // in this case.
+      format = HAL_PIXEL_FORMAT_YV12;
   }
 
   if (mHalPixelFormat != format) {
@@ -851,40 +928,182 @@ bool C2SoftGav1Dec::outputBuffer(const std::shared_ptr<C2BlockPool> &pool,
   uint8_t *dstY = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_Y]);
   uint8_t *dstU = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_U]);
   uint8_t *dstV = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_V]);
-  size_t srcYStride = buffer->stride[0];
-  size_t srcUStride = buffer->stride[1];
-  size_t srcVStride = buffer->stride[2];
 
   C2PlanarLayout layout = wView.layout();
   size_t dstYStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
-  size_t dstUVStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
+  size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
+  size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
 
-  if (buffer->bitdepth == 10) {
+  if (buffer->bitdepth == 12) {
+#if LIBYUV_VERSION >= 1871
+      const uint16_t *srcY = (const uint16_t *)buffer->plane[0];
+      const uint16_t *srcU = (const uint16_t *)buffer->plane[1];
+      const uint16_t *srcV = (const uint16_t *)buffer->plane[2];
+      size_t srcYStride = buffer->stride[0] / 2;
+      size_t srcUStride = buffer->stride[1] / 2;
+      size_t srcVStride = buffer->stride[2] / 2;
+      if (isMonochrome) {
+          if (!fillMonochromeRow(2048)) {
+              setError(work, C2_NO_MEMORY);
+              return false;
+          }
+          srcU = srcV = mTmpFrameBuffer.get();
+          srcUStride = srcVStride = 0;
+      }
+      if (format == HAL_PIXEL_FORMAT_RGBA_1010102) {
+          libyuv::I012ToAB30Matrix(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                                   dstY, dstYStride, &libyuv::kYuvV2020Constants,
+                                   mWidth, mHeight);
+      } else if (isMonochrome || buffer->image_format == libgav1::kImageFormatYuv420) {
+          libyuv::I012ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                             dstY, dstYStride, dstU, dstUStride, dstV, dstVStride,
+                             mWidth, mHeight);
+      } else if (buffer->image_format == libgav1::kImageFormatYuv444) {
+          libyuv::I412ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                             dstY, dstYStride, dstU, dstUStride, dstV, dstVStride,
+                             mWidth, mHeight);
+      } else {
+          libyuv::I212ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                             dstY, dstYStride, dstU, dstUStride, dstV, dstVStride,
+                             mWidth, mHeight);
+      }
+#endif  // LIBYUV_VERSION >= 1871
+  } else if (buffer->bitdepth == 10) {
     const uint16_t *srcY = (const uint16_t *)buffer->plane[0];
     const uint16_t *srcU = (const uint16_t *)buffer->plane[1];
     const uint16_t *srcV = (const uint16_t *)buffer->plane[2];
+    size_t srcYStride = buffer->stride[0] / 2;
+    size_t srcUStride = buffer->stride[1] / 2;
+    size_t srcVStride = buffer->stride[2] / 2;
 
     if (format == HAL_PIXEL_FORMAT_RGBA_1010102) {
-        convertYUV420Planar16ToY410OrRGBA1010102(
-                (uint32_t *)dstY, srcY, srcU, srcV, srcYStride / 2,
-                srcUStride / 2, srcVStride / 2,
-                dstYStride / sizeof(uint32_t), mWidth, mHeight,
-                std::static_pointer_cast<const C2ColorAspectsStruct>(codedColorAspects));
+        bool processed = false;
+#if HAVE_LIBYUV_I410_I210_TO_AB30
+        if (buffer->image_format == libgav1::kImageFormatYuv444) {
+            libyuv::I410ToAB30Matrix(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                                     dstY, dstYStride, &libyuv::kYuvV2020Constants,
+                                     mWidth, mHeight);
+            processed = true;
+        } else if (buffer->image_format == libgav1::kImageFormatYuv422) {
+            libyuv::I210ToAB30Matrix(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                                     dstY, dstYStride, &libyuv::kYuvV2020Constants,
+                                     mWidth, mHeight);
+            processed = true;
+        }
+#endif  // HAVE_LIBYUV_I410_I210_TO_AB30
+        if (!processed) {
+            if (isMonochrome) {
+                if (!fillMonochromeRow(512)) {
+                    setError(work, C2_NO_MEMORY);
+                    return false;
+                }
+                srcU = srcV = mTmpFrameBuffer.get();
+                srcUStride = srcVStride = 0;
+            }
+            convertYUV420Planar16ToY410OrRGBA1010102(
+                    (uint32_t *)dstY, srcY, srcU, srcV, srcYStride,
+                    srcUStride, srcVStride,
+                    dstYStride / sizeof(uint32_t), mWidth, mHeight,
+                    std::static_pointer_cast<const C2ColorAspectsStruct>(codedColorAspects));
+        }
     } else if (format == HAL_PIXEL_FORMAT_YCBCR_P010) {
+        dstYStride /= 2;
+        dstUStride /= 2;
+        dstVStride /= 2;
+#if LIBYUV_VERSION >= 1779
+        if (buffer->image_format == libgav1::kImageFormatYuv444 ||
+            buffer->image_format == libgav1::kImageFormatYuv422) {
+            // TODO(https://crbug.com/libyuv/952): replace this block with libyuv::I410ToP010 and
+            // libyuv::I210ToP010 when they are available.
+            // Note it may be safe to alias dstY in I010ToP010, but the libyuv API doesn't make any
+            // guarantees.
+            const size_t tmpSize = dstYStride * mHeight + dstUStride * align(mHeight, 2);
+            if (!allocTmpFrameBuffer(tmpSize)) {
+                ALOGE("Error allocating temp conversion buffer (%zu bytes)", tmpSize);
+                setError(work, C2_NO_MEMORY);
+                return false;
+            }
+            uint16_t *const tmpY = mTmpFrameBuffer.get();
+            uint16_t *const tmpU = tmpY + dstYStride * mHeight;
+            uint16_t *const tmpV = tmpU + dstUStride * align(mHeight, 2) / 2;
+            if (buffer->image_format == libgav1::kImageFormatYuv444) {
+                libyuv::I410ToI010(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                                   tmpY, dstYStride, tmpU, dstUStride, tmpV, dstUStride,
+                                   mWidth, mHeight);
+            } else {
+                libyuv::I210ToI010(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                                   tmpY, dstYStride, tmpU, dstUStride, tmpV, dstUStride,
+                                   mWidth, mHeight);
+            }
+            libyuv::I010ToP010(tmpY, dstYStride, tmpU, dstUStride, tmpV, dstVStride,
+                               (uint16_t*)dstY, dstYStride, (uint16_t*)dstU, dstUStride,
+                               mWidth, mHeight);
+        } else {
+            convertYUV420Planar16ToP010((uint16_t *)dstY, (uint16_t *)dstU, srcY, srcU, srcV,
+                                        srcYStride, srcUStride, srcVStride, dstYStride,
+                                        dstUStride, mWidth, mHeight, isMonochrome);
+        }
+#else  // LIBYUV_VERSION < 1779
         convertYUV420Planar16ToP010((uint16_t *)dstY, (uint16_t *)dstU, srcY, srcU, srcV,
-                                    srcYStride / 2, srcUStride / 2, srcVStride / 2, dstYStride / 2,
-                                    dstUVStride / 2, mWidth, mHeight, isMonochrome);
+                                    srcYStride, srcUStride, srcVStride, dstYStride,
+                                    dstUStride, mWidth, mHeight, isMonochrome);
+#endif  // LIBYUV_VERSION >= 1779
     } else {
-        convertYUV420Planar16ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride / 2,
-                                    srcUStride / 2, srcVStride / 2, dstYStride, dstUVStride, mWidth,
-                                    mHeight, isMonochrome);
+#if LIBYUV_VERSION >= 1779
+        if (buffer->image_format == libgav1::kImageFormatYuv444) {
+            // TODO(https://crbug.com/libyuv/950): replace this block with libyuv::I410ToI420 when
+            // it's available.
+            const size_t tmpSize = dstYStride * mHeight + dstUStride * align(mHeight, 2);
+            if (!allocTmpFrameBuffer(tmpSize)) {
+                ALOGE("Error allocating temp conversion buffer (%zu bytes)", tmpSize);
+                setError(work, C2_NO_MEMORY);
+                return false;
+            }
+            uint16_t *const tmpY = mTmpFrameBuffer.get();
+            uint16_t *const tmpU = tmpY + dstYStride * mHeight;
+            uint16_t *const tmpV = tmpU + dstUStride * align(mHeight, 2) / 2;
+            libyuv::I410ToI010(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                               tmpY, dstYStride, tmpU, dstUStride, tmpV, dstVStride,
+                               mWidth, mHeight);
+            libyuv::I010ToI420(tmpY, dstYStride, tmpU, dstUStride, tmpV, dstUStride,
+                               dstY, dstYStride, dstU, dstUStride, dstV, dstVStride,
+                               mWidth, mHeight);
+        } else if (buffer->image_format == libgav1::kImageFormatYuv422) {
+            libyuv::I210ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                               dstY, dstYStride, dstU, dstUStride, dstV, dstVStride,
+                               mWidth, mHeight);
+        } else {
+            convertYUV420Planar16ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride,
+                                        srcUStride, srcVStride, dstYStride, dstUStride,
+                                        mWidth, mHeight, isMonochrome);
+        }
+#else  // LIBYUV_VERSION < 1779
+        convertYUV420Planar16ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride,
+                                    srcUStride, srcVStride, dstYStride, dstUStride,
+                                    mWidth, mHeight, isMonochrome);
+#endif  // LIBYUV_VERSION >= 1779
     }
   } else {
     const uint8_t *srcY = (const uint8_t *)buffer->plane[0];
     const uint8_t *srcU = (const uint8_t *)buffer->plane[1];
     const uint8_t *srcV = (const uint8_t *)buffer->plane[2];
-    convertYUV420Planar8ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride, srcUStride,
-                               srcVStride, dstYStride, dstUVStride, mWidth, mHeight, isMonochrome);
+    size_t srcYStride = buffer->stride[0];
+    size_t srcUStride = buffer->stride[1];
+    size_t srcVStride = buffer->stride[2];
+
+    if (buffer->image_format == libgav1::kImageFormatYuv444) {
+        libyuv::I444ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                           dstY, dstYStride, dstU, dstUStride, dstV, dstVStride,
+                           mWidth, mHeight);
+    } else if (buffer->image_format == libgav1::kImageFormatYuv422) {
+        libyuv::I422ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride,
+                           dstY, dstYStride, dstU, dstUStride, dstV, dstVStride,
+                           mWidth, mHeight);
+    } else {
+        convertYUV420Planar8ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride, srcUStride,
+                                   srcVStride, dstYStride, dstUStride, dstVStride, mWidth, mHeight,
+                                   isMonochrome);
+    }
   }
   finishWork(buffer->user_private_data, work, std::move(block));
   block = nullptr;

@@ -14,35 +14,37 @@
  * limitations under the License.
  */
 
-#include "BundleTypes.h"
-#define LOG_TAG "EffectBundleAidl"
-#include <Utils.h>
 #include <algorithm>
+#include <limits.h>
 #include <unordered_set>
+#define LOG_TAG "EffectBundleAidl"
 
-#include <android-base/logging.h>
-#include <fmq/AidlMessageQueue.h>
 #include <audio_effects/effect_bassboost.h>
 #include <audio_effects/effect_equalizer.h>
 #include <audio_effects/effect_virtualizer.h>
-
-#include "EffectBundleAidl.h"
+#include <android-base/logging.h>
+#include <fmq/AidlMessageQueue.h>
 #include <LVM.h>
-#include <limits.h>
+#include <Utils.h>
 
+#include "BundleTypes.h"
+#include "EffectBundleAidl.h"
+
+using aidl::android::hardware::audio::effect::getEffectImplUuidBassBoostBundle;
 using aidl::android::hardware::audio::effect::Descriptor;
 using aidl::android::hardware::audio::effect::EffectBundleAidl;
+using aidl::android::hardware::audio::effect::getEffectImplUuidEqualizerBundle;
 using aidl::android::hardware::audio::effect::IEffect;
-using aidl::android::hardware::audio::effect::kBassBoostBundleImplUUID;
-using aidl::android::hardware::audio::effect::kEqualizerBundleImplUUID;
-using aidl::android::hardware::audio::effect::kVirtualizerBundleImplUUID;
-using aidl::android::hardware::audio::effect::kVolumeBundleImplUUID;
 using aidl::android::hardware::audio::effect::State;
+using aidl::android::hardware::audio::effect::getEffectImplUuidVirtualizerBundle;
+using aidl::android::hardware::audio::effect::getEffectImplUuidVolumeBundle;
 using aidl::android::media::audio::common::AudioUuid;
 
 bool isUuidSupported(const AudioUuid* uuid) {
-    return (*uuid == kEqualizerBundleImplUUID || *uuid == kBassBoostBundleImplUUID ||
-            *uuid == kVirtualizerBundleImplUUID || *uuid == kVolumeBundleImplUUID);
+    return (*uuid == getEffectImplUuidBassBoostBundle() ||
+            *uuid == getEffectImplUuidEqualizerBundle() ||
+            *uuid == getEffectImplUuidVirtualizerBundle() ||
+            *uuid == getEffectImplUuidVolumeBundle());
 }
 
 extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
@@ -53,7 +55,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<EffectBundleAidl>(*uuid);
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -66,13 +67,13 @@ extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descrip
         LOG(ERROR) << __func__ << "uuid not supported";
         return EX_ILLEGAL_ARGUMENT;
     }
-    if (*in_impl_uuid == kEqualizerBundleImplUUID) {
+    if (*in_impl_uuid == getEffectImplUuidEqualizerBundle()) {
         *_aidl_return = aidl::android::hardware::audio::effect::lvm::kEqualizerDesc;
-    } else if (*in_impl_uuid == kBassBoostBundleImplUUID) {
+    } else if (*in_impl_uuid == getEffectImplUuidBassBoostBundle()) {
         *_aidl_return = aidl::android::hardware::audio::effect::lvm:: kBassBoostDesc;
-    } else if (*in_impl_uuid == kVirtualizerBundleImplUUID) {
+    } else if (*in_impl_uuid == getEffectImplUuidVirtualizerBundle()) {
         *_aidl_return = aidl::android::hardware::audio::effect::lvm::kVirtualizerDesc;
-    } else if (*in_impl_uuid == kVolumeBundleImplUUID) {
+    } else if (*in_impl_uuid == getEffectImplUuidVolumeBundle()) {
         *_aidl_return = aidl::android::hardware::audio::effect::lvm::kVolumeDesc;
     }
     return EX_NONE;
@@ -81,20 +82,19 @@ extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descrip
 namespace aidl::android::hardware::audio::effect {
 
 EffectBundleAidl::EffectBundleAidl(const AudioUuid& uuid) {
-    LOG(DEBUG) << __func__ << uuid.toString();
-    if (uuid == kEqualizerBundleImplUUID) {
+    if (uuid == getEffectImplUuidEqualizerBundle()) {
         mType = lvm::BundleEffectType::EQUALIZER;
         mDescriptor = &lvm::kEqualizerDesc;
         mEffectName = &lvm::kEqualizerEffectName;
-    } else if (uuid == kBassBoostBundleImplUUID) {
+    } else if (uuid == getEffectImplUuidBassBoostBundle()) {
         mType = lvm::BundleEffectType::BASS_BOOST;
         mDescriptor = &lvm::kBassBoostDesc;
         mEffectName = &lvm::kBassBoostEffectName;
-    } else if (uuid == kVirtualizerBundleImplUUID) {
+    } else if (uuid == getEffectImplUuidVirtualizerBundle()) {
         mType = lvm::BundleEffectType::VIRTUALIZER;
         mDescriptor = &lvm::kVirtualizerDesc;
         mEffectName = &lvm::kVirtualizerEffectName;
-    } else if (uuid == kVolumeBundleImplUUID) {
+    } else if (uuid == getEffectImplUuidVolumeBundle()) {
         mType = lvm::BundleEffectType::VOLUME;
         mDescriptor = &lvm::kVolumeDesc;
         mEffectName = &lvm::kVolumeEffectName;
@@ -105,12 +105,10 @@ EffectBundleAidl::EffectBundleAidl(const AudioUuid& uuid) {
 
 EffectBundleAidl::~EffectBundleAidl() {
     cleanUp();
-    LOG(DEBUG) << __func__;
 }
 
 ndk::ScopedAStatus EffectBundleAidl::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << _aidl_return->toString();
     *_aidl_return = *mDescriptor;
     return ndk::ScopedAStatus::ok();
 }
@@ -152,7 +150,6 @@ ndk::ScopedAStatus EffectBundleAidl::setParameterCommon(const Parameter& param) 
 }
 
 ndk::ScopedAStatus EffectBundleAidl::setParameterSpecific(const Parameter::Specific& specific) {
-    LOG(DEBUG) << __func__ << " specific " << specific.toString();
     RETURN_IF(!mContext, EX_NULL_POINTER, "nullContext");
 
     auto tag = specific.getTag();
@@ -308,7 +305,7 @@ ndk::ScopedAStatus EffectBundleAidl::getParameterEqualizer(const Equalizer::Id& 
             eqParam.set<Equalizer::centerFreqMh>(mContext->getEqualizerCenterFreqs());
             break;
         }
-        case Equalizer::vendorExtension: {
+        case Equalizer::vendor: {
             LOG(ERROR) << __func__ << " not handled tag: " << toString(tag);
             return ndk::ScopedAStatus::fromExceptionCodeWithMessage(
                     EX_ILLEGAL_ARGUMENT, "unsupportedTag");
@@ -353,7 +350,7 @@ ndk::ScopedAStatus EffectBundleAidl::getParameterVolume(const Volume::Id& id,
     auto tag = id.get<Volume::Id::commonTag>();
     switch (tag) {
         case Volume::levelDb: {
-            volParam.set<Volume::levelDb>(mContext->getVolumeLevel());
+            volParam.set<Volume::levelDb>(static_cast<int>(mContext->getVolumeLevel()));
             break;
         }
         case Volume::mute: {
@@ -373,14 +370,16 @@ ndk::ScopedAStatus EffectBundleAidl::getParameterVolume(const Volume::Id& id,
 
 ndk::ScopedAStatus EffectBundleAidl::getParameterVirtualizer(const Virtualizer::Id& id,
                                                              Parameter::Specific* specific) {
-    RETURN_IF(id.getTag() != Virtualizer::Id::commonTag, EX_ILLEGAL_ARGUMENT,
-              "VirtualizerTagNotSupported");
+    RETURN_IF((id.getTag() != Virtualizer::Id::commonTag) &&
+                      (id.getTag() != Virtualizer::Id::speakerAnglesPayload),
+              EX_ILLEGAL_ARGUMENT, "VirtualizerTagNotSupported");
 
     RETURN_IF(!mContext, EX_NULL_POINTER, "nullContext");
     Virtualizer vrParam;
 
     if (id.getTag() == Virtualizer::Id::speakerAnglesPayload) {
         auto angles = mContext->getSpeakerAngles(id.get<Virtualizer::Id::speakerAnglesPayload>());
+        RETURN_IF(angles.size() == 0, EX_ILLEGAL_ARGUMENT, "getSpeakerAnglesFailed");
         Virtualizer param = Virtualizer::make<Virtualizer::speakerAngles>(angles);
         specific->set<Parameter::Specific::virtualizer>(param);
         return ndk::ScopedAStatus::ok();
@@ -421,10 +420,6 @@ std::shared_ptr<EffectContext> EffectBundleAidl::createContext(const Parameter::
     return mContext;
 }
 
-std::shared_ptr<EffectContext> EffectBundleAidl::getContext() {
-    return mContext;
-}
-
 RetCode EffectBundleAidl::releaseContext() {
     if (mContext) {
         GlobalSession::getGlobalSession().releaseSession(mType, mContext->getSessionId());
@@ -458,7 +453,7 @@ ndk::ScopedAStatus EffectBundleAidl::commandImpl(CommandId command) {
 IEffect::Status EffectBundleAidl::effectProcessImpl(float* in, float* out, int sampleToProcess) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, sampleToProcess);
+    return mContext->process(in, out, sampleToProcess);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

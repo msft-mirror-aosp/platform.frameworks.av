@@ -22,17 +22,18 @@
 
 #include <algorithm>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 
 #include <errno.h>
 #include <inttypes.h>
-#include <math.h>
 
 #include <android-base/parsedouble.h>
 #include <android-base/properties.h>
 #include <audio_effects/effect_hapticgenerator.h>
 #include <audio_utils/format.h>
+#include <audio_utils/safe_math.h>
 #include <system/audio.h>
 
 static constexpr float DEFAULT_RESONANT_FREQUENCY = 150.0f;
@@ -94,6 +95,33 @@ float getFloatProperty(const std::string& key, float defaultValue) {
     return defaultValue;
 }
 
+std::string hapticParamToString(const struct HapticGeneratorParam& param) {
+    std::stringstream ss;
+    ss << "\t\tHapticGenerator Parameters:\n";
+    ss << "\t\t- resonant frequency: " << param.resonantFrequency << '\n';
+    ss << "\t\t- bpf Q: " << param.bpfQ << '\n';
+    ss << "\t\t- slow env normalization power: " << param.slowEnvNormalizationPower << '\n';
+    ss << "\t\t- bsf zero Q: " << param.bsfZeroQ << '\n';
+    ss << "\t\t- bsf pole Q: " << param.bsfPoleQ << '\n';
+    ss << "\t\t- distortion corner frequency: " << param.distortionCornerFrequency << '\n';
+    ss << "\t\t- distortion input gain: " << param.distortionInputGain << '\n';
+    ss << "\t\t- distortion cube threshold: " << param.distortionCubeThreshold << '\n';
+    ss << "\t\t- distortion output gain: " << param.distortionOutputGain << '\n';
+    return ss.str();
+}
+
+std::string hapticSettingToString(const struct HapticGeneratorParam& param) {
+    std::stringstream ss;
+    ss << "\t\tHaptic setting:\n";
+    ss << "\t\t- tracks intensity map:\n";
+    for (const auto&[id, intensity] : param.id2Intensity) {
+        ss << "\t\t\t- id=" << id << ", intensity=" << (int) intensity;
+    }
+    ss << "\t\t- max intensity: " << (int) param.maxHapticIntensity << '\n';
+    ss << "\t\t- max haptic amplitude: " << param.maxHapticAmplitude << '\n';
+    return ss.str();
+}
+
 int HapticGenerator_Init(struct HapticGeneratorContext *context) {
     context->itfe = &gHapticGeneratorInterface;
 
@@ -129,7 +157,7 @@ int HapticGenerator_Init(struct HapticGeneratorContext *context) {
     context->param.distortionCubeThreshold = 0.1f;
     context->param.distortionOutputGain = getFloatProperty(
             "vendor.audio.hapticgenerator.distortion.output.gain", DEFAULT_DISTORTION_OUTPUT_GAIN);
-    ALOGD("Using distortion output gain as %f", context->param.distortionOutputGain);
+    ALOGD("%s\n%s", __func__, hapticParamToString(context->param).c_str());
 
     context->state = HAPTICGENERATOR_STATE_INITIALIZED;
     return 0;
@@ -289,6 +317,7 @@ int HapticGenerator_SetParameter(struct HapticGeneratorContext *context,
         }
         int id = *(int *) value;
         os::HapticScale hapticIntensity = static_cast<os::HapticScale>(*((int *) value + 1));
+        ALOGD("Setting haptic intensity as %d", static_cast<int>(hapticIntensity));
         if (hapticIntensity == os::HapticScale::MUTE) {
             context->param.id2Intensity.erase(id);
         } else {
@@ -309,10 +338,15 @@ int HapticGenerator_SetParameter(struct HapticGeneratorContext *context,
         const float qFactor = *((float *) value + 1);
         const float maxAmplitude = *((float *) value + 2);
         context->param.resonantFrequency =
-                isnan(resonantFrequency) ? DEFAULT_RESONANT_FREQUENCY : resonantFrequency;
-        context->param.bsfZeroQ = isnan(qFactor) ? DEFAULT_BSF_POLE_Q : qFactor;
+                audio_utils::safe_isnan(resonantFrequency) ? DEFAULT_RESONANT_FREQUENCY
+                                                           : resonantFrequency;
+        context->param.bsfZeroQ = audio_utils::safe_isnan(qFactor) ? DEFAULT_BSF_ZERO_Q : qFactor;
         context->param.bsfPoleQ = context->param.bsfZeroQ / 2.0f;
         context->param.maxHapticAmplitude = maxAmplitude;
+        ALOGD("Updating vibrator info, resonantFrequency=%f, bsfZeroQ=%f, bsfPoleQ=%f, "
+              "maxHapticAmplitude=%f",
+              context->param.resonantFrequency, context->param.bsfZeroQ, context->param.bsfPoleQ,
+              context->param.maxHapticAmplitude);
 
         if (context->processorsRecord.bpf != nullptr) {
             context->processorsRecord.bpf->setCoefficients(
@@ -356,6 +390,11 @@ float* HapticGenerator_runProcessingChain(
         std::swap(in, out);
     }
     return in;
+}
+
+void HapticGenerator_Dump(int32_t fd, const struct HapticGeneratorParam& param) {
+    dprintf(fd, "%s", hapticParamToString(param).c_str());
+    dprintf(fd, "%s", hapticSettingToString(param).c_str());
 }
 
 } // namespace (anonymous)
@@ -560,6 +599,10 @@ int32_t HapticGenerator_Command(effect_handle_t self, uint32_t cmdCode, uint32_t
         case EFFECT_CMD_SET_VOLUME:
         case EFFECT_CMD_SET_DEVICE:
         case EFFECT_CMD_SET_AUDIO_MODE:
+            break;
+
+        case EFFECT_CMD_DUMP:
+            HapticGenerator_Dump(*(reinterpret_cast<int32_t*>(cmdData)), context->param);
             break;
 
         default:

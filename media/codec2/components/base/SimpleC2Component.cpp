@@ -21,8 +21,10 @@
 #include <android/hardware_buffer.h>
 #include <cutils/properties.h>
 #include <media/stagefright/foundation/AMessage.h>
+#include <media/stagefright/foundation/AUtils.h>
 
 #include <inttypes.h>
+#include <libyuv.h>
 
 #include <C2Config.h>
 #include <C2Debug.h>
@@ -32,14 +34,23 @@
 #include <SimpleC2Component.h>
 
 namespace android {
+
+// libyuv version required for I410ToAB30Matrix and I210ToAB30Matrix.
+#if LIBYUV_VERSION >= 1780
+#include <algorithm>
+#define HAVE_LIBYUV_I410_I210_TO_AB30 1
+#else
+#define HAVE_LIBYUV_I410_I210_TO_AB30 0
+#endif
+
 constexpr uint8_t kNeutralUVBitDepth8 = 128;
 constexpr uint16_t kNeutralUVBitDepth10 = 512;
 
 void convertYUV420Planar8ToYV12(uint8_t *dstY, uint8_t *dstU, uint8_t *dstV, const uint8_t *srcY,
                                 const uint8_t *srcU, const uint8_t *srcV, size_t srcYStride,
                                 size_t srcUStride, size_t srcVStride, size_t dstYStride,
-                                size_t dstUVStride, uint32_t width, uint32_t height,
-                                bool isMonochrome) {
+                                size_t dstUStride, size_t dstVStride, uint32_t width,
+                                uint32_t height, bool isMonochrome) {
     for (size_t i = 0; i < height; ++i) {
         memcpy(dstY, srcY, width);
         srcY += srcYStride;
@@ -51,8 +62,8 @@ void convertYUV420Planar8ToYV12(uint8_t *dstY, uint8_t *dstU, uint8_t *dstV, con
         for (size_t i = 0; i < (height + 1) / 2; ++i) {
             memset(dstV, kNeutralUVBitDepth8, (width + 1) / 2);
             memset(dstU, kNeutralUVBitDepth8, (width + 1) / 2);
-            dstV += dstUVStride;
-            dstU += dstUVStride;
+            dstV += dstVStride;
+            dstU += dstUStride;
         }
         return;
     }
@@ -60,13 +71,13 @@ void convertYUV420Planar8ToYV12(uint8_t *dstY, uint8_t *dstU, uint8_t *dstV, con
     for (size_t i = 0; i < (height + 1) / 2; ++i) {
         memcpy(dstV, srcV, (width + 1) / 2);
         srcV += srcVStride;
-        dstV += dstUVStride;
+        dstV += dstVStride;
     }
 
     for (size_t i = 0; i < (height + 1) / 2; ++i) {
         memcpy(dstU, srcU, (width + 1) / 2);
         srcU += srcUStride;
-        dstU += dstUVStride;
+        dstU += dstUStride;
     }
 }
 
@@ -412,6 +423,212 @@ void convertYUV420Planar16ToP010(uint16_t *dstY, uint16_t *dstUV, const uint16_t
         srcU += srcUStride;
         srcV += srcVStride;
         dstUV += dstUVStride;
+    }
+}
+
+void convertP010ToYUV420Planar16(uint16_t *dstY, uint16_t *dstU, uint16_t *dstV,
+                                 const uint16_t *srcY, const uint16_t *srcUV,
+                                 size_t srcYStride, size_t srcUVStride, size_t dstYStride,
+                                 size_t dstUStride, size_t dstVStride, size_t width,
+                                 size_t height, bool isMonochrome) {
+    for (size_t y = 0; y < height; ++y) {
+        for (size_t x = 0; x < width; ++x) {
+            dstY[x] = srcY[x] >> 6;
+        }
+        srcY += srcYStride;
+        dstY += dstYStride;
+    }
+
+    if (isMonochrome) {
+        // Fill with neutral U/V values.
+        for (size_t y = 0; y < (height + 1) / 2; ++y) {
+            for (size_t x = 0; x < (width + 1) / 2; ++x) {
+                dstU[x] = kNeutralUVBitDepth10;
+                dstV[x] = kNeutralUVBitDepth10;
+            }
+            dstU += dstUStride;
+            dstV += dstVStride;
+        }
+        return;
+    }
+
+    for (size_t y = 0; y < (height + 1) / 2; ++y) {
+        for (size_t x = 0; x < (width + 1) / 2; ++x) {
+            dstU[x] = srcUV[2 * x] >> 6;
+            dstV[x] = srcUV[2 * x + 1] >> 6;
+        }
+        dstU += dstUStride;
+        dstV += dstVStride;
+        srcUV += srcUVStride;
+    }
+}
+
+static const int16_t bt709Matrix_10bit[2][3][3] = {
+    { { 218, 732, 74 }, { -117, -395, 512 }, { 512, -465, -47 } }, /* RANGE_FULL */
+    { { 186, 627, 63 }, { -103, -345, 448 }, { 448, -407, -41 } }, /* RANGE_LIMITED */
+};
+
+static const int16_t bt2020Matrix_10bit[2][3][3] = {
+    { { 269, 694, 61 }, { -143, -369, 512 }, { 512, -471, -41 } }, /* RANGE_FULL */
+    { { 230, 594, 52 }, { -125, -323, 448 }, { 448, -412, -36 } }, /* RANGE_LIMITED */
+};
+
+void convertRGBA1010102ToYUV420Planar16(uint16_t* dstY, uint16_t* dstU, uint16_t* dstV,
+                                        const uint32_t* srcRGBA, size_t srcRGBStride, size_t width,
+                                        size_t height, C2Color::matrix_t colorMatrix,
+                                        C2Color::range_t colorRange) {
+    uint16_t r, g, b;
+    int32_t i32Y, i32U, i32V;
+    uint16_t zeroLvl =  colorRange == C2Color::RANGE_FULL ? 0 : 64;
+    uint16_t maxLvlLuma =  colorRange == C2Color::RANGE_FULL ? 1023 : 940;
+    uint16_t maxLvlChroma =  colorRange == C2Color::RANGE_FULL ? 1023 : 960;
+    // set default range as limited
+    if (colorRange != C2Color::RANGE_FULL) {
+        colorRange = C2Color::RANGE_LIMITED;
+    }
+    const int16_t(*weights)[3] = (colorMatrix == C2Color::MATRIX_BT709)
+                                         ? bt709Matrix_10bit[colorRange - 1]
+                                         : bt2020Matrix_10bit[colorRange - 1];
+
+    for (size_t y = 0; y < height; ++y) {
+        for (size_t x = 0; x < width; ++x) {
+            b = (srcRGBA[x]  >> 20) & 0x3FF;
+            g = (srcRGBA[x]  >> 10) & 0x3FF;
+            r = srcRGBA[x] & 0x3FF;
+
+            i32Y = ((r * weights[0][0] + g * weights[0][1] + b * weights[0][2] + 512) >> 10) +
+                   zeroLvl;
+            dstY[x] = CLIP3(zeroLvl, i32Y, maxLvlLuma);
+            if (y % 2 == 0 && x % 2 == 0) {
+                i32U = ((r * weights[1][0] + g * weights[1][1] + b * weights[1][2] + 512) >> 10) +
+                       512;
+                i32V = ((r * weights[2][0] + g * weights[2][1] + b * weights[2][2] + 512) >> 10) +
+                       512;
+                dstU[x >> 1] = CLIP3(zeroLvl, i32U, maxLvlChroma);
+                dstV[x >> 1] = CLIP3(zeroLvl, i32V, maxLvlChroma);
+            }
+        }
+        srcRGBA += srcRGBStride;
+        dstY += width;
+        if (y % 2 == 0) {
+            dstU += width / 2;
+            dstV += width / 2;
+        }
+    }
+}
+
+void convertPlanar16ToY410OrRGBA1010102(uint8_t* dst, const uint16_t* srcY, const uint16_t* srcU,
+                                        const uint16_t* srcV, size_t srcYStride, size_t srcUStride,
+                                        size_t srcVStride, size_t dstStride, size_t width,
+                                        size_t height,
+                                        std::shared_ptr<const C2ColorAspectsStruct> aspects,
+                                        CONV_FORMAT_T format) {
+    bool processed = false;
+#if HAVE_LIBYUV_I410_I210_TO_AB30
+    if (format == CONV_FORMAT_I444) {
+        libyuv::I410ToAB30Matrix(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, dst,
+                                 dstStride, &libyuv::kYuvV2020Constants, width, height);
+        processed = true;
+    } else if (format == CONV_FORMAT_I422) {
+        libyuv::I210ToAB30Matrix(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, dst,
+                                 dstStride, &libyuv::kYuvV2020Constants, width, height);
+        processed = true;
+    }
+#endif  // HAVE_LIBYUV_I410_I210_TO_AB30
+    if (!processed) {
+        convertYUV420Planar16ToY410OrRGBA1010102(
+                (uint32_t*)dst, srcY, srcU, srcV, srcYStride, srcUStride, srcVStride,
+                dstStride / sizeof(uint32_t), width, height,
+                std::static_pointer_cast<const C2ColorAspectsStruct>(aspects));
+    }
+}
+
+void convertPlanar16ToP010(uint16_t* dstY, uint16_t* dstUV, const uint16_t* srcY,
+                           const uint16_t* srcU, const uint16_t* srcV, size_t srcYStride,
+                           size_t srcUStride, size_t srcVStride, size_t dstYStride,
+                           size_t dstUStride, size_t dstVStride, size_t width, size_t height,
+                           bool isMonochrome, CONV_FORMAT_T format, uint16_t* tmpFrameBuffer,
+                           size_t tmpFrameBufferSize) {
+#if LIBYUV_VERSION >= 1779
+    if ((format == CONV_FORMAT_I444) || (format == CONV_FORMAT_I422)) {
+        // TODO(https://crbug.com/libyuv/952): replace this block with libyuv::I410ToP010
+        // and libyuv::I210ToP010 when they are available. Note it may be safe to alias dstY
+        // in I010ToP010, but the libyuv API doesn't make any guarantees.
+        const size_t tmpSize = dstYStride * height + dstUStride * align(height, 2);
+        CHECK(tmpSize <= tmpFrameBufferSize);
+
+        uint16_t* const tmpY = tmpFrameBuffer;
+        uint16_t* const tmpU = tmpY + dstYStride * height;
+        uint16_t* const tmpV = tmpU + dstUStride * align(height, 2) / 2;
+        if (format == CONV_FORMAT_I444) {
+            libyuv::I410ToI010(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, tmpY,
+                               dstYStride, tmpU, dstUStride, tmpV, dstUStride, width, height);
+        } else {
+            libyuv::I210ToI010(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, tmpY,
+                               dstYStride, tmpU, dstUStride, tmpV, dstUStride, width, height);
+        }
+        libyuv::I010ToP010(tmpY, dstYStride, tmpU, dstUStride, tmpV, dstVStride, dstY, dstYStride,
+                           dstUV, dstUStride, width, height);
+    } else {
+        convertYUV420Planar16ToP010(dstY, dstUV, srcY, srcU, srcV, srcYStride, srcUStride,
+                                    srcVStride, dstYStride, dstUStride, width, height,
+                                    isMonochrome);
+    }
+#else   // LIBYUV_VERSION < 1779
+    convertYUV420Planar16ToP010(dstY, dstUV, srcY, srcU, srcV, srcYStride, srcUStride, srcVStride,
+                                dstYStride, dstUStride, width, height, isMonochrome);
+#endif  // LIBYUV_VERSION >= 1779
+}
+
+void convertPlanar16ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV, const uint16_t* srcY,
+                           const uint16_t* srcU, const uint16_t* srcV, size_t srcYStride,
+                           size_t srcUStride, size_t srcVStride, size_t dstYStride,
+                           size_t dstUStride, size_t dstVStride, size_t width, size_t height,
+                           bool isMonochrome, CONV_FORMAT_T format, uint16_t* tmpFrameBuffer,
+                           size_t tmpFrameBufferSize) {
+#if LIBYUV_VERSION >= 1779
+    if (format == CONV_FORMAT_I444) {
+        // TODO(https://crbug.com/libyuv/950): replace this block with libyuv::I410ToI420
+        // when it's available.
+        const size_t tmpSize = dstYStride * height + dstUStride * align(height, 2);
+        CHECK(tmpSize <= tmpFrameBufferSize);
+
+        uint16_t* const tmpY = tmpFrameBuffer;
+        uint16_t* const tmpU = tmpY + dstYStride * height;
+        uint16_t* const tmpV = tmpU + dstUStride * align(height, 2) / 2;
+        libyuv::I410ToI010(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, tmpY, dstYStride,
+                           tmpU, dstUStride, tmpV, dstVStride, width, height);
+        libyuv::I010ToI420(tmpY, dstYStride, tmpU, dstUStride, tmpV, dstUStride, dstY, dstYStride,
+                           dstU, dstUStride, dstV, dstVStride, width, height);
+    } else if (format == CONV_FORMAT_I422) {
+        libyuv::I210ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, dstY, dstYStride,
+                           dstU, dstUStride, dstV, dstVStride, width, height);
+    } else {
+        convertYUV420Planar16ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride, srcUStride,
+                                    srcVStride, dstYStride, dstUStride, width, height,
+                                    isMonochrome);
+    }
+#else   // LIBYUV_VERSION < 1779
+    convertYUV420Planar16ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride, srcUStride,
+                                srcVStride, dstYStride, dstUStride, width, height, isMonochrome);
+#endif  // LIBYUV_VERSION >= 1779
+}
+
+void convertPlanar8ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV, const uint8_t* srcY,
+                          const uint8_t* srcU, const uint8_t* srcV, size_t srcYStride,
+                          size_t srcUStride, size_t srcVStride, size_t dstYStride,
+                          size_t dstUStride, size_t dstVStride, uint32_t width, uint32_t height,
+                          bool isMonochrome, CONV_FORMAT_T format) {
+    if (format == CONV_FORMAT_I444) {
+        libyuv::I444ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, dstY, dstYStride,
+                           dstU, dstUStride, dstV, dstVStride, width, height);
+    } else if (format == CONV_FORMAT_I422) {
+        libyuv::I422ToI420(srcY, srcYStride, srcU, srcUStride, srcV, srcVStride, dstY, dstYStride,
+                           dstU, dstUStride, dstV, dstVStride, width, height);
+    } else {
+        convertYUV420Planar8ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride, srcUStride,
+                                   srcVStride, dstYStride, dstUStride, dstVStride, width, height,
+                                   isMonochrome);
     }
 }
 std::unique_ptr<C2Work> SimpleC2Component::WorkQueue::pop_front() {

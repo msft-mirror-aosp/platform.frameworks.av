@@ -89,6 +89,8 @@ public:
     void importAudioPortAndPickAudioProfile(const sp<PolicyAudioPort>& policyPort,
                                             bool force = false);
 
+    status_t readFromParcelable(const media::AudioPortFw& parcelable) override;
+
     void setEncapsulationInfoFromHal(AudioPolicyClientInterface *clientInterface);
 
     void dump(String8 *dst, int spaces, bool verbose = true) const;
@@ -104,7 +106,7 @@ private:
     std::string mTagName; // Unique human readable identifier for a device port found in conf file.
     audio_format_t      mCurrentEncodedFormat;
     bool                mIsDynamic = false;
-    const std::string   mDeclaredAddress; // Original device address
+    std::string         mDeclaredAddress; // Original device address
 };
 
 class DeviceVector : public SortedVector<sp<DeviceDescriptor> >
@@ -181,6 +183,10 @@ public:
 
     bool onlyContainsDevicesWithType(audio_devices_t deviceType) const {
         return isSingleDeviceType(mDeviceTypes, deviceType);
+    }
+
+    bool onlyContainsDevice(const sp<DeviceDescriptor>& item) const {
+        return this->size() == 1 && contains(item);
     }
 
     bool contains(const sp<DeviceDescriptor>& item) const { return indexOf(item) >= 0; }

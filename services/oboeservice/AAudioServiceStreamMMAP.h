@@ -47,9 +47,10 @@ class AAudioServiceStreamMMAP : public AAudioServiceStreamBase {
 public:
     AAudioServiceStreamMMAP(android::AAudioService &aAudioService,
                             bool inService);
-    virtual ~AAudioServiceStreamMMAP() = default;
+    ~AAudioServiceStreamMMAP() override = default;
 
-    aaudio_result_t open(const aaudio::AAudioStreamRequest &request) override;
+    aaudio_result_t open(const aaudio::AAudioStreamRequest &request) override
+            EXCLUDES(mUpMessageQueueLock);
 
     aaudio_result_t startClient(const android::AudioClient& client,
                                 const audio_attributes_t *attr,
@@ -83,6 +84,10 @@ protected:
 
     aaudio_result_t getHardwareTimestamp_l(
             int64_t *positionFrames, int64_t *timeNanos) REQUIRES(mLock) override;
+
+    int64_t nextDataReportTime_l() REQUIRES(mLock) override;
+
+    void reportData_l() REQUIRES(mLock) override;
 
     /**
      * Device specific startup.

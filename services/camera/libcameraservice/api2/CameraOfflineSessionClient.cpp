@@ -21,12 +21,13 @@
 #include "CameraOfflineSessionClient.h"
 #include "utils/CameraThreadState.h"
 #include <utils/Trace.h>
+#include <camera/StringUtils.h>
 
 namespace android {
 
 using binder::Status;
 
-status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const String8&) {
+status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const std::string&) {
     ATRACE_CALL();
 
     if (mFrameProcessor.get() != nullptr) {
@@ -42,14 +43,18 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
 
     if (mOfflineSession.get() == nullptr) {
         ALOGE("%s: Camera %s: No valid offline session",
-                __FUNCTION__, mCameraIdStr.string());
+                __FUNCTION__, mCameraIdStr.c_str());
         return NO_INIT;
     }
 
-    String8 threadName;
     mFrameProcessor = new camera2::FrameProcessorBase(mOfflineSession);
-    threadName = String8::format("Offline-%s-FrameProc", mCameraIdStr.string());
-    mFrameProcessor->run(threadName.string());
+    std::string threadName = fmt::sprintf("Offline-%s-FrameProc", mCameraIdStr.c_str());
+    res = mFrameProcessor->run(threadName.c_str());
+    if (res != OK) {
+        ALOGE("%s: Unable to start frame processor thread: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+        return res;
+    }
 
     mFrameProcessor->registerListener(camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MIN_ID,
                                       camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MAX_ID,
@@ -60,7 +65,7 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
     res = mOfflineSession->initialize(weakThis);
     if (res != OK) {
         ALOGE("%s: Camera %s: unable to initialize device: %s (%d)",
-                __FUNCTION__, mCameraIdStr.string(), strerror(-res), res);
+                __FUNCTION__, mCameraIdStr.c_str(), strerror(-res), res);
         return res;
     }
 
@@ -75,9 +80,14 @@ status_t CameraOfflineSessionClient::setCameraServiceWatchdog(bool) {
     return OK;
 }
 
-status_t CameraOfflineSessionClient::setRotateAndCropOverride(uint8_t /*rotateAndCrop*/) {
+status_t CameraOfflineSessionClient::setRotateAndCropOverride(uint8_t /*rotateAndCrop*/,
+        bool /*fromHal*/) {
     // Since we're not submitting more capture requests, changes to rotateAndCrop override
     // make no difference.
+    return OK;
+}
+
+status_t CameraOfflineSessionClient::setAutoframingOverride(uint8_t) {
     return OK;
 }
 
@@ -90,20 +100,34 @@ status_t CameraOfflineSessionClient::setCameraMute(bool) {
     return INVALID_OPERATION;
 }
 
+void CameraOfflineSessionClient::setStreamUseCaseOverrides(
+        const std::vector<int64_t>& /*useCaseOverrides*/) {
+}
+
+void CameraOfflineSessionClient::clearStreamUseCaseOverrides() {
+}
+
+bool CameraOfflineSessionClient::supportsZoomOverride() {
+    return false;
+}
+
+status_t CameraOfflineSessionClient::setZoomOverride(int32_t /*zoomOverride*/) {
+    return INVALID_OPERATION;
+}
 
 status_t CameraOfflineSessionClient::dump(int fd, const Vector<String16>& args) {
     return BasicClient::dump(fd, args);
 }
 
 status_t CameraOfflineSessionClient::dumpClient(int fd, const Vector<String16>& args) {
-    String8 result;
+    std::string result;
 
     result = "  Offline session dump:\n";
-    write(fd, result.string(), result.size());
+    write(fd, result.c_str(), result.size());
 
     if (mOfflineSession.get() == nullptr) {
         result = "  *** Offline session is detached\n";
-        write(fd, result.string(), result.size());
+        write(fd, result.c_str(), result.size());
         return NO_ERROR;
     }
 
@@ -111,15 +135,15 @@ status_t CameraOfflineSessionClient::dumpClient(int fd, const Vector<String16>& 
 
     auto res = mOfflineSession->dump(fd);
     if (res != OK) {
-        result = String8::format("   Error dumping offline session: %s (%d)",
+        result = fmt::sprintf("   Error dumping offline session: %s (%d)",
                 strerror(-res), res);
-        write(fd, result.string(), result.size());
+        write(fd, result.c_str(), result.size());
     }
 
     return OK;
 }
 
-status_t CameraOfflineSessionClient::startWatchingTags(const String8 &tags, int outFd) {
+status_t CameraOfflineSessionClient::startWatchingTags(const std::string &tags, int outFd) {
     return BasicClient::startWatchingTags(tags, outFd);
 }
 
@@ -148,7 +172,7 @@ binder::Status CameraOfflineSessionClient::disconnect() {
     mDisconnected = true;
 
     sCameraService->removeByClient(this);
-    sCameraService->logDisconnectedOffline(mCameraIdStr, mClientPid, String8(mClientPackageName));
+    sCameraService->logDisconnectedOffline(mCameraIdStr, mClientPid, mClientPackageName);
 
     sp<IBinder> remote = getRemote();
     if (remote != nullptr) {
@@ -163,7 +187,7 @@ binder::Status CameraOfflineSessionClient::disconnect() {
 
     finishCameraOps();
     ALOGI("%s: Disconnected client for offline camera %s for PID %d", __FUNCTION__,
-            mCameraIdStr.string(), mClientPid);
+            mCameraIdStr.c_str(), mClientPid);
 
     // client shouldn't be able to call into us anymore
     mClientPid = 0;
@@ -208,7 +232,7 @@ status_t CameraOfflineSessionClient::startCameraOps() {
     ATRACE_CALL();
     {
         ALOGV("%s: Start camera ops, package name = %s, client UID = %d",
-              __FUNCTION__, String8(mClientPackageName).string(), mClientUid);
+              __FUNCTION__, mClientPackageName.c_str(), mClientUid);
     }
 
     if (mAppOpsManager != nullptr) {
@@ -217,14 +241,14 @@ status_t CameraOfflineSessionClient::startCameraOps() {
         int32_t res;
         // TODO : possibly change this to OP_OFFLINE_CAMERA_SESSION
         mAppOpsManager->startWatchingMode(AppOpsManager::OP_CAMERA,
-                mClientPackageName, mOpsCallback);
+                toString16(mClientPackageName), mOpsCallback);
         // TODO : possibly change this to OP_OFFLINE_CAMERA_SESSION
         res = mAppOpsManager->startOpNoThrow(AppOpsManager::OP_CAMERA,
-                mClientUid, mClientPackageName, /*startIfModeDefault*/ false);
+                mClientUid, toString16(mClientPackageName), /*startIfModeDefault*/ false);
 
         if (res == AppOpsManager::MODE_ERRORED) {
             ALOGI("Offline Camera %s: Access for \"%s\" has been revoked",
-                    mCameraIdStr.string(), String8(mClientPackageName).string());
+                    mCameraIdStr.c_str(), mClientPackageName.c_str());
             return PERMISSION_DENIED;
         }
 
@@ -232,7 +256,7 @@ status_t CameraOfflineSessionClient::startCameraOps() {
         // return MODE_IGNORED. Do not treat such case as error.
         if (!mUidIsTrusted && res == AppOpsManager::MODE_IGNORED) {
             ALOGI("Offline Camera %s: Access for \"%s\" has been restricted",
-                    mCameraIdStr.string(), String8(mClientPackageName).string());
+                    mCameraIdStr.c_str(), mClientPackageName.c_str());
             // Return the same error as for device policy manager rejection
             return -EACCES;
         }
@@ -241,7 +265,7 @@ status_t CameraOfflineSessionClient::startCameraOps() {
     mOpsActive = true;
 
     // Transition device state to OPEN
-    sCameraService->mUidPolicy->registerMonitorUid(mClientUid);
+    sCameraService->mUidPolicy->registerMonitorUid(mClientUid, /*openCamera*/true);
 
     return OK;
 }
@@ -255,7 +279,7 @@ status_t CameraOfflineSessionClient::finishCameraOps() {
         if (mAppOpsManager != nullptr) {
         // TODO : possibly change this to OP_OFFLINE_CAMERA_SESSION
             mAppOpsManager->finishOp(AppOpsManager::OP_CAMERA, mClientUid,
-                    mClientPackageName);
+                    toString16(mClientPackageName));
             mOpsActive = false;
         }
     }
@@ -265,7 +289,7 @@ status_t CameraOfflineSessionClient::finishCameraOps() {
     }
     mOpsCallback.clear();
 
-    sCameraService->mUidPolicy->unregisterMonitorUid(mClientUid);
+    sCameraService->mUidPolicy->unregisterMonitorUid(mClientUid, /*closeCamera*/true);
 
     return OK;
 }
@@ -309,26 +333,20 @@ void CameraOfflineSessionClient::notifyIdle(
     finishCameraStreamingOps();
 }
 
-void CameraOfflineSessionClient::notifyAutoFocus(uint8_t newState, int triggerId) {
-    (void)newState;
-    (void)triggerId;
-
+void CameraOfflineSessionClient::notifyAutoFocus([[maybe_unused]] uint8_t newState,
+                [[maybe_unused]] int triggerId) {
     ALOGV("%s: Autofocus state now %d, last trigger %d",
           __FUNCTION__, newState, triggerId);
 }
 
-void CameraOfflineSessionClient::notifyAutoExposure(uint8_t newState, int triggerId) {
-    (void)newState;
-    (void)triggerId;
-
+void CameraOfflineSessionClient::notifyAutoExposure([[maybe_unused]] uint8_t newState,
+                [[maybe_unused]] int triggerId) {
     ALOGV("%s: Autoexposure state now %d, last trigger %d",
             __FUNCTION__, newState, triggerId);
 }
 
-void CameraOfflineSessionClient::notifyAutoWhitebalance(uint8_t newState, int triggerId) {
-    (void)newState;
-    (void)triggerId;
-
+void CameraOfflineSessionClient::notifyAutoWhitebalance([[maybe_unused]] uint8_t newState,
+                [[maybe_unused]] int triggerId) {
     ALOGV("%s: Auto-whitebalance state now %d, last trigger %d", __FUNCTION__, newState,
             triggerId);
 }
@@ -351,10 +369,10 @@ void CameraOfflineSessionClient::notifyRepeatingRequestError(long /*lastFrameNum
                 CaptureResultExtras());
 }
 
-status_t CameraOfflineSessionClient::injectCamera(const String8& injectedCamId,
+status_t CameraOfflineSessionClient::injectCamera(const std::string& injectedCamId,
             sp<CameraProviderManager> manager) {
     ALOGV("%s: This client doesn't support the injection camera. injectedCamId: %s providerPtr: %p",
-            __FUNCTION__, injectedCamId.string(), manager.get());
+            __FUNCTION__, injectedCamId.c_str(), manager.get());
 
     return OK;
 }
@@ -365,5 +383,12 @@ status_t CameraOfflineSessionClient::stopInjection() {
     return OK;
 }
 
+status_t CameraOfflineSessionClient::injectSessionParams(
+        const hardware::camera2::impl::CameraMetadataNative& sessionParams) {
+    ALOGV("%s: This client doesn't support the injecting session parameters camera.",
+            __FUNCTION__);
+    (void)sessionParams;
+    return OK;
+}
 // ----------------------------------------------------------------------------
 }; // namespace android

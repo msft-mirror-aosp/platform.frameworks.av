@@ -38,6 +38,9 @@ void ZoomRatioMapper::initRemappedKeys() {
             kResultPointsToCorrectNoClamp.end());
 
     mRemappedKeys.insert(ANDROID_CONTROL_ZOOM_RATIO);
+    if (flags::concert_mode()) {
+        mRemappedKeys.insert(ANDROID_LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION);
+    }
 }
 
 status_t ZoomRatioMapper::initZoomRatioInTemplate(CameraMetadata *request) {
@@ -153,9 +156,9 @@ ZoomRatioMapper::ZoomRatioMapper(const CameraMetadata* deviceInfo,
         return;
     }
 
-    bool isUltraHighResolutionSensor =
-            camera3::SessionConfigurationUtils::isUltraHighResolutionSensor(*deviceInfo);
-    if (isUltraHighResolutionSensor) {
+    bool supportsUltraHighResolutionCapture =
+            camera3::SessionConfigurationUtils::supportsUltraHighResolutionCapture(*deviceInfo);
+    if (supportsUltraHighResolutionCapture) {
         if (!SessionConfigurationUtils::getArrayWidthAndHeight(deviceInfo,
                 ANDROID_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION,
                 &arrayMaximumResolutionW, &arrayMaximumResolutionH)) {
@@ -354,17 +357,8 @@ status_t ZoomRatioMapper::separateZoomFromCropLocked(CameraMetadata* metadata, b
             if (weight == 0) {
                 continue;
             }
-            // Top left (inclusive)
-            scaleCoordinates(entry.data.i32 + j, 1, zoomRatio, true /*clamp*/, arrayWidth,
+            scaleRegion(entry.data.i32 + j, zoomRatio, arrayWidth,
                     arrayHeight);
-            // Bottom right (exclusive): Use adjacent inclusive pixel to
-            // calculate.
-            entry.data.i32[j+2] -= 1;
-            entry.data.i32[j+3] -= 1;
-            scaleCoordinates(entry.data.i32 + j + 2, 1, zoomRatio, true /*clamp*/, arrayWidth,
-                    arrayHeight);
-            entry.data.i32[j+2] += 1;
-            entry.data.i32[j+3] += 1;
         }
     }
 
@@ -401,17 +395,8 @@ status_t ZoomRatioMapper::combineZoomAndCropLocked(CameraMetadata* metadata, boo
             if (weight == 0) {
                 continue;
             }
-            // Top-left (inclusive)
-            scaleCoordinates(entry.data.i32 + j, 1, 1.0 / zoomRatio, true /*clamp*/, arrayWidth,
+            scaleRegion(entry.data.i32 + j, 1.0 / zoomRatio, arrayWidth,
                     arrayHeight);
-            // Bottom-right (exclusive): Use adjacent inclusive pixel to
-            // calculate.
-            entry.data.i32[j+2] -= 1;
-            entry.data.i32[j+3] -= 1;
-            scaleCoordinates(entry.data.i32 + j + 2, 1, 1.0 / zoomRatio, true /*clamp*/, arrayWidth,
-                    arrayHeight);
-            entry.data.i32[j+2] += 1;
-            entry.data.i32[j+3] += 1;
         }
     }
     for (auto rect : kRectsToCorrect) {
@@ -468,6 +453,24 @@ void ZoomRatioMapper::scaleCoordinates(int32_t* coordPairs, int coordCount,
         }
         ALOGV("%s: coordinates: %d, %d", __FUNCTION__, coordPairs[i], coordPairs[i+1]);
     }
+}
+
+void ZoomRatioMapper::scaleRegion(int32_t* region, float scaleRatio,
+        int32_t arrayWidth, int32_t arrayHeight) {
+    // Top-left (inclusive)
+    scaleCoordinates(region, 1, scaleRatio, true /*clamp*/, arrayWidth,
+            arrayHeight);
+    // Bottom-right (exclusive): Use adjacent inclusive pixel to
+    // calculate.
+    region[2] -= 1;
+    region[3] -= 1;
+    scaleCoordinates(region + 2, 1, scaleRatio, true /*clamp*/, arrayWidth,
+            arrayHeight);
+    region[2] += 1;
+    region[3] += 1;
+    // Make sure bottom-right >= top-left
+    region[2] = std::max(region[0], region[2]);
+    region[3] = std::max(region[1], region[3]);
 }
 
 void ZoomRatioMapper::scaleRects(int32_t* rects, int rectCount,

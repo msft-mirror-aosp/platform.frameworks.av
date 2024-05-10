@@ -15,8 +15,8 @@ cc_defaults {
         "NBAIO.cpp",
     ],
     header_libs: [
-        "libaudioclient_headers",
         "libaudio_system_headers",
+        "libaudioclient_headers",
     ],
     export_header_lib_headers: [
         "libaudioclient_headers",
@@ -35,8 +35,8 @@ cc_defaults {
     export_include_dirs: ["include_mono"],
 
     cflags: [
-        "-Werror",
         "-Wall",
+        "-Werror",
     ],
 }
 
@@ -49,7 +49,7 @@ cc_library_shared {
     defaults: ["libnbaio_mono_defaults"],
 }
 
-cc_library_shared {
+cc_library {
     name: "libnbaio",
     defaults: ["libnbaio_mono_defaults"],
     srcs: [
@@ -67,6 +67,10 @@ cc_library_shared {
     //     "LibsndfileSource.cpp",
     // ],
     // static_libs: ["libsndfile"],
+
+    shared_libs: [
+        "libmediautils",
+    ],
 
     header_libs: ["libaudiohal_headers"],
 

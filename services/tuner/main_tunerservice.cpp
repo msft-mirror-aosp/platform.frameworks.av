@@ -17,7 +17,9 @@
 #include <android-base/logging.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
+#include <cutils/properties.h>
 #include <utils/Log.h>
+#include <hidl/HidlTransportSupport.h>
 
 #include "TunerService.h"
 #include "hidl/TunerHidlService.h"
@@ -30,8 +32,16 @@ using namespace android;
 int main() {
     ALOGD("Tuner service starting");
 
+    if (!property_get_bool("tuner.server.enable", false)
+        && !property_get_bool("ro.tuner.lazyhal", false)) {
+        ALOGD("tuner is not enabled, terminating");
+        return 0;
+    }
+
     sp<ProcessState> proc(ProcessState::self());
     sp<IServiceManager> sm = defaultServiceManager();
+    hardware::configureRpcThreadpool(16, true);
+    ProcessState::self()->setThreadPoolMaxThreadCount(16);
 
     // Check legacy HIDL HAL first. If it's not existed, use AIDL HAL.
     binder_status_t status = TunerHidlService::instantiate();

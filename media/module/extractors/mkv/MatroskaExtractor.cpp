@@ -1769,6 +1769,30 @@ status_t MatroskaExtractor::synthesizeMPEG4(TrackInfo *trackInfo, size_t index) 
 
 }
 
+status_t MatroskaExtractor::synthesizeVP9(TrackInfo* trackInfo, size_t index) {
+    BlockIterator iter(this, trackInfo->mTrackNum, index);
+    if (iter.eos()) {
+        return ERROR_MALFORMED;
+    }
+
+    const mkvparser::Block* block = iter.block();
+    if (block->GetFrameCount() <= 0) {
+        return ERROR_MALFORMED;
+    }
+
+    const mkvparser::Block::Frame& frame = block->GetFrame(0);
+    auto tmpData = heapbuffer<unsigned char>(frame.len);
+    long n = frame.Read(mReader, tmpData.get());
+    if (n != 0) {
+        return ERROR_MALFORMED;
+    }
+
+    if (!MakeVP9CodecSpecificData(trackInfo->mMeta, tmpData.get(), frame.len)) {
+        return ERROR_MALFORMED;
+    }
+
+    return OK;
+}
 
 static inline bool isValidInt32ColourValue(long long value) {
     return value != mkvparser::Colour::kValueNotPresent
@@ -1800,7 +1824,6 @@ void MatroskaExtractor::getColorInformation(
         int32_t isotransfer = 2; // ISO unspecified
         int32_t coeffs = 2; // ISO unspecified
         bool fullRange = false; // default
-        bool rangeSpecified = false;
 
         if (isValidInt32ColourValue(color->primaries)) {
             primaries = color->primaries;
@@ -1816,7 +1839,6 @@ void MatroskaExtractor::getColorInformation(
             // We only support MKV broadcast range (== limited) and full range.
             // We treat all other value as the default limited range.
             fullRange = color->range == 2 /* MKV fullRange */;
-            rangeSpecified = true;
         }
 
         int32_t range = 0;
@@ -2004,6 +2026,8 @@ void MatroskaExtractor::addTracks() {
                       // specified in http://www.webmproject.org/vp9/profiles/.
                       AMediaFormat_setBuffer(meta,
                              AMEDIAFORMAT_KEY_CSD_0, codecPrivate, codecPrivateSize);
+                    } else {
+                        isSetCsdFrom1stFrame = true;
                     }
                 } else if (!strcmp("V_AV1", codecID)) {
                     AMediaFormat_setString(meta, AMEDIAFORMAT_KEY_MIME, MEDIA_MIMETYPE_VIDEO_AV1);
@@ -2256,6 +2280,13 @@ void MatroskaExtractor::addTracks() {
                 mTracks.pop();
                 continue;
             }
+        } else if ((!strcmp("V_VP9", codecID) && codecPrivateSize == 0) ||
+                   (!strcmp(mimetype, MEDIA_MIMETYPE_VIDEO_VP9) && isSetCsdFrom1stFrame)) {
+            // Attempt to recover from VP9 track without codec private data
+            err = synthesizeVP9(trackInfo, n);
+            if (err != OK) {
+                ALOGW("ignoring error %d in synthesizeVP9", err);
+            }
         }
         // the TrackInfo owns the metadata now
         meta = nullptr;
@@ -2281,6 +2312,8 @@ void MatroskaExtractor::findThumbnails() {
         int64_t thumbnailTimeUs = 0;
         size_t maxBlockSize = 0;
         while (!iter.eos() && j < 20) {
+            int64_t blockTimeUs = iter.blockTimeUs();
+
             if (iter.block()->IsKey()) {
                 ++j;
 
@@ -2291,8 +2324,12 @@ void MatroskaExtractor::findThumbnails() {
 
                 if (blockSize > maxBlockSize) {
                     maxBlockSize = blockSize;
-                    thumbnailTimeUs = iter.blockTimeUs();
+                    thumbnailTimeUs = blockTimeUs;
                 }
+            }
+            // Exit after 20s if we've already found at least one key frame.
+            if (blockTimeUs > 20000000 && maxBlockSize > 0) {
+                break;
             }
             iter.advance();
         }

@@ -44,13 +44,14 @@ class AAudioServiceStreamShared : public AAudioServiceStreamBase {
 
 public:
     explicit AAudioServiceStreamShared(android::AAudioService &aAudioService);
-    virtual ~AAudioServiceStreamShared() = default;
+    ~AAudioServiceStreamShared() override = default;
 
     static std::string dumpHeader();
 
     std::string dump() const override;
 
-    aaudio_result_t open(const aaudio::AAudioStreamRequest &request) override;
+    aaudio_result_t open(const aaudio::AAudioStreamRequest &request) override
+            EXCLUDES(mUpMessageQueueLock);
 
     void writeDataIfRoom(int64_t mmapFramesRead, const void *buffer, int32_t numFrames);
 
@@ -107,7 +108,7 @@ protected:
 
 private:
 
-    std::shared_ptr<SharedRingBuffer> mAudioDataQueue GUARDED_BY(audioDataQueueLock);
+    std::shared_ptr<SharedRingBuffer> mAudioDataQueue PT_GUARDED_BY(audioDataQueueLock);
 
     std::atomic<int64_t>     mTimestampPositionOffset;
     std::atomic<int32_t>     mXRunCount;

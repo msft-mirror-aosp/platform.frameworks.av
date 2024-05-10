@@ -43,11 +43,29 @@ license {
     ],
 }
 
+aconfig_declarations {
+    name: "camera_platform_flags",
+    package: "com.android.internal.camera.flags",
+    container: "system",
+    srcs: ["camera_platform.aconfig"],
+}
+
+cc_aconfig_library {
+    name: "camera_platform_flags_c_lib",
+    aconfig_declarations: "camera_platform_flags",
+    host_supported: true,
+}
+
+java_aconfig_library {
+    name: "camera_platform_flags_java_lib",
+    aconfig_declarations: "camera_platform_flags",
+}
+
 cc_library_headers {
     name: "camera_headers",
     export_include_dirs: ["include"],
 }
-cc_library_shared {
+cc_library {
     name: "libcamera_client",
 
     aidl: {
@@ -85,6 +103,7 @@ cc_library_shared {
     ],
 
     shared_libs: [
+        "camera_platform_flags_c_lib",
         "libbase",
         "libcutils",
         "libutils",
@@ -93,6 +112,7 @@ cc_library_shared {
         "libgui",
         "libcamera_metadata",
         "libnativewindow",
+        "lib-platform-compat-native-api",
     ],
 
     include_dirs: [
@@ -141,14 +161,16 @@ cc_library_host_static {
 filegroup {
     name: "libcamera_client_aidl",
     srcs: [
+        "aidl/android/hardware/CameraExtensionSessionStats.aidl",
         "aidl/android/hardware/ICameraService.aidl",
+        "aidl/android/hardware/CameraIdRemapping.aidl",
         "aidl/android/hardware/ICameraServiceListener.aidl",
         "aidl/android/hardware/ICameraServiceProxy.aidl",
         "aidl/android/hardware/camera2/ICameraDeviceCallbacks.aidl",
         "aidl/android/hardware/camera2/ICameraDeviceUser.aidl",
-        "aidl/android/hardware/camera2/ICameraOfflineSession.aidl",
         "aidl/android/hardware/camera2/ICameraInjectionCallback.aidl",
         "aidl/android/hardware/camera2/ICameraInjectionSession.aidl",
+        "aidl/android/hardware/camera2/ICameraOfflineSession.aidl",
     ],
     path: "aidl",
 }

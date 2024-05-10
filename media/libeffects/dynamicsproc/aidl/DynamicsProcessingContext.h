@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <android-base/thread_annotations.h>
 #include <audio_effects/effect_dynamicsprocessing.h>
 
 #include "effect-impl/EffectContext.h"
@@ -37,14 +36,15 @@ enum DynamicsProcessingState {
 class DynamicsProcessingContext final : public EffectContext {
   public:
     DynamicsProcessingContext(int statusDepth, const Parameter::Common& common);
-    ~DynamicsProcessingContext();
-
+    ~DynamicsProcessingContext() = default;
     RetCode enable();
     RetCode disable();
     void reset();
 
     // override EffectContext::setCommon to update mChannelCount
     RetCode setCommon(const Parameter::Common& common) override;
+    RetCode setVolumeStereo(const Parameter::VolumeStereo& volumeStereo) override;
+    Parameter::VolumeStereo getVolumeStereo() override;
 
     RetCode setEngineArchitecture(const DynamicsProcessing::EngineArchitecture& engineArchitecture);
     RetCode setPreEq(const std::vector<DynamicsProcessing::ChannelConfig>& eqChannels);
@@ -66,17 +66,16 @@ class DynamicsProcessingContext final : public EffectContext {
     std::vector<DynamicsProcessing::LimiterConfig> getLimiter();
     std::vector<DynamicsProcessing::InputGain> getInputGain();
 
-    IEffect::Status lvmProcess(float* in, float* out, int samples);
+    IEffect::Status dpeProcess(float* in, float* out, int samples);
 
   private:
     static constexpr float kPreferredProcessingDurationMs = 10.0f;
     static constexpr int kBandCount = 5;
-    std::mutex mMutex;
-    size_t mChannelCount GUARDED_BY(mMutex) = 0;
-    DynamicsProcessingState mState GUARDED_BY(mMutex) = DYNAMICS_PROCESSING_STATE_UNINITIALIZED;
-    std::unique_ptr<dp_fx::DPFrequency> mDpFreq GUARDED_BY(mMutex) = nullptr;
-    bool mEngineInited GUARDED_BY(mMutex) = false;
-    DynamicsProcessing::EngineArchitecture mEngineArchitecture GUARDED_BY(mMutex) = {
+    int mChannelCount = 0;
+    DynamicsProcessingState mState = DYNAMICS_PROCESSING_STATE_UNINITIALIZED;
+    std::unique_ptr<dp_fx::DPFrequency> mDpFreq = nullptr;
+    bool mEngineInited = false;
+    DynamicsProcessing::EngineArchitecture mEngineArchitecture = {
             .resolutionPreference =
                     DynamicsProcessing::ResolutionPreference::FAVOR_FREQUENCY_RESOLUTION,
             .preferredProcessingDurationMs = kPreferredProcessingDurationMs,
@@ -90,41 +89,34 @@ class DynamicsProcessingContext final : public EffectContext {
 
     void init();
 
-    void dpSetFreqDomainVariant_l(const DynamicsProcessing::EngineArchitecture& engine)
-            REQUIRES(mMutex);
-    dp_fx::DPChannel* getChannel_l(int ch) REQUIRES(mMutex);
-    dp_fx::DPEq* getPreEq_l(int ch) REQUIRES(mMutex);
-    dp_fx::DPEq* getPostEq_l(int ch) REQUIRES(mMutex);
-    dp_fx::DPMbc* getMbc_l(int ch) REQUIRES(mMutex);
-    dp_fx::DPLimiter* getLimiter_l(int ch) REQUIRES(mMutex);
-    dp_fx::DPBandStage* getStageWithType_l(StageType type, int ch) REQUIRES(mMutex);
-    dp_fx::DPEq* getEqWithType_l(StageType type, int ch) REQUIRES(mMutex);
+    void dpSetFreqDomainVariant_l(const DynamicsProcessing::EngineArchitecture& engine);
+    dp_fx::DPChannel* getChannel_l(int ch);
+    dp_fx::DPEq* getPreEq_l(int ch);
+    dp_fx::DPEq* getPostEq_l(int ch);
+    dp_fx::DPMbc* getMbc_l(int ch);
+    dp_fx::DPLimiter* getLimiter_l(int ch);
+    dp_fx::DPBandStage* getStageWithType_l(StageType type, int ch);
+    dp_fx::DPEq* getEqWithType_l(StageType type, int ch);
     template <typename D>
     RetCode setDpChannels_l(const std::vector<DynamicsProcessing::ChannelConfig>& channels,
-                            bool stageInUse, StageType type) REQUIRES(mMutex);
+                            StageType type);
     template <typename T /* BandConfig */>
-    RetCode setBands_l(const std::vector<T>& bands, int maxBand, StageType type) REQUIRES(mMutex);
-    RetCode setDpChannelBand_l(const std::any& anyConfig, StageType type, int maxCh, int maxBand,
-                               std::set<std::pair<int, int>>& chBandSet) REQUIRES(mMutex);
+    RetCode setBands_l(const std::vector<T>& bands, StageType type);
+    RetCode setDpChannelBand_l(const std::any& anyConfig, StageType type,
+                               std::set<std::pair<int, int>>& chBandSet);
 
     std::vector<DynamicsProcessing::EqBandConfig> getEqBandConfigs(StageType type);
     std::vector<DynamicsProcessing::ChannelConfig> getChannelConfig(StageType type);
 
-    bool validateStageEnablement(const DynamicsProcessing::StageEnablement& enablement);
-    bool validateEngineConfig(const DynamicsProcessing::EngineArchitecture& engine);
-    bool validateEqBandConfig(const DynamicsProcessing::EqBandConfig& band, int maxChannel,
-                              int maxBand);
-    bool validateMbcBandConfig(const DynamicsProcessing::MbcBandConfig& band, int maxChannel,
-                               int maxBand);
-    bool validateLimiterConfig(const DynamicsProcessing::LimiterConfig& limiter, int maxChannel);
-    bool validateInputGainConfig(const DynamicsProcessing::InputGain& gain, int maxChannel);
+    template <typename T /* BandConfig */>
+    bool validateBandConfig(const std::vector<T>& bands, int maxChannel, int maxBand);
+    bool validateLimiterConfig(const std::vector<DynamicsProcessing::LimiterConfig>& cfgs,
+                               int maxChannel);
+    bool validateInputGainConfig(const std::vector<DynamicsProcessing::InputGain>& cfgs,
+                                 int maxChannel);
 
-    inline bool validateCutoffFrequency(float freq);
     inline bool validateChannel(int ch, int maxCh) { return ch >= 0 && ch < maxCh; }
     inline bool validateBand(int band, int maxBand) { return band >= 0 && band < maxBand; }
-    inline bool validateTime(int time) { return time >= 0; }
-    inline bool validateRatio(int ratio) { return ratio >= 0; }
-    inline bool validateBandDb(int db) { return db <= 0; }
 };
 
 }  // namespace aidl::android::hardware::audio::effect

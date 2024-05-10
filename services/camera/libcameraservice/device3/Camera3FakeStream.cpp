@@ -20,13 +20,14 @@
 
 #include <utils/Log.h>
 #include <utils/Trace.h>
+#include <camera/StringUtils.h>
 #include "Camera3FakeStream.h"
 
 namespace android {
 
 namespace camera3 {
 
-const String8 Camera3FakeStream::FAKE_ID;
+const std::string Camera3FakeStream::FAKE_ID;
 
 Camera3FakeStream::Camera3FakeStream(int id) :
         Camera3IOStreamBase(id, CAMERA_STREAM_OUTPUT, FAKE_WIDTH, FAKE_HEIGHT,
@@ -67,11 +68,10 @@ status_t Camera3FakeStream::returnBufferCheckedLocked(
     return INVALID_OPERATION;
 }
 
-void Camera3FakeStream::dump(int fd, const Vector<String16> &args) const {
-    (void) args;
-    String8 lines;
-    lines.appendFormat("    Stream[%d]: Fake\n", mId);
-    write(fd, lines.string(), lines.size());
+void Camera3FakeStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) const {
+    std::string lines;
+    lines += fmt::sprintf("    Stream[%d]: Fake\n", mId);
+    write(fd, lines.c_str(), lines.size());
 
     Camera3IOStreamBase::dump(fd, args);
 }
@@ -82,9 +82,8 @@ status_t Camera3FakeStream::setTransform(int, bool) {
     return OK;
 }
 
-status_t Camera3FakeStream::detachBuffer(sp<GraphicBuffer>* buffer, int* fenceFd) {
-    (void) buffer;
-    (void) fenceFd;
+status_t Camera3FakeStream::detachBuffer([[maybe_unused]] sp<GraphicBuffer>* buffer,
+                [[maybe_unused]] int* fenceFd) {
     // Do nothing
     return OK;
 }
@@ -117,7 +116,7 @@ status_t Camera3FakeStream::dropBuffers(bool /*dropping*/) {
     return OK;
 }
 
-const String8& Camera3FakeStream::getPhysicalCameraId() const {
+const std::string& Camera3FakeStream::getPhysicalCameraId() const {
     return FAKE_ID;
 }
 
