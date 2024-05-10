@@ -459,6 +459,14 @@ void NuPlayer::Decoder::onSetParameters(const sp<AMessage> &params) {
         codecParams->setFloat("operating-rate", decodeFrameRate * mPlaybackSpeed);
         mCodec->setParameters(codecParams);
     }
+
+    int32_t videoScalingMode;
+    if (params->findInt32("android._video-scaling", &videoScalingMode)
+            && mCodec != NULL) {
+        sp<AMessage> codecParams = new AMessage();
+        codecParams->setInt32("android._video-scaling", videoScalingMode);
+        mCodec->setParameters(codecParams);
+    }
 }
 
 void NuPlayer::Decoder::onSetRenderer(const sp<Renderer> &renderer) {
@@ -1104,14 +1112,14 @@ bool NuPlayer::Decoder::onInputBufferFetched(const sp<AMessage> &msg) {
                         static_cast<MediaBufferHolder*>(holder.get())->mediaBuffer() : nullptr;
                 }
                 if (mediaBuf != NULL) {
-                    if (mediaBuf->size() > codecBuffer->capacity()) {
+                    if (mediaBuf->range_length() > codecBuffer->capacity()) {
                         handleError(ERROR_BUFFER_TOO_SMALL);
                         mDequeuedInputBuffers.push_back(bufferIx);
                         return false;
                     }
 
-                    codecBuffer->setRange(0, mediaBuf->size());
-                    memcpy(codecBuffer->data(), mediaBuf->data(), mediaBuf->size());
+                    codecBuffer->setRange(0, mediaBuf->range_length());
+                    memcpy(codecBuffer->data(), mediaBuf->data(), mediaBuf->range_length());
 
                     MetaDataBase &meta_data = mediaBuf->meta_data();
                     cryptInfo = NuPlayerDrm::getSampleCryptoInfo(meta_data);

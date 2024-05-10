@@ -19,6 +19,8 @@
 
 #include <initializer_list>
 
+#include <android_media_codec.h>
+
 #include <cutils/properties.h>
 #include <log/log.h>
 #include <utils/NativeHandle.h>
@@ -285,6 +287,12 @@ struct StandardParams {
         }
     }
 
+    // Updates or adds a mapper for a "sdkkey"
+    void updateConfigMappersForKey(const SdkKey& key,
+            const std::vector<ConfigMapper>& vec_cm) {
+        mConfigMappers.insert_or_assign(key, vec_cm);
+    }
+
     /**
      * Returns all paths for a specific domain.
      *
@@ -396,9 +404,18 @@ void CCodecConfig::initializeStandardParams() {
 
     add(ConfigMapper(KEY_MAX_INPUT_SIZE, C2_PARAMKEY_INPUT_MAX_BUFFER_SIZE, "value")
         .limitTo(D::INPUT));
+
     // remove when codecs switch to PARAMKEY
     deprecated(ConfigMapper(KEY_MAX_INPUT_SIZE, "coded.max-frame-size", "value")
                .limitTo(D::INPUT));
+
+    // large frame params
+    add(ConfigMapper(KEY_BUFFER_BATCH_MAX_OUTPUT_SIZE,
+            C2_PARAMKEY_OUTPUT_LARGE_FRAME, "max-size")
+        .limitTo(D::AUDIO & D::OUTPUT));
+    add(ConfigMapper(KEY_BUFFER_BATCH_THRESHOLD_OUTPUT_SIZE,
+            C2_PARAMKEY_OUTPUT_LARGE_FRAME, "threshold-size")
+        .limitTo(D::AUDIO & D::OUTPUT));
 
     // Rotation
     // Note: SDK rotation is clock-wise, while C2 rotation is counter-clock-wise
@@ -576,6 +593,13 @@ void CCodecConfig::initializeStandardParams() {
             }
             return C2Value();
         }));
+
+    if (android::media::codec::provider_->region_of_interest()
+        && android::media::codec::provider_->region_of_interest_support()) {
+        add(ConfigMapper(C2_PARAMKEY_QP_OFFSET_RECTS, C2_PARAMKEY_QP_OFFSET_RECTS, "")
+            .limitTo(D::VIDEO & (D::CONFIG | D::PARAM) & D::ENCODER & D::INPUT));
+    }
+
     deprecated(ConfigMapper(PARAMETER_KEY_REQUEST_SYNC_FRAME,
                      "coding.request-sync", "value")
         .limitTo(D::PARAM & D::ENCODER)
@@ -619,30 +643,30 @@ void CCodecConfig::initializeStandardParams() {
         .limitTo(D::OUTPUT & D::READ));
 
     deprecated(ConfigMapper(KEY_HDR10_PLUS_INFO, C2_PARAMKEY_INPUT_HDR10_PLUS_INFO, "value")
-        .limitTo(D::VIDEO & D::PARAM & D::INPUT));
+        .limitTo(D::VIDEO & D::PARAM & D::INPUT & (D::CONFIG | D::PARAM)));
 
     deprecated(ConfigMapper(KEY_HDR10_PLUS_INFO, C2_PARAMKEY_OUTPUT_HDR10_PLUS_INFO, "value")
-        .limitTo(D::VIDEO & D::OUTPUT));
+        .limitTo(D::VIDEO & D::OUTPUT & D::READ));
 
     add(ConfigMapper(
             std::string(C2_PARAMKEY_INPUT_HDR_DYNAMIC_INFO) + ".type",
             C2_PARAMKEY_INPUT_HDR_DYNAMIC_INFO, "type")
-        .limitTo(D::VIDEO & D::PARAM & D::INPUT));
+        .limitTo(D::VIDEO & D::PARAM & D::INPUT & (D::CONFIG | D::PARAM)));
 
     add(ConfigMapper(
             std::string(C2_PARAMKEY_INPUT_HDR_DYNAMIC_INFO) + ".data",
             C2_PARAMKEY_INPUT_HDR_DYNAMIC_INFO, "data")
-        .limitTo(D::VIDEO & D::PARAM & D::INPUT));
+        .limitTo(D::VIDEO & D::PARAM & D::INPUT & (D::CONFIG | D::PARAM)));
 
     add(ConfigMapper(
             std::string(C2_PARAMKEY_OUTPUT_HDR_DYNAMIC_INFO) + ".type",
             C2_PARAMKEY_OUTPUT_HDR_DYNAMIC_INFO, "type")
-        .limitTo(D::VIDEO & D::OUTPUT));
+        .limitTo(D::VIDEO & D::OUTPUT & D::READ));
 
     add(ConfigMapper(
             std::string(C2_PARAMKEY_OUTPUT_HDR_DYNAMIC_INFO) + ".data",
             C2_PARAMKEY_OUTPUT_HDR_DYNAMIC_INFO, "data")
-        .limitTo(D::VIDEO & D::OUTPUT));
+        .limitTo(D::VIDEO & D::OUTPUT & D::READ));
 
     add(ConfigMapper(C2_PARAMKEY_TEMPORAL_LAYERING, C2_PARAMKEY_TEMPORAL_LAYERING, "")
         .limitTo(D::ENCODER & D::VIDEO & D::OUTPUT));
@@ -934,6 +958,9 @@ void CCodecConfig::initializeStandardParams() {
     add(ConfigMapper(KEY_CHANNEL_MASK, C2_PARAMKEY_CHANNEL_MASK, "value")
         .limitTo(D::AUDIO & D::DECODER & D::READ));
 
+    add(ConfigMapper(KEY_CHANNEL_MASK, C2_PARAMKEY_CHANNEL_MASK, "value")
+        .limitTo(D::AUDIO & D::ENCODER & D::CONFIG));
+
     add(ConfigMapper(KEY_AAC_SBR_MODE, C2_PARAMKEY_AAC_SBR_MODE, "value")
         .limitTo(D::AUDIO & D::ENCODER & (D::CONFIG | D::PARAM | D::READ))
         .withMapper([](C2Value v) -> C2Value {
@@ -955,7 +982,7 @@ void CCodecConfig::initializeStandardParams() {
         .limitTo(D::ENCODER & (D::CONFIG | D::PARAM)));
     add(ConfigMapper(KEY_FLAC_COMPRESSION_LEVEL, C2_PARAMKEY_COMPLEXITY, "value")
         .limitTo(D::AUDIO & D::ENCODER));
-    add(ConfigMapper("complexity", C2_PARAMKEY_COMPLEXITY, "value")
+    add(ConfigMapper(KEY_COMPLEXITY, C2_PARAMKEY_COMPLEXITY, "value")
         .limitTo(D::ENCODER & (D::CONFIG | D::PARAM)));
 
     add(ConfigMapper(KEY_GRID_COLUMNS, C2_PARAMKEY_TILE_LAYOUT, "columns")
@@ -1103,6 +1130,11 @@ status_t CCodecConfig::initialize(
     mParamUpdater->clear();
     mParamUpdater->supportWholeParam(
             C2_PARAMKEY_TEMPORAL_LAYERING, C2StreamTemporalLayeringTuning::CORE_INDEX);
+    if (android::media::codec::provider_->region_of_interest()
+        && android::media::codec::provider_->region_of_interest_support()) {
+        mParamUpdater->supportWholeParam(
+                C2_PARAMKEY_QP_OFFSET_RECTS, C2StreamQpOffsetRects::CORE_INDEX);
+    }
     mParamUpdater->addParamDesc(mReflector, mParamDescs);
 
     // TEMP: add some standard fields even if not reflected
@@ -1853,6 +1885,39 @@ ReflectedParamUpdater::Dict CCodecConfig::getReflectedFormat(
         }
     }
 
+    if (android::media::codec::provider_->region_of_interest()
+        && android::media::codec::provider_->region_of_interest_support()) {
+        if (mDomain == (IS_VIDEO | IS_ENCODER)) {
+            AString qpOffsetRects;
+            if (params->findString(PARAMETER_KEY_QP_OFFSET_RECTS, &qpOffsetRects)) {
+                std::vector<C2QpOffsetRectStruct> c2QpOffsetRects;
+                char mutableStrQpOffsetRects[strlen(qpOffsetRects.c_str()) + 1];
+                strcpy(mutableStrQpOffsetRects, qpOffsetRects.c_str());
+                char* box = strtok(mutableStrQpOffsetRects, ";");
+                while (box != nullptr) {
+                    int top, left, bottom, right, offset;
+                    if (sscanf(box, "%d,%d-%d,%d=%d", &top, &left, &bottom, &right, &offset) == 5) {
+                        left = c2_max(0, left);
+                        top = c2_max(0, top);
+                        if (right > left && bottom > top) {
+                            C2Rect rect(right - left, bottom - top);
+                            rect.at(left, top);
+                            c2QpOffsetRects.push_back(C2QpOffsetRectStruct(rect, offset));
+                        }
+                    }
+                    box = strtok(nullptr, ";");
+                }
+                if (c2QpOffsetRects.size() != 0) {
+                    const std::unique_ptr<C2StreamQpOffsetRects::output> regions =
+                            C2StreamQpOffsetRects::output::AllocUnique(
+                                    c2QpOffsetRects.size(), 0u, c2QpOffsetRects);
+                    params->setBuffer(C2_PARAMKEY_QP_OFFSET_RECTS,
+                                      ABuffer::CreateAsCopy(regions.get(), regions->size()));
+                }
+            }
+        }
+    }
+
     // this is to verify that we set proper signedness for standard parameters
     bool beVeryStrict = property_get_bool("debug.stagefright.ccodec_strict_type", false);
     // this is to allow vendors to use the wrong signedness for standard parameters
@@ -1914,6 +1979,67 @@ status_t CCodecConfig::getConfigUpdateFromSdkParams(
         const sp<AMessage> &sdkParams, Domain configDomain,
         c2_blocking_t blocking,
         std::vector<std::unique_ptr<C2Param>> *configUpdate) const {
+    // update the mappers if we know something more of this format.
+    // AV1 10b or 8b encoding request.
+    AString mime;
+    int32_t requestedSdkProfile = -1;
+    if ((mDomain == (IS_VIDEO | IS_ENCODER)) &&
+            sdkParams->findString(KEY_MIME, &mime) &&
+            mime == MIMETYPE_VIDEO_AV1) {
+
+        sdkParams->findInt32(KEY_PROFILE, &requestedSdkProfile);
+        bool is10bAv1EncodeRequested = (requestedSdkProfile == AV1ProfileMain10);
+
+        int32_t bitDepth = (is10bAv1EncodeRequested) ? 10 : 8;
+        // we always initilze with an 8b mapper. Update this only if needed.
+        if (bitDepth != 8) {
+            std::shared_ptr<C2Mapper::ProfileLevelMapper> mapper =
+                C2Mapper::GetBitDepthProfileLevelMapper(mCodingMediaType, bitDepth);
+            mStandardParams->updateConfigMappersForKey(StandardParams::SdkKey(KEY_PROFILE),
+                {
+                    ConfigMapper(KEY_PROFILE, C2_PARAMKEY_PROFILE_LEVEL, "profile")
+                    .limitTo(Domain::CODED)
+                    .withMappers([mapper](C2Value v) -> C2Value {
+                        C2Config::profile_t c2 = PROFILE_UNUSED;
+                        int32_t sdk;
+                        if (mapper && v.get(&sdk) && mapper->mapProfile(sdk, &c2)) {
+                            return c2;
+                        }
+                        return PROFILE_UNUSED;
+                        }, [mapper](C2Value v) -> C2Value {
+                        C2Config::profile_t c2;
+                        int32_t sdk;
+                        using C2ValueType =
+                            typename _c2_reduce_enum_to_underlying_type<decltype(c2)>::type;
+                        if (mapper && v.get((C2ValueType*)&c2) && mapper->mapProfile(c2, &sdk)) {
+                            return sdk;
+                        }
+                        return C2Value();
+                })});
+            mStandardParams->updateConfigMappersForKey(StandardParams::SdkKey(KEY_LEVEL),
+                {
+                    ConfigMapper(KEY_LEVEL, C2_PARAMKEY_PROFILE_LEVEL, "level")
+                    .limitTo(Domain::CODED)
+                    .withMappers([mapper](C2Value v) -> C2Value {
+                        C2Config::level_t c2 = LEVEL_UNUSED;
+                        int32_t sdk;
+                        if (mapper && v.get(&sdk) && mapper->mapLevel(sdk, &c2)) {
+                            return c2;
+                        }
+                        return LEVEL_UNUSED;
+                        }, [mapper](C2Value v) -> C2Value {
+                        C2Config::level_t c2;
+                        int32_t sdk;
+                        using C2ValueType =
+                            typename _c2_reduce_enum_to_underlying_type<decltype(c2)>::type;
+                        if (mapper && v.get((C2ValueType*)&c2) && mapper->mapLevel(c2, &sdk)) {
+                            return sdk;
+                        }
+                        return C2Value();
+                })});
+        }
+    }
+
     ReflectedParamUpdater::Dict params = getReflectedFormat(sdkParams, configDomain);
 
     std::vector<C2Param::Index> indices;

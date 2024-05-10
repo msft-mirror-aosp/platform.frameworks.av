@@ -141,6 +141,11 @@ struct AMessage : public RefBase {
 
     status_t post(int64_t delayUs = 0);
 
+    // Post a message uniquely to its target with the given timeout.
+    // This method ensures that there is exactly one message with the same token posted to its
+    // target after the call returns. A null token will result in an EINVAL error status.
+    status_t postUnique(const sp<RefBase> &token, int64_t delayUs = 0);
+
     // Posts the message to its target and waits for a response (or error)
     // before returning.
     status_t postAndAwaitResponse(sp<AMessage> *response);
@@ -194,6 +199,7 @@ struct AMessage : public RefBase {
     };
 
     size_t countEntries() const;
+    static size_t maxAllowedEntries();
     const char *getEntryNameAt(size_t index, Type *type) const;
 
     /**
@@ -348,6 +354,16 @@ private:
     void deliver();
 
     DISALLOW_EVIL_CONSTRUCTORS(AMessage);
+};
+
+/*
+ * Helper struct for wrapping any object with RefBase.
+ */
+template <typename T>
+struct WrapperObject : public RefBase {
+    WrapperObject(const T& v) : value(v) {}
+    WrapperObject(T&& v) : value(std::move(v)) {}
+    T value;
 };
 
 }  // namespace android

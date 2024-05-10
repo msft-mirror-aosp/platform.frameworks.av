@@ -35,6 +35,7 @@ cc_defaults {
     shared_libs: [
         "framework-permission-aidl-cpp",
         "libbinder",
+        "libbinder_ndk",
         "libcutils",
         "libmedia",
         "libstagefright",
@@ -46,6 +47,14 @@ cc_defaults {
             "android-media-fuzzing-reports@google.com",
         ],
         componentid: 155276,
+        hotlists: [
+            "4593311",
+        ],
+        description: "The fuzzer targets the APIs of libmediaplayerservice",
+        vector: "remote",
+        service_privilege: "privileged",
+        users: "multi_user",
+        fuzzed_code_usage: "shipped",
     },
 }
 
@@ -60,15 +69,51 @@ cc_fuzz {
     static_libs: [
         "libstagefright_rtsp",
         "libbase",
+        "libstagefright_nuplayer",
+        "libplayerservice_datasource",
+        "libstagefright_timedtext",
+        "libaudioprocessing_base",
     ],
     shared_libs: [
+        "android.hardware.media.omx@1.0",
         "av-types-aidl-cpp",
         "media_permission-aidl-cpp",
         "libaudioclient_aidl_conversion",
+        "libactivitymanager_aidl",
         "libandroid_net",
+        "libaudioclient",
         "libcamera_client",
+        "libcodec2_client",
+        "libcrypto",
+        "libdatasource",
+        "libdrmframework",
         "libgui",
+        "libhidlbase",
+        "liblog",
+        "libmedia_codeclist",
+        "libmedia_omx",
+        "libmediadrm",
         "libmediametrics",
+        "libmediautils",
+        "libmemunreachable",
+        "libnetd_client",
+        "libpowermanager",
+        "libstagefright_httplive",
+        "packagemanager_aidl-cpp",
+        "libfakeservicemanager",
+        "libvibrator",
+        "libnbaio",
+        "libnblog",
+        "libpowermanager",
+        "libaudioprocessing",
+        "libaudioflinger",
+        "libresourcemanagerservice",
+        "libmediametricsservice",
+        "mediametricsservice-aidl-cpp",
+    ],
+    header_libs: [
+        "libaudiohal_headers",
+        "libaudioflinger_headers",
     ],
 }
 
@@ -79,14 +124,19 @@ cc_fuzz {
     ],
     defaults: [
         "libmediaplayerserviceFuzzer_defaults",
+        "libmediaplayerservice_defaults",
     ],
     static_libs: [
         "libplayerservice_datasource",
     ],
     shared_libs: [
+        "libmediaplayerservice",
         "libdatasource",
         "libdrmframework",
+        "libstagefright_httplive",
+        "libmediaextractorservice",
     ],
+    include_dirs: ["frameworks/av/services/mediaextractor"],
 }
 
 cc_fuzz {
@@ -129,5 +179,29 @@ cc_fuzz {
         "libnetd_client",
         "libpowermanager",
         "libstagefright_httplive",
+        "libaudiohal@7.0",
     ],
+}
+
+cc_fuzz {
+    name: "media_player_service_fuzzer",
+    defaults: [
+        "service_fuzzer_defaults",
+        "libmediaplayerservice_defaults",
+        "fuzzer_disable_leaks",
+    ],
+    srcs: [
+        "media_player_service_fuzzer.cpp",
+    ],
+    fuzz_config: {
+        cc: [
+            "kyslov@google.com",
+            "ibaker@google.com",
+        ],
+        triage_assignee: "waghpawan@google.com",
+    },
+    cflags: [
+        "-DFUZZ_MODE_MEDIA_PLAYER_SERVICE",
+    ],
+    include_dirs: ["frameworks/av/media/libmediaplayerservice/"],
 }

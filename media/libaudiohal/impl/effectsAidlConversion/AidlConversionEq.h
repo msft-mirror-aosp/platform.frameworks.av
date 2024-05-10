@@ -25,18 +25,19 @@ namespace effect {
 class AidlConversionEq : public EffectConversionHelperAidl {
   public:
     AidlConversionEq(std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
-                      int32_t sessionId, int32_t ioId,
-                      const ::aidl::android::hardware::audio::effect::Descriptor& desc)
-        : EffectConversionHelperAidl(effect, sessionId, ioId, desc) {}
+                     int32_t sessionId, int32_t ioId,
+                     const ::aidl::android::hardware::audio::effect::Descriptor& desc,
+                     bool isProxyEffect)
+        : EffectConversionHelperAidl(effect, sessionId, ioId, desc, isProxyEffect) {}
     ~AidlConversionEq() {}
 
   private:
     status_t setParameter(utils::EffectParamReader& param) override;
     status_t getParameter(utils::EffectParamWriter& param) override;
-    aidl::ConversionResult<::aidl::android::hardware::audio::effect::Parameter> getAidlParameter(
+    ConversionResult<::aidl::android::hardware::audio::effect::Parameter> getAidlParameter(
             ::aidl::android::hardware::audio::effect::Equalizer::Tag tag);
-    aidl::ConversionResult<int32_t> getParameterPreset();
-    aidl::ConversionResult<std::string> getParameterPresetName(utils::EffectParamWriter& param);
+    ConversionResult<int32_t> getParameterPreset();
+    ConversionResult<std::string> getParameterPresetName(utils::EffectParamWriter& param);
 };
 
 }  // namespace effect

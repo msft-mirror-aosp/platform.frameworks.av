@@ -102,6 +102,21 @@ static const OMX_U32 kPortIndexOutput = 1;
 
 namespace android {
 
+static bool isValidOmxParamSize(const void *params, OMX_U32 size) {
+    // expect the vector to contain at least the size and version, two OMX_U32 entries.
+    if (size < 2 * sizeof(OMX_U32)) {
+        return false;
+    }
+
+    // expect the vector to be as large as the declared size
+    OMX_U32 *buf = (OMX_U32 *)params;
+    OMX_U32 declaredSize = *(OMX_U32*)buf;
+    if (declaredSize > size) {
+        return false;
+    }
+    return true;
+}
+
 struct BufferMeta {
     explicit BufferMeta(
             const sp<IMemory> &mem, const sp<IHidlMemory> &hidlMemory,
@@ -316,7 +331,7 @@ struct OMXNodeInstance::CallbackDispatcher : public RefBase {
     // that a new message is available on the queue. Otherwise, the message stays on the queue, but
     // the listener is not notified of it. It will process this message when a subsequent message
     // is posted with |realTime| set to true.
-    void post(const omx_message &msg, bool realTime = true);
+    void post(const omx_message &msg, bool realTime);
 
     bool loop();
 
@@ -325,18 +340,15 @@ protected:
 
 private:
     enum {
-        // This is used for frame_rendered message batching, which will eventually end up in a
-        // single AMessage in MediaCodec when it is signaled to the app. AMessage can contain
-        // up-to 64 key-value pairs, and each frame_rendered message uses 2 keys, so the max
-        // value for this would be 32. Nonetheless, limit this to 12 to which gives at least 10
-        // mseconds of batching at 120Hz.
-        kMaxQueueSize = 12,
+        // Don't delay non-realtime messages longer than 200ms
+        kMaxBatchedDelayNs = 200 * 1000 * 1000,
     };
 
     Mutex mLock;
 
     sp<OMXNodeInstance> const mOwner;
     bool mDone;
+    bool mHasBatchedMessages;
     Condition mQueueChanged;
     std::list<omx_message> mQueue;
 
@@ -350,7 +362,8 @@ private:
 
 OMXNodeInstance::CallbackDispatcher::CallbackDispatcher(const sp<OMXNodeInstance> &owner)
     : mOwner(owner),
-      mDone(false) {
+      mDone(false),
+      mHasBatchedMessages(false) {
     mThread = new CallbackDispatcherThread(this);
     mThread->run("OMXCallbackDisp", ANDROID_PRIORITY_FOREGROUND);
 }
@@ -358,7 +371,6 @@ OMXNodeInstance::CallbackDispatcher::CallbackDispatcher(const sp<OMXNodeInstance
 OMXNodeInstance::CallbackDispatcher::~CallbackDispatcher() {
     {
         Mutex::Autolock autoLock(mLock);
-
         mDone = true;
         mQueueChanged.signal();
     }
@@ -377,8 +389,11 @@ void OMXNodeInstance::CallbackDispatcher::post(const omx_message &msg, bool real
     Mutex::Autolock autoLock(mLock);
 
     mQueue.push_back(msg);
-    if (realTime || mQueue.size() >= kMaxQueueSize) {
+    if (realTime) {
         mQueueChanged.signal();
+    } else if (!mHasBatchedMessages) {
+        mHasBatchedMessages = true;
+        mQueueChanged.signal(); // The first non-realtime message is not batched.
     }
 }
 
@@ -393,11 +408,16 @@ void OMXNodeInstance::CallbackDispatcher::dispatch(std::list<omx_message> &messa
 bool OMXNodeInstance::CallbackDispatcher::loop() {
     for (;;) {
         std::list<omx_message> messages;
+        std::list<long long> messageTimestamps;
 
         {
             Mutex::Autolock autoLock(mLock);
             while (!mDone && mQueue.empty()) {
-                mQueueChanged.wait(mLock);
+                if (mHasBatchedMessages) {
+                    mQueueChanged.waitRelative(mLock, kMaxBatchedDelayNs);
+                } else {
+                    mQueueChanged.wait(mLock);
+                }
             }
 
             if (mDone) {
@@ -606,6 +626,10 @@ status_t OMXNodeInstance::sendCommand(
             // ACodec is waiting for all buffers to be returned, do NOT
             // submit any more buffers to the codec.
             bufferSource->onOmxIdle();
+        } else if (param == OMX_StateExecuting) {
+            // Initiating transition from Idle -> Executing
+            // Start submitting buffers to codec.
+            bufferSource->onOmxExecuting();
         } else if (param == OMX_StateLoaded) {
             // Initiating transition from Idle/Executing -> Loaded
             // Buffers are about to be freed.
@@ -683,6 +707,18 @@ bool OMXNodeInstance::isProhibitedIndex_l(OMX_INDEXTYPE index) {
 
 status_t OMXNodeInstance::getParameter(
         OMX_INDEXTYPE index, void *params, size_t size) {
+    OMX_INDEXEXTTYPE extIndex = (OMX_INDEXEXTTYPE)index;
+    if (extIndex == OMX_IndexParamConsumerUsageBits) {
+        // expect the size to be 4 bytes for OMX_IndexParamConsumerUsageBits
+        if (size != sizeof(OMX_U32)) {
+            return BAD_VALUE;
+        }
+    } else {
+        if (!isValidOmxParamSize(params, size)) {
+            return BAD_VALUE;
+        }
+    }
+
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -694,7 +730,6 @@ status_t OMXNodeInstance::getParameter(
     }
 
     OMX_ERRORTYPE err = OMX_GetParameter(mHandle, index, params);
-    OMX_INDEXEXTTYPE extIndex = (OMX_INDEXEXTTYPE)index;
     // some errors are expected for getParameter
     if (err != OMX_ErrorNoMore) {
         CLOG_IF_ERROR(getParameter, err, "%s(%#x)", asString(extIndex), index);
@@ -705,6 +740,10 @@ status_t OMXNodeInstance::getParameter(
 
 status_t OMXNodeInstance::setParameter(
         OMX_INDEXTYPE index, const void *params, size_t size) {
+    if (!isValidOmxParamSize(params, size)) {
+        return BAD_VALUE;
+    }
+
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -731,6 +770,9 @@ status_t OMXNodeInstance::setParameter(
 
 status_t OMXNodeInstance::getConfig(
         OMX_INDEXTYPE index, void *params, size_t size) {
+    if (!isValidOmxParamSize(params, size)) {
+        return BAD_VALUE;
+    }
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -754,6 +796,10 @@ status_t OMXNodeInstance::getConfig(
 
 status_t OMXNodeInstance::setConfig(
         OMX_INDEXTYPE index, const void *params, size_t size) {
+    if (!isValidOmxParamSize(params, size)) {
+        return BAD_VALUE;
+    }
+
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -2362,13 +2408,6 @@ void OMXNodeInstance::onEvent(
             asString(event), event, arg1String, arg1, arg2String, arg2);
     const sp<IOMXBufferSource> bufferSource(getBufferSource());
 
-    if (bufferSource != NULL
-            && event == OMX_EventCmdComplete
-            && arg1 == OMX_CommandStateSet
-            && arg2 == OMX_StateExecuting) {
-        bufferSource->onOmxExecuting();
-    }
-
     // allow configuration if we return to the loaded state
     if (event == OMX_EventCmdComplete
             && arg1 == OMX_CommandStateSet
@@ -2447,7 +2486,7 @@ OMX_ERRORTYPE OMXNodeInstance::OnEmptyBufferDone(
     msg.type = omx_message::EMPTY_BUFFER_DONE;
     msg.fenceFd = fenceFd;
     msg.u.buffer_data.buffer = instance->findBufferID(pBuffer);
-    instance->mDispatcher->post(msg);
+    instance->mDispatcher->post(msg, true /* realTime */);
 
     return OMX_ErrorNone;
 }
@@ -2475,7 +2514,7 @@ OMX_ERRORTYPE OMXNodeInstance::OnFillBufferDone(
     msg.u.extended_buffer_data.range_length = pBuffer->nFilledLen;
     msg.u.extended_buffer_data.flags = pBuffer->nFlags;
     msg.u.extended_buffer_data.timestamp = pBuffer->nTimeStamp;
-    instance->mDispatcher->post(msg);
+    instance->mDispatcher->post(msg, true /* realTime */);
 
     return OMX_ErrorNone;
 }

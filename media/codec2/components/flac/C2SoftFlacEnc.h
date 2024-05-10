@@ -63,7 +63,8 @@ private:
 
     std::shared_ptr<IntfImpl> mIntf;
     const unsigned int kInBlockSize = 1152;
-    const unsigned int kMaxNumChannels = 2;
+    static constexpr unsigned int kMaxNumChannels = 2;
+    static constexpr unsigned int kMaxBlockSize = 4608;
     FLAC__StreamEncoder* mFlacStreamEncoder;
     FLAC__int32* mInputBufferPcm32;
     std::shared_ptr<C2LinearBlock> mOutputBlock;
@@ -79,6 +80,12 @@ private:
     unsigned mHeaderOffset;
     bool mWroteHeader;
     char mHeader[FLAC_HEADER_SIZE];
+    struct OutputBuffer {
+        std::shared_ptr<C2Buffer> buffer;
+        c2_cntr64_t timestampUs;
+        std::uint64_t frameIndex;
+    };
+    std::list<OutputBuffer> mOutputBuffers;
 
     C2_DO_NOT_COPY(C2SoftFlacEnc);
 };

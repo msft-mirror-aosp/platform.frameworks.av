@@ -17,6 +17,7 @@
 #pragma once
 
 #include <aidl/android/hardware/audio/core/IConfig.h>
+#include <aidl/android/media/audio/IHalAdapterVendorExtension.h>
 #include <media/audiohal/DevicesFactoryHalInterface.h>
 #include <utils/RefBase.h>
 
@@ -26,20 +27,26 @@ class DevicesFactoryHalAidl : public DevicesFactoryHalInterface
 {
   public:
     explicit DevicesFactoryHalAidl(
-            std::shared_ptr<::aidl::android::hardware::audio::core::IConfig> iConfig);
+            std::shared_ptr<::aidl::android::hardware::audio::core::IConfig> config);
+
+    status_t getDeviceNames(std::vector<std::string> *names) override;
 
     // Opens a device with the specified name. To close the device, it is
     // necessary to release references to the returned object.
     status_t openDevice(const char *name, sp<DeviceHalInterface> *device) override;
 
-    status_t getHalPids(std::vector<pid_t> *pids) override;
-
     status_t setCallbackOnce(sp<DevicesFactoryHalCallback> callback) override;
 
     android::detail::AudioHalVersionInfo getHalVersion() const override;
 
+    status_t getSurroundSoundConfig(media::SurroundSoundConfig *config) override;
+
+    status_t getEngineConfig(media::audio::common::AudioHalEngineConfig *config) override;
+
   private:
-    const std::shared_ptr<::aidl::android::hardware::audio::core::IConfig> mIConfig;
+    const std::shared_ptr<::aidl::android::hardware::audio::core::IConfig> mConfig;
+    const std::shared_ptr<::aidl::android::media::audio::IHalAdapterVendorExtension> mVendorExt;
+
     ~DevicesFactoryHalAidl() = default;
 };
 

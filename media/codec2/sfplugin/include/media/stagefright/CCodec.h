@@ -56,7 +56,7 @@ public:
     virtual void initiateStart() override;
     virtual void initiateShutdown(bool keepComponentAllocated = false) override;
 
-    virtual status_t setSurface(const sp<Surface> &surface) override;
+    virtual status_t setSurface(const sp<Surface> &surface, uint32_t generation) override;
 
     virtual void signalFlush() override;
     virtual void signalResume() override;
@@ -109,9 +109,9 @@ private:
     void allocate(const sp<MediaCodecInfo> &codecInfo);
     void configure(const sp<AMessage> &msg);
     void start();
-    void stop();
+    void stop(bool pushBlankBuffer);
     void flush();
-    void release(bool sendCallback);
+    void release(bool sendCallback, bool pushBlankBuffer);
 
     /**
      * Creates an input surface for the current device configuration compatible with CCodec.
@@ -204,6 +204,8 @@ private:
 
     Mutexed<std::unique_ptr<CCodecConfig>> mConfig;
     Mutexed<std::list<std::unique_ptr<C2Work>>> mWorkDoneQueue;
+
+    sp<AMessage> mMetrics;
 
     friend class CCodecCallbackImpl;
 

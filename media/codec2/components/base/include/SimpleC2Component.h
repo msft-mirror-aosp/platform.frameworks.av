@@ -21,6 +21,7 @@
 #include <unordered_map>
 
 #include <C2Component.h>
+#include <C2Config.h>
 
 #include <media/stagefright/foundation/AHandler.h>
 #include <media/stagefright/foundation/ALooper.h>
@@ -30,11 +31,17 @@ struct C2ColorAspectsStruct;
 
 namespace android {
 
+typedef enum {
+    CONV_FORMAT_I420,
+    CONV_FORMAT_I422,
+    CONV_FORMAT_I444,
+} CONV_FORMAT_T;
+
 void convertYUV420Planar8ToYV12(uint8_t *dstY, uint8_t *dstU, uint8_t *dstV, const uint8_t *srcY,
                                 const uint8_t *srcU, const uint8_t *srcV, size_t srcYStride,
                                 size_t srcUStride, size_t srcVStride, size_t dstYStride,
-                                size_t dstUVStride, uint32_t width, uint32_t height,
-                                bool isMonochrome = false);
+                                size_t dstUStride, size_t dstVStride, uint32_t width,
+                                uint32_t height, bool isMonochrome = false);
 
 void convertYUV420Planar16ToY410OrRGBA1010102(
         uint32_t *dst, const uint16_t *srcY,
@@ -54,6 +61,41 @@ void convertYUV420Planar16ToP010(uint16_t *dstY, uint16_t *dstUV, const uint16_t
                                  size_t srcUStride, size_t srcVStride, size_t dstYStride,
                                  size_t dstUVStride, size_t width, size_t height,
                                  bool isMonochrome = false);
+
+void convertP010ToYUV420Planar16(uint16_t *dstY, uint16_t *dstU, uint16_t *dstV,
+                                 const uint16_t *srcY, const uint16_t *srcUV,
+                                 size_t srcYStride, size_t srcUVStride, size_t dstYStride,
+                                 size_t dstUStride, size_t dstVStride, size_t width,
+                                 size_t height, bool isMonochrome = false);
+
+void convertRGBA1010102ToYUV420Planar16(uint16_t* dstY, uint16_t* dstU, uint16_t* dstV,
+                                        const uint32_t* srcRGBA, size_t srcRGBStride, size_t width,
+                                        size_t height, C2Color::matrix_t colorMatrix,
+                                        C2Color::range_t colorRange);
+void convertPlanar16ToY410OrRGBA1010102(uint8_t* dst, const uint16_t* srcY, const uint16_t* srcU,
+                                        const uint16_t* srcV, size_t srcYStride, size_t srcUStride,
+                                        size_t srcVStride, size_t dstStride, size_t width,
+                                        size_t height,
+                                        std::shared_ptr<const C2ColorAspectsStruct> aspects,
+                                        CONV_FORMAT_T format);
+
+void convertPlanar16ToP010(uint16_t* dstY, uint16_t* dstUV, const uint16_t* srcY,
+                           const uint16_t* srcU, const uint16_t* srcV, size_t srcYStride,
+                           size_t srcUStride, size_t srcVStride, size_t dstYStride,
+                           size_t dstUStride, size_t dstVStride, size_t width, size_t height,
+                           bool isMonochrome, CONV_FORMAT_T format, uint16_t* tmpFrameBuffer,
+                           size_t tmpFrameBufferSize);
+void convertPlanar16ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV, const uint16_t* srcY,
+                           const uint16_t* srcU, const uint16_t* srcV, size_t srcYStride,
+                           size_t srcUStride, size_t srcVStride, size_t dstYStride,
+                           size_t dstUStride, size_t dstVStride, size_t width, size_t height,
+                           bool isMonochrome, CONV_FORMAT_T format, uint16_t* tmpFrameBuffer,
+                           size_t tmpFrameBufferSize);
+void convertPlanar8ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV, const uint8_t* srcY,
+                          const uint8_t* srcU, const uint8_t* srcV, size_t srcYStride,
+                          size_t srcUStride, size_t srcVStride, size_t dstYStride,
+                          size_t dstUStride, size_t dstVStride, uint32_t width, uint32_t height,
+                          bool isMonochrome, CONV_FORMAT_T format);
 
 class SimpleC2Component
         : public C2Component, public std::enable_shared_from_this<SimpleC2Component> {

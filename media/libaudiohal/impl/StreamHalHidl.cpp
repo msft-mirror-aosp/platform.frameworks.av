@@ -33,6 +33,7 @@
 #include <util/CoreUtils.h>
 
 #include "DeviceHalHidl.h"
+#include "EffectHalHidl.h"
 #include "ParameterUtils.h"
 #include "StreamHalHidl.h"
 
@@ -144,13 +145,15 @@ status_t StreamHalHidl::getParameters(const String8& keys, String8 *values) {
 status_t StreamHalHidl::addEffect(sp<EffectHalInterface> effect) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    return processReturn("addEffect", mStream->addEffect(effect->effectId()));
+    auto hidlEffect = sp<effect::EffectHalHidl>::cast(effect);
+    return processReturn("addEffect", mStream->addEffect(hidlEffect->effectId()));
 }
 
 status_t StreamHalHidl::removeEffect(sp<EffectHalInterface> effect) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    return processReturn("removeEffect", mStream->removeEffect(effect->effectId()));
+    auto hidlEffect = sp<effect::EffectHalHidl>::cast(effect);
+    return processReturn("removeEffect", mStream->removeEffect(hidlEffect->effectId()));
 }
 
 status_t StreamHalHidl::standby() {
@@ -837,7 +840,7 @@ struct StreamOutEventCallback : public IStreamOutEventCallback {
             const android::hardware::hidl_vec<uint8_t>& audioMetadata)  override {
         sp<StreamOutHalHidl> stream = mStream.promote();
         if (stream != nullptr) {
-            std::basic_string<uint8_t> metadataBs(audioMetadata.begin(), audioMetadata.end());
+            std::vector<uint8_t> metadataBs(audioMetadata.begin(), audioMetadata.end());
             stream->onCodecFormatChanged(metadataBs);
         }
         return Void();
@@ -964,7 +967,7 @@ void StreamOutHalHidl::onError() {
     callback->onError();
 }
 
-void StreamOutHalHidl::onCodecFormatChanged(const std::basic_string<uint8_t>& metadataBs) {
+void StreamOutHalHidl::onCodecFormatChanged(const std::vector<uint8_t>& metadataBs) {
     sp<StreamOutHalInterfaceEventCallback> callback = mEventCallback.load().promote();
     if (callback == nullptr) return;
     ALOGV("asyncCodecFormatCallback %s", __func__);
@@ -979,9 +982,11 @@ void StreamOutHalHidl::onRecommendedLatencyModeChanged(
 }
 
 status_t StreamOutHalHidl::exit() {
-    // FIXME this is using hard-coded strings but in the future, this functionality will be
-    //       converted to use audio HAL extensions required to support tunneling
-    return setParameters(String8("exiting=1"));
+    // Signal exiting to HALs that use intermediate pipes to close them.
+    AudioParameter param;
+    param.addInt(String8(AudioParameter::keyExiting), 1);
+    param.add(String8(AudioParameter::keyClosing), String8(AudioParameter::valueTrue));
+    return setParameters(param.toString());
 }
 
 StreamInHalHidl::StreamInHalHidl(

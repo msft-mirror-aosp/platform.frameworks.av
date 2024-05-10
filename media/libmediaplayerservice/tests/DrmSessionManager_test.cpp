@@ -25,8 +25,8 @@
 #include <aidl/android/media/BnResourceManagerService.h>
 
 #include <media/stagefright/foundation/ADebug.h>
-#include <media/stagefright/ProcessInfoInterface.h>
 #include <mediadrm/DrmSessionManager.h>
+#include <mediautils/ProcessInfoInterface.h>
 
 #include <algorithm>
 #include <iostream>
@@ -148,8 +148,8 @@ static const std::vector<uint8_t> kTestSessionId3{9, 0};
 class DrmSessionManagerTest : public ::testing::Test {
 public:
     DrmSessionManagerTest()
-        : mService(::ndk::SharedRefBase::make<ResourceManagerService>
-            (new FakeProcessInfo(), new FakeSystemCallback())),
+        : mService(ResourceManagerService::Create(
+                  new FakeProcessInfo(), new FakeSystemCallback())),
           mDrmSessionManager(new DrmSessionManager(mService)),
           mTestDrm1(::ndk::SharedRefBase::make<FakeDrm>(
                   kTestSessionId1, mDrmSessionManager)),

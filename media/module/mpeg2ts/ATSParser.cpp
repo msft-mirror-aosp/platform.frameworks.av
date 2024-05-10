@@ -23,8 +23,8 @@
 #include "ESQueue.h"
 
 #include <android/hardware/cas/native/1.0/IDescrambler.h>
-#include <android/hidl/allocator/1.0/IAllocator.h>
 #include <android/hidl/memory/1.0/IMemory.h>
+#include <cutils/ashmem.h>
 #include <cutils/native_handle.h>
 #include <hidlmemory/mapping.h>
 #include <media/cas/DescramblerAPI.h>
@@ -46,12 +46,12 @@
 #include <inttypes.h>
 
 namespace android {
+using hardware::hidl_handle;
 using hardware::hidl_string;
 using hardware::hidl_vec;
 using hardware::hidl_memory;
 using namespace hardware::cas::V1_0;
 using namespace hardware::cas::native::V1_0;
-typedef hidl::allocator::V1_0::IAllocator TAllocator;
 typedef hidl::memory::V1_0::IMemory TMemory;
 
 // I want the expression "y" evaluated even if verbose logging is off.
@@ -210,7 +210,6 @@ private:
     bool mSampleEncrypted;
     sp<AMessage> mSampleAesKeyItem;
     sp<TMemory> mHidlMemory;
-    sp<TAllocator> mHidlAllocator;
     hardware::cas::native::V1_0::SharedBuffer mDescramblerSrcBuffer;
     sp<ABuffer> mDescrambledBuffer;
     List<SubSampleInfo> mSubSamples;
@@ -441,6 +440,10 @@ bool ATSParser::Program::findCADescriptor(
         ATSParser::CADescriptor *caDescriptor) {
     bool found = false;
     while (infoLength > 2) {
+        if (br->numBitsLeft() < 16) {
+            ALOGE("Not enough data left in bitreader");
+            return false;
+        }
         unsigned descriptor_tag = br->getBits(8);
         ALOGV("      tag = 0x%02x", descriptor_tag);
 
@@ -453,6 +456,10 @@ bool ATSParser::Program::findCADescriptor(
         }
         if (descriptor_tag == DESCRIPTOR_CA && descriptor_length >= 4) {
             found = true;
+            if (br->numBitsLeft() < 32) {
+                ALOGE("Not enough data left in bitreader");
+                return false;
+            }
             caDescriptor->mSystemID = br->getBits(16);
             caDescriptor->mPID = br->getBits(16) & 0x1fff;
             infoLength -= 4;
@@ -461,14 +468,24 @@ bool ATSParser::Program::findCADescriptor(
             break;
         } else {
             infoLength -= descriptor_length;
-            br->skipBits(descriptor_length * 8);
+            if (!br->skipBits(descriptor_length * 8)) {
+                ALOGE("Not enough data left in bitreader");
+                return false;
+            }
         }
     }
-    br->skipBits(infoLength * 8);
+    if (!br->skipBits(infoLength * 8)) {
+        ALOGE("Not enough data left in bitreader");
+        return false;
+    }
     return found;
 }
 
 status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
+    if (br->numBitsLeft() < 10) {
+        ALOGE("Not enough data left in bitreader!");
+        return ERROR_MALFORMED;
+    }
     unsigned table_id = br->getBits(8);
     ALOGV("  table_id = %u", table_id);
     if (table_id != 0x02u) {
@@ -483,6 +500,10 @@ status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
     }
 
     br->skipBits(1);  // '0'
+    if (br->numBitsLeft() < 86) {
+        ALOGE("Not enough data left in bitreader!");
+        return ERROR_MALFORMED;
+    }
     MY_LOGV("  reserved = %u", br->getBits(2));
 
     unsigned section_length = br->getBits(12);
@@ -527,6 +548,10 @@ status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
 
     while (infoBytesRemaining >= 5) {
         StreamInfo info;
+        if (br->numBitsLeft() < 40) {
+            ALOGE("Not enough data left in bitreader!");
+            return ERROR_MALFORMED;
+        }
         info.mType = br->getBits(8);
         ALOGV("    stream_type = 0x%02x", info.mType);
         MY_LOGV("    reserved = %u", br->getBits(3));
@@ -546,6 +571,10 @@ status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
         info.mAudioPresentations.clear();
         bool hasStreamCA = false;
         while (ES_info_length > 2 && infoBytesRemaining >= 0) {
+            if (br->numBitsLeft() < 16) {
+                ALOGE("Not enough data left in bitreader!");
+                return ERROR_MALFORMED;
+            }
             unsigned descriptor_tag = br->getBits(8);
             ALOGV("      tag = 0x%02x", descriptor_tag);
 
@@ -556,27 +585,67 @@ status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
             if (descriptor_length > ES_info_length) {
                 return ERROR_MALFORMED;
             }
-            if (descriptor_tag == DESCRIPTOR_CA && descriptor_length >= 4) {
+
+            // The DTS descriptor is used in the PSI PMT to identify streams which carry
+            // DTS audio(core only). If a DTS descriptor is present, a DTS-HD or DTS-UHD
+            // descriptors shall not be present in the same ES_info descriptor loop.
+            if (descriptor_tag == DESCRIPTOR_DTS) {
+                info.mType = STREAMTYPE_DTS;
+                ES_info_length -= descriptor_length;
+                if (!br->skipBits(descriptor_length * 8)) {
+                    ALOGE("Not enough data left in bitreader!");
+                    return ERROR_MALFORMED;
+                }
+            } else if (descriptor_tag == DESCRIPTOR_CA && descriptor_length >= 4) {
                 hasStreamCA = true;
+                if (br->numBitsLeft() < 32) {
+                    ALOGE("Not enough data left in bitreader!");
+                    return ERROR_MALFORMED;
+                }
                 streamCA.mSystemID = br->getBits(16);
                 streamCA.mPID = br->getBits(16) & 0x1fff;
                 ES_info_length -= descriptor_length;
                 descriptor_length -= 4;
                 streamCA.mPrivateData.assign(br->data(), br->data() + descriptor_length);
-                br->skipBits(descriptor_length * 8);
+                if (!br->skipBits(descriptor_length * 8)) {
+                    ALOGE("Not enough data left in bitreader!");
+                    return ERROR_MALFORMED;
+                }
             } else if (info.mType == STREAMTYPE_PES_PRIVATE_DATA &&
                        descriptor_tag == DESCRIPTOR_DVB_EXTENSION && descriptor_length >= 1) {
+                if (br->numBitsLeft() < 8) {
+                    ALOGE("Not enough data left in bitreader!");
+                    return ERROR_MALFORMED;
+                }
                 unsigned descTagExt = br->getBits(8);
                 ALOGV("      tag_ext = 0x%02x", descTagExt);
                 ES_info_length -= descriptor_length;
                 descriptor_length--;
+                if (br->numBitsLeft() < (descriptor_length * 8)) {
+                    ALOGE("Not enough data left in bitreader!");
+                    return ERROR_MALFORMED;
+                }
                 // The AC4 descriptor is used in the PSI PMT to identify streams which carry AC4
                 // audio.
                 if (descTagExt == EXT_DESCRIPTOR_DVB_AC4) {
                     info.mTypeExt = EXT_DESCRIPTOR_DVB_AC4;
                     br->skipBits(descriptor_length * 8);
+                } else if (descTagExt == EXT_DESCRIPTOR_DVB_DTS_HD) {
+                    // DTS HD extended descriptor which can accommodate core only formats
+                    // as well as extension only and core + extension combinations.
+                    info.mTypeExt = EXT_DESCRIPTOR_DVB_DTS_HD;
+                    br->skipBits(descriptor_length * 8);
+                } else if (descTagExt == EXT_DESCRIPTOR_DVB_DTS_UHD) {
+                    // The DTS-UHD descriptor is used in the PSI PMT to identify streams
+                    // which carry DTS-UHD audio
+                    info.mTypeExt = EXT_DESCRIPTOR_DVB_DTS_UHD;
+                    br->skipBits(descriptor_length * 8);
                 } else if (descTagExt == EXT_DESCRIPTOR_DVB_AUDIO_PRESELECTION &&
                            descriptor_length >= 1) {
+                    if (br->numBitsLeft() < 8) {
+                        ALOGE("Not enough data left in bitreader!");
+                        return ERROR_MALFORMED;
+                    }
                     // DVB BlueBook A038 Table 110
                     unsigned num_preselections = br->getBits(5);
                     br->skipBits(3);  // reserved
@@ -654,11 +723,17 @@ status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
                         info.mAudioPresentations.push_back(std::move(ap));
                     }
                 } else {
-                    br->skipBits(descriptor_length * 8);
+                    if (!br->skipBits(descriptor_length * 8)) {
+                        ALOGE("Not enough data left in bitreader!");
+                        return ERROR_MALFORMED;
+                    }
                 }
             } else {
                 ES_info_length -= descriptor_length;
-                br->skipBits(descriptor_length * 8);
+                if (!br->skipBits(descriptor_length * 8)) {
+                    ALOGE("Not enough data left in bitreader!");
+                    return ERROR_MALFORMED;
+                }
             }
         }
         if (hasStreamCA && !mParser->mCasManager->addStream(
@@ -676,6 +751,10 @@ status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
 
     if (infoBytesRemaining != 0) {
         ALOGW("Section data remains unconsumed");
+    }
+    if (br->numBitsLeft() < 32) {
+        ALOGE("Not enough data left in bitreader!");
+        return ERROR_MALFORMED;
     }
     unsigned crc = br->getBits(32);
     if (crc != mPMT_CRC) {
@@ -920,9 +999,17 @@ ATSParser::Stream::Stream(
             mode = ElementaryStreamQueue::EAC3;
             break;
 
+        case STREAMTYPE_DTS:
+            mode = ElementaryStreamQueue::DTS;
+            break;
+
         case STREAMTYPE_PES_PRIVATE_DATA:
             if (mStreamTypeExt == EXT_DESCRIPTOR_DVB_AC4) {
                 mode = ElementaryStreamQueue::AC4;
+            } else if (mStreamTypeExt == EXT_DESCRIPTOR_DVB_DTS_HD) {
+                mode = ElementaryStreamQueue::DTS_HD;
+            } else if (mStreamTypeExt == EXT_DESCRIPTOR_DVB_DTS_UHD) {
+                mode = ElementaryStreamQueue::DTS_UHD;
             }
             break;
 
@@ -980,34 +1067,29 @@ bool ATSParser::Stream::ensureBufferCapacity(size_t neededSize) {
     sp<ABuffer> newBuffer, newScrambledBuffer;
     sp<TMemory> newMem;
     if (mScrambled) {
-        if (mHidlAllocator == nullptr) {
-            mHidlAllocator = TAllocator::getService("ashmem");
-            if (mHidlAllocator == nullptr) {
-                ALOGE("[stream %d] can't get hidl allocator", mElementaryPID);
-                return false;
+        int fd = ashmem_create_region("mediaATS", neededSize);
+        if (fd < 0) {
+             ALOGE("[stream %d] create_ashmem_region failed for size %zu. FD returned: %d",
+                    mElementaryPID, neededSize, fd);
+            return false;
+        }
+
+        native_handle_t* handle = native_handle_create(1 /*numFds*/, 0/*numInts*/);
+        if (handle == nullptr) {
+            ALOGE("[stream %d] failed to create a native_handle_t", mElementaryPID);
+            if (close(fd)) {
+                ALOGE("[stream %d] failed to close ashmem fd. errno: %s", mElementaryPID,
+                      strerror(errno));
             }
-        }
 
-        hidl_memory hidlMemToken;
-        bool success;
-        auto transStatus = mHidlAllocator->allocate(
-                neededSize,
-                [&success, &hidlMemToken](
-                        bool s,
-                        hidl_memory const& m) {
-                    success = s;
-                    hidlMemToken = m;
-                });
-
-        if (!transStatus.isOk()) {
-            ALOGE("[stream %d] hidl allocator failed at the transport: %s",
-                    mElementaryPID, transStatus.description().c_str());
             return false;
         }
-        if (!success) {
-            ALOGE("[stream %d] hidl allocator failed", mElementaryPID);
-            return false;
-        }
+
+        handle->data[0] = fd;
+        hidl_handle memHandle;
+        memHandle.setTo(handle, true /*shouldOwn*/);
+        hidl_memory hidlMemToken("ashmem", memHandle, neededSize);
+
         newMem = mapMemory(hidlMemToken);
         if (newMem == nullptr || newMem->getPointer() == nullptr) {
             ALOGE("[stream %d] hidl failed to map memory", mElementaryPID);
@@ -1158,9 +1240,12 @@ bool ATSParser::Stream::isAudio() const {
         case STREAMTYPE_EAC3:
         case STREAMTYPE_AAC_ENCRYPTED:
         case STREAMTYPE_AC3_ENCRYPTED:
+        case STREAMTYPE_DTS:
             return true;
         case STREAMTYPE_PES_PRIVATE_DATA:
-            return mStreamTypeExt == EXT_DESCRIPTOR_DVB_AC4;
+            return (mStreamTypeExt == EXT_DESCRIPTOR_DVB_AC4
+                    || mStreamTypeExt == EXT_DESCRIPTOR_DVB_DTS_HD
+                    || mStreamTypeExt == EXT_DESCRIPTOR_DVB_DTS_UHD);
 
         default:
             return false;
@@ -1238,6 +1323,10 @@ void ATSParser::Stream::signalEOS(status_t finalResult) {
 status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
     const uint8_t *basePtr = br->data();
 
+    if (br->numBitsLeft() < 48) {
+        ALOGE("Not enough data left in bitreader!");
+        return ERROR_MALFORMED;
+    }
     unsigned packet_startcode_prefix = br->getBits(24);
 
     ALOGV("packet_startcode_prefix = 0x%08x", packet_startcode_prefix);
@@ -1263,10 +1352,14 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
             && stream_id != 0xff  // program_stream_directory
             && stream_id != 0xf2  // DSMCC
             && stream_id != 0xf8) {  // H.222.1 type E
-        if (br->getBits(2) != 2u) {
+        if (br->numBitsLeft() < 2 || br->getBits(2) != 2u) {
             return ERROR_MALFORMED;
         }
 
+        if (br->numBitsLeft() < 22) {
+            ALOGE("Not enough data left in bitreader!");
+            return ERROR_MALFORMED;
+        }
         unsigned PES_scrambling_control = br->getBits(2);
         ALOGV("PES_scrambling_control = %u", PES_scrambling_control);
 
@@ -1305,19 +1398,19 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
                 return ERROR_MALFORMED;
             }
 
-            if (br->getBits(4) != PTS_DTS_flags) {
+            if (br->numBitsLeft() < 7 || br->getBits(4) != PTS_DTS_flags) {
                 return ERROR_MALFORMED;
             }
             PTS = ((uint64_t)br->getBits(3)) << 30;
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 16 || br->getBits(1) != 1u) {
                 return ERROR_MALFORMED;
             }
             PTS |= ((uint64_t)br->getBits(15)) << 15;
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 16 || br->getBits(1) != 1u) {
                 return ERROR_MALFORMED;
             }
             PTS |= br->getBits(15);
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 1 || br->getBits(1) != 1u) {
                 return ERROR_MALFORMED;
             }
 
@@ -1330,20 +1423,20 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
                     return ERROR_MALFORMED;
                 }
 
-                if (br->getBits(4) != 1u) {
+                if (br->numBitsLeft() < 7 || br->getBits(4) != 1u) {
                     return ERROR_MALFORMED;
                 }
 
                 DTS = ((uint64_t)br->getBits(3)) << 30;
-                if (br->getBits(1) != 1u) {
+                if (br->numBitsLeft() < 16 || br->getBits(1) != 1u) {
                     return ERROR_MALFORMED;
                 }
                 DTS |= ((uint64_t)br->getBits(15)) << 15;
-                if (br->getBits(1) != 1u) {
+                if (br->numBitsLeft() < 16 || br->getBits(1) != 1u) {
                     return ERROR_MALFORMED;
                 }
                 DTS |= br->getBits(15);
-                if (br->getBits(1) != 1u) {
+                if (br->numBitsLeft() < 1 || br->getBits(1) != 1u) {
                     return ERROR_MALFORMED;
                 }
 
@@ -1358,22 +1451,30 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
                 return ERROR_MALFORMED;
             }
 
+            if (br->numBitsLeft() < 5) {
+                ALOGE("Not enough data left in bitreader!");
+                return ERROR_MALFORMED;
+            }
             br->getBits(2);
 
             uint64_t ESCR = ((uint64_t)br->getBits(3)) << 30;
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 16 || br->getBits(1) != 1u) {
                 return ERROR_MALFORMED;
             }
             ESCR |= ((uint64_t)br->getBits(15)) << 15;
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 16 || br->getBits(1) != 1u) {
                 return ERROR_MALFORMED;
             }
             ESCR |= br->getBits(15);
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 1 || br->getBits(1) != 1u) {
                 return ERROR_MALFORMED;
             }
 
             ALOGV("ESCR = %" PRIu64, ESCR);
+            if (br->numBitsLeft() < 10) {
+                ALOGE("Not enough data left in bitreader!");
+                return ERROR_MALFORMED;
+            }
             MY_LOGV("ESCR_extension = %u", br->getBits(9));
 
             if (br->getBits(1) != 1u) {
@@ -1388,18 +1489,25 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
                 return ERROR_MALFORMED;
             }
 
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 1 || br->getBits(1) != 1u) {
+                return ERROR_MALFORMED;
+            }
+            if (br->numBitsLeft() < 22) {
+                ALOGE("Not enough data left in bitreader!");
                 return ERROR_MALFORMED;
             }
             MY_LOGV("ES_rate = %u", br->getBits(22));
-            if (br->getBits(1) != 1u) {
+            if (br->numBitsLeft() < 1 || br->getBits(1) != 1u) {
                 return ERROR_MALFORMED;
             }
 
             optional_bytes_remaining -= 3;
         }
 
-        br->skipBits(optional_bytes_remaining * 8);
+        if (!br->skipBits(optional_bytes_remaining * 8)) {
+            ALOGE("Not enough data left in bitreader!");
+            return ERROR_MALFORMED;
+        }
 
         // ES data follows.
         int32_t pesOffset = br->data() - basePtr;
@@ -1427,7 +1535,10 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
                     PTS_DTS_flags, PTS, DTS, PES_scrambling_control,
                     br->data(), dataLength, pesOffset, event);
 
-            br->skipBits(dataLength * 8);
+            if (!br->skipBits(dataLength * 8)) {
+                ALOGE("Not enough data left in bitreader!");
+                return ERROR_MALFORMED;
+            }
         } else {
             onPayloadData(
                     PTS_DTS_flags, PTS, DTS, PES_scrambling_control,
@@ -1442,15 +1553,13 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
                     payloadSizeBits / 8, pesOffset);
         }
     } else if (stream_id == 0xbe) {  // padding_stream
-        if (PES_packet_length == 0u) {
+        if (PES_packet_length == 0u || !br->skipBits(PES_packet_length * 8)) {
             return ERROR_MALFORMED;
         }
-        br->skipBits(PES_packet_length * 8);
     } else {
-        if (PES_packet_length == 0u) {
+        if (PES_packet_length == 0u || !br->skipBits(PES_packet_length * 8)) {
             return ERROR_MALFORMED;
         }
-        br->skipBits(PES_packet_length * 8);
     }
 
     return OK;
@@ -1458,6 +1567,10 @@ status_t ATSParser::Stream::parsePES(ABitReader *br, SyncEvent *event) {
 
 uint32_t ATSParser::Stream::getPesScramblingControl(
         ABitReader *br, int32_t *pesOffset) {
+    if (br->numBitsLeft() < 24) {
+        ALOGE("Not enough data left in bitreader!");
+        return 0;
+    }
     unsigned packet_startcode_prefix = br->getBits(24);
 
     ALOGV("packet_startcode_prefix = 0x%08x", packet_startcode_prefix);
@@ -1468,6 +1581,7 @@ uint32_t ATSParser::Stream::getPesScramblingControl(
     }
 
     if (br->numBitsLeft() < 48) {
+        ALOGE("Not enough data left in bitreader!");
         return 0;
     }
 
@@ -1964,11 +2078,19 @@ void ATSParser::signalEOS(status_t finalResult) {
 }
 
 void ATSParser::parseProgramAssociationTable(ABitReader *br) {
+    if (br->numBitsLeft() < 8) {
+        ALOGE("Not enough data left in bitreader!");
+        return;
+    }
     unsigned table_id = br->getBits(8);
     ALOGV("  table_id = %u", table_id);
     if (table_id != 0x00u) {
         ALOGE("PAT data error!");
         return ;
+    }
+    if (br->numBitsLeft() < 56) {
+        ALOGE("Not enough data left in bitreader!");
+        return;
     }
     unsigned section_syntax_indictor = br->getBits(1);
     ALOGV("  section_syntax_indictor = %u", section_syntax_indictor);
@@ -1986,9 +2108,17 @@ void ATSParser::parseProgramAssociationTable(ABitReader *br) {
     MY_LOGV("  section_number = %u", br->getBits(8));
     MY_LOGV("  last_section_number = %u", br->getBits(8));
 
+    // check for unsigned integer overflow before assigning it to numProgramBytes
+    if (section_length < 9) {
+        return;
+    }
     size_t numProgramBytes = (section_length - 5 /* header */ - 4 /* crc */);
 
     for (size_t i = 0; i < numProgramBytes / 4; ++i) {
+        if (br->numBitsLeft() < 32) {
+            ALOGE("Not enough data left in bitreader!");
+            return;
+        }
         unsigned program_number = br->getBits(16);
         ALOGV("    program_number = %u", program_number);
 
@@ -2026,6 +2156,10 @@ void ATSParser::parseProgramAssociationTable(ABitReader *br) {
         }
     }
 
+    if (br->numBitsLeft() < 32) {
+        ALOGE("Not enough data left in bitreader!");
+        return;
+    }
     MY_LOGV("  CRC = 0x%08x", br->getBits(32));
 }
 
@@ -2047,9 +2181,16 @@ status_t ATSParser::parsePID(
                 section->clear();
             }
 
+            if (br->numBitsLeft() < 8) {
+                ALOGE("Not enough data left in bitreader!");
+                return ERROR_MALFORMED;
+            }
             unsigned skip = br->getBits(8);
             section->setSkipBytes(skip + 1);  // skip filler bytes + pointer field itself
-            br->skipBits(skip * 8);
+            if (!br->skipBits(skip * 8)) {
+                ALOGE("Not enough data left in bitreader!");
+                return ERROR_MALFORMED;
+            }
         }
 
         if (br->numBitsLeft() % 8 != 0) {
@@ -2134,6 +2275,10 @@ status_t ATSParser::parsePID(
 status_t ATSParser::parseAdaptationField(
         ABitReader *br, unsigned PID, unsigned *random_access_indicator) {
     *random_access_indicator = 0;
+    if (br->numBitsLeft() < 8) {
+        ALOGE("Not enough data left in bitreader!");
+        return ERROR_MALFORMED;
+    }
     unsigned adaptation_field_length = br->getBits(8);
 
     if (adaptation_field_length > 0) {
@@ -2204,6 +2349,10 @@ status_t ATSParser::parseAdaptationField(
 status_t ATSParser::parseTS(ABitReader *br, SyncEvent *event) {
     ALOGV("---");
 
+    if (br->numBitsLeft() < 32) {
+        ALOGE("Not enough data left in bitreader!");
+        return ERROR_MALFORMED;
+    }
     unsigned sync_byte = br->getBits(8);
     if (sync_byte != 0x47u) {
         ALOGE("[error] parseTS: return error as sync_byte=0x%x", sync_byte);

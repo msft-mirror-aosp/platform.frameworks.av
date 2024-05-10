@@ -370,7 +370,7 @@ status_t NuPlayer::setBufferingSettings(const BufferingSettings& buffering) {
 }
 
 void NuPlayer::setDataSourceAsync(const String8& rtpParams) {
-    ALOGD("setDataSourceAsync for RTP = %s", rtpParams.string());
+    ALOGD("setDataSourceAsync for RTP = %s", rtpParams.c_str());
     sp<AMessage> msg = new AMessage(kWhatSetDataSource, this);
 
     sp<AMessage> notify = new AMessage(kWhatSourceNotify, this);
@@ -555,6 +555,13 @@ void NuPlayer::writeTrackInfo(
         reply->writeInt32(isAuto);
         reply->writeInt32(isDefault);
         reply->writeInt32(isForced);
+    } else if (trackType == MEDIA_TRACK_TYPE_AUDIO) {
+        int32_t hapticChannelCount;
+        bool hasHapticChannels = format->findInt32("haptic-channel-count", &hapticChannelCount);
+        reply->writeInt32(hasHapticChannels);
+        if (hasHapticChannels) {
+            reply->writeInt32(hapticChannelCount);
+        }
     }
 }
 
@@ -1970,6 +1977,8 @@ status_t NuPlayer::instantiateDecoder(
         if (rate > 0) {
             format->setFloat("operating-rate", rate * mPlaybackSettings.mSpeed);
         }
+
+        format->setInt32("android._video-scaling", mVideoScalingMode);
     }
 
     Mutex::Autolock autoLock(mDecoderLock);
@@ -2089,9 +2098,12 @@ void NuPlayer::updateVideoSize(
              displayHeight,
              cropLeft, cropTop);
     } else {
-        CHECK(inputFormat->findInt32("width", &displayWidth));
-        CHECK(inputFormat->findInt32("height", &displayHeight));
-
+        if (!inputFormat->findInt32("width", &displayWidth)
+            || !inputFormat->findInt32("height", &displayHeight)) {
+            ALOGW("Either video width or video height missing, reporting 0x0!");
+            notifyListener(MEDIA_SET_VIDEO_SIZE, 0, 0);
+            return;
+        }
         ALOGV("Video input format %d x %d", displayWidth, displayHeight);
     }
 
@@ -2216,6 +2228,11 @@ status_t NuPlayer::setVideoScalingMode(int32_t mode) {
             ALOGE("Failed to set scaling mode (%d): %s",
                 -ret, strerror(-ret));
             return ret;
+        }
+        if (mVideoDecoder != NULL) {
+            sp<AMessage> params = new AMessage();
+            params->setInt32("android._video-scaling", mode);
+            mVideoDecoder->setParameters(params);
         }
     }
     return OK;
@@ -3023,6 +3040,16 @@ const char *NuPlayer::getDataSourceType() {
         default:
             return "None";
     }
+ }
+
+ void NuPlayer::dump(AString& logString) {
+    logString.append("renderer(");
+    if (mRenderer != nullptr) {
+        mRenderer->dump(logString);
+    } else {
+        logString.append("null");
+    }
+    logString.append(")");
  }
 
 // Modular DRM begin

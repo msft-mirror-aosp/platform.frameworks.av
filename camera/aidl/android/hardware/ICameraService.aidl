@@ -22,6 +22,7 @@ import android.hardware.camera2.ICameraDeviceUser;
 import android.hardware.camera2.ICameraDeviceCallbacks;
 import android.hardware.camera2.ICameraInjectionCallback;
 import android.hardware.camera2.ICameraInjectionSession;
+import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.VendorTagDescriptor;
 import android.hardware.camera2.params.VendorTagDescriptorCache;
 import android.hardware.camera2.utils.ConcurrentCameraIdCombination;
@@ -29,7 +30,9 @@ import android.hardware.camera2.utils.CameraIdAndSessionConfiguration;
 import android.hardware.camera2.impl.CameraMetadataNative;
 import android.hardware.ICameraServiceListener;
 import android.hardware.CameraInfo;
+import android.hardware.CameraIdRemapping;
 import android.hardware.CameraStatus;
+import android.hardware.CameraExtensionSessionStats;
 
 /**
  * Binder interface for the native camera service running in mediaserver.
@@ -67,7 +70,7 @@ interface ICameraService
     /**
      * Fetch basic camera information for a camera device
      */
-    CameraInfo getCameraInfo(int cameraId);
+    CameraInfo getCameraInfo(int cameraId, boolean overrideToPortrait);
 
     /**
      * Default UID/PID values for non-privileged callers of
@@ -81,20 +84,23 @@ interface ICameraService
      */
     ICamera connect(ICameraClient client,
             int cameraId,
-            String opPackageName,
+            @utf8InCpp String opPackageName,
             int clientUid, int clientPid,
-            int targetSdkVersion);
+            int targetSdkVersion,
+            boolean overrideToPortrait,
+            boolean forceSlowJpegMode);
 
     /**
      * Open a camera device through the new camera API
      * Only supported for device HAL versions >= 3.2
      */
     ICameraDeviceUser connectDevice(ICameraDeviceCallbacks callbacks,
-            String cameraId,
-            String opPackageName,
-            @nullable String featureId,
+            @utf8InCpp String cameraId,
+            @utf8InCpp String opPackageName,
+            @nullable @utf8InCpp String featureId,
             int clientUid, int oomScoreOffset,
-            int targetSdkVersion);
+            int targetSdkVersion,
+            boolean overrideToPortrait);
 
     /**
      * Add listener for changes to camera device and flashlight state.
@@ -127,6 +133,34 @@ interface ICameraService
             int targetSdkVersion);
 
     /**
+     * Remap Camera Ids in the CameraService.
+     *
+     * Once this is in effect, all binder calls in the ICameraService that
+     * use logicalCameraId should consult remapping state to arrive at the
+     * correct cameraId to perform the operation on.
+     *
+     * Note: Before the new cameraIdRemapping state is applied, the previous
+     * state is cleared.
+     *
+     * @param cameraIdRemapping the camera ids to remap. Sending an unpopulated
+     *        cameraIdRemapping object will result in clearing of any previous
+     *        cameraIdRemapping state in the camera service.
+     */
+    void remapCameraIds(in CameraIdRemapping cameraIdRemapping);
+
+    /**
+     * Inject Session Params into an existing camera session.
+     *
+     * @param cameraId the camera id session to inject session params into. Note that
+     *                 if there is no active session for the input cameraid, this operation
+     *                 will be a no-op. In addition, future camera sessions for cameraid will
+     *                 not be affected.
+     * @param sessionParams the session params to override for the existing session.
+     */
+    void injectSessionParams(@utf8InCpp String cameraId,
+            in CameraMetadataNative sessionParams);
+
+    /**
      * Remove listener for changes to camera device and flashlight state.
      */
     void removeListener(ICameraServiceListener listener);
@@ -135,7 +169,8 @@ interface ICameraService
      * Read the static camera metadata for a camera device.
      * Only supported for device HAL versions >= 3.2
      */
-    CameraMetadataNative getCameraCharacteristics(String cameraId, int targetSdkVersion);
+    CameraMetadataNative getCameraCharacteristics(@utf8InCpp String cameraId, int targetSdkVersion,
+            boolean overrideToPortrait);
 
     /**
      * Read in the vendor tag descriptors from the camera module HAL.
@@ -155,7 +190,7 @@ interface ICameraService
     /**
      * Read the legacy camera1 parameters into a String
      */
-    String getLegacyParameters(int cameraId);
+    @utf8InCpp String getLegacyParameters(int cameraId);
 
     /**
      * apiVersion constants for supportsCameraApi
@@ -164,21 +199,21 @@ interface ICameraService
     const int API_VERSION_2 = 2;
 
     // Determines if a particular API version is supported directly for a cameraId.
-    boolean supportsCameraApi(String cameraId, int apiVersion);
+    boolean supportsCameraApi(@utf8InCpp String cameraId, int apiVersion);
     // Determines if a cameraId is a hidden physical camera of a logical multi-camera.
-    boolean isHiddenPhysicalCamera(String cameraId);
+    boolean isHiddenPhysicalCamera(@utf8InCpp String cameraId);
     // Inject the external camera to replace the internal camera session.
-    ICameraInjectionSession injectCamera(String packageName, String internalCamId,
-            String externalCamId, in ICameraInjectionCallback CameraInjectionCallback);
+    ICameraInjectionSession injectCamera(@utf8InCpp String packageName, @utf8InCpp String internalCamId,
+            @utf8InCpp String externalCamId, in ICameraInjectionCallback CameraInjectionCallback);
 
-    void setTorchMode(String cameraId, boolean enabled, IBinder clientBinder);
+    void setTorchMode(@utf8InCpp String cameraId, boolean enabled, IBinder clientBinder);
 
     // Change the brightness level of the flash unit associated with cameraId to strengthLevel.
     // If the torch is in OFF state and strengthLevel > 0 then the torch will also be turned ON.
-    void turnOnTorchWithStrengthLevel(String cameraId, int strengthLevel, IBinder clientBinder);
+    void turnOnTorchWithStrengthLevel(@utf8InCpp String cameraId, int strengthLevel, IBinder clientBinder);
 
     // Get the brightness level of the flash unit associated with cameraId.
-    int getTorchStrengthLevel(String cameraId);
+    int getTorchStrengthLevel(@utf8InCpp String cameraId);
 
     /**
      * Notify the camera service of a system event.  Should only be called from system_server.
@@ -210,6 +245,26 @@ interface ICameraService
      */
     oneway void notifyDeviceStateChange(long newState);
 
+    /**
+     * Report Extension specific metrics to camera service for logging. This should only be called
+     * by CameraExtensionSession to log extension metrics. All calls after the first must set
+     * CameraExtensionSessionStats.key to the value returned by this function.
+     *
+     * Each subsequent call fully overwrites the existing CameraExtensionSessionStats for the
+     * current session, so the caller is responsible for keeping the stats complete.
+     *
+     * Due to cameraservice and cameraservice_proxy architecture, there is no guarantee that
+     * {@code stats} will be logged immediately (or at all). CameraService will log whatever
+     * extension stats it has at the time of camera session closing which may be before the app
+     * process receives a session/device closed callback; so CameraExtensionSession
+     * should send metrics to the cameraservice preriodically, and cameraservice must handle calls
+     * to this function from sessions that have not been logged yet and from sessions that have
+     * already been closed.
+     *
+     * @return the key that must be used to report updates to previously reported stats.
+     */
+    @utf8InCpp String reportExtensionSessionStats(in CameraExtensionSessionStats stats);
+
     // Bitfield constants for notifyDeviceStateChange
     // All bits >= 32 are for custom vendor states
     // Written as ints since AIDL does not support long constants.
@@ -219,4 +274,18 @@ interface ICameraService
     const int DEVICE_STATE_FOLDED = 4;
     const int DEVICE_STATE_LAST_FRAMEWORK_BIT = 0x80000000; // 1 << 31;
 
+    // Create a CaptureRequest metadata based on template id
+    CameraMetadataNative createDefaultRequest(@utf8InCpp String cameraId, int templateId);
+
+    /**
+      * Check whether a particular session configuration with optional session parameters
+      * has camera device support.
+      *
+      * @param cameraId The camera id to query session configuration on
+      * @param sessionConfiguration Specific session configuration to be verified.
+      * @return true  - in case the stream combination is supported.
+      *         false - in case there is no device support.
+      */
+    boolean isSessionConfigurationWithParametersSupported(@utf8InCpp String cameraId,
+            in SessionConfiguration sessionConfiguration);
 }

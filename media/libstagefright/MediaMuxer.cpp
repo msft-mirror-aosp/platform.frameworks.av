@@ -162,7 +162,7 @@ status_t MediaMuxer::setLocation(int latitude, int longitude) {
         return INVALID_OPERATION;
     }
     if (!isMp4Format(mFormat)) {
-        ALOGE("setLocation() is only supported for .mp4, .3gp or .heic output.");
+        ALOGE("setLocation() is only supported for .mp4, .3gp, .heic or .avif output.");
         return INVALID_OPERATION;
     }
 
@@ -206,6 +206,9 @@ status_t MediaMuxer::writeSampleData(const sp<ABuffer> &buffer, size_t trackInde
                                      int64_t timeUs, uint32_t flags) {
     if (buffer.get() == NULL) {
         ALOGE("WriteSampleData() get an NULL buffer.");
+        return -EINVAL;
+    }
+    if (!mWriter->isSampleMetadataValid(trackIndex, timeUs)) {
         return -EINVAL;
     }
     {

@@ -21,6 +21,8 @@
 #define OMX_ANDROID_COMPILE_AS_32BIT_ON_64BIT_PLATFORMS
 #endif
 
+#include <android_media_codec.h>
+
 #include <inttypes.h>
 #include <utils/Trace.h>
 
@@ -43,6 +45,7 @@
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/OMXClient.h>
 #include <media/stagefright/PersistentSurface.h>
+#include <media/stagefright/RenderedFrameInfo.h>
 #include <media/stagefright/SurfaceUtils.h>
 #include <media/hardware/HardwareAPI.h>
 #include <media/MediaBufferHolder.h>
@@ -64,11 +67,14 @@
 #include "include/SharedMemoryBuffer.h"
 #include <media/stagefright/omx/OMXUtils.h>
 
+#include <server_configurable_flags/get_flags.h>
+
 namespace android {
 
 typedef hardware::media::omx::V1_0::IGraphicBufferSource HGraphicBufferSource;
 
 using hardware::media::omx::V1_0::Status;
+using server_configurable_flags::GetServerConfigurableFlag;
 
 enum {
     kMaxIndicesToCheck = 32, // used when enumerating supported formats and profiles
@@ -79,6 +85,11 @@ namespace {
 constexpr char TUNNEL_PEEK_KEY[] = "android._trigger-tunnel-peek";
 constexpr char TUNNEL_PEEK_SET_LEGACY_KEY[] = "android._tunnel-peek-set-legacy";
 
+}
+
+static bool areRenderMetricsEnabled() {
+    std::string v = GetServerConfigurableFlag("media_native", "render_metrics_enabled", "false");
+    return v == "true";
 }
 
 // OMX errors are directly mapped into status_t range if
@@ -292,6 +303,8 @@ protected:
             mPendingExtraOutputMetadataBufferRequest = true;
         }
     }
+
+    void setSurfaceParameters(const sp<AMessage> &msg);
 
 private:
     // Handles an OMX message. Returns true iff message was handled.
@@ -561,6 +574,9 @@ void ACodec::BufferInfo::checkReadFence(const char *dbg) {
 ACodec::ACodec()
     : mSampleRate(0),
       mNodeGeneration(0),
+      mAreRenderMetricsEnabled(areRenderMetricsEnabled()),
+      mIsWindowToDisplay(false),
+      mHasPresentFenceTimes(false),
       mUsingNativeWindow(false),
       mNativeWindowUsageBits(0),
       mLastNativeWindowDataSpace(HAL_DATASPACE_UNKNOWN),
@@ -632,7 +648,8 @@ std::shared_ptr<BufferChannelBase> ACodec::getBufferChannel() {
     if (!mBufferChannel) {
         mBufferChannel = std::make_shared<ACodecBufferChannel>(
                 new AMessage(kWhatInputBufferFilled, this),
-                new AMessage(kWhatOutputBufferDrained, this));
+                new AMessage(kWhatOutputBufferDrained, this),
+                new AMessage(kWhatPollForRenderedBuffers, this));
     }
     return mBufferChannel;
 }
@@ -655,7 +672,7 @@ void ACodec::initiateConfigureComponent(const sp<AMessage> &msg) {
     msg->post();
 }
 
-status_t ACodec::setSurface(const sp<Surface> &surface) {
+status_t ACodec::setSurface(const sp<Surface> &surface, uint32_t /*generation*/) {
     sp<AMessage> msg = new AMessage(kWhatSetSurface, this);
     msg->setObject("surface", surface);
 
@@ -742,6 +759,7 @@ status_t ACodec::handleSetSurface(const sp<Surface> &surface) {
     // if we have not yet started the codec, we can simply set the native window
     if (mBuffers[kPortIndexInput].size() == 0) {
         mNativeWindow = surface;
+        initializeFrameTracking();
         return OK;
     }
 
@@ -850,6 +868,7 @@ status_t ACodec::handleSetSurface(const sp<Surface> &surface) {
 
     mNativeWindow = nativeWindow;
     mNativeWindowUsageBits = usageBits;
+    initializeFrameTracking();
     return OK;
 }
 
@@ -960,7 +979,6 @@ status_t ACodec::allocateBuffersOnPort(OMX_U32 portIndex) {
                 BufferInfo info;
                 info.mStatus = BufferInfo::OWNED_BY_US;
                 info.mFenceFd = -1;
-                info.mRenderInfo = NULL;
                 info.mGraphicBuffer = NULL;
                 info.mNewGraphicBuffer = false;
 
@@ -1228,6 +1246,7 @@ status_t ACodec::configureOutputBuffersFromNativeWindow(
 
     *bufferCount = def.nBufferCountActual;
     *bufferSize =  def.nBufferSize;
+    initializeFrameTracking();
     return err;
 }
 
@@ -1266,7 +1285,6 @@ status_t ACodec::allocateOutputBuffersFromNativeWindow() {
         info.mStatus = BufferInfo::OWNED_BY_US;
         info.mFenceFd = fenceFd;
         info.mIsReadFence = false;
-        info.mRenderInfo = NULL;
         info.mGraphicBuffer = graphicBuffer;
         info.mNewGraphicBuffer = false;
         info.mDequeuedAt = mDequeueCounter;
@@ -1343,7 +1361,6 @@ status_t ACodec::allocateOutputMetadataBuffers() {
         BufferInfo info;
         info.mStatus = BufferInfo::OWNED_BY_NATIVE_WINDOW;
         info.mFenceFd = -1;
-        info.mRenderInfo = NULL;
         info.mGraphicBuffer = NULL;
         info.mNewGraphicBuffer = false;
         info.mDequeuedAt = mDequeueCounter;
@@ -1439,42 +1456,6 @@ status_t ACodec::cancelBufferToNativeWindow(BufferInfo *info) {
     return err;
 }
 
-void ACodec::updateRenderInfoForDequeuedBuffer(
-        ANativeWindowBuffer *buf, int fenceFd, BufferInfo *info) {
-
-    info->mRenderInfo =
-        mRenderTracker.updateInfoForDequeuedBuffer(
-                buf, fenceFd, info - &mBuffers[kPortIndexOutput][0]);
-
-    // check for any fences already signaled
-    notifyOfRenderedFrames(false /* dropIncomplete */, info->mRenderInfo);
-}
-
-void ACodec::onFrameRendered(int64_t mediaTimeUs, nsecs_t systemNano) {
-    if (mRenderTracker.onFrameRendered(mediaTimeUs, systemNano) != OK) {
-        mRenderTracker.dumpRenderQueue();
-    }
-}
-
-void ACodec::notifyOfRenderedFrames(bool dropIncomplete, FrameRenderTracker::Info *until) {
-    std::list<FrameRenderTracker::Info> done =
-        mRenderTracker.checkFencesAndGetRenderedFrames(until, dropIncomplete);
-
-    // unlink untracked frames
-    for (std::list<FrameRenderTracker::Info>::const_iterator it = done.cbegin();
-            it != done.cend(); ++it) {
-        ssize_t index = it->getIndex();
-        if (index >= 0 && (size_t)index < mBuffers[kPortIndexOutput].size()) {
-            mBuffers[kPortIndexOutput][index].mRenderInfo = NULL;
-        } else if (index >= 0) {
-            // THIS SHOULD NEVER HAPPEN
-            ALOGE("invalid index %zd in %zu", index, mBuffers[kPortIndexOutput].size());
-        }
-    }
-
-    mCallback->onOutputFramesRendered(done);
-}
-
 void ACodec::onFirstTunnelFrameReady() {
     mCallback->onFirstTunnelFrameReady();
 }
@@ -1529,7 +1510,6 @@ ACodec::BufferInfo *ACodec::dequeueBufferFromNativeWindow() {
 
                 info->mStatus = BufferInfo::OWNED_BY_US;
                 info->setWriteFence(fenceFd, "dequeueBufferFromNativeWindow");
-                updateRenderInfoForDequeuedBuffer(buf, fenceFd, info);
                 return info;
             }
         }
@@ -1574,16 +1554,103 @@ ACodec::BufferInfo *ACodec::dequeueBufferFromNativeWindow() {
     oldest->mNewGraphicBuffer = true;
     oldest->mStatus = BufferInfo::OWNED_BY_US;
     oldest->setWriteFence(fenceFd, "dequeueBufferFromNativeWindow for oldest");
-    mRenderTracker.untrackFrame(oldest->mRenderInfo);
-    oldest->mRenderInfo = NULL;
 
     ALOGV("replaced oldest buffer #%u with age %u, graphicBuffer %p",
             (unsigned)(oldest - &mBuffers[kPortIndexOutput][0]),
             mDequeueCounter - oldest->mDequeuedAt,
             oldest->mGraphicBuffer->handle);
-
-    updateRenderInfoForDequeuedBuffer(buf, fenceFd, oldest);
     return oldest;
+}
+
+void ACodec::initializeFrameTracking() {
+    mTrackedFrames.clear();
+
+    int isWindowToDisplay = 0;
+    mNativeWindow->query(mNativeWindow.get(), NATIVE_WINDOW_QUEUES_TO_WINDOW_COMPOSER,
+            &isWindowToDisplay);
+    mIsWindowToDisplay = isWindowToDisplay == 1;
+    // No frame tracking is needed if we're not sending frames to the display
+    if (!mIsWindowToDisplay) {
+        // Return early so we don't call into SurfaceFlinger (requiring permissions)
+        return;
+    }
+
+    int hasPresentFenceTimes = 0;
+    mNativeWindow->query(mNativeWindow.get(), NATIVE_WINDOW_FRAME_TIMESTAMPS_SUPPORTS_PRESENT,
+            &hasPresentFenceTimes);
+    mHasPresentFenceTimes = hasPresentFenceTimes == 1;
+    if (!mHasPresentFenceTimes) {
+        ALOGI("Using latch times for frame rendered signals - present fences not supported");
+    }
+
+    status_t err = native_window_enable_frame_timestamps(mNativeWindow.get(), true);
+    if (err) {
+        ALOGE("Failed to enable frame timestamps (%d)", err);
+    }
+}
+
+void ACodec::trackReleasedFrame(int64_t frameId, int64_t mediaTimeUs, int64_t desiredRenderTimeNs) {
+    // If the render time is earlier than now, then we're suggesting it should be rendered ASAP,
+    // so track the frame as if the desired render time is now.
+    int64_t nowNs = systemTime(SYSTEM_TIME_MONOTONIC);
+    if (desiredRenderTimeNs < nowNs) {
+        desiredRenderTimeNs = nowNs;
+    }
+
+    // If the render time is more than a second from now, then pretend the frame is supposed to be
+    // rendered immediately, because that's what SurfaceFlinger heuristics will do. This is a tight
+    // coupling, but is really the only way to optimize away unnecessary present fence checks in
+    // processRenderedFrames.
+    if (desiredRenderTimeNs > nowNs + 1*1000*1000*1000LL) {
+        desiredRenderTimeNs = nowNs;
+    }
+
+    // We've just queued a frame to the surface, so keep track of it and later check to see if it is
+    // actually rendered.
+    TrackedFrame frame;
+    frame.id = frameId;
+    frame.mediaTimeUs = mediaTimeUs;
+    frame.desiredRenderTimeNs = desiredRenderTimeNs;
+    mTrackedFrames.push_back(frame);
+}
+
+void ACodec::pollForRenderedFrames() {
+    std::list<RenderedFrameInfo> renderedFrameInfos;
+    // Scan all frames and check to see if the frames that SHOULD have been rendered by now, have,
+    // in fact, been rendered.
+    int64_t nowNs = systemTime(SYSTEM_TIME_MONOTONIC);
+    while (!mTrackedFrames.empty()) {
+        TrackedFrame & frame = mTrackedFrames.front();
+        // Frames that should have been rendered at least 100ms in the past are checked
+        if (frame.desiredRenderTimeNs > nowNs - 100*1000*1000LL) {
+            break;
+        }
+
+        status_t err;
+        nsecs_t latchOrPresentTimeNs = NATIVE_WINDOW_TIMESTAMP_INVALID;
+        err = native_window_get_frame_timestamps(mNativeWindow.get(), frame.id,
+                /* outRequestedPresentTime */ nullptr, /* outAcquireTime */ nullptr,
+                mHasPresentFenceTimes ? nullptr : &latchOrPresentTimeNs, // latch time
+                /* outFirstRefreshStartTime */ nullptr, /* outLastRefreshStartTime */ nullptr,
+                /* outGpuCompositionDoneTime */ nullptr,
+                mHasPresentFenceTimes ? &latchOrPresentTimeNs : nullptr, // display present time,
+                /* outDequeueReadyTime */ nullptr, /* outReleaseTime */ nullptr);
+        if (err) {
+            ALOGE("Failed to get frame timestamps for %lld: %d", (long long) frame.id, err);
+        }
+        // If we don't have a render time by now, then consider the frame as dropped
+        if (latchOrPresentTimeNs != NATIVE_WINDOW_TIMESTAMP_PENDING &&
+            latchOrPresentTimeNs != NATIVE_WINDOW_TIMESTAMP_INVALID) {
+            renderedFrameInfos.push_back(RenderedFrameInfo(frame.mediaTimeUs,
+                                                           latchOrPresentTimeNs));
+        }
+
+        mTrackedFrames.pop_front();
+    }
+
+    if (!renderedFrameInfos.empty()) {
+        mCallback->onOutputFramesRendered(renderedFrameInfos);
+    }
 }
 
 status_t ACodec::freeBuffersOnPort(OMX_U32 portIndex) {
@@ -1659,11 +1726,6 @@ status_t ACodec::freeBuffer(OMX_U32 portIndex, size_t i) {
 
     if (info->mFenceFd >= 0) {
         ::close(info->mFenceFd);
-    }
-
-    if (portIndex == kPortIndexOutput) {
-        mRenderTracker.untrackFrame(info->mRenderInfo, i);
-        info->mRenderInfo = NULL;
     }
 
     // remove buffer even if mOMXNode->freeBuffer fails
@@ -2128,7 +2190,7 @@ status_t ACodec::configureCodec(
                 int32_t colorFormat = OMX_COLOR_FormatUnused;
                 OMX_U32 flexibleEquivalent = OMX_COLOR_FormatUnused;
                 if (!outputFormat->findInt32("color-format", &colorFormat)) {
-                    ALOGE("ouptut port did not have a color format (wrong domain?)");
+                    ALOGE("output port did not have a color format (wrong domain?)");
                     return BAD_VALUE;
                 }
                 ALOGD("[%s] Requested output format %#x and got %#x.",
@@ -6030,22 +6092,10 @@ bool ACodec::BaseState::onOMXMessageList(const sp<AMessage> &msg) {
     sp<RefBase> obj;
     CHECK(msg->findObject("messages", &obj));
     sp<MessageList> msgList = static_cast<MessageList *>(obj.get());
-
-    bool receivedRenderedEvents = false;
     for (std::list<sp<AMessage>>::const_iterator it = msgList->getList().cbegin();
           it != msgList->getList().cend(); ++it) {
         (*it)->setWhat(ACodec::kWhatOMXMessageItem);
         mCodec->handleMessage(*it);
-        int32_t type;
-        CHECK((*it)->findInt32("type", &type));
-        if (type == omx_message::FRAME_RENDERED) {
-            receivedRenderedEvents = true;
-        }
-    }
-
-    if (receivedRenderedEvents) {
-        // NOTE: all buffers are rendered in this case
-        mCodec->notifyOfRenderedFrames();
     }
     return true;
 }
@@ -6315,6 +6365,11 @@ void ACodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
                     flags |= OMX_BUFFERFLAG_EOS;
                 }
 
+                int32_t isDecodeOnly = 0;
+                if (buffer->meta()->findInt32("decode-only", &isDecodeOnly) && isDecodeOnly != 0) {
+                    flags |= OMX_BUFFERFLAG_DECODEONLY;
+                    mCodec->mDecodeOnlyTimesUs.emplace(timeUs);
+                }
                 size_t size = buffer->size();
                 size_t offset = buffer->offset();
                 if (buffer->base() != info->mCodecData->base()) {
@@ -6344,6 +6399,10 @@ void ACodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
                     ALOGV("[%s] calling emptyBuffer %u w/ EOS",
                          mCodec->mComponentName.c_str(), bufferID);
                 } else {
+                    if (flags & OMX_BUFFERFLAG_DECODEONLY) {
+                        ALOGV("[%s] calling emptyBuffer %u w/ decode only flag",
+                            mCodec->mComponentName.c_str(), bufferID);
+                    }
 #if TRACK_BUFFER_TIMING
                     ALOGI("[%s] calling emptyBuffer %u w/ time %lld us",
                          mCodec->mComponentName.c_str(), bufferID, (long long)timeUs);
@@ -6502,6 +6561,59 @@ void ACodec::BaseState::getMoreInputDataIfPossible() {
     postFillThisBuffer(eligible);
 }
 
+void ACodec::BaseState::setSurfaceParameters(const sp<AMessage> &msg) {
+    sp<AMessage> params;
+    CHECK(msg->findMessage("params", &params));
+
+    status_t err = mCodec->setSurfaceParameters(params);
+    if (err != OK) {
+        ALOGE("[%s] Unable to set input surface parameters (err %d)",
+                mCodec->mComponentName.c_str(),
+                err);
+        return;
+    }
+
+    int64_t timeOffsetUs;
+    if (params->findInt64(PARAMETER_KEY_OFFSET_TIME, &timeOffsetUs)) {
+        params->removeEntryAt(params->findEntryByName(PARAMETER_KEY_OFFSET_TIME));
+
+        if (params->countEntries() == 0) {
+            msg->removeEntryAt(msg->findEntryByName("params"));
+            return;
+        }
+    }
+
+    int64_t skipFramesBeforeUs;
+    if (params->findInt64("skip-frames-before", &skipFramesBeforeUs)) {
+        params->removeEntryAt(params->findEntryByName("skip-frames-before"));
+
+        if (params->countEntries() == 0) {
+            msg->removeEntryAt(msg->findEntryByName("params"));
+            return;
+        }
+    }
+
+    int32_t dropInputFrames;
+    if (params->findInt32(PARAMETER_KEY_SUSPEND, &dropInputFrames)) {
+        params->removeEntryAt(params->findEntryByName(PARAMETER_KEY_SUSPEND));
+
+        if (params->countEntries() == 0) {
+            msg->removeEntryAt(msg->findEntryByName("params"));
+            return;
+        }
+    }
+
+    int64_t stopTimeUs;
+    if (params->findInt64("stop-time-us", &stopTimeUs)) {
+        params->removeEntryAt(params->findEntryByName("stop-time-us"));
+
+        if (params->countEntries() == 0) {
+            msg->removeEntryAt(msg->findEntryByName("params"));
+            return;
+        }
+    }
+}
+
 bool ACodec::BaseState::onOMXFillBufferDone(
         IOMX::buffer_id bufferID,
         size_t rangeOffset, size_t rangeLength,
@@ -6544,15 +6656,6 @@ bool ACodec::BaseState::onOMXFillBufferDone(
 
     info->mDequeuedAt = ++mCodec->mDequeueCounter;
     info->mStatus = BufferInfo::OWNED_BY_US;
-
-    if (info->mRenderInfo != NULL) {
-        // The fence for an emptied buffer must have signaled, but there still could be queued
-        // or out-of-order dequeued buffers in the render queue prior to this buffer. Drop these,
-        // as we will soon requeue this buffer to the surface. While in theory we could still keep
-        // track of buffers that are requeued to the surface, it is better to add support to the
-        // buffer-queue to notify us of released buffers and their fences (in the future).
-        mCodec->notifyOfRenderedFrames(true /* dropIncomplete */);
-    }
 
     // byte buffers cannot take fences, so wait for any fence now
     if (mCodec->mNativeWindow == NULL) {
@@ -6634,6 +6737,39 @@ bool ACodec::BaseState::onOMXFillBufferDone(
 
             info->mData.clear();
 
+            // Workaround: if OMX_BUFFERFLAG_DECODEONLY is not implemented in
+            // HAL, the flag is then removed in the corresponding output buffer.
+
+            // for all buffers that were marked as DECODE_ONLY, remove their timestamp
+            // if it is smaller than the timestamp of the buffer that was
+            // just received
+            while (!mCodec->mDecodeOnlyTimesUs.empty() &&
+                   *mCodec->mDecodeOnlyTimesUs.begin() < timeUs) {
+                    mCodec->mDecodeOnlyTimesUs.erase(mCodec->mDecodeOnlyTimesUs.begin());
+            }
+            // if OMX_BUFFERFLAG_DECODEONLY is not implemented in HAL, we need to restore the
+            // OMX_BUFFERFLAG_DECODEONLY flag to the frames we had saved in the set, the set
+            // contains the timestamps of buffers that were marked as DECODE_ONLY by the app
+            if (!mCodec->mDecodeOnlyTimesUs.empty() &&
+                *mCodec->mDecodeOnlyTimesUs.begin() == timeUs) {
+                mCodec->mDecodeOnlyTimesUs.erase(timeUs);
+                // If the app queued the last valid buffer as DECODE_ONLY and queued an additional
+                // empty buffer as EOS, it's possible that HAL sets the last valid frame as EOS
+                // instead and drops the empty buffer. In such a case, we should not add back
+                // the OMX_BUFFERFLAG_DECODEONLY flag to it, as doing so will make it so that the
+                // app does not receive the EOS buffer, which breaks the contract of EOS buffers
+                if (flags & OMX_BUFFERFLAG_EOS) {
+                    // Set buffer size to 0, as described by
+                    // https://developer.android.com/reference/android/media/MediaCodec.BufferInfo?hl=en#size
+                    // a buffer of size 0 should only be used to carry the EOS flag and should
+                    // be discarded by the app as it has no data
+                    buffer->setRange(0, 0);
+                } else {
+                    // re-add the OMX_BUFFERFLAG_DECODEONLY flag to the buffer in case it is
+                    // not the end of stream buffer
+                    flags |= OMX_BUFFERFLAG_DECODEONLY;
+                }
+            }
             mCodec->mBufferChannel->drainThisBuffer(info->mBufferID, flags);
 
             info->mStatus = BufferInfo::OWNED_BY_DOWNSTREAM;
@@ -6727,14 +6863,6 @@ void ACodec::BaseState::onOutputBufferDrained(const sp<AMessage> &msg) {
             mCodec->mLastHdr10PlusBuffer = hdr10PlusInfo;
         }
 
-        // save buffers sent to the surface so we can get render time when they return
-        int64_t mediaTimeUs = -1;
-        buffer->meta()->findInt64("timeUs", &mediaTimeUs);
-        if (mediaTimeUs >= 0) {
-            mCodec->mRenderTracker.onFrameQueued(
-                    mediaTimeUs, info->mGraphicBuffer, new Fence(::dup(info->mFenceFd)));
-        }
-
         int64_t timestampNs = 0;
         if (!msg->findInt64("timestampNs", &timestampNs)) {
             // use media timestamp if client did not request a specific render timestamp
@@ -6748,9 +6876,25 @@ void ACodec::BaseState::onOutputBufferDrained(const sp<AMessage> &msg) {
         err = native_window_set_buffers_timestamp(mCodec->mNativeWindow.get(), timestampNs);
         ALOGW_IF(err != NO_ERROR, "failed to set buffer timestamp: %d", err);
 
+        uint64_t frameId;
+        err = native_window_get_next_frame_id(mCodec->mNativeWindow.get(), &frameId);
+
         info->checkReadFence("onOutputBufferDrained before queueBuffer");
         err = mCodec->mNativeWindow->queueBuffer(
                     mCodec->mNativeWindow.get(), info->mGraphicBuffer.get(), info->mFenceFd);
+
+        int64_t mediaTimeUs = -1;
+        buffer->meta()->findInt64("timeUs", &mediaTimeUs);
+        if (mCodec->mAreRenderMetricsEnabled && mCodec->mIsWindowToDisplay) {
+            mCodec->trackReleasedFrame(frameId, mediaTimeUs, timestampNs);
+            mCodec->pollForRenderedFrames();
+        } else {
+            // When the surface is an intermediate surface, onFrameRendered is triggered immediately
+            // when the frame is queued to the non-display surface
+            mCodec->mCallback->onOutputFramesRendered({RenderedFrameInfo(mediaTimeUs,
+                                                                         timestampNs)});
+        }
+
         info->mFenceFd = -1;
         if (err == OK) {
             info->mStatus = BufferInfo::OWNED_BY_NATIVE_WINDOW;
@@ -6854,6 +6998,7 @@ void ACodec::UninitializedState::stateEntered() {
     mCodec->mConverter[0].clear();
     mCodec->mConverter[1].clear();
     mCodec->mComponentName.clear();
+    mCodec->mDecodeOnlyTimesUs.clear();
 }
 
 bool ACodec::UninitializedState::onMessageReceived(const sp<AMessage> &msg) {
@@ -6976,7 +7121,6 @@ bool ACodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg) {
     ++mCodec->mNodeGeneration;
 
     mCodec->mComponentName = componentName;
-    mCodec->mRenderTracker.setComponentName(componentName);
     mCodec->mFlags = 0;
 
     if (componentName.endsWith(".secure")) {
@@ -7366,6 +7510,13 @@ status_t ACodec::LoadedToIdleState::allocateBuffers() {
 bool ACodec::LoadedToIdleState::onMessageReceived(const sp<AMessage> &msg) {
     switch (msg->what()) {
         case kWhatSetParameters:
+        {
+            BaseState::setSurfaceParameters(msg);
+            if (msg->countEntries() > 0) {
+                mCodec->deferMessage(msg);
+            }
+            return true;
+        }
         case kWhatShutdown:
         {
             mCodec->deferMessage(msg);
@@ -7424,6 +7575,22 @@ bool ACodec::LoadedToIdleState::onOMXEvent(
             return true;
         }
 
+        // When Acodec receive an error event at LoadedToIdleState, it will not release
+        // allocated buffers, which will cause gralloc buffer leak issue. We need to first release
+        // these buffers and then process the error event
+        case OMX_EventError:
+        {
+            if (mCodec->allYourBuffersAreBelongToUs(kPortIndexInput)) {
+                mCodec->freeBuffersOnPort(kPortIndexInput);
+            }
+
+            if (mCodec->allYourBuffersAreBelongToUs(kPortIndexOutput)) {
+                mCodec->freeBuffersOnPort(kPortIndexOutput);
+            }
+
+            return BaseState::onOMXEvent(event, data1, data2);
+        }
+
         default:
             return BaseState::onOMXEvent(event, data1, data2);
     }
@@ -7442,6 +7609,13 @@ void ACodec::IdleToExecutingState::stateEntered() {
 bool ACodec::IdleToExecutingState::onMessageReceived(const sp<AMessage> &msg) {
     switch (msg->what()) {
         case kWhatSetParameters:
+        {
+            BaseState::setSurfaceParameters(msg);
+            if (msg->countEntries() > 0) {
+                mCodec->deferMessage(msg);
+            }
+            return true;
+        }
         case kWhatShutdown:
         {
             mCodec->deferMessage(msg);
@@ -7599,7 +7773,6 @@ void ACodec::ExecutingState::resume() {
 
 void ACodec::ExecutingState::stateEntered() {
     ALOGV("[%s] Now Executing", mCodec->mComponentName.c_str());
-    mCodec->mRenderTracker.clear(systemTime(CLOCK_MONOTONIC));
     mCodec->processDeferredMessages();
 }
 
@@ -7710,7 +7883,15 @@ bool ACodec::ExecutingState::onMessageReceived(const sp<AMessage> &msg) {
                     mCodec->signalSubmitOutputMetadataBufferIfEOS_workaround();
                 }
             }
-            return true;
+            handled = true;
+            break;
+        }
+
+        case kWhatPollForRenderedBuffers:
+        {
+            mCodec->pollForRenderedFrames();
+            handled = true;
+            break;
         }
 
         default:
@@ -7721,27 +7902,7 @@ bool ACodec::ExecutingState::onMessageReceived(const sp<AMessage> &msg) {
     return handled;
 }
 
-status_t ACodec::setParameters(const sp<AMessage> &params) {
-    int32_t videoBitrate;
-    if (params->findInt32("video-bitrate", &videoBitrate)) {
-        OMX_VIDEO_CONFIG_BITRATETYPE configParams;
-        InitOMXParams(&configParams);
-        configParams.nPortIndex = kPortIndexOutput;
-        configParams.nEncodeBitrate = videoBitrate;
-
-        status_t err = mOMXNode->setConfig(
-                OMX_IndexConfigVideoBitrate,
-                &configParams,
-                sizeof(configParams));
-
-        if (err != OK) {
-            ALOGE("setConfig(OMX_IndexConfigVideoBitrate, %d) failed w/ err %d",
-                   videoBitrate, err);
-
-            return err;
-        }
-    }
-
+status_t ACodec::setSurfaceParameters(const sp<AMessage> &params) {
     int64_t timeOffsetUs;
     if (params->findInt64(PARAMETER_KEY_OFFSET_TIME, &timeOffsetUs)) {
         if (mGraphicBufferSource == NULL) {
@@ -7829,9 +7990,41 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
         mInputFormat->setInt64("android._stop-time-offset-us", stopTimeOffsetUs);
     }
 
+    return OK;
+}
+
+status_t ACodec::setParameters(const sp<AMessage> &params) {
+    status_t err;
+
+    int32_t videoBitrate;
+    if (params->findInt32("video-bitrate", &videoBitrate)) {
+        OMX_VIDEO_CONFIG_BITRATETYPE configParams;
+        InitOMXParams(&configParams);
+        configParams.nPortIndex = kPortIndexOutput;
+        configParams.nEncodeBitrate = videoBitrate;
+
+        err = mOMXNode->setConfig(
+                OMX_IndexConfigVideoBitrate,
+                &configParams,
+                sizeof(configParams));
+
+        if (err != OK) {
+            ALOGE("setConfig(OMX_IndexConfigVideoBitrate, %d) failed w/ err %d",
+                   videoBitrate, err);
+
+            return err;
+        }
+    }
+
+    err = setSurfaceParameters(params);
+    if (err != OK) {
+        ALOGE("Failed to set input surface parameters (err %d)", err);
+        return err;
+    }
+
     int32_t tmp;
     if (params->findInt32("request-sync", &tmp)) {
-        status_t err = requestIDRFrame();
+        err = requestIDRFrame();
 
         if (err != OK) {
             ALOGE("Requesting a sync frame failed w/ err %d", err);
@@ -7846,7 +8039,7 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
         rateFloat = (float) rateInt; // 16MHz (FLINTMAX) is OK for upper bound.
     }
     if (rateFloat > 0) {
-        status_t err = setOperatingRate(rateFloat, mIsVideo);
+        err = setOperatingRate(rateFloat, mIsVideo);
         if (err != OK) {
             ALOGI("Failed to set parameter 'operating-rate' (err %d)", err);
         }
@@ -7855,7 +8048,7 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
     int32_t intraRefreshPeriod = 0;
     if (params->findInt32("intra-refresh-period", &intraRefreshPeriod)
             && intraRefreshPeriod > 0) {
-        status_t err = setIntraRefreshPeriod(intraRefreshPeriod, false);
+        err = setIntraRefreshPeriod(intraRefreshPeriod, false);
         if (err != OK) {
             ALOGI("[%s] failed setIntraRefreshPeriod. Failure is fine since this key is optional",
                     mComponentName.c_str());
@@ -7865,7 +8058,7 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
 
     int32_t lowLatency = 0;
     if (params->findInt32("low-latency", &lowLatency)) {
-        status_t err = setLowLatency(lowLatency);
+        err = setLowLatency(lowLatency);
         if (err != OK) {
             return err;
         }
@@ -7873,7 +8066,7 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
 
     int32_t latency = 0;
     if (params->findInt32("latency", &latency) && latency > 0) {
-        status_t err = setLatency(latency);
+        err = setLatency(latency);
         if (err != OK) {
             ALOGI("[%s] failed setLatency. Failure is fine since this key is optional",
                     mComponentName.c_str());
@@ -7885,7 +8078,7 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
     if (params->findInt32("audio-presentation-presentation-id", &presentationId)) {
         int32_t programId = -1;
         params->findInt32("audio-presentation-program-id", &programId);
-        status_t err = setAudioPresentation(presentationId, programId);
+        err = setAudioPresentation(presentationId, programId);
         if (err != OK) {
             ALOGI("[%s] failed setAudioPresentation. Failure is fine since this key is optional",
                     mComponentName.c_str());
@@ -7958,7 +8151,7 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
     {
         int32_t tunnelPeek = 0;
         if (params->findInt32(TUNNEL_PEEK_KEY, &tunnelPeek)) {
-            status_t err = setTunnelPeek(tunnelPeek);
+            err = setTunnelPeek(tunnelPeek);
             if (err != OK) {
                 return err;
             }
@@ -7967,7 +8160,7 @@ status_t ACodec::setParameters(const sp<AMessage> &params) {
     {
         int32_t tunnelPeekSetLegacy = 0;
         if (params->findInt32(TUNNEL_PEEK_SET_LEGACY_KEY, &tunnelPeekSetLegacy)) {
-            status_t err = setTunnelPeekLegacy(tunnelPeekSetLegacy);
+            err = setTunnelPeekLegacy(tunnelPeekSetLegacy);
             if (err != OK) {
                 return err;
             }
@@ -8394,7 +8587,7 @@ void ACodec::forceStateTransition(int generation) {
 }
 
 bool ACodec::ExecutingState::onOMXFrameRendered(int64_t mediaTimeUs, nsecs_t systemNano) {
-    mCodec->onFrameRendered(mediaTimeUs, systemNano);
+    mCodec->mCallback->onOutputFramesRendered({RenderedFrameInfo(mediaTimeUs, systemNano)});
     return true;
 }
 
@@ -8568,7 +8761,7 @@ void ACodec::OutputPortSettingsChangedState::stateEntered() {
 
 bool ACodec::OutputPortSettingsChangedState::onOMXFrameRendered(
         int64_t mediaTimeUs, nsecs_t systemNano) {
-    mCodec->onFrameRendered(mediaTimeUs, systemNano);
+    mCodec->mCallback->onOutputFramesRendered({RenderedFrameInfo(mediaTimeUs, systemNano)});
     return true;
 }
 
@@ -8598,10 +8791,6 @@ bool ACodec::OutputPortSettingsChangedState::onOMXEvent(
                     err = mCodec->mOMXNode->sendCommand(
                             OMX_CommandPortEnable, kPortIndexOutput);
                 }
-
-                // Clear the RenderQueue in which queued GraphicBuffers hold the
-                // actual buffer references in order to free them early.
-                mCodec->mRenderTracker.clear(systemTime(CLOCK_MONOTONIC));
 
                 if (err == OK) {
                     err = mCodec->allocateBuffersOnPort(kPortIndexOutput);
@@ -8839,6 +9028,7 @@ void ACodec::FlushingState::stateEntered() {
     ALOGV("[%s] Now Flushing", mCodec->mComponentName.c_str());
 
     mFlushComplete[kPortIndexInput] = mFlushComplete[kPortIndexOutput] = false;
+    mCodec->mDecodeOnlyTimesUs.clear();
 
     // If we haven't transitioned after 3 seconds, we're probably stuck.
     sp<AMessage> msg = new AMessage(ACodec::kWhatCheckIfStuck, mCodec);
@@ -8984,8 +9174,6 @@ void ACodec::FlushingState::changeStateIfWeOwnAllBuffers() {
         // We now own all buffers except possibly those still queued with
         // the native window for rendering. Let's get those back as well.
         mCodec->waitUntilAllPossibleNativeWindowBuffersAreReturnedToUs();
-
-        mCodec->mRenderTracker.clear(systemTime(CLOCK_MONOTONIC));
 
         mCodec->mCallback->onFlushCompleted();
 
@@ -9143,6 +9331,12 @@ status_t ACodec::queryCapabilities(
                         1280 /* width */, 720 /* height */) != OK) {
                 // adaptive playback is not supported
                 caps->removeDetail(MediaCodecInfo::Capabilities::FEATURE_ADAPTIVE_PLAYBACK);
+            }
+
+            // all non-tunneled video decoders support detached surface mode
+            if (android::media::codec::provider_->null_output_surface_support() &&
+                    android::media::codec::provider_->null_output_surface()) {
+                caps->addDetail(MediaCodecInfo::Capabilities::FEATURE_DETACHED_SURFACE, 0);
             }
         }
     }

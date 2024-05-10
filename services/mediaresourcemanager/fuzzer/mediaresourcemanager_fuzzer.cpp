@@ -22,8 +22,8 @@
 #include <aidl/android/media/BnResourceManagerClient.h>
 #include <media/MediaResource.h>
 #include <media/MediaResourcePolicy.h>
-#include <media/stagefright/ProcessInfoInterface.h>
 #include <media/stagefright/foundation/ADebug.h>
+#include <mediautils/ProcessInfoInterface.h>
 #include "ResourceManagerService.h"
 #include "fuzzer/FuzzedDataProvider.h"
 
@@ -208,9 +208,9 @@ class ResourceManagerServiceFuzzer {
         return nullptr;
     }
 
-    shared_ptr<ResourceManagerService> mService =
-        ::ndk::SharedRefBase::make<ResourceManagerService>(new TestProcessInfo(),
-                                                           new TestSystemCallback());
+    shared_ptr<ResourceManagerService> mService = ResourceManagerService::Create(
+            new TestProcessInfo(),
+            new TestSystemCallback());
     FuzzedDataProvider* mFuzzedDataProvider = nullptr;
 };
 

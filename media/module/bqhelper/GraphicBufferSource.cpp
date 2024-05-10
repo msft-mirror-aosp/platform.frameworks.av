@@ -589,7 +589,7 @@ status_t GraphicBufferSource::onInputBufferEmptied(codec_buffer_id bufferId, int
 
 void GraphicBufferSource::onDataspaceChanged_l(
         android_dataspace dataspace, android_pixel_format pixelFormat) {
-    ALOGD("got buffer with new dataSpace #%x", dataspace);
+    ALOGD("got buffer with new dataSpace %#x", dataspace);
     mLastDataspace = dataspace;
 
     if (ColorUtils::convertDataSpaceToV0(dataspace)) {
@@ -1151,6 +1151,18 @@ status_t GraphicBufferSource::configure(
         uint32_t frameWidth,
         uint32_t frameHeight,
         uint32_t consumerUsage) {
+    uint64_t consumerUsage64 = static_cast<uint64_t>(consumerUsage);
+    return configure(component, dataSpace, bufferCount,
+                     frameWidth, frameHeight, consumerUsage64);
+}
+
+status_t GraphicBufferSource::configure(
+        const sp<ComponentWrapper>& component,
+        int32_t dataSpace,
+        int32_t bufferCount,
+        uint32_t frameWidth,
+        uint32_t frameHeight,
+        uint64_t consumerUsage) {
     if (component == NULL) {
         return BAD_VALUE;
     }

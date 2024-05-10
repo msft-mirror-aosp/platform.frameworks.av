@@ -430,6 +430,17 @@ status_t AMessage::post(int64_t delayUs) {
     return OK;
 }
 
+status_t AMessage::postUnique(const sp<RefBase> &token, int64_t delayUs) {
+    sp<ALooper> looper = mLooper.promote();
+    if (looper == NULL) {
+        ALOGW("failed to post message as target looper for handler %d is gone.",
+              mTarget);
+        return -ENOENT;
+    }
+
+    return looper->postUnique(this, token, delayUs);
+}
+
 status_t AMessage::postAndAwaitResponse(sp<AMessage> *response) {
     sp<ALooper> looper = mLooper.promote();
     if (looper == NULL) {
@@ -948,6 +959,11 @@ sp<AMessage> AMessage::changesFrom(const sp<const AMessage> &other, bool deep) c
 
 size_t AMessage::countEntries() const {
     return mItems.size();
+}
+
+/* static */
+size_t AMessage::maxAllowedEntries() {
+    return kMaxNumItems;
 }
 
 const char *AMessage::getEntryNameAt(size_t index, Type *type) const {

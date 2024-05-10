@@ -112,6 +112,21 @@ struct C2SyncVariables {
      */
     c2_status_t waitForChange(uint32_t waitId, c2_nsecs_t timeoutNs);
 
+    /**
+     * Wake up and expire all waitors.
+     */
+    void notifyAll();
+
+    /**
+     * Invalide current sync variables on the death of the other process.
+     */
+    void invalidate();
+
+    /**
+     * If a dead process holds the lock, clear the lock.
+     */
+    void clearLockIfNecessary();
+
     C2SyncVariables() {}
 
 private:
@@ -129,6 +144,11 @@ private:
      * wait for signal or broadcast.
      */
     int wait();
+
+    /**
+     * try lock for the specified duration.
+     */
+    bool tryLockFor(size_t ms);
 
     std::atomic<uint32_t> mLock;
     std::atomic<uint32_t> mCond;

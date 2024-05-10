@@ -20,36 +20,58 @@ package {
     default_applicable_licenses: ["frameworks_av_license"],
 }
 
+cc_defaults {
+    name: "libaudiohal_aidl_test_default",
+    test_suites: ["device-tests"],
+    defaults: [
+        "libaudiohal_aidl_default",
+        "libaudiohal_default",
+    ],
+    shared_libs: [
+        "libaudiohal",
+    ],
+}
+
+cc_test {
+    name: "CoreAudioHalAidlTest",
+    srcs: [
+        ":core_audio_hal_aidl_src_files",
+        "CoreAudioHalAidl_test.cpp",
+    ],
+    defaults: ["libaudiohal_aidl_test_default"],
+    header_libs: ["libaudiohalimpl_headers"],
+}
+
 cc_test {
     name: "EffectsFactoryHalInterfaceTest",
-    test_suites: ["device-tests"],
-
-    srcs: [
-        "EffectsFactoryHalInterface_test.cpp",
-    ],
-
-    defaults: [
-        "latest_android_media_audio_common_types_ndk_shared",
-    ],
-
-    cflags: [
-        "-Wall",
-        "-Wextra",
-        "-Werror",
-        "-Wthread-safety",
-        "-DBACKEND_NDK",
-    ],
-
+    srcs: ["EffectsFactoryHalInterface_test.cpp"],
+    defaults: ["libaudiohal_aidl_test_default"],
     shared_libs: [
-        "audioclient-types-aidl-cpp",
-        "libaudio_aidl_conversion_common_ndk",
-        "libaudiohal",
-        "liblog",
-        "libutils",
         "libvibrator",
     ],
+    test_config_template: "AudioHalTestTemplate.xml",
+}
 
-    header_libs: [
-        "libaudiohal_headers",
+cc_test {
+    name: "EffectProxyTest",
+    srcs: [
+        ":audio_effectproxy_src_files",
+        "EffectProxy_test.cpp",
     ],
+    defaults: [
+        "libaudiohal_aidl_test_default",
+        "use_libaidlvintf_gtest_helper_static",
+    ],
+    header_libs: ["libaudiohalimpl_headers"],
+}
+
+cc_test {
+    name: "EffectHalVersionCompatibilityTest",
+    srcs: [
+        ":audio_effect_hal_aidl_src_files",
+        "EffectHalVersionCompatibility_test.cpp",
+    ],
+    defaults: ["libaudiohal_aidl_test_default"],
+    header_libs: ["libaudiohalimpl_headers"],
+    static_libs: ["libgmock"],
 }

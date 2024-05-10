@@ -142,7 +142,7 @@ const char* AMediaFormat_toString(AMediaFormat *mData) {
     }
     ret.append("}");
     mData->mDebug = ret;
-    return mData->mDebug.string();
+    return mData->mDebug.c_str();
 }
 
 EXPORT
@@ -238,7 +238,7 @@ bool AMediaFormat_getString(AMediaFormat* mData, const char *name, const char **
         return false;
     }
     for (size_t i = 0; i < mData->mStringCache.size(); i++) {
-        if (strcmp(mData->mStringCache.keyAt(i).string(), name) == 0) {
+        if (strcmp(mData->mStringCache.keyAt(i).c_str(), name) == 0) {
             mData->mStringCache.removeItemsAt(i, 1);
             break;
         }
@@ -251,7 +251,7 @@ bool AMediaFormat_getString(AMediaFormat* mData, const char *name, const char **
         if (i < 0) {
             return false;
         }
-        *out = mData->mStringCache.valueAt(i).string();
+        *out = mData->mStringCache.valueAt(i).c_str();
         return true;
     }
     return false;
@@ -332,6 +332,9 @@ void AMediaFormat_setString(AMediaFormat* format, const char* name, const char* 
     if (name == nullptr) {
         return;
     }
+    if (value == nullptr) {
+        return;
+    }
     // AMessage::setString() makes a copy of the string
     format->mFormat->setString(name, value, strlen(value));
 }
@@ -365,6 +368,7 @@ EXPORT const char* AMEDIAFORMAT_KEY_AAC_SBR_MODE = "aac-sbr-mode";
 EXPORT const char* AMEDIAFORMAT_KEY_ALBUM = "album";
 EXPORT const char* AMEDIAFORMAT_KEY_ALBUMART = "albumart";
 EXPORT const char* AMEDIAFORMAT_KEY_ALBUMARTIST = "albumartist";
+EXPORT const char* AMEDIAFORMAT_KEY_ALLOW_FRAME_DROP = "allow-frame-drop";
 EXPORT const char* AMEDIAFORMAT_KEY_ARTIST = "artist";
 EXPORT const char* AMEDIAFORMAT_KEY_AUDIO_PRESENTATION_INFO = "audio-presentation-info";
 EXPORT const char* AMEDIAFORMAT_KEY_AUDIO_PRESENTATION_PRESENTATION_ID =
@@ -424,6 +428,7 @@ EXPORT const char* AMEDIAFORMAT_KEY_HDR_STATIC_INFO = "hdr-static-info";
 EXPORT const char* AMEDIAFORMAT_KEY_HDR10_PLUS_INFO = "hdr10-plus-info";
 EXPORT const char* AMEDIAFORMAT_KEY_HEIGHT = "height";
 EXPORT const char* AMEDIAFORMAT_KEY_ICC_PROFILE = "icc-profile";
+EXPORT const char* AMEDIAFORMAT_KEY_IMPORTANCE = "importance";
 EXPORT const char* AMEDIAFORMAT_KEY_INTRA_REFRESH_PERIOD = "intra-refresh-period";
 EXPORT const char* AMEDIAFORMAT_KEY_IS_ADTS = "is-adts";
 EXPORT const char* AMEDIAFORMAT_KEY_IS_AUTOSELECT = "is-autoselect";
@@ -441,9 +446,14 @@ EXPORT const char* AMEDIAFORMAT_KEY_LOW_LATENCY = "low-latency";
 EXPORT const char* AMEDIAFORMAT_KEY_LYRICIST = "lyricist";
 EXPORT const char* AMEDIAFORMAT_KEY_MANUFACTURER = "manufacturer";
 EXPORT const char* AMEDIAFORMAT_KEY_MAX_BIT_RATE = "max-bitrate";
+EXPORT const char* AMEDIAFORMAT_KEY_MAX_B_FRAMES = "max-bframes";
 EXPORT const char* AMEDIAFORMAT_KEY_MAX_FPS_TO_ENCODER = "max-fps-to-encoder";
 EXPORT const char* AMEDIAFORMAT_KEY_MAX_HEIGHT = "max-height";
 EXPORT const char* AMEDIAFORMAT_KEY_MAX_INPUT_SIZE = "max-input-size";
+EXPORT const char* AMEDIAFORMAT_KEY_BUFFER_BATCH_MAX_OUTPUT_SIZE =
+        "buffer-batch-max-output-size";
+EXPORT const char* AMEDIAFORMAT_KEY_BUFFER_BATCH_THRESHOLD_OUTPUT_SIZE =
+        "buffer-batch-threshold-output-size";
 EXPORT const char* AMEDIAFORMAT_KEY_MAX_PTS_GAP_TO_ENCODER = "max-pts-gap-to-encoder";
 EXPORT const char* AMEDIAFORMAT_KEY_MAX_WIDTH = "max-width";
 EXPORT const char* AMEDIAFORMAT_KEY_MIME = "mime";

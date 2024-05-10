@@ -106,6 +106,10 @@ static const char* idFromHal(const char *name, status_t* status) {
 }
 #endif
 
+status_t DevicesFactoryHalHidl::getDeviceNames(std::vector<std::string> *names __unused) {
+    return INVALID_OPERATION;
+}
+
 status_t DevicesFactoryHalHidl::openDevice(const char *name, sp<DeviceHalInterface> *device) {
     auto factories = copyDeviceFactories();
     if (factories.empty()) return NO_INIT;
@@ -159,29 +163,6 @@ status_t DevicesFactoryHalHidl::openDevice(const char *name, sp<DeviceHalInterfa
     return BAD_VALUE;
 }
 
-status_t DevicesFactoryHalHidl::getHalPids(std::vector<pid_t> *pids) {
-    std::set<pid_t> pidsSet;
-    auto factories = copyDeviceFactories();
-    for (const auto& factory : factories) {
-        using ::android::hidl::base::V1_0::DebugInfo;
-
-        DebugInfo debugInfo;
-        auto ret = factory->getDebugInfo([&] (const auto &info) {
-               debugInfo = info;
-            });
-        if (!ret.isOk()) {
-           return INVALID_OPERATION;
-        }
-        if (debugInfo.pid == (int)IServiceManager::PidConstant::NO_PID) {
-            continue;
-        }
-        pidsSet.insert(debugInfo.pid);
-    }
-
-    *pids = {pidsSet.begin(), pidsSet.end()};
-    return NO_ERROR;
-}
-
 status_t DevicesFactoryHalHidl::setCallbackOnce(sp<DevicesFactoryHalCallback> callback) {
     ALOG_ASSERT(callback != nullptr);
     bool needToCallCallback = false;
@@ -230,6 +211,16 @@ std::vector<sp<::android::hardware::audio::CPP_VERSION::IDevicesFactory>>
 
 AudioHalVersionInfo DevicesFactoryHalHidl::getHalVersion() const {
     return AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, MAJOR_VERSION, MINOR_VERSION);
+}
+
+status_t DevicesFactoryHalHidl::getSurroundSoundConfig(
+        media::SurroundSoundConfig *config __unused) {
+    return INVALID_OPERATION;
+}
+
+status_t DevicesFactoryHalHidl::getEngineConfig(
+        media::audio::common::AudioHalEngineConfig *config __unused) {
+    return INVALID_OPERATION;
 }
 
 // Main entry-point to the shared library.

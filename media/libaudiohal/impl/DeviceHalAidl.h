@@ -17,15 +17,21 @@
 #pragma once
 
 #include <map>
-#include <set>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
+#include <aidl/android/media/audio/IHalAdapterVendorExtension.h>
 #include <aidl/android/hardware/audio/core/BpModule.h>
+#include <aidl/android/hardware/audio/core/sounddose/BpSoundDose.h>
 #include <android-base/thread_annotations.h>
 #include <media/audiohal/DeviceHalInterface.h>
 #include <media/audiohal/EffectHalInterface.h>
 
+#include "Cleanups.h"
 #include "ConversionHelperAidl.h"
+#include "Hal2AidlMapper.h"
 
 namespace android {
 
@@ -56,9 +62,23 @@ class CallbackBroker : public virtual RefBase {
             void* cookie, const sp<StreamOutHalInterfaceLatencyModeCallback>&) = 0;
 };
 
-class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
-                      public CallbackBroker {
+class MicrophoneInfoProvider : public virtual RefBase {
   public:
+    using Info = std::vector<::aidl::android::media::audio::common::MicrophoneInfo>;
+    virtual ~MicrophoneInfoProvider() = default;
+    // Returns a nullptr if the HAL does not support microphone info retrieval.
+    virtual Info const* getMicrophoneInfo() = 0;
+};
+
+class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
+                      public CallbackBroker, public MicrophoneInfoProvider {
+  public:
+    status_t getAudioPorts(std::vector<media::audio::common::AudioPort> *ports) override;
+
+    status_t getAudioRoutes(std::vector<media::AudioRoute> *routes) override;
+
+    status_t getSupportedModes(std::vector<media::audio::common::AudioMode> *modes) override;
+
     // Sets the value of 'devices' to a bitmask of 1 or more values of audio_devices_t.
     status_t getSupportedDevices(uint32_t *devices) override;
 
@@ -93,7 +113,7 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     status_t getParameters(const String8& keys, String8 *values) override;
 
     // Returns audio input buffer size according to parameters passed.
-    status_t getInputBufferSize(const struct audio_config* config, size_t* size) override;
+    status_t getInputBufferSize(struct audio_config* config, size_t* size) override;
 
     // Creates and opens the audio hardware output stream. The stream is closed
     // by releasing all references to the returned object.
@@ -130,11 +150,13 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     status_t setAudioPortConfig(const struct audio_port_config* config) override;
 
     // List microphones
-    status_t getMicrophones(std::vector<audio_microphone_characteristic_t>* microphones);
+    status_t getMicrophones(std::vector<audio_microphone_characteristic_t>* microphones) override;
 
-    status_t addDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
+    status_t addDeviceEffect(
+            const struct audio_port_config *device, sp<EffectHalInterface> effect) override;
 
-    status_t removeDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
+    status_t removeDeviceEffect(
+            const struct audio_port_config *device, sp<EffectHalInterface> effect) override;
 
     status_t getMmapPolicyInfos(media::audio::common::AudioMMapPolicyType policyType __unused,
                                 std::vector<media::audio::common::AudioMMapPolicyInfo>* policyInfos
@@ -146,9 +168,21 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
 
     error::Result<audio_hw_sync_t> getHwAvSync() override;
 
-    status_t dump(int __unused, const Vector<String16>& __unused) override;
+    status_t supportsBluetoothVariableLatency(bool* supports __unused) override;
 
-    int32_t supportsBluetoothVariableLatency(bool* supports __unused) override;
+    status_t getSoundDoseInterface(const std::string& module,
+                                   ::ndk::SpAIBinder* soundDoseBinder) override;
+
+    status_t prepareToDisconnectExternalDevice(const struct audio_port_v7 *port) override;
+
+    status_t setConnectedState(const struct audio_port_v7 *port, bool connected) override;
+
+    status_t setSimulateDeviceConnections(bool enabled) override;
+
+    status_t getAudioMixPort(const struct audio_port_v7* devicePort,
+                             struct audio_port_v7* mixPort) override;
+
+    status_t dump(int __unused, const Vector<String16>& __unused) override;
 
   private:
     friend class sp<DeviceHalAidl>;
@@ -158,73 +192,28 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
         wp<StreamOutHalInterfaceEventCallback> event;
         wp<StreamOutHalInterfaceLatencyModeCallback> latency;
     };
-    using Patches = std::map<int32_t /*patch ID*/,
-            ::aidl::android::hardware::audio::core::AudioPatch>;
-    using PortConfigs = std::map<int32_t /*port config ID*/,
-            ::aidl::android::media::audio::common::AudioPortConfig>;
-    using Ports = std::map<int32_t /*port ID*/, ::aidl::android::media::audio::common::AudioPort>;
-    class Cleanups;
+    struct Microphones {
+        enum Status { UNKNOWN, NOT_SUPPORTED, QUERIED };
+        Status status = Status::UNKNOWN;
+        MicrophoneInfoProvider::Info info;
+    };
 
     // Must not be constructed directly by clients.
     DeviceHalAidl(
             const std::string& instance,
-            const std::shared_ptr<::aidl::android::hardware::audio::core::IModule>& module)
-            : ConversionHelperAidl("DeviceHalAidl"), mInstance(instance), mModule(module) {}
+            const std::shared_ptr<::aidl::android::hardware::audio::core::IModule>& module,
+            const std::shared_ptr<::aidl::android::media::audio::IHalAdapterVendorExtension>& vext);
 
     ~DeviceHalAidl() override = default;
 
-    bool audioDeviceMatches(const ::aidl::android::media::audio::common::AudioDevice& device,
-            const ::aidl::android::media::audio::common::AudioPort& p);
-    bool audioDeviceMatches(const ::aidl::android::media::audio::common::AudioDevice& device,
-            const ::aidl::android::media::audio::common::AudioPortConfig& p);
-    status_t createPortConfig(
-            const ::aidl::android::media::audio::common::AudioPortConfig& requestedPortConfig,
-            PortConfigs::iterator* result);
-    status_t findOrCreatePatch(
-        const std::set<int32_t>& sourcePortConfigIds,
-        const std::set<int32_t>& sinkPortConfigIds,
-        ::aidl::android::hardware::audio::core::AudioPatch* patch, bool* created);
-    status_t findOrCreatePatch(
-        const ::aidl::android::hardware::audio::core::AudioPatch& requestedPatch,
-        ::aidl::android::hardware::audio::core::AudioPatch* patch, bool* created);
-    status_t findOrCreatePortConfig(
-            const ::aidl::android::media::audio::common::AudioDevice& device,
-            ::aidl::android::media::audio::common::AudioPortConfig* portConfig,
-            bool* created);
-    status_t findOrCreatePortConfig(
-            const ::aidl::android::media::audio::common::AudioConfig& config,
-            const std::optional<::aidl::android::media::audio::common::AudioIoFlags>& flags,
-            int32_t ioHandle,
-            ::aidl::android::media::audio::common::AudioPortConfig* portConfig, bool* created);
-    status_t findOrCreatePortConfig(
-        const ::aidl::android::media::audio::common::AudioPortConfig& requestedPortConfig,
-        ::aidl::android::media::audio::common::AudioPortConfig* portConfig, bool* created);
-    Patches::iterator findPatch(const std::set<int32_t>& sourcePortConfigIds,
-            const std::set<int32_t>& sinkPortConfigIds);
-    Ports::iterator findPort(const ::aidl::android::media::audio::common::AudioDevice& device);
-    Ports::iterator findPort(
-            const ::aidl::android::media::audio::common::AudioConfig& config,
-            const ::aidl::android::media::audio::common::AudioIoFlags& flags);
-    PortConfigs::iterator findPortConfig(
-            const ::aidl::android::media::audio::common::AudioDevice& device);
-    PortConfigs::iterator findPortConfig(
-            const ::aidl::android::media::audio::common::AudioConfig& config,
-            const std::optional<::aidl::android::media::audio::common::AudioIoFlags>& flags,
-            int32_t ioHandle);
-    // Currently unused but may be useful for implementing setAudioPortConfig
-    // PortConfigs::iterator findPortConfig(
-    //         const ::aidl::android::media::audio::common::AudioPortConfig& portConfig);
-    status_t prepareToOpenStream(
-        int32_t aidlHandle,
-        const ::aidl::android::media::audio::common::AudioDevice& aidlDevice,
-        const ::aidl::android::media::audio::common::AudioIoFlags& aidlFlags,
-        struct audio_config* config,
-        Cleanups* cleanups,
-        ::aidl::android::media::audio::common::AudioConfig* aidlConfig,
-        ::aidl::android::media::audio::common::AudioPortConfig* mixPortConfig,
-        int32_t* nominalLatency);
-    void resetPatch(int32_t patchId);
-    void resetPortConfig(int32_t portConfigId);
+    status_t filterAndRetrieveBtA2dpParameters(AudioParameter &keys, AudioParameter *result);
+    status_t filterAndRetrieveBtLeParameters(AudioParameter &keys, AudioParameter *result);
+    status_t filterAndUpdateBtA2dpParameters(AudioParameter &parameters);
+    status_t filterAndUpdateBtHfpParameters(AudioParameter &parameters);
+    status_t filterAndUpdateBtLeParameters(AudioParameter &parameters);
+    status_t filterAndUpdateBtScoParameters(AudioParameter &parameters);
+    status_t filterAndUpdateScreenParameters(AudioParameter &parameters);
+    status_t filterAndUpdateTelephonyParameters(AudioParameter &parameters);
 
     // CallbackBroker implementation
     void clearCallbacks(void* cookie) override;
@@ -241,15 +230,24 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     template<class C> sp<C> getCallbackImpl(void* cookie, wp<C> Callbacks::* field);
     template<class C> void setCallbackImpl(void* cookie, wp<C> Callbacks::* field, const sp<C>& cb);
 
+    // MicrophoneInfoProvider implementation
+    MicrophoneInfoProvider::Info const* getMicrophoneInfo() override;
+
     const std::string mInstance;
     const std::shared_ptr<::aidl::android::hardware::audio::core::IModule> mModule;
-    Ports mPorts;
-    int32_t mDefaultInputPortId = -1;
-    int32_t mDefaultOutputPortId = -1;
-    PortConfigs mPortConfigs;
-    Patches mPatches;
+    const std::shared_ptr<::aidl::android::media::audio::IHalAdapterVendorExtension> mVendorExt;
+    const std::shared_ptr<::aidl::android::hardware::audio::core::ITelephony> mTelephony;
+    const std::shared_ptr<::aidl::android::hardware::audio::core::IBluetooth> mBluetooth;
+    const std::shared_ptr<::aidl::android::hardware::audio::core::IBluetoothA2dp> mBluetoothA2dp;
+    const std::shared_ptr<::aidl::android::hardware::audio::core::IBluetoothLe> mBluetoothLe;
+    const std::shared_ptr<::aidl::android::hardware::audio::core::sounddose::ISoundDose> mSoundDose;
+
     std::mutex mLock;
     std::map<void*, Callbacks> mCallbacks GUARDED_BY(mLock);
+    std::set<audio_port_handle_t> mDeviceDisconnectionNotified GUARDED_BY(mLock);
+    Hal2AidlMapper mMapper GUARDED_BY(mLock);
+    LockedAccessor<Hal2AidlMapper> mMapperAccessor;
+    Microphones mMicrophones GUARDED_BY(mLock);
 };
 
 } // namespace android

@@ -17,25 +17,26 @@
 #define LOG_TAG "AHAL_LoudnessEnhancerImpl"
 
 #include <android-base/logging.h>
+#include <system/audio_effects/effect_uuid.h>
 
 #include "EffectLoudnessEnhancer.h"
 
 using aidl::android::hardware::audio::effect::Descriptor;
+using aidl::android::hardware::audio::effect::getEffectImplUuidLoudnessEnhancer;
+using aidl::android::hardware::audio::effect::getEffectTypeUuidLoudnessEnhancer;
 using aidl::android::hardware::audio::effect::IEffect;
-using aidl::android::hardware::audio::effect::kLoudnessEnhancerImplUUID;
 using aidl::android::hardware::audio::effect::LoudnessEnhancerImpl;
 using aidl::android::hardware::audio::effect::State;
 using aidl::android::media::audio::common::AudioUuid;
 
 extern "C" binder_exception_t createEffect(const AudioUuid* in_impl_uuid,
                                            std::shared_ptr<IEffect>* instanceSpp) {
-    if (!in_impl_uuid || *in_impl_uuid != kLoudnessEnhancerImplUUID) {
+    if (!in_impl_uuid || *in_impl_uuid != getEffectImplUuidLoudnessEnhancer()) {
         LOG(ERROR) << __func__ << "uuid not supported";
         return EX_ILLEGAL_ARGUMENT;
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<LoudnessEnhancerImpl>();
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -44,7 +45,7 @@ extern "C" binder_exception_t createEffect(const AudioUuid* in_impl_uuid,
 }
 
 extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descriptor* _aidl_return) {
-    if (!in_impl_uuid || *in_impl_uuid != kLoudnessEnhancerImplUUID) {
+    if (!in_impl_uuid || *in_impl_uuid != getEffectImplUuidLoudnessEnhancer()) {
         LOG(ERROR) << __func__ << "uuid not supported";
         return EX_ILLEGAL_ARGUMENT;
     }
@@ -56,8 +57,8 @@ namespace aidl::android::hardware::audio::effect {
 
 const std::string LoudnessEnhancerImpl::kEffectName = "Loudness Enhancer";
 const Descriptor LoudnessEnhancerImpl::kDescriptor = {
-        .common = {.id = {.type = kLoudnessEnhancerTypeUUID,
-                          .uuid = kLoudnessEnhancerImplUUID,
+        .common = {.id = {.type = getEffectTypeUuidLoudnessEnhancer(),
+                          .uuid = getEffectImplUuidLoudnessEnhancer(),
                           .proxy = std::nullopt},
                    .flags = {.type = Flags::Type::INSERT, .insert = Flags::Insert::FIRST},
                    .name = LoudnessEnhancerImpl::kEffectName,
@@ -65,7 +66,6 @@ const Descriptor LoudnessEnhancerImpl::kDescriptor = {
 
 ndk::ScopedAStatus LoudnessEnhancerImpl::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << __func__ << kDescriptor.toString();
     *_aidl_return = kDescriptor;
     return ndk::ScopedAStatus::ok();
 }
@@ -176,7 +176,7 @@ RetCode LoudnessEnhancerImpl::releaseContext() {
 IEffect::Status LoudnessEnhancerImpl::effectProcessImpl(float* in, float* out, int samples) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, samples);
+    return mContext->process(in, out, samples);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

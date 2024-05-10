@@ -17,6 +17,7 @@
 package android.media;
 
 import android.media.AudioPatchFw;
+import android.media.AudioPolicyConfig;
 import android.media.AudioPortFw;
 import android.media.AudioPortConfigFw;
 import android.media.AudioUniqueIdUse;
@@ -27,6 +28,7 @@ import android.media.CreateRecordRequest;
 import android.media.CreateRecordResponse;
 import android.media.CreateTrackRequest;
 import android.media.CreateTrackResponse;
+import android.media.DeviceConnectedState;
 import android.media.OpenInputRequest;
 import android.media.OpenInputResponse;
 import android.media.OpenOutputRequest;
@@ -35,6 +37,8 @@ import android.media.EffectDescriptor;
 import android.media.IAudioFlingerClient;
 import android.media.IAudioRecord;
 import android.media.IAudioTrack;
+import android.media.ISoundDose;
+import android.media.ISoundDoseCallback;
 import android.media.MicrophoneInfoFw;
 import android.media.RenderPosition;
 import android.media.TrackSecondaryOutputInfo;
@@ -132,8 +136,6 @@ interface IAudioFlingerService {
     OpenInputResponse openInput(in OpenInputRequest request);
     void closeInput(int /* audio_io_handle_t */ input);
 
-    void invalidateStream(AudioStreamType stream);
-
     void setVoiceVolume(float volume);
 
     RenderPosition getRenderPosition(int /* audio_io_handle_t */ output);
@@ -227,7 +229,10 @@ interface IAudioFlingerService {
 
     int getAAudioHardwareBurstMinUsec();
 
-    void setDeviceConnectedState(in AudioPortFw devicePort, boolean connected);
+    void setDeviceConnectedState(in AudioPortFw devicePort, DeviceConnectedState state);
+
+    // Used for tests only. Requires AIDL HAL to work.
+    void setSimulateDeviceConnections(boolean enabled);
 
     /**
      * Requests a given latency mode (See AudioLatencyMode.aidl) on an output stream.
@@ -265,6 +270,28 @@ interface IAudioFlingerService {
      * Indicates if the variable Bluetooth latency control mechanism is enabled or disabled.
      */
     boolean isBluetoothVariableLatencyEnabled();
+
+    /**
+     * Registers the sound dose callback and returns the interface for executing
+     * sound dose methods on the audio server.
+     */
+    ISoundDose getSoundDoseInterface(in ISoundDoseCallback callback);
+
+    /**
+     * Invalidate all tracks with given port ids.
+     */
+    void invalidateTracks(in int[] /* audio_port_handle_t[] */ portIds);
+
+    /**
+     * Only implemented for AIDL. Provides the APM configuration which
+     * used to be in the XML file.
+     */
+    AudioPolicyConfig getAudioPolicyConfig();
+
+    /**
+     * Get the attributes of the mix port when connecting to the given device port.
+     */
+    AudioPortFw getAudioMixPort(in AudioPortFw devicePort, in AudioPortFw mixPort);
 
     // When adding a new method, please review and update
     // IAudioFlinger.h AudioFlingerServerAdapter::Delegate::TransactionCode

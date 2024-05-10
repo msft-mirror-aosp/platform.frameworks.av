@@ -16,6 +16,8 @@
 
 package android.media;
 
+import android.media.audio.common.AudioChannelLayout;
+import android.media.audio.common.AudioFormatDescription;
 import android.media.audio.common.AudioStreamType;
 import android.media.IAudioTrack;
 
@@ -38,7 +40,10 @@ parcelable CreateTrackResponse {
     AudioStreamType streamType;
     long afFrameCount;
     int afSampleRate;
+    AudioChannelLayout afChannelMask;
+    AudioFormatDescription afFormat;
     int afLatencyMs;
+    int afTrackFlags;
     /** Interpreted as audio_io_handle_t. */
     int outputId;
     /** Interpreted as audio_port_handle_t. */

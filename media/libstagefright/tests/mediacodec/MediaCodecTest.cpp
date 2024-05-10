@@ -62,7 +62,8 @@ public:
              size_t offset,
              const CryptoPlugin::SubSample *subSamples,
              size_t numSubSamples,
-             const sp<MediaCodecBuffer> &buffer),
+             const sp<MediaCodecBuffer> &buffer,
+             AString* errorDetailMsg),
             (override));
     MOCK_METHOD(status_t, renderOutputBuffer,
             (const sp<MediaCodecBuffer> &buffer, int64_t timestampNs),
@@ -70,6 +71,7 @@ public:
     MOCK_METHOD(status_t, discardBuffer, (const sp<MediaCodecBuffer> &buffer), (override));
     MOCK_METHOD(void, getInputBufferArray, (Vector<sp<MediaCodecBuffer>> *array), (override));
     MOCK_METHOD(void, getOutputBufferArray, (Vector<sp<MediaCodecBuffer>> *array), (override));
+    MOCK_METHOD(void, pollForRenderedBuffers, (), (override));
 };
 
 class MockCodec : public CodecBase {
@@ -87,7 +89,8 @@ public:
     MOCK_METHOD(void, initiateStart, (), (override));
     MOCK_METHOD(void, initiateShutdown, (bool keepComponentAllocated), (override));
     MOCK_METHOD(void, onMessageReceived, (const sp<AMessage> &msg), (override));
-    MOCK_METHOD(status_t, setSurface, (const sp<Surface> &surface), (override));
+    MOCK_METHOD(
+            status_t, setSurface, (const sp<Surface> &surface, uint32_t generation), (override));
     MOCK_METHOD(void, signalFlush, (), (override));
     MOCK_METHOD(void, signalResume, (), (override));
     MOCK_METHOD(void, signalRequestIDRFrame, (), (override));

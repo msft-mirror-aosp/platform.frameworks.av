@@ -105,6 +105,7 @@ ARTPWriter::ARTPWriter(int fd)
 
     mRTCPAddr = mRTPAddr;
     mRTCPAddr.sin_port = htons(ntohs(mRTPAddr.sin_port) | 1);
+    mVPSBuf = NULL;
     mSPSBuf = NULL;
     mPPSBuf = NULL;
 
@@ -255,9 +256,34 @@ status_t ARTPWriter::start(MetaData * params) {
     if (params->findInt32(kKeyRtpCvoDegrees, &rtpCVODegrees))
         mRTPCVODegrees = rtpCVODegrees;
 
+    bool needToSetSockOpt = false;
     int32_t dscp = 0;
-    if (params->findInt32(kKeyRtpDscp, &dscp))
-        updateSocketDscp(dscp);
+    if (params->findInt32(kKeyRtpDscp, &dscp)) {
+        mRtpLayer3Dscp = dscp << 2;
+        needToSetSockOpt = true;
+    }
+
+    int32_t ecn = 0;
+    if (params->findInt32(kKeyRtpEcn, &ecn)) {
+        /*
+         * @ecn, possible value for ECN.
+         *  +-----+-----+
+         *  | ECN FIELD |
+         *  +-----+-----+
+         *    ECT   CE         [Obsolete] RFC 2481 names for the ECN bits.
+         *     0     0         Not-ECT
+         *     0     1         ECT (ECN-Capable Transport) (1)
+         *     1     0         ECT (ECN-Capable Transport) (0)
+         *     1     1         CE (Congestion Experienced)
+         *
+         */
+        mRtpSockOptEcn = ecn;
+        needToSetSockOpt = true;
+    }
+
+    if (needToSetSockOpt) {
+        updateSocketOpt();
+    }
 
     int64_t sockNetwork = 0;
     if (params->findInt64(kKeySocketNetwork, &sockNetwork))
@@ -1438,18 +1464,29 @@ void ARTPWriter::updatePayloadType(int32_t payloadType) {
     mPayloadType = payloadType;
 }
 
-void ARTPWriter::updateSocketDscp(int32_t dscp) {
-    mRtpLayer3Dscp = dscp << 2;
+/*
+ * This function will set socket option in IP header
+ */
+void ARTPWriter::updateSocketOpt() {
+    /*
+     * 0     1     2     3     4     5     6     7
+     * +-----+-----+-----+-----+-----+-----+-----+-----+
+     * |          DS FIELD, DSCP           | ECN FIELD |
+     * +-----+-----+-----+-----+-----+-----+-----+-----+
+     */
+    int sockOpt = mRtpLayer3Dscp ^ mRtpSockOptEcn;
+    ALOGD("Update socket opt with sockopt=%d, mRtpLayer3Dscp=%d, mRtpSockOptEcn=%d",
+                sockOpt, mRtpLayer3Dscp, mRtpSockOptEcn);
 
-    /* mRtpLayer3Dscp will be mapped to WMM(Wifi) as per operator's requirement */
-    if (setsockopt(mRTPSocket, IPPROTO_IP, IP_TOS,
-                (int *)&mRtpLayer3Dscp, sizeof(mRtpLayer3Dscp)) < 0) {
-        ALOGE("failed to set dscp on rtpsock. err=%s", strerror(errno));
+    /* sockOpt will be used to set socket option in IP header */
+    if (setsockopt(mRTPSocket, mIsIPv6 ? IPPROTO_IPV6 : IPPROTO_IP, mIsIPv6 ? IPV6_TCLASS : IP_TOS,
+                (int *)&sockOpt, sizeof(sockOpt)) < 0) {
+        ALOGE("failed to set sockopt on rtpsock. err=%s", strerror(errno));
     } else {
-        ALOGD("successfully set dscp on rtpsock. opt=%d", mRtpLayer3Dscp);
-        setsockopt(mRTCPSocket, IPPROTO_IP, IP_TOS,
-                (int *)&mRtpLayer3Dscp, sizeof(mRtpLayer3Dscp));
-        ALOGD("successfully set dscp on rtcpsock. opt=%d", mRtpLayer3Dscp);
+        ALOGD("successfully set sockopt. opt=%d", sockOpt);
+        setsockopt(mRTCPSocket, mIsIPv6 ? IPPROTO_IPV6 : IPPROTO_IP, mIsIPv6 ? IPV6_TCLASS : IP_TOS,
+                (int *)&sockOpt, sizeof(sockOpt));
+        ALOGD("successfully set sockopt rtcpsock. opt=%d", sockOpt);
     }
 }
 
@@ -1611,11 +1648,11 @@ void ARTPWriter::makeSocketPairAndBind(String8& localIp, int localPort,
         memset(&mRTCPAddr6, 0, sizeof(mRTCPAddr6));
 
         mLocalAddr6.sin6_family = AF_INET6;
-        inet_pton(AF_INET6, localIp.string(), &mLocalAddr6.sin6_addr);
+        inet_pton(AF_INET6, localIp.c_str(), &mLocalAddr6.sin6_addr);
         mLocalAddr6.sin6_port = htons((uint16_t)localPort);
 
         mRTPAddr6.sin6_family = AF_INET6;
-        inet_pton(AF_INET6, remoteIp.string(), &mRTPAddr6.sin6_addr);
+        inet_pton(AF_INET6, remoteIp.c_str(), &mRTPAddr6.sin6_addr);
         mRTPAddr6.sin6_port = htons((uint16_t)remotePort);
 
         mRTCPAddr6 = mRTPAddr6;
@@ -1626,11 +1663,11 @@ void ARTPWriter::makeSocketPairAndBind(String8& localIp, int localPort,
         memset(&mRTCPAddr, 0, sizeof(mRTCPAddr));
 
         mLocalAddr.sin_family = AF_INET;
-        mLocalAddr.sin_addr.s_addr = inet_addr(localIp.string());
+        mLocalAddr.sin_addr.s_addr = inet_addr(localIp.c_str());
         mLocalAddr.sin_port = htons((uint16_t)localPort);
 
         mRTPAddr.sin_family = AF_INET;
-        mRTPAddr.sin_addr.s_addr = inet_addr(remoteIp.string());
+        mRTPAddr.sin_addr.s_addr = inet_addr(remoteIp.c_str());
         mRTPAddr.sin_port = htons((uint16_t)remotePort);
 
         mRTCPAddr = mRTPAddr;
@@ -1643,9 +1680,9 @@ void ARTPWriter::makeSocketPairAndBind(String8& localIp, int localPort,
     int sizeSockSt = mIsIPv6 ? sizeof(mLocalAddr6) : sizeof(mLocalAddr);
 
     if (bind(mRTPSocket, localAddr, sizeSockSt) == -1) {
-        ALOGE("failed to bind rtp %s:%d err=%s", localIp.string(), localPort, strerror(errno));
+        ALOGE("failed to bind rtp %s:%d err=%s", localIp.c_str(), localPort, strerror(errno));
     } else {
-        ALOGD("succeed to bind rtp %s:%d", localIp.string(), localPort);
+        ALOGD("succeed to bind rtp %s:%d", localIp.c_str(), localPort);
     }
 
     if (mIsIPv6)
@@ -1654,9 +1691,9 @@ void ARTPWriter::makeSocketPairAndBind(String8& localIp, int localPort,
         mLocalAddr.sin_port = htons((uint16_t)(localPort + 1));
 
     if (bind(mRTCPSocket, localAddr, sizeSockSt) == -1) {
-        ALOGE("failed to bind rtcp %s:%d err=%s", localIp.string(), localPort + 1, strerror(errno));
+        ALOGE("failed to bind rtcp %s:%d err=%s", localIp.c_str(), localPort + 1, strerror(errno));
     } else {
-        ALOGD("succeed to bind rtcp %s:%d", localIp.string(), localPort + 1);
+        ALOGD("succeed to bind rtcp %s:%d", localIp.c_str(), localPort + 1);
     }
 }
 

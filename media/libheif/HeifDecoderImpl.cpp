@@ -26,7 +26,6 @@
 #include <binder/IMemory.h>
 #include <binder/MemoryDealer.h>
 #include <drm/drm_framework_common.h>
-#include <log/log.h>
 #include <media/mediametadataretriever.h>
 #include <media/stagefright/MediaSource.h>
 #include <media/stagefright/foundation/ADebug.h>
@@ -42,8 +41,8 @@ HeifDecoder* createHeifDecoder() {
 namespace android {
 
 void initFrameInfo(HeifFrameInfo *info, const VideoFrame *videoFrame) {
-    info->mWidth = videoFrame->mWidth;
-    info->mHeight = videoFrame->mHeight;
+    info->mWidth = videoFrame->mDisplayWidth;
+    info->mHeight = videoFrame->mDisplayHeight;
     info->mRotationAngle = videoFrame->mRotationAngle;
     info->mBytesPerPixel = videoFrame->mBytesPerPixel;
     info->mDurationUs = videoFrame->mDurationUs;
@@ -344,19 +343,22 @@ bool HeifDecoderImpl::reinit(HeifFrameInfo* frameInfo) {
     mFrameDecoded = false;
     mFrameMemory.clear();
 
-    mRetriever = new MediaMetadataRetriever();
-    status_t err = mRetriever->setDataSource(mDataSource, "image/heif");
+    sp<MediaMetadataRetriever> retriever = new MediaMetadataRetriever();
+    status_t err = retriever->setDataSource(mDataSource, "image/heif");
     if (err != OK) {
         ALOGE("failed to set data source!");
-
         mRetriever.clear();
         mDataSource.clear();
         return false;
     }
+    {
+        Mutex::Autolock _l(mRetrieverLock);
+        mRetriever = retriever;
+    }
     ALOGV("successfully set data source.");
 
-    const char* hasImage = mRetriever->extractMetadata(METADATA_KEY_HAS_IMAGE);
-    const char* hasVideo = mRetriever->extractMetadata(METADATA_KEY_HAS_VIDEO);
+    const char* hasImage = retriever->extractMetadata(METADATA_KEY_HAS_IMAGE);
+    const char* hasVideo = retriever->extractMetadata(METADATA_KEY_HAS_VIDEO);
 
     mHasImage = hasImage && !strcasecmp(hasImage, "yes");
     mHasVideo = hasVideo && !strcasecmp(hasVideo, "yes");
@@ -364,7 +366,7 @@ bool HeifDecoderImpl::reinit(HeifFrameInfo* frameInfo) {
     HeifFrameInfo* defaultInfo = nullptr;
     if (mHasImage) {
         // image index < 0 to retrieve primary image
-        sp<IMemory> sharedMem = mRetriever->getImageAtIndex(
+        sp<IMemory> sharedMem = retriever->getImageAtIndex(
                 -1, mOutputColor, true /*metaOnly*/);
 
         if (sharedMem == nullptr || sharedMem->unsecurePointer() == nullptr) {
@@ -399,7 +401,7 @@ bool HeifDecoderImpl::reinit(HeifFrameInfo* frameInfo) {
     }
 
     if (mHasVideo) {
-        sp<IMemory> sharedMem = mRetriever->getFrameAtTime(0,
+        sp<IMemory> sharedMem = retriever->getFrameAtTime(0,
                 MediaSource::ReadOptions::SEEK_PREVIOUS_SYNC,
                 mOutputColor, true /*metaOnly*/);
 
@@ -425,7 +427,7 @@ bool HeifDecoderImpl::reinit(HeifFrameInfo* frameInfo) {
 
         initFrameInfo(&mSequenceInfo, videoFrame);
 
-        const char* frameCount = mRetriever->extractMetadata(METADATA_KEY_VIDEO_FRAME_COUNT);
+        const char* frameCount = retriever->extractMetadata(METADATA_KEY_VIDEO_FRAME_COUNT);
         if (frameCount == nullptr) {
             android_errorWriteWithInfoLog(0x534e4554, "215002587", -1, NULL, 0);
             ALOGD("No valid sequence information in metadata");
@@ -474,35 +476,37 @@ bool HeifDecoderImpl::getEncodedColor(HeifEncodedColor* /*outColor*/) const {
 }
 
 bool HeifDecoderImpl::setOutputColor(HeifColorFormat heifColor) {
-    if (heifColor == (HeifColorFormat)mOutputColor) {
-        return true;
-    }
-
+    android_pixel_format_t outputColor;
     switch(heifColor) {
         case kHeifColorFormat_RGB565:
         {
-            mOutputColor = HAL_PIXEL_FORMAT_RGB_565;
+            outputColor = HAL_PIXEL_FORMAT_RGB_565;
             break;
         }
         case kHeifColorFormat_RGBA_8888:
         {
-            mOutputColor = HAL_PIXEL_FORMAT_RGBA_8888;
+            outputColor = HAL_PIXEL_FORMAT_RGBA_8888;
             break;
         }
         case kHeifColorFormat_BGRA_8888:
         {
-            mOutputColor = HAL_PIXEL_FORMAT_BGRA_8888;
+            outputColor = HAL_PIXEL_FORMAT_BGRA_8888;
             break;
         }
         case kHeifColorFormat_RGBA_1010102:
         {
-            mOutputColor = HAL_PIXEL_FORMAT_RGBA_1010102;
+            outputColor = HAL_PIXEL_FORMAT_RGBA_1010102;
             break;
         }
         default:
             ALOGE("Unsupported output color format %d", heifColor);
             return false;
     }
+    if (outputColor == mOutputColor) {
+        return true;
+    }
+
+    mOutputColor = outputColor;
 
     if (mFrameDecoded) {
         return reinit(nullptr);
@@ -511,14 +515,26 @@ bool HeifDecoderImpl::setOutputColor(HeifColorFormat heifColor) {
 }
 
 bool HeifDecoderImpl::decodeAsync() {
+    wp<MediaMetadataRetriever> weakRetriever;
+    {
+        Mutex::Autolock _l(mRetrieverLock);
+        weakRetriever = mRetriever;
+    }
+
     for (size_t i = 1; i < mNumSlices; i++) {
+        sp<MediaMetadataRetriever> retriever = weakRetriever.promote();
+        if (retriever == nullptr) {
+            return false;
+        }
+
         ALOGV("decodeAsync(): decoding slice %zu", i);
         size_t top = i * mSliceHeight;
         size_t bottom = (i + 1) * mSliceHeight;
         if (bottom > mImageInfo.mHeight) {
             bottom = mImageInfo.mHeight;
         }
-        sp<IMemory> frameMemory = mRetriever->getImageRectAtIndex(
+
+        sp<IMemory> frameMemory = retriever->getImageRectAtIndex(
                 -1, mOutputColor, 0, top, mImageInfo.mWidth, bottom);
         {
             Mutex::Autolock autolock(mLock);
@@ -534,10 +550,13 @@ bool HeifDecoderImpl::decodeAsync() {
             mScanlineReady.signal();
         }
     }
-    // Aggressive clear to avoid holding on to resources
-    mRetriever.clear();
-
     // Hold on to mDataSource in case the client wants to redecode.
+
+    {
+        Mutex::Autolock _l(mRetrieverLock);
+        mRetriever.clear();
+    }
+
     return false;
 }
 
@@ -547,6 +566,17 @@ bool HeifDecoderImpl::decode(HeifFrameInfo* frameInfo) {
 
     if (mFrameDecoded) {
         return true;
+    }
+
+    sp<MediaMetadataRetriever> retriever;
+    {
+        Mutex::Autolock _l(mRetrieverLock);
+        if (mRetriever == nullptr) {
+            ALOGE("Failed to get MediaMetadataRetriever!");
+            return false;
+        }
+
+        retriever = mRetriever;
     }
 
     // See if we want to decode in slices to allow client to start
@@ -563,7 +593,7 @@ bool HeifDecoderImpl::decode(HeifFrameInfo* frameInfo) {
 
         if (mNumSlices > 1) {
             // get first slice and metadata
-            sp<IMemory> frameMemory = mRetriever->getImageRectAtIndex(
+            sp<IMemory> frameMemory = retriever->getImageRectAtIndex(
                     -1, mOutputColor, 0, 0, mImageInfo.mWidth, mSliceHeight);
 
             if (frameMemory == nullptr || frameMemory->unsecurePointer() == nullptr) {
@@ -598,9 +628,9 @@ bool HeifDecoderImpl::decode(HeifFrameInfo* frameInfo) {
 
     if (mHasImage) {
         // image index < 0 to retrieve primary image
-        mFrameMemory = mRetriever->getImageAtIndex(-1, mOutputColor);
+        mFrameMemory = retriever->getImageAtIndex(-1, mOutputColor);
     } else if (mHasVideo) {
-        mFrameMemory = mRetriever->getFrameAtTime(0,
+        mFrameMemory = retriever->getFrameAtTime(0,
                 MediaSource::ReadOptions::SEEK_PREVIOUS_SYNC, mOutputColor);
     }
 
@@ -636,7 +666,10 @@ bool HeifDecoderImpl::decode(HeifFrameInfo* frameInfo) {
     mFrameDecoded = true;
 
     // Aggressively clear to avoid holding on to resources
-    mRetriever.clear();
+    {
+        Mutex::Autolock _l(mRetrieverLock);
+        mRetriever.clear();
+    }
 
     // Hold on to mDataSource in case the client wants to redecode.
     return true;
@@ -658,7 +691,17 @@ bool HeifDecoderImpl::decodeSequence(int frameIndex, HeifFrameInfo* frameInfo) {
     // set total scanline to sequence height now
     mTotalScanline = mSequenceInfo.mHeight;
 
-    mFrameMemory = mRetriever->getFrameAtIndex(frameIndex, mOutputColor);
+    sp<MediaMetadataRetriever> retriever;
+    {
+        Mutex::Autolock _l(mRetrieverLock);
+        retriever = mRetriever;
+        if (retriever == nullptr) {
+            ALOGE("failed to get MediaMetadataRetriever!");
+            return false;
+        }
+    }
+
+    mFrameMemory = retriever->getFrameAtIndex(frameIndex, mOutputColor);
     if (mFrameMemory == nullptr || mFrameMemory->unsecurePointer() == nullptr) {
         ALOGE("decode: videoFrame is a nullptr");
         return false;
@@ -699,8 +742,11 @@ bool HeifDecoderImpl::getScanlineInner(uint8_t* dst) {
     //       Either document why it is safe in this case or address the
     //       issue (e.g. by copying).
     VideoFrame* videoFrame = static_cast<VideoFrame*>(mFrameMemory->unsecurePointer());
-    uint8_t* src = videoFrame->getFlattenedData() + videoFrame->mRowBytes * mCurScanline++;
-    memcpy(dst, src, videoFrame->mBytesPerPixel * videoFrame->mWidth);
+    uint8_t* src = videoFrame->getFlattenedData() +
+                   (videoFrame->mRowBytes * (mCurScanline + videoFrame->mDisplayTop)) +
+                   (videoFrame->mBytesPerPixel * videoFrame->mDisplayLeft);
+    mCurScanline++;
+    memcpy(dst, src, videoFrame->mBytesPerPixel * videoFrame->mDisplayWidth);
     return true;
 }
 
@@ -735,9 +781,9 @@ uint32_t HeifDecoderImpl::getColorDepth() {
     HeifFrameInfo* info = &mImageInfo;
     if (info != nullptr) {
         return mImageInfo.mBitDepth;
+    } else {
+        return 0;
     }
-
-    return 0;
 }
 
 } // namespace android

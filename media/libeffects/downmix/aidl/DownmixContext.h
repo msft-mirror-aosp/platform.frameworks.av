@@ -50,17 +50,18 @@ class DownmixContext final : public EffectContext {
         return RetCode::SUCCESS;
     }
 
-    IEffect::Status lvmProcess(float* in, float* out, int samples);
+    IEffect::Status downmixProcess(float* in, float* out, int samples);
+
+    static bool validateCommonConfig(const Parameter::Common& common);
 
   private:
     DownmixState mState;
     Downmix::Type mType;
     ::aidl::android::media::audio::common::AudioChannelLayout mChMask;
-    ::android::audio_utils::channels::ChannelMix mChannelMix;
+    ::android::audio_utils::channels::ChannelMix<AUDIO_CHANNEL_OUT_STEREO> mChannelMix;
 
     // Common Params
     void init_params(const Parameter::Common& common);
-    bool isChannelMaskValid(::aidl::android::media::audio::common::AudioChannelLayout channelMask);
 };
 
 }  // namespace aidl::android::hardware::audio::effect

@@ -83,6 +83,8 @@ struct NuPlayer::Renderer : public AHandler {
             bool isStreaming);
     void closeAudioSink();
 
+    void dump(AString& logString);
+
     // re-open audio sink after all pending audio buffers played.
     void changeAudioFormat(
             const sp<AMessage> &format,
@@ -177,6 +179,9 @@ private:
     float mVideoFpsHint;
 
     int64_t mAudioFirstAnchorTimeMediaUs;
+    // previous audio anchor timestamp, in media time base.
+    int64_t mAudioAnchorTimeMediaUs;
+    // previous anchor timestamp (audio or video), in media time base.
     int64_t mAnchorTimeMediaUs;
     int64_t mAnchorNumFramesWritten;
     int64_t mVideoLateByUs;
@@ -234,6 +239,32 @@ private:
     bool getCurrentPositionIfPaused_l(int64_t *mediaUs);
     status_t getCurrentPositionFromAnchor(
             int64_t *mediaUs, int64_t nowUs, bool allowPastQueuedVideo = false);
+
+    struct WakeLockEvent{
+        int64_t mTimeMs;
+        int32_t mEventTimeoutGeneration;
+        int32_t mRendererTimeoutGeneration;
+
+        WakeLockEvent():
+            mTimeMs(0),
+            mEventTimeoutGeneration(0),
+            mRendererTimeoutGeneration(0) {}
+
+        void updateValues(int64_t timeMs,
+                          int32_t eventGeneration,
+                          int32_t rendererGeneration) {
+            mTimeMs = timeMs;
+            mEventTimeoutGeneration = eventGeneration;
+            mRendererTimeoutGeneration = rendererGeneration;
+        }
+
+        void dump(AString& logString);
+    };
+
+    WakeLockEvent mWakelockAcquireEvent;
+    WakeLockEvent mWakelockTimeoutEvent;
+    WakeLockEvent mWakelockReleaseEvent;
+    WakeLockEvent mWakelockCancelEvent;
 
     void notifyEOSCallback();
     size_t fillAudioBuffer(void *buffer, size_t size);
@@ -304,6 +335,9 @@ private:
     int64_t getDurationUsIfPlayedAtSampleRate(uint32_t numFrames);
 
     DISALLOW_EVIL_CONSTRUCTORS(Renderer);
+
+private:
+    bool mNeedVideoClearAnchor;
 };
 
 } // namespace android

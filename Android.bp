@@ -52,8 +52,8 @@ aidl_interface {
         "aidl/android/media/VolumeShaperOperationFlag.aidl",
         "aidl/android/media/VolumeShaperState.aidl",
     ],
-    imports: [
-        "android.media.audio.common.types-V2",
+    defaults: [
+        "latest_android_media_audio_common_types_import_interface",
     ],
     backend: {
         cpp: {
@@ -101,4 +101,35 @@ cc_library_headers {
             enabled: false,
         },
     },
+}
+
+aidl_interface {
+    name: "av-audio-types-aidl",
+    host_supported: true,
+    vendor_available: true,
+    double_loadable: true,
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/android/media/audio/IHalAdapterVendorExtension.aidl",
+    ],
+    defaults: [
+        "latest_android_hardware_audio_core_import_interface",
+    ],
+    backend: {
+        // The C++ backend is disabled transitively due to use of FMQ by the audio core HAL.
+        cpp: {
+            enabled: false,
+        },
+        java: {
+            sdk_version: "module_current",
+        },
+    },
+    versions_with_info: [
+        {
+            version: "1",
+            imports: ["android.hardware.audio.core-V2"],
+        },
+    ],
+    frozen: true,
+
 }

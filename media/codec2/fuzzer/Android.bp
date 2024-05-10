@@ -41,8 +41,17 @@ cc_defaults {
 
     fuzz_config: {
         cc: [
-            "wonsik@google.com",
+            "android-fwk-video@google.com",
         ],
+        componentid: 1344,
+        hotlists: [
+            "4593311",
+        ],
+        description: "The fuzzer targets the APIs of libcodec2",
+        vector: "remote",
+        service_privilege: "constrained",
+        users: "multi_user",
+        fuzzed_code_usage: "shipped",
     },
 }
 
@@ -141,6 +150,21 @@ cc_fuzz {
     static_libs: [
         "libvpx",
         "libcodec2_soft_vp9dec",
+    ],
+}
+
+cc_fuzz {
+    name: "C2FuzzerAV1Dec",
+    defaults: ["C2Fuzzer-defaults"],
+
+    cflags: [
+        "-DC2COMPONENTNAME=\"c2.android.av1.decoder\"",
+    ],
+
+    static_libs: [
+        "libgav1",
+        "libyuv_static",
+        "libcodec2_soft_av1dec_gav1",
     ],
 }
 

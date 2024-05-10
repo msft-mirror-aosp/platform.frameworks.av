@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <android-base/thread_annotations.h>
 #include <vibrator/ExternalVibrationUtils.h>
 #include <map>
 
@@ -75,7 +74,7 @@ class HapticGeneratorContext final : public EffectContext {
     RetCode setHgVibratorInformation(const HapticGenerator::VibratorInformation& vibratorInfo);
     HapticGenerator::VibratorInformation getHgVibratorInformation();
 
-    IEffect::Status lvmProcess(float* in, float* out, int samples);
+    IEffect::Status process(float* in, float* out, int samples);
 
   private:
     static constexpr float DEFAULT_RESONANT_FREQUENCY = 150.0f;
@@ -88,11 +87,10 @@ class HapticGeneratorContext final : public EffectContext {
     static constexpr float DEFAULT_DISTORTION_INPUT_GAIN = 0.3f;
     static constexpr float DEFAULT_DISTORTION_CUBE_THRESHOLD = 0.1f;
 
-    std::mutex mMutex;
     HapticGeneratorState mState;
-    HapticGeneratorParam mParams GUARDED_BY(mMutex);
+    HapticGeneratorParam mParams;
     int mSampleRate;
-    int mFrameCount = 0;
+    int64_t mFrameCount = 0;
 
     // A cache for all shared pointers of the HapticGenerator
     struct HapticGeneratorProcessorsRecord mProcessorsRecord;

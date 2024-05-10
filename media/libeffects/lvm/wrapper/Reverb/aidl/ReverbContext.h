@@ -17,7 +17,6 @@
 #pragma once
 
 #include <android-base/logging.h>
-#include <android-base/thread_annotations.h>
 #include <unordered_map>
 
 #include "ReverbTypes.h"
@@ -81,7 +80,12 @@ class ReverbContext final : public EffectContext {
     bool getEnvironmentalReverbBypass() const { return mBypass; }
 
     RetCode setVolumeStereo(const Parameter::VolumeStereo& volumeStereo) override;
-    Parameter::VolumeStereo getVolumeStereo() override { return mVolumeStereo; }
+    Parameter::VolumeStereo getVolumeStereo() override {
+        if (isAuxiliary()) {
+            return mVolumeStereo;
+        }
+        return {1.0f, 1.0f};
+    }
 
     RetCode setReflectionsDelay(int delay) {
         mReflectionsDelayMs = delay;
@@ -95,7 +99,7 @@ class ReverbContext final : public EffectContext {
     }
     bool getReflectionsLevel() const { return mReflectionsLevelMb; }
 
-    IEffect::Status lvmProcess(float* in, float* out, int samples);
+    IEffect::Status process(float* in, float* out, int samples);
 
   private:
     static constexpr inline float kUnitVolume = 1;
@@ -153,10 +157,9 @@ class ReverbContext final : public EffectContext {
              {-400, -600, 1800, 700, -2000, 30, -1400, 60, 1000, 1000}},
             {PresetReverb::Presets::PLATE, {-400, -200, 1300, 900, 0, 2, 0, 10, 1000, 750}}};
 
-    std::mutex mMutex;
     const lvm::ReverbEffectType mType;
     bool mEnabled = false;
-    LVREV_Handle_t mInstance GUARDED_BY(mMutex);
+    LVREV_Handle_t mInstance = LVM_NULL;
 
     int mRoomLevel = 0;
     int mRoomHfLevel = 0;

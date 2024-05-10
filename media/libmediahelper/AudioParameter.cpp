@@ -20,6 +20,7 @@
 #include <utils/Log.h>
 
 #include <media/AudioParameter.h>
+#include <hardware/audio.h>
 #include <system/audio.h>
 
 namespace android {
@@ -32,7 +33,24 @@ const char * const AudioParameter::keyChannels = AUDIO_PARAMETER_STREAM_CHANNELS
 const char * const AudioParameter::keyFrameCount = AUDIO_PARAMETER_STREAM_FRAME_COUNT;
 const char * const AudioParameter::keyInputSource = AUDIO_PARAMETER_STREAM_INPUT_SOURCE;
 const char * const AudioParameter::keyScreenState = AUDIO_PARAMETER_KEY_SCREEN_STATE;
+const char * const AudioParameter::keyScreenRotation = AUDIO_PARAMETER_KEY_ROTATION;
+const char * const AudioParameter::keyClosing = AUDIO_PARAMETER_KEY_CLOSING;
+const char * const AudioParameter::keyExiting = AUDIO_PARAMETER_KEY_EXITING;
+const char * const AudioParameter::keyBtSco = AUDIO_PARAMETER_KEY_BT_SCO;
+const char * const AudioParameter::keyBtScoHeadsetName = AUDIO_PARAMETER_KEY_BT_SCO_HEADSET_NAME;
 const char * const AudioParameter::keyBtNrec = AUDIO_PARAMETER_KEY_BT_NREC;
+const char * const AudioParameter::keyBtScoWb = AUDIO_PARAMETER_KEY_BT_SCO_WB;
+const char * const AudioParameter::keyBtHfpEnable = AUDIO_PARAMETER_KEY_HFP_ENABLE;
+const char * const AudioParameter::keyBtHfpSamplingRate = AUDIO_PARAMETER_KEY_HFP_SET_SAMPLING_RATE;
+const char * const AudioParameter::keyBtHfpVolume = AUDIO_PARAMETER_KEY_HFP_VOLUME;
+const char * const AudioParameter::keyTtyMode = AUDIO_PARAMETER_KEY_TTY_MODE;
+const char * const AudioParameter::valueTtyModeOff = AUDIO_PARAMETER_VALUE_TTY_OFF;
+const char * const AudioParameter::valueTtyModeFull = AUDIO_PARAMETER_VALUE_TTY_FULL;
+const char * const AudioParameter::valueTtyModeHco = AUDIO_PARAMETER_VALUE_TTY_HCO;
+const char * const AudioParameter::valueTtyModeVco = AUDIO_PARAMETER_VALUE_TTY_VCO;
+const char * const AudioParameter::keyHacSetting = AUDIO_PARAMETER_KEY_HAC;
+const char * const AudioParameter::valueHacOff = AUDIO_PARAMETER_VALUE_HAC_OFF;
+const char * const AudioParameter::valueHacOn = AUDIO_PARAMETER_VALUE_HAC_ON;
 const char * const AudioParameter::keyHwAvSync = AUDIO_PARAMETER_HW_AV_SYNC;
 const char * const AudioParameter::keyPresentationId = AUDIO_PARAMETER_STREAM_PRESENTATION_ID;
 const char * const AudioParameter::keyProgramId = AUDIO_PARAMETER_STREAM_PROGRAM_ID;
@@ -50,9 +68,15 @@ const char * const AudioParameter::keyStreamSupportedSamplingRates =
         AUDIO_PARAMETER_STREAM_SUP_SAMPLING_RATES;
 const char * const AudioParameter::valueOn = AUDIO_PARAMETER_VALUE_ON;
 const char * const AudioParameter::valueOff = AUDIO_PARAMETER_VALUE_OFF;
+const char * const AudioParameter::valueTrue = AUDIO_PARAMETER_VALUE_TRUE;
+const char * const AudioParameter::valueFalse = AUDIO_PARAMETER_VALUE_FALSE;
 const char * const AudioParameter::valueListSeparator = AUDIO_PARAMETER_VALUE_LIST_SEPARATOR;
+const char * const AudioParameter::keyBtA2dpSuspended = AUDIO_PARAMETER_KEY_BT_A2DP_SUSPENDED;
 const char * const AudioParameter::keyReconfigA2dp = AUDIO_PARAMETER_RECONFIG_A2DP;
 const char * const AudioParameter::keyReconfigA2dpSupported = AUDIO_PARAMETER_A2DP_RECONFIG_SUPPORTED;
+const char * const AudioParameter::keyBtLeSuspended = AUDIO_PARAMETER_KEY_BT_LE_SUSPENDED;
+const char * const AudioParameter::keyReconfigLe = AUDIO_PARAMETER_RECONFIG_LE;
+const char * const AudioParameter::keyReconfigLeSupported = AUDIO_PARAMETER_LE_RECONFIG_SUPPORTED;
 // const char * const AudioParameter::keyDeviceSupportedEncapsulationModes =
 //        AUDIO_PARAMETER_DEVICE_SUP_ENCAPSULATION_MODES;
 // const char * const AudioParameter::keyDeviceSupportedEncapsulationMetadataTypes =
@@ -61,6 +85,12 @@ const char * const AudioParameter::keyAdditionalOutputDeviceDelay =
         AUDIO_PARAMETER_DEVICE_ADDITIONAL_OUTPUT_DELAY;
 const char * const AudioParameter::keyMaxAdditionalOutputDeviceDelay =
         AUDIO_PARAMETER_DEVICE_MAX_ADDITIONAL_OUTPUT_DELAY;
+const char * const AudioParameter::keyOffloadCodecAverageBitRate = AUDIO_OFFLOAD_CODEC_AVG_BIT_RATE;
+const char * const AudioParameter::keyOffloadCodecSampleRate = AUDIO_OFFLOAD_CODEC_SAMPLE_RATE;
+const char * const AudioParameter::keyOffloadCodecChannels = AUDIO_OFFLOAD_CODEC_NUM_CHANNEL;
+const char * const AudioParameter::keyOffloadCodecDelaySamples = AUDIO_OFFLOAD_CODEC_DELAY_SAMPLES;
+const char * const AudioParameter::keyOffloadCodecPaddingSamples =
+        AUDIO_OFFLOAD_CODEC_PADDING_SAMPLES;
 
 AudioParameter::AudioParameter(const String8& keyValuePairs)
 {
@@ -68,7 +98,7 @@ AudioParameter::AudioParameter(const String8& keyValuePairs)
     mKeyValuePairs = keyValuePairs;
     char *last;
 
-    strcpy(str, keyValuePairs.string());
+    strcpy(str, keyValuePairs.c_str());
     char *pair = strtok_r(str, ";", &last);
     while (pair != NULL) {
         if (strlen(pair) != 0) {
@@ -180,7 +210,7 @@ status_t AudioParameter::getInt(const String8& key, int& value) const
     value = 0;
     if (result == NO_ERROR) {
         int val;
-        if (sscanf(str8.string(), "%d", &val) == 1) {
+        if (sscanf(str8.c_str(), "%d", &val) == 1) {
             value = val;
         } else {
             result = INVALID_OPERATION;
@@ -196,7 +226,7 @@ status_t AudioParameter::getFloat(const String8& key, float& value) const
     value = 0;
     if (result == NO_ERROR) {
         float val;
-        if (sscanf(str8.string(), "%f", &val) == 1) {
+        if (sscanf(str8.c_str(), "%f", &val) == 1) {
             value = val;
         } else {
             result = INVALID_OPERATION;
@@ -224,6 +254,11 @@ status_t AudioParameter::getAt(size_t index, String8& key, String8& value) const
     } else {
         return BAD_VALUE;
     }
+}
+
+bool AudioParameter::containsKey(const String8& key) const
+{
+    return mParameters.indexOfKey(key) >= 0;
 }
 
 } // namespace android

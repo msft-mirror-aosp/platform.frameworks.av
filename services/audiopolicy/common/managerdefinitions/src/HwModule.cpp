@@ -33,6 +33,13 @@ HwModule::HwModule(const char *name, uint32_t halVersionMajor, uint32_t halVersi
     setHalVersion(halVersionMajor, halVersionMinor);
 }
 
+HwModule::HwModule(const char *name, uint32_t halVersion)
+    : mName(String8(name)),
+      mHandle(AUDIO_MODULE_HANDLE_NONE),
+      mHalVersion(halVersion)
+{
+}
+
 HwModule::~HwModule()
 {
     for (size_t i = 0; i < mOutputProfiles.size(); i++) {
@@ -52,15 +59,16 @@ std::string HwModule::getTagForDevice(audio_devices_t device, const String8 &add
 }
 
 status_t HwModule::addOutputProfile(const std::string& name, const audio_config_t *config,
-                                    audio_devices_t device, const String8& address)
+                                    audio_devices_t device, const String8& address,
+                                    audio_output_flags_t flags)
 {
     sp<IOProfile> profile = new OutputProfile(name);
-
     profile->addAudioProfile(new AudioProfile(config->format, config->channel_mask,
                                               config->sample_rate));
+    profile->setFlags(flags);
 
     sp<DeviceDescriptor> devDesc =
-            new DeviceDescriptor(device, getTagForDevice(device), address.string());
+            new DeviceDescriptor(device, getTagForDevice(device), address.c_str());
     addDynamicDevice(devDesc);
     // Reciprocally attach the device to the module
     devDesc->attach(this);
@@ -121,14 +129,16 @@ status_t HwModule::removeOutputProfile(const std::string& name)
 }
 
 status_t HwModule::addInputProfile(const std::string& name, const audio_config_t *config,
-                                   audio_devices_t device, const String8& address)
+                                   audio_devices_t device, const String8& address,
+                                   audio_input_flags_t flags)
 {
     sp<IOProfile> profile = new InputProfile(name);
     profile->addAudioProfile(new AudioProfile(config->format, config->channel_mask,
                                               config->sample_rate));
+    profile->setFlags(flags);
 
     sp<DeviceDescriptor> devDesc =
-            new DeviceDescriptor(device, getTagForDevice(device), address.string());
+            new DeviceDescriptor(device, getTagForDevice(device), address.c_str());
     addDynamicDevice(devDesc);
     // Reciprocally attach the device to the module
     devDesc->attach(this);
@@ -354,7 +364,7 @@ sp<DeviceDescriptor> HwModuleCollection::getDeviceDescriptor(const audio_devices
         DeviceVector moduleDevices = hwModule->getAllDevices();
         auto moduleDevice = moduleDevices.getDevice(deviceType, devAddress, encodedFormat);
 
-        // Prevent overwritting moduleDevice address if connected device does not have the same
+        // Prevent overwriting moduleDevice address if connected device does not have the same
         // address (since getDevice with empty address ignores match on address), use dynamic device
         if (moduleDevice && allowToCreate &&
                 (!moduleDevice->address().empty() &&
@@ -368,7 +378,7 @@ sp<DeviceDescriptor> HwModuleCollection::getDeviceDescriptor(const audio_devices
             if (allowToCreate) {
                 moduleDevice->attach(hwModule);
                 // Name may be overwritten, restored on detach.
-                moduleDevice->setAddress(devAddress.string());
+                moduleDevice->setAddress(devAddress.c_str());
                 // Name may be overwritten, restored on detach.
                 moduleDevice->setName(name);
             }
@@ -376,8 +386,8 @@ sp<DeviceDescriptor> HwModuleCollection::getDeviceDescriptor(const audio_devices
         }
     }
     if (!allowToCreate) {
-        ALOGV("%s: could not find HW module for device %s %04x address %s", __FUNCTION__,
-              name, deviceType, address);
+        ALOGW("%s: could not find HW module for device %s (%s, %08x) address %s", __FUNCTION__,
+                name, audio_device_to_string(deviceType), deviceType, address);
         return nullptr;
     }
     return createDevice(deviceType, address, name, encodedFormat);
@@ -391,8 +401,14 @@ sp<DeviceDescriptor> HwModuleCollection::createDevice(const audio_devices_t type
     std::string tagName = {};
     sp<HwModule> hwModule = getModuleForDeviceType(type, encodedFormat, &tagName);
     if (hwModule == 0) {
-        ALOGE("%s: could not find HW module for device %04x address %s", __FUNCTION__, type,
-              address);
+        if (encodedFormat == AUDIO_FORMAT_DEFAULT) {
+            ALOGE("%s: could not find HW module for device type '%s' (%08x)",
+                    __FUNCTION__, audio_device_to_string(type), type);
+        } else {
+            ALOGE("%s: could not find HW module for device type '%s' (%08x), "
+                    "encoded format '%s'", __FUNCTION__, audio_device_to_string(type), type,
+                    audio_format_to_string(encodedFormat));
+        }
         return nullptr;
     }
 

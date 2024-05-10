@@ -161,11 +161,6 @@ cc_library_shared {
         "libgui",
     ],
 
-    product_variables: {
-        pdk: {
-            enabled: false,
-        },
-    },
     version_script: "libmediandk.map.txt",
     stubs: {
         symbol_file: "libmediandk.map.txt",
@@ -213,19 +208,21 @@ cc_library {
 }
 
 cc_test {
-    name: "AImageReaderWindowHandleTest",
+    name: "AImageReaderWindowTest",
     test_suites: ["device-tests"],
-    srcs: ["tests/AImageReaderWindowHandleTest.cpp"],
+    srcs: ["tests/AImageReaderWindowTest.cpp"],
     shared_libs: [
         "libbinder",
         "libmediandk",
         "libmediautils",
         "libnativewindow",
         "libgui",
+        "libhidlbase",
         "libutils",
         "libui",
         "libcutils",
         "android.hardware.graphics.bufferqueue@1.0",
+        "android.hidl.token@1.0",
     ],
 
     header_libs: [

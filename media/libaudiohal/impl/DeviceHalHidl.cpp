@@ -17,7 +17,7 @@
 #include <stdio.h>
 
 #define LOG_TAG "DeviceHalHidl"
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 
 #include <cutils/native_handle.h>
 #include <cutils/properties.h>
@@ -32,8 +32,20 @@
 #include <util/CoreUtils.h>
 
 #include "DeviceHalHidl.h"
+#include "EffectHalHidl.h"
 #include "ParameterUtils.h"
 #include "StreamHalHidl.h"
+
+#if MAJOR_VERSION == 7 && MINOR_VERSION == 1
+#include <aidl/android/hardware/audio/core/sounddose/BpSoundDose.h>
+#include <aidl/android/hardware/audio/sounddose/BpSoundDoseFactory.h>
+#include <android/binder_manager.h>
+
+constexpr std::string_view kSoundDoseInterfaceModule = "/default";
+
+using aidl::android::hardware::audio::core::sounddose::ISoundDose;
+using aidl::android::hardware::audio::sounddose::ISoundDoseFactory;
+#endif
 
 using ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION::implementation::HidlUtils;
 using ::android::hardware::audio::common::utils::EnumBitfield;
@@ -46,8 +58,21 @@ namespace android {
 using namespace ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION;
 using namespace ::android::hardware::audio::CORE_TYPES_CPP_VERSION;
 
+class DeviceHalHidl::SoundDoseWrapper {
+public:
+    SoundDoseWrapper() = default;
+    ~SoundDoseWrapper() = default;
+
+#if MAJOR_VERSION == 7 && MINOR_VERSION == 1
+    std::shared_ptr<ISoundDoseFactory> mSoundDoseFactory;
+    std::shared_ptr<ISoundDose> mSoundDose;
+#endif
+};
+
 DeviceHalHidl::DeviceHalHidl(const sp<::android::hardware::audio::CPP_VERSION::IDevice>& device)
-        : CoreConversionHelperHidl("DeviceHalHidl"), mDevice(device) {
+        : CoreConversionHelperHidl("DeviceHalHidl"),
+          mDevice(device),
+          mSoundDoseWrapper(std::make_unique<DeviceHalHidl::SoundDoseWrapper>()) {
 }
 
 DeviceHalHidl::DeviceHalHidl(
@@ -56,7 +81,8 @@ DeviceHalHidl::DeviceHalHidl(
 #if MAJOR_VERSION <= 6 || (MAJOR_VERSION == 7 && MINOR_VERSION == 0)
           mDevice(device),
 #endif
-          mPrimaryDevice(device) {
+          mPrimaryDevice(device),
+          mSoundDoseWrapper(std::make_unique<DeviceHalHidl::SoundDoseWrapper>()) {
 #if MAJOR_VERSION == 7 && MINOR_VERSION == 1
     auto getDeviceRet = mPrimaryDevice->getDevice();
     if (getDeviceRet.isOk()) {
@@ -77,6 +103,20 @@ DeviceHalHidl::~DeviceHalHidl() {
         mDevice->close();
 #endif
     }
+}
+
+status_t DeviceHalHidl::getAudioPorts(
+        std::vector<media::audio::common::AudioPort> *ports __unused) {
+    return INVALID_OPERATION;
+}
+
+status_t DeviceHalHidl::getAudioRoutes(std::vector<media::AudioRoute> *routes __unused) {
+    return INVALID_OPERATION;
+}
+
+status_t DeviceHalHidl::getSupportedModes(
+        std::vector<media::audio::common::AudioMode> *modes __unused) {
+    return INVALID_OPERATION;
 }
 
 status_t DeviceHalHidl::getSupportedDevices(uint32_t*) {
@@ -196,7 +236,7 @@ status_t DeviceHalHidl::getParameters(const String8& keys, String8 *values) {
 }
 
 status_t DeviceHalHidl::getInputBufferSize(
-        const struct audio_config *config, size_t *size) {
+        struct audio_config *config, size_t *size) {
     TIME_CHECK();
     if (mDevice == 0) return NO_INIT;
     AudioConfig hidlConfig;
@@ -264,7 +304,12 @@ status_t DeviceHalHidl::openOutputStream(
                 }
                 HidlUtils::audioConfigToHal(suggestedConfig, config);
             });
-    return processReturn("openOutputStream", ret, retval);
+    const status_t status = processReturn("openOutputStream", ret, retval);
+    cleanupStreams();
+    if (status == NO_ERROR) {
+        mStreams.insert({handle, *outStream});
+    }
+    return status;
 }
 
 status_t DeviceHalHidl::openInputStream(
@@ -337,7 +382,12 @@ status_t DeviceHalHidl::openInputStream(
                 }
                 HidlUtils::audioConfigToHal(suggestedConfig, config);
             });
-    return processReturn("openInputStream", ret, retval);
+    const status_t status = processReturn("openInputStream", ret, retval);
+    cleanupStreams();
+    if (status == NO_ERROR) {
+        mStreams.insert({handle, *inStream});
+    }
+    return status;
 }
 
 status_t DeviceHalHidl::supportsAudioPatches(bool *supportsPatches) {
@@ -405,6 +455,7 @@ status_t DeviceHalHidl::releaseAudioPatch(audio_patch_handle_t patch) {
 
 template <typename HalPort>
 status_t DeviceHalHidl::getAudioPortImpl(HalPort *port) {
+    using ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION::AudioPort;
     if (mDevice == 0) return NO_INIT;
     AudioPort hidlPort;
     HidlUtils::audioPortFromHal(*port, &hidlPort);
@@ -447,6 +498,7 @@ status_t DeviceHalHidl::getAudioPort(struct audio_port_v7 *port) {
 }
 
 status_t DeviceHalHidl::setAudioPortConfig(const struct audio_port_config *config) {
+    using ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION::AudioPortConfig;
     TIME_CHECK();
     if (mDevice == 0) return NO_INIT;
     AudioPortConfig hidlConfig;
@@ -482,37 +534,59 @@ status_t DeviceHalHidl::getMicrophones(
 
 #if MAJOR_VERSION >= 6
 status_t DeviceHalHidl::addDeviceEffect(
-        audio_port_handle_t device, sp<EffectHalInterface> effect) {
+        const struct audio_port_config *device, sp<EffectHalInterface> effect) {
     TIME_CHECK();
     if (mDevice == 0) return NO_INIT;
+    auto hidlEffect = sp<effect::EffectHalHidl>::cast(effect);
     return processReturn("addDeviceEffect", mDevice->addDeviceEffect(
-            static_cast<AudioPortHandle>(device), effect->effectId()));
+            static_cast<AudioPortHandle>(device->id), hidlEffect->effectId()));
 }
 #else
 status_t DeviceHalHidl::addDeviceEffect(
-        audio_port_handle_t device __unused, sp<EffectHalInterface> effect __unused) {
+        const struct audio_port_config *device __unused, sp<EffectHalInterface> effect __unused) {
     return INVALID_OPERATION;
 }
 #endif
 
 #if MAJOR_VERSION >= 6
 status_t DeviceHalHidl::removeDeviceEffect(
-        audio_port_handle_t device, sp<EffectHalInterface> effect) {
+        const struct audio_port_config *device, sp<EffectHalInterface> effect) {
     TIME_CHECK();
     if (mDevice == 0) return NO_INIT;
+    auto hidlEffect = sp<effect::EffectHalHidl>::cast(effect);
     return processReturn("removeDeviceEffect", mDevice->removeDeviceEffect(
-            static_cast<AudioPortHandle>(device), effect->effectId()));
+            static_cast<AudioPortHandle>(device->id), hidlEffect->effectId()));
 }
 #else
 status_t DeviceHalHidl::removeDeviceEffect(
-        audio_port_handle_t device __unused, sp<EffectHalInterface> effect __unused) {
+        const struct audio_port_config *device __unused, sp<EffectHalInterface> effect __unused) {
     return INVALID_OPERATION;
 }
 #endif
 
+status_t DeviceHalHidl::prepareToDisconnectExternalDevice(const struct audio_port_v7* port) {
+    // For HIDL HAL, there is not API to call notify the HAL to prepare for device connected
+    // state changed. Call `setConnectedState` directly.
+    const status_t status = setConnectedState(port, false /*connected*/);
+    if (status == NO_ERROR) {
+        // Cache the port id so that it won't disconnect twice.
+        mDeviceDisconnectionNotified.insert(port->id);
+    }
+    return status;
+}
+
 status_t DeviceHalHidl::setConnectedState(const struct audio_port_v7 *port, bool connected) {
+    using ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION::AudioPort;
     TIME_CHECK();
     if (mDevice == 0) return NO_INIT;
+    if (!connected && mDeviceDisconnectionNotified.erase(port->id) > 0) {
+        // For device disconnection, APM will first call `prepareToDisconnectExternalDevice` and
+        // then call `setConnectedState`. However, in HIDL HAL, there is no API for
+        // `prepareToDisconnectExternalDevice`. In that case, HIDL HAL will call `setConnectedState`
+        // when calling `prepareToDisconnectExternalDevice`. Do not call to the HAL if previous
+        // call is successful. Also remove the cache here to avoid a large cache after a long run.
+        return NO_ERROR;
+    }
 #if MAJOR_VERSION == 7 && MINOR_VERSION == 1
     if (supportsSetConnectedState7_1) {
         AudioPort hidlPort;
@@ -572,6 +646,200 @@ status_t DeviceHalHidl::dump(int fd, const Vector<String16>& args) {
     (void)mDevice->ping(); // synchronous Binder call
 
     return processReturn("dump", ret);
+}
+
+#if MAJOR_VERSION == 7 && MINOR_VERSION == 1
+status_t DeviceHalHidl::getSoundDoseInterface(const std::string& module,
+                                              ::ndk::SpAIBinder* soundDoseBinder) {
+    if (mSoundDoseWrapper->mSoundDose != nullptr) {
+        *soundDoseBinder = mSoundDoseWrapper->mSoundDose->asBinder();
+        return OK;
+    }
+
+    if (mSoundDoseWrapper->mSoundDoseFactory == nullptr) {
+        std::string interface =
+            std::string(ISoundDoseFactory::descriptor) + kSoundDoseInterfaceModule.data();
+        AIBinder* binder = AServiceManager_checkService(interface.c_str());
+        if (binder == nullptr) {
+            ALOGW("%s service %s doesn't exist", __func__, interface.c_str());
+            return NO_INIT;
+        }
+        mSoundDoseWrapper->mSoundDoseFactory =
+                ISoundDoseFactory::fromBinder(ndk::SpAIBinder(binder));
+    }
+
+    auto result = mSoundDoseWrapper->mSoundDoseFactory->getSoundDose(
+                        module, &mSoundDoseWrapper->mSoundDose);
+    if (!result.isOk()) {
+        ALOGW("%s could not get sound dose interface: %s", __func__, result.getMessage());
+        return BAD_VALUE;
+    }
+
+    if (mSoundDoseWrapper->mSoundDose == nullptr) {
+        ALOGW("%s standalone sound dose interface is not implemented", __func__);
+        *soundDoseBinder = nullptr;
+        return OK;
+    }
+
+    *soundDoseBinder = mSoundDoseWrapper->mSoundDose->asBinder();
+    ALOGI("%s using standalone sound dose interface", __func__);
+    return OK;
+}
+#else
+status_t DeviceHalHidl::getSoundDoseInterface(const std::string& module,
+                                              ::ndk::SpAIBinder* soundDoseBinder) {
+    (void)module;  // avoid unused param
+    (void)soundDoseBinder;  // avoid unused param
+    return INVALID_OPERATION;
+}
+#endif
+
+status_t DeviceHalHidl::supportsBluetoothVariableLatency(bool* supports) {
+    if (supports == nullptr) {
+        return BAD_VALUE;
+    }
+    *supports = false;
+
+    String8 reply;
+    status_t status = getParameters(
+            String8(AUDIO_PARAMETER_BT_VARIABLE_LATENCY_SUPPORTED), &reply);
+    if (status != NO_ERROR) {
+        return status;
+    }
+    AudioParameter replyParams(reply);
+    String8 trueOrFalse;
+    status = replyParams.get(
+            String8(AUDIO_PARAMETER_BT_VARIABLE_LATENCY_SUPPORTED), trueOrFalse);
+    if (status != NO_ERROR) {
+        return status;
+    }
+    *supports = trueOrFalse == AudioParameter::valueTrue;
+    return NO_ERROR;
+}
+
+namespace {
+
+status_t getParametersFromStream(
+        sp<StreamHalInterface> stream,
+        const char* parameters,
+        const char* extraParameters,
+        String8* reply) {
+    String8 request(parameters);
+    if (extraParameters != nullptr) {
+        request.append(";");
+        request.append(extraParameters);
+    }
+    status_t status = stream->getParameters(request, reply);
+    if (status != NO_ERROR) {
+        ALOGW("%s, failed to query %s, status=%d", __func__, parameters, status);
+        return status;
+    }
+    AudioParameter repliedParameters(*reply);
+    status = repliedParameters.get(String8(parameters), *reply);
+    if (status != NO_ERROR) {
+        ALOGW("%s: failed to retrieve %s, bailing out", __func__, parameters);
+    }
+    return status;
+}
+
+} // namespace
+
+status_t DeviceHalHidl::getAudioMixPort(const struct audio_port_v7 *devicePort,
+                                        struct audio_port_v7 *mixPort) {
+    // For HIDL HAL, querying mix port information is not supported. If the HAL supports
+    // `getAudioPort` API to query the device port attributes, use the structured audio profiles
+    // that have the same attributes reported by the `getParameters` API. Otherwise, only use
+    // the attributes reported by `getParameters` API.
+    struct audio_port_v7 temp = *devicePort;
+    AudioProfileAttributesMultimap attrsFromDevice;
+    bool supportsPatches;
+    if (supportsAudioPatches(&supportsPatches) == OK && supportsPatches) {
+        // The audio patches are supported since HAL 3.0, which is the same HAL version
+        // requirement for 'getAudioPort' API.
+        if (getAudioPort(&temp) == NO_ERROR) {
+            attrsFromDevice = createAudioProfilesAttrMap(temp.audio_profiles, 0 /*first*/,
+                                                         temp.num_audio_profiles);
+        }
+    }
+    auto streamIt = mStreams.find(mixPort->ext.mix.handle);
+    if (streamIt == mStreams.end()) {
+        return BAD_VALUE;
+    }
+    auto stream = streamIt->second.promote();
+    if (stream == nullptr) {
+        return BAD_VALUE;
+    }
+
+    String8 formatsStr;
+    status_t status = getParametersFromStream(
+            stream, AudioParameter::keyStreamSupportedFormats, nullptr /*extraParameters*/,
+            &formatsStr);
+    if (status != NO_ERROR) {
+        return status;
+    }
+    FormatVector formats = formatsFromString(formatsStr.c_str());
+
+    mixPort->num_audio_profiles = 0;
+    for (audio_format_t format : formats) {
+        if (mixPort->num_audio_profiles >= AUDIO_PORT_MAX_AUDIO_PROFILES) {
+            ALOGW("%s, too many audio profiles", __func__);
+            break;
+        }
+        AudioParameter formatParameter;
+        formatParameter.addInt(String8(AudioParameter::keyFormat), format);
+
+        String8 samplingRatesStr;
+        status = getParametersFromStream(
+                stream, AudioParameter::keyStreamSupportedSamplingRates,
+                formatParameter.toString(), &samplingRatesStr);
+        if (status != NO_ERROR) {
+            // Failed to query supported sample rate for current format, may succeed with
+            // other formats.
+            ALOGW("Skip adding format=%#x, status=%d", format, status);
+            continue;
+        }
+        SampleRateSet sampleRatesFromStream = samplingRatesFromString(samplingRatesStr.c_str());
+        if (sampleRatesFromStream.empty()) {
+            ALOGW("Skip adding format=%#x as the returned sampling rates are empty", format);
+            continue;
+        }
+        String8 channelMasksStr;
+        status = getParametersFromStream(
+                stream, AudioParameter::keyStreamSupportedChannels,
+                formatParameter.toString(), &channelMasksStr);
+        if (status != NO_ERROR) {
+            // Failed to query supported channel masks for current format, may succeed with
+            // other formats.
+            ALOGW("Skip adding format=%#x, status=%d", format, status);
+            continue;
+        }
+        ChannelMaskSet channelMasksFromStream = channelMasksFromString(channelMasksStr.c_str());
+        if (channelMasksFromStream.empty()) {
+            ALOGW("Skip adding format=%#x as the returned channel masks are empty", format);
+            continue;
+        }
+
+        // For an audio format, all audio profiles from the device port with the same format will
+        // be added to mix port after filtering sample rates, channel masks according to the reply
+        // of getParameters API. If there is any sample rate or channel mask reported by
+        // getParameters API but not reported by the device, additional audio profiles will be
+        // added.
+        populateAudioProfiles(attrsFromDevice, format, channelMasksFromStream,
+                              sampleRatesFromStream, mixPort->audio_profiles,
+                              &mixPort->num_audio_profiles);
+    }
+
+    return NO_ERROR;
+}
+
+void DeviceHalHidl::cleanupStreams() {
+    for (auto it = mStreams.begin(); it != mStreams.end();) {
+        if (it->second.promote() == nullptr) {
+            it = mStreams.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 } // namespace android

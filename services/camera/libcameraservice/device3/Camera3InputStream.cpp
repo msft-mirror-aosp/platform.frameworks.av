@@ -21,13 +21,14 @@
 #include <gui/BufferItem.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
+#include <camera/StringUtils.h>
 #include "Camera3InputStream.h"
 
 namespace android {
 
 namespace camera3 {
 
-const String8 Camera3InputStream::FAKE_ID;
+const std::string Camera3InputStream::FAKE_ID;
 
 Camera3InputStream::Camera3InputStream(int id,
         uint32_t width, uint32_t height, int format) :
@@ -104,17 +105,14 @@ status_t Camera3InputStream::getInputBufferLocked(
 
 status_t Camera3InputStream::returnBufferCheckedLocked(
             const camera_stream_buffer &buffer,
-            nsecs_t timestamp,
-            nsecs_t readoutTimestamp,
-            bool output,
+            [[maybe_unused]] nsecs_t timestamp,
+            [[maybe_unused]] nsecs_t readoutTimestamp,
+            [[maybe_unused]] bool output,
             int32_t /*transform*/,
             const std::vector<size_t>&,
             /*out*/
             sp<Fence> *releaseFenceOut) {
 
-    (void)timestamp;
-    (void)readoutTimestamp;
-    (void)output;
     ALOG_ASSERT(!output, "Expected output to be false");
 
     status_t res;
@@ -218,11 +216,10 @@ status_t Camera3InputStream::disconnectLocked() {
     return OK;
 }
 
-void Camera3InputStream::dump(int fd, const Vector<String16> &args) const {
-    (void) args;
-    String8 lines;
-    lines.appendFormat("    Stream[%d]: Input\n", mId);
-    write(fd, lines.string(), lines.size());
+void Camera3InputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) const {
+    std::string lines;
+    lines += fmt::sprintf("    Stream[%d]: Input\n", mId);
+    write(fd, lines.c_str(), lines.size());
 
     Camera3IOStreamBase::dump(fd, args);
 }

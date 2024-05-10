@@ -27,11 +27,13 @@ class AidlConversionSpatializer : public EffectConversionHelperAidl {
     AidlConversionSpatializer(
             std::shared_ptr<::aidl::android::hardware::audio::effect::IEffect> effect,
             int32_t sessionId, int32_t ioId,
-            const ::aidl::android::hardware::audio::effect::Descriptor& desc)
-        : EffectConversionHelperAidl(effect, sessionId, ioId, desc) {}
+            const ::aidl::android::hardware::audio::effect::Descriptor& desc, bool isProxyEffect)
+        : EffectConversionHelperAidl(effect, sessionId, ioId, desc, isProxyEffect) {}
     ~AidlConversionSpatializer() {}
 
   private:
+    std::optional<bool> mIsSpatializerAidlParamSupported;
+    bool isSpatializerParameterSupported();
     status_t setParameter(utils::EffectParamReader& param) override;
     status_t getParameter(utils::EffectParamWriter& param) override;
 };

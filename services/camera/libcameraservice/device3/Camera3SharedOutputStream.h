@@ -37,7 +37,7 @@ public:
             uint32_t width, uint32_t height, int format,
             uint64_t consumerUsage, android_dataspace dataSpace,
             camera_stream_rotation_t rotation, nsecs_t timestampOffset,
-            const String8& physicalCameraId,
+            const std::string& physicalCameraId,
             const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
             int setId = CAMERA3_STREAM_SET_ID_INVALID,
             bool useHalBufManager = false,
@@ -45,9 +45,13 @@ public:
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             bool deviceTimeBaseIsRealtime = false,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO);
+            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+            int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+            bool useReadoutTimestamp = false);
 
     virtual ~Camera3SharedOutputStream();
+
+    void setHalBufferManager(bool enabled) override;
 
     virtual status_t notifyBufferReleased(ANativeWindowBuffer *buffer);
 
@@ -83,7 +87,7 @@ private:
 
     // Whether HAL is in control for buffer management. Surface sharing behavior
     // depends on this flag.
-    const bool mUseHalBufManager;
+    bool mUseHalBufManager;
 
     // Pair of an output Surface and its unique ID
     typedef std::pair<sp<Surface>, size_t> SurfaceUniqueId;
