@@ -126,6 +126,9 @@ class VirtualCameraDevice
   // Default JPEG orientation.
   static constexpr uint8_t kDefaultJpegOrientation = 0;
 
+  // Lowest min fps advertised in supported fps ranges.
+  static constexpr int kMinFps = 1;
+
   // Default Make and Model for Exif
   static constexpr char kDefaultMakeAndModel[] = "Android Virtual Camera";
 

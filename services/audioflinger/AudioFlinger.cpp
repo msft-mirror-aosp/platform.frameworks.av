@@ -2189,6 +2189,13 @@ void AudioFlinger::onSupportedLatencyModesChanged(
     }
 }
 
+void AudioFlinger::onHardError(std::set<audio_port_handle_t>& trackPortIds) {
+    ALOGI("releasing tracks due to a hard error occurred on an I/O thread");
+    for (const auto portId : trackPortIds) {
+        AudioSystem::releaseOutput(portId);
+    }
+}
+
 // removeClient_l() must be called with AudioFlinger::clientMutex() held
 void AudioFlinger::removeClient_l(pid_t pid)
 {
@@ -4962,6 +4969,23 @@ status_t AudioFlinger::getAudioMixPort(const struct audio_port_v7 *devicePort,
     return mPatchPanel->getAudioMixPort_l(devicePort, mixPort);
 }
 
+status_t AudioFlinger::setTracksInternalMute(
+        const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) {
+    audio_utils::lock_guard _l(mutex());
+    ALOGV("%s", __func__);
+
+    std::map<audio_port_handle_t, bool> tracksInternalMuteMap;
+    for (const auto& trackInternalMute : tracksInternalMute) {
+        audio_port_handle_t portId = VALUE_OR_RETURN_STATUS(
+                aidl2legacy_int32_t_audio_port_handle_t(trackInternalMute.portId));
+        tracksInternalMuteMap.emplace(portId, trackInternalMute.muted);
+    }
+    for (size_t i = 0; i < mPlaybackThreads.size() && !tracksInternalMuteMap.empty(); i++) {
+        mPlaybackThreads.valueAt(i)->setTracksInternalMute(&tracksInternalMuteMap);
+    }
+    return NO_ERROR;
+}
+
 // ----------------------------------------------------------------------------
 
 status_t AudioFlinger::onTransactWrapper(TransactionCode code,
@@ -4996,6 +5020,7 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         case TransactionCode::INVALIDATE_TRACKS:
         case TransactionCode::GET_AUDIO_POLICY_CONFIG:
         case TransactionCode::GET_AUDIO_MIX_PORT:
+        case TransactionCode::SET_TRACKS_INTERNAL_MUTE:
             ALOGW("%s: transaction %d received from PID %d",
                   __func__, static_cast<int>(code), IPCThreadState::self()->getCallingPid());
             // return status only for non void methods

@@ -259,6 +259,10 @@ private:
     status_t getAudioMixPort(const struct audio_port_v7* devicePort,
                              struct audio_port_v7* mixPort) const final EXCLUDES_AudioFlinger_Mutex;
 
+    status_t setTracksInternalMute(
+            const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) final
+            EXCLUDES_AudioFlinger_Mutex;
+
     status_t onTransactWrapper(TransactionCode code, const Parcel& data, uint32_t flags,
             const std::function<status_t()>& delegate) final EXCLUDES_AudioFlinger_Mutex;
 
@@ -396,6 +400,8 @@ private:
     void onNonOffloadableGlobalEffectEnable() final EXCLUDES_AudioFlinger_Mutex;
     void onSupportedLatencyModesChanged(
             audio_io_handle_t output, const std::vector<audio_latency_mode_t>& modes) final
+            EXCLUDES_AudioFlinger_ClientMutex;
+    void onHardError(std::set<audio_port_handle_t>& trackPortIds) final
             EXCLUDES_AudioFlinger_ClientMutex;
 
     // ---- end of IAfThreadCallback interface
