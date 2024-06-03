@@ -22,6 +22,7 @@ cc_defaults {
     name: "libaudioclient_aidl_fuzzer_defaults",
     static_libs: [
         "android.hardware.audio.common@7.0-enums",
+        "audiopermissioncontroller",
         "libaudiomockhal",
         "libcgrouprc",
         "libcgrouprc_format",
@@ -78,7 +79,7 @@ cc_defaults {
     ],
     fuzz_config: {
         cc: [
-            "android-media-fuzzing-reports@google.com",
+            "android-audio-fuzzing-reports@google.com",
         ],
         componentid: 155276,
         hotlists: ["4593311"],

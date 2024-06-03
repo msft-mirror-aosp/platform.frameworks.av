@@ -58,6 +58,7 @@ using aidl::android::media::audio::common::MicrophoneInfo;
 using aidl::android::media::audio::IHalAdapterVendorExtension;
 using aidl::android::hardware::audio::common::getFrameSizeInBytes;
 using aidl::android::hardware::audio::common::isBitPositionFlagSet;
+using aidl::android::hardware::audio::common::kDumpFromAudioServerArgument;
 using aidl::android::hardware::audio::common::RecordTrackMetadata;
 using aidl::android::hardware::audio::core::sounddose::ISoundDose;
 using aidl::android::hardware::audio::core::AudioPatch;
@@ -386,7 +387,7 @@ class OutputStreamCallbackAidl : public StreamCallbackBase,
         return runCb([](CbRef cb) { cb->onWriteReady(); });
     }
     ndk::ScopedAStatus onError() override {
-        return runCb([](CbRef cb) { cb->onError(); });
+        return runCb([](CbRef cb) { cb->onError(true /*isHardError*/); });
     }
     ndk::ScopedAStatus onDrainReady() override {
         return runCb([](CbRef cb) { cb->onDrainReady(); });
@@ -478,15 +479,21 @@ status_t DeviceHalAidl::openOutputStream(
                 __func__, ret.desc.toString().c_str());
         return NO_INIT;
     }
-    *outStream = sp<StreamOutHalAidl>::make(*config, std::move(context), aidlPatch.latenciesMs[0],
+    auto stream = sp<StreamOutHalAidl>::make(*config, std::move(context), aidlPatch.latenciesMs[0],
             std::move(ret.stream), mVendorExt, this /*callbackBroker*/);
-    void* cbCookie = (*outStream).get();
+    *outStream = stream;
+    /* StreamOutHalInterface* */ void* cbCookie = (*outStream).get();
     {
         std::lock_guard l(mLock);
         mCallbacks.emplace(cbCookie, Callbacks{});
         mMapper.addStream(*outStream, mixPortConfig.id, aidlPatch.id);
     }
-    if (streamCb) streamCb->setCookie(cbCookie);
+    if (streamCb) {
+        streamCb->setCookie(cbCookie);
+        // Although StreamOutHalAidl implements StreamOutHalInterfaceCallback,
+        // we always go via the CallbackBroker for consistency.
+        setStreamOutCallback(cbCookie, stream);
+    }
     eventCb->setCookie(cbCookie);
     cleanups.disarmAll();
     return OK;
@@ -907,7 +914,9 @@ error::Result<audio_hw_sync_t> DeviceHalAidl::getHwAvSync() {
 status_t DeviceHalAidl::dump(int fd, const Vector<String16>& args) {
     TIME_CHECK();
     if (mModule == nullptr) return NO_INIT;
-    return mModule->dump(fd, Args(args).args(), args.size());
+    Vector<String16> newArgs = args;
+    newArgs.push(String16(kDumpFromAudioServerArgument));
+    return mModule->dump(fd, Args(newArgs).args(), newArgs.size());
 }
 
 status_t DeviceHalAidl::supportsBluetoothVariableLatency(bool* supports) {

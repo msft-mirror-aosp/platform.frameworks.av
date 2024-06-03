@@ -389,6 +389,7 @@ TrackHandle::TrackHandle(const sp<IAfTrack>& track)
       mTrack(track)
 {
     setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    setInheritRt(true);
 }
 
 TrackHandle::~TrackHandle() {
@@ -912,7 +913,7 @@ void Track::appendDumpHeader(String8& result) const
                         "  Format Chn mask  SRate "
                         "ST Usg CT "
                         " G db  L dB  R dB  VS dB "
-                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect"
+                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
                         "%s\n",
                         isServerLatencySupported() ? "   Latency" : "");
 }
@@ -998,7 +999,7 @@ void Track::appendDump(String8& result, bool active) const
                         "%08X %08X %6u "
                         "%2u %3x %2x "
                         "%5.2g %5.2g %5.2g %5.2g%c "
-                        "%08X %6zu%c %6zu %c %9u%c %7u %10s",
+                        "%08X %6zu%c %6zu %c %9u%c %7u %10s %12s",
             active ? "yes" : "no",
             (mClient == 0) ? getpid() : mClient->pid(),
             mSessionId,
@@ -1028,7 +1029,8 @@ void Track::appendDump(String8& result, bool active) const
             mAudioTrackServerProxy->getUnderrunFrames(),
             nowInUnderrun,
             (unsigned)mAudioTrackServerProxy->framesFlushed() % 10000000,
-            isBitPerfect() ? "true" : "false"
+            isBitPerfect() ? "true" : "false",
+            getInternalMute() ? "true" : "false"
             );
 
     if (isServerLatencySupported()) {
@@ -1880,6 +1882,12 @@ void Track::disable()
     signalClientFlag(CBLK_DISABLED);
 }
 
+bool Track::isDisabled() const {
+    audio_track_cblk_t* cblk = mCblk;
+    return (cblk != nullptr)
+            && ((android_atomic_release_load(&cblk->mFlags) & CBLK_DISABLED) != 0);
+}
+
 void Track::signalClientFlag(int32_t flag)
 {
     // FIXME should use proxy, and needs work
@@ -2641,6 +2649,7 @@ RecordHandle::RecordHandle(
     mRecordTrack(recordTrack)
 {
     setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    setInheritRt(true);
 }
 
 RecordHandle::~RecordHandle() {

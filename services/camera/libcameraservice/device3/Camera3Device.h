@@ -47,6 +47,7 @@
 #include "device3/Camera3OutputInterface.h"
 #include "device3/Camera3OfflineSession.h"
 #include "device3/Camera3StreamInterface.h"
+#include "utils/AttributionAndPermissionUtils.h"
 #include "utils/TagMonitor.h"
 #include "utils/IPCTransport.h"
 #include "utils/LatencyHistogram.h"
@@ -79,13 +80,15 @@ class Camera3Device :
             public camera3::SetErrorInterface,
             public camera3::InflightRequestUpdateInterface,
             public camera3::RequestBufferInterface,
-            public camera3::FlushBufferInterface {
+            public camera3::FlushBufferInterface,
+            public AttributionAndPermissionUtilsEncapsulator {
   friend class HidlCamera3Device;
   friend class AidlCamera3Device;
   public:
 
     explicit Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
-            const std::string& id, bool overrideForPerfClass, bool overrideToPortrait,
+            std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+            const std::string& id, bool overrideForPerfClass, int rotationOverride,
             bool legacyClient = false);
 
     virtual ~Camera3Device();
@@ -305,6 +308,15 @@ class Camera3Device :
     status_t setCameraMute(bool enabled);
 
     /**
+     * Mute the camera.
+     *
+     * When muted, black image data is output on all output streams.
+     * This method assumes the caller already acquired the 'mInterfaceLock'
+     * and 'mLock' locks.
+     */
+    status_t setCameraMuteLocked(bool enabled);
+
+    /**
      * Enables/disables camera service watchdog
      */
     status_t setCameraServiceWatchdog(bool enabled);
@@ -361,8 +373,6 @@ class Camera3Device :
     static const size_t        kInFlightWarnLimitHighSpeed = 256; // batch size 32 * pipe depth 8
     static const nsecs_t       kMinInflightDuration = 5000000000; // 5 s
     static const nsecs_t       kBaseGetBufferWait = 3000000000; // 3 sec.
-    // SCHED_FIFO priority for request submission thread in HFR mode
-    static const int           kRequestThreadPriority = 1;
 
     struct                     RequestTrigger;
     // minimal jpeg buffer size: 256KB + blob header
@@ -867,7 +877,7 @@ class Camera3Device :
 
     // Override rotate_and_crop control if needed
     static bool    overrideAutoRotateAndCrop(const sp<CaptureRequest> &request /*out*/,
-            bool overrideToPortrait,
+            int rotationOverride,
             camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropOverride);
 
     // Override auto framing control if needed
@@ -904,7 +914,7 @@ class Camera3Device :
                 const Vector<int32_t>& sessionParamKeys,
                 bool useHalBufManager,
                 bool supportCameraMute,
-                bool overrideToPortrait,
+                int rotationOverride,
                 bool supportSettingsOverride);
         ~RequestThread();
 
@@ -1025,6 +1035,11 @@ class Camera3Device :
         void injectSessionParams(
             const sp<CaptureRequest> &request,
             const CameraMetadata& injectedSessionParams);
+
+        /**
+         * signal mLatestRequestmutex
+         **/
+        void wakeupLatestRequest(bool latestRequestFailed, int32_t latestRequestId);
 
       protected:
 
@@ -1214,7 +1229,7 @@ class Camera3Device :
         bool               mUseHalBufManager = false;
         std::set<int32_t > mHalBufManagedStreamIds;
         const bool         mSupportCameraMute;
-        const bool         mOverrideToPortrait;
+        const bool         mRotationOverride;
         const bool         mSupportSettingsOverride;
         int32_t            mVndkVersion = -1;
     };
@@ -1225,7 +1240,7 @@ class Camera3Device :
                 const Vector<int32_t>& /*sessionParamKeys*/,
                 bool /*useHalBufManager*/,
                 bool /*supportCameraMute*/,
-                bool /*overrideToPortrait*/,
+                int /*rotationOverride*/,
                 bool /*supportSettingsOverride*/) = 0;
 
     sp<RequestThread> mRequestThread;
@@ -1392,6 +1407,10 @@ class Camera3Device :
             const camera_stream_buffer_t *outputBuffers, uint32_t numOutputBuffers,
             int32_t inputStreamId);
 
+    // Collect any statistics that are based on the stream of capture requests sent
+    // to the HAL
+    void collectRequestStats(int64_t frameNumber, const CameraMetadata& request);
+
     metadata_vendor_id_t mVendorTagId;
 
     // Cached last requested template id
@@ -1503,12 +1522,16 @@ class Camera3Device :
 
     // Whether the camera framework overrides the device characteristics for
     // app compatibility reasons.
-    bool mOverrideToPortrait;
+    int mRotationOverride;
     camera_metadata_enum_android_scaler_rotate_and_crop_t mRotateAndCropOverride;
     bool mComposerOutput;
 
     // Auto framing override value
     camera_metadata_enum_android_control_autoframing mAutoframingOverride;
+
+    // Initial camera mute state stored before the request thread
+    // is active.
+    bool mCameraMuteInitial = false;
 
     // Settings override value
     int32_t mSettingsOverride; // -1 = use original, otherwise
@@ -1610,34 +1633,6 @@ class Camera3Device :
 
     void overrideStreamUseCaseLocked();
 
-    // An instance of this class will raise the scheduling policy of a given
-    // given thread to real time and keep it this way throughout the lifetime
-    // of the object. The thread scheduling policy will revert back to its original
-    // state after the instances is released. By default the implementation will
-    // raise the priority of the current thread unless clients explicitly specify
-    // another thread id.
-    // Client must avoid:
-    //  - Keeping an instance of this class for extended and long running operations.
-    //    This is only intended for short/temporarily priority bumps that mitigate
-    //    scheduling delays within critical camera paths.
-    //  - Allocating instances of this class on the memory heap unless clients have
-    //    complete control over the object lifetime. It is preferable to allocate
-    //    instances of this class on the stack instead.
-    //  - Nesting multiple instances of this class using the same default or same thread id.
-    class RunThreadWithRealtimePriority final {
-        public:
-            RunThreadWithRealtimePriority(int tid = gettid());
-            ~RunThreadWithRealtimePriority();
-
-            RunThreadWithRealtimePriority(const RunThreadWithRealtimePriority&) = delete;
-            RunThreadWithRealtimePriority& operator=(const RunThreadWithRealtimePriority&) = delete;
-
-        private:
-            int mTid;
-            int mPreviousPolicy;
-            bool mPolicyBumped = false;
-            struct sched_param mPreviousParams;
-    };
 
 }; // class Camera3Device
 

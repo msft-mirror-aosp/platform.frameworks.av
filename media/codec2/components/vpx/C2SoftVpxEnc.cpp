@@ -22,6 +22,7 @@
 #include <media/hardware/VideoAPI.h>
 
 #include <Codec2BufferUtils.h>
+#include <Codec2CommonUtils.h>
 #include <C2Debug.h>
 #include "C2SoftVpxEnc.h"
 
@@ -63,12 +64,14 @@ C2SoftVpxEnc::IntfImpl::IntfImpl(const std::shared_ptr<C2ReflectorHelper> &helpe
                     0u, (uint64_t)C2MemoryUsage::CPU_READ))
             .build());
 
+    // Odd dimension support in encoders requires Android V and above
+    size_t stepSize = isAtLeastV() ? 1 : 2;
     addParameter(
         DefineParam(mSize, C2_PARAMKEY_PICTURE_SIZE)
             .withDefault(new C2StreamPictureSizeInfo::input(0u, 64, 64))
             .withFields({
-                C2F(mSize, width).inRange(2, 2048, 2),
-                C2F(mSize, height).inRange(2, 2048, 2),
+                C2F(mSize, width).inRange(2, 2048, stepSize),
+                C2F(mSize, height).inRange(2, 2048, stepSize),
             })
             .withSetter(SizeSetter)
             .build());
@@ -351,12 +354,9 @@ uint32_t C2SoftVpxEnc::IntfImpl::getSyncFramePeriod() const {
     return (uint32_t)c2_max(c2_min(period + 0.5, double(UINT32_MAX)), 1.);
 }
 
-C2R C2SoftVpxEnc::IntfImpl::PictureQuantizationSetter(bool mayBlock,
-                                                     C2P<C2StreamPictureQuantizationTuning::output>
-                                                     &me) {
+C2R C2SoftVpxEnc::IntfImpl::PictureQuantizationSetter(
+        bool mayBlock, C2P<C2StreamPictureQuantizationTuning::output>& me) {
     (void)mayBlock;
-    // these are the ones we're going to set, so want them to default
-    // to the DEFAULT values for the codec
     int32_t iMin = VPX_QP_DEFAULT_MIN, pMin = VPX_QP_DEFAULT_MIN;
     int32_t iMax = VPX_QP_DEFAULT_MAX, pMax = VPX_QP_DEFAULT_MAX;
     for (size_t i = 0; i < me.v.flexCount(); ++i) {
@@ -379,8 +379,8 @@ C2R C2SoftVpxEnc::IntfImpl::PictureQuantizationSetter(bool mayBlock,
           iMin, iMax, pMin, pMax);
 
     // vpx library takes same range for I/P picture type
-    int32_t maxFrameQP = std::min({iMax, pMax});
-    int32_t minFrameQP = std::max({iMin, pMin});
+    int32_t maxFrameQP = std::min(iMax, pMax);
+    int32_t minFrameQP = std::max(iMin, pMin);
     if (minFrameQP > maxFrameQP) {
         minFrameQP = maxFrameQP;
     }

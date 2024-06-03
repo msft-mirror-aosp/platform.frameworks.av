@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "VirtualCameraService.h"
 #include "VirtualCameraSession.h"
 #include "aidl/android/companion/virtualcamera/SupportedStreamConfiguration.h"
 #include "aidl/android/companion/virtualcamera/VirtualCameraConfiguration.h"
@@ -72,12 +73,13 @@ const char* kDevicePathPrefix = "device@1.1/virtual/";
 
 constexpr int32_t kMaxJpegSize = 3 * 1024 * 1024 /*3MiB*/;
 
-constexpr int32_t kMinFps = 15;
-
 constexpr std::chrono::nanoseconds kMaxFrameDuration =
-    std::chrono::duration_cast<std::chrono::nanoseconds>(1e9ns / kMinFps);
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+        1e9ns / VirtualCameraDevice::kMinFps);
 
 constexpr uint8_t kPipelineMaxDepth = 2;
+
+constexpr int k30Fps = 30;
 
 constexpr MetadataBuilder::ControlRegion kDefaultEmptyControlRegion{};
 
@@ -129,16 +131,20 @@ std::vector<FpsRange> fpsRangesForInputConfig(
   std::set<FpsRange> availableRanges;
 
   for (const SupportedStreamConfiguration& config : configs) {
-    availableRanges.insert({.minFps = kMinFps, .maxFps = config.maxFps});
+    availableRanges.insert(
+        {.minFps = VirtualCameraDevice::kMinFps, .maxFps = config.maxFps});
     availableRanges.insert({.minFps = config.maxFps, .maxFps = config.maxFps});
   }
 
   if (std::any_of(configs.begin(), configs.end(),
                   [](const SupportedStreamConfiguration& config) {
-                    return config.maxFps >= 30;
+                    return config.maxFps >= k30Fps;
                   })) {
-    availableRanges.insert({.minFps = kMinFps, .maxFps = 30});
-    availableRanges.insert({.minFps = 30, .maxFps = 30});
+    // Extend the set of available ranges with (minFps <= 15, 30) & (30, 30) as
+    // required by CDD.
+    availableRanges.insert(
+        {.minFps = VirtualCameraDevice::kMinFps, .maxFps = k30Fps});
+    availableRanges.insert({.minFps = k30Fps, .maxFps = k30Fps});
   }
 
   return std::vector<FpsRange>(availableRanges.begin(), availableRanges.end());
@@ -214,7 +220,8 @@ std::map<Resolution, int> getResolutionToMaxFpsMap(
 // TODO(b/301023410) - Populate camera characteristics according to camera configuration.
 std::optional<CameraMetadata> initCameraCharacteristics(
     const std::vector<SupportedStreamConfiguration>& supportedInputConfig,
-    const SensorOrientation sensorOrientation, const LensFacing lensFacing) {
+    const SensorOrientation sensorOrientation, const LensFacing lensFacing,
+    const int32_t deviceId) {
   if (!std::all_of(supportedInputConfig.begin(), supportedInputConfig.end(),
                    [](const SupportedStreamConfiguration& config) {
                      return isFormatSupportedForInput(
@@ -229,6 +236,7 @@ std::optional<CameraMetadata> initCameraCharacteristics(
       MetadataBuilder()
           .setSupportedHardwareLevel(
               ANDROID_INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL)
+          .setDeviceId(deviceId)
           .setFlashAvailable(false)
           .setLensFacing(
               static_cast<camera_metadata_enum_android_lens_facing>(lensFacing))
@@ -242,6 +250,13 @@ std::optional<CameraMetadata> initCameraCharacteristics(
               {ANDROID_COLOR_CORRECTION_ABERRATION_MODE_OFF})
           .setAvailableNoiseReductionModes({ANDROID_NOISE_REDUCTION_MODE_OFF})
           .setAvailableFaceDetectModes({ANDROID_STATISTICS_FACE_DETECT_MODE_OFF})
+          .setAvailableStreamUseCases(
+              {ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_PREVIEW,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_STILL_CAPTURE,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_PREVIEW_VIDEO_STILL,
+               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_CALL})
           .setAvailableTestPatternModes({ANDROID_SENSOR_TEST_PATTERN_MODE_OFF})
           .setAvailableMaxDigitalZoom(1.0)
           .setControlAvailableModes({ANDROID_CONTROL_MODE_AUTO})
@@ -389,13 +404,14 @@ std::optional<CameraMetadata> initCameraCharacteristics(
 }  // namespace
 
 VirtualCameraDevice::VirtualCameraDevice(
-    const uint32_t cameraId, const VirtualCameraConfiguration& configuration)
+    const uint32_t cameraId, const VirtualCameraConfiguration& configuration,
+    int32_t deviceId)
     : mCameraId(cameraId),
       mVirtualCameraClientCallback(configuration.virtualCameraCallback),
       mSupportedInputConfigurations(configuration.supportedStreamConfigs) {
   std::optional<CameraMetadata> metadata = initCameraCharacteristics(
       mSupportedInputConfigurations, configuration.sensorOrientation,
-      configuration.lensFacing);
+      configuration.lensFacing, deviceId);
   if (metadata.has_value()) {
     mCameraCharacteristics = *metadata;
   } else {
@@ -565,12 +581,18 @@ ndk::ScopedAStatus VirtualCameraDevice::getTorchStrengthLevel(
   return cameraStatus(Status::OPERATION_NOT_SUPPORTED);
 }
 
-binder_status_t VirtualCameraDevice::dump(int fd, const char** args,
-                                          uint32_t numArgs) {
-  // TODO(b/301023410) Implement.
-  (void)fd;
-  (void)args;
-  (void)numArgs;
+binder_status_t VirtualCameraDevice::dump(int fd, const char**, uint32_t) {
+  ALOGD("Dumping virtual camera %d", mCameraId);
+  const char* indent = "  ";
+  const char* doubleIndent = "    ";
+  dprintf(fd, "%svirtual_camera %d belongs to virtual device %d\n", indent,
+          mCameraId,
+          getDeviceId(mCameraCharacteristics)
+              .value_or(VirtualCameraService::kDefaultDeviceId));
+  dprintf(fd, "%sSupportedStreamConfiguration:\n", indent);
+  for (auto& config : mSupportedInputConfigurations) {
+    dprintf(fd, "%s%s", doubleIndent, config.toString().c_str());
+  }
   return STATUS_OK;
 }
 

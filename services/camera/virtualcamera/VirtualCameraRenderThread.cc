@@ -44,13 +44,13 @@
 #include "android-base/thread_annotations.h"
 #include "android/binder_auto_utils.h"
 #include "android/hardware_buffer.h"
+#include "hardware/gralloc.h"
 #include "system/camera_metadata.h"
 #include "ui/GraphicBuffer.h"
 #include "ui/Rect.h"
 #include "util/EglFramebuffer.h"
 #include "util/JpegUtil.h"
 #include "util/MetadataUtil.h"
-#include "util/TestPatternHelper.h"
 #include "util/Util.h"
 #include "utils/Errors.h"
 
@@ -108,7 +108,14 @@ CameraMetadata createCaptureResultMetadata(
           .setControlAeLock(ANDROID_CONTROL_AE_LOCK_OFF)
           .setControlAeMode(ANDROID_CONTROL_AE_MODE_ON)
           .setControlAePrecaptureTrigger(
-              ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
+              // Limited devices are expected to have precapture ae enabled and
+              // respond to cancellation request. Since we don't actuall support
+              // AE at all, let's just respect the cancellation expectation in
+              // case it's requested
+              requestSettings.aePrecaptureTrigger ==
+                      ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL
+                  ? ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL
+                  : ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
           .setControlAeState(ANDROID_CONTROL_AE_STATE_INACTIVE)
           .setControlAfMode(ANDROID_CONTROL_AF_MODE_OFF)
           .setControlAfTrigger(ANDROID_CONTROL_AF_TRIGGER_IDLE)
@@ -270,6 +277,16 @@ std::vector<uint8_t> createExif(
   return app1Data;
 }
 
+std::chrono::nanoseconds getMaxFrameDuration(
+    const RequestSettings& requestSettings) {
+  if (requestSettings.fpsRange.has_value()) {
+    return std::chrono::nanoseconds(static_cast<uint64_t>(
+        1e9 / std::max(1, requestSettings.fpsRange->minFps)));
+  }
+  return std::chrono::nanoseconds(
+      static_cast<uint64_t>(1e9 / VirtualCameraDevice::kMinFps));
+}
+
 }  // namespace
 
 CaptureRequestBuffer::CaptureRequestBuffer(int streamId, int bufferId,
@@ -292,12 +309,12 @@ sp<Fence> CaptureRequestBuffer::getFence() const {
 VirtualCameraRenderThread::VirtualCameraRenderThread(
     VirtualCameraSessionContext& sessionContext,
     const Resolution inputSurfaceSize, const Resolution reportedSensorSize,
-    std::shared_ptr<ICameraDeviceCallback> cameraDeviceCallback, bool testMode)
+    std::shared_ptr<ICameraDeviceCallback> cameraDeviceCallback)
     : mCameraDeviceCallback(cameraDeviceCallback),
       mInputSurfaceSize(inputSurfaceSize),
       mReportedSensorSize(reportedSensorSize),
-      mTestMode(testMode),
-      mSessionContext(sessionContext) {
+      mSessionContext(sessionContext),
+      mInputSurfaceFuture(mInputSurfacePromise.get_future()) {
 }
 
 VirtualCameraRenderThread::~VirtualCameraRenderThread() {
@@ -357,7 +374,7 @@ void VirtualCameraRenderThread::stop() {
 }
 
 sp<Surface> VirtualCameraRenderThread::getInputSurface() {
-  return mInputSurfacePromise.get_future().get();
+  return mInputSurfaceFuture.get();
 }
 
 std::unique_ptr<ProcessCaptureRequestTask>
@@ -392,6 +409,7 @@ void VirtualCameraRenderThread::threadLoop() {
       EglTextureProgram::TextureFormat::RGBA);
   mEglSurfaceTexture = std::make_unique<EglSurfaceTexture>(
       mInputSurfaceSize.width, mInputSurfaceSize.height);
+
   mInputSurfacePromise.set_value(mEglSurfaceTexture->getSurface());
 
   while (std::unique_ptr<ProcessCaptureRequestTask> task = dequeueTask()) {
@@ -409,9 +427,64 @@ void VirtualCameraRenderThread::threadLoop() {
 
 void VirtualCameraRenderThread::processCaptureRequest(
     const ProcessCaptureRequestTask& request) {
-  const std::chrono::nanoseconds timestamp =
+  std::chrono::nanoseconds timestamp =
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::steady_clock::now().time_since_epoch());
+  const std::chrono::nanoseconds lastAcquisitionTimestamp(
+      mLastAcquisitionTimestampNanoseconds.exchange(timestamp.count(),
+                                                    std::memory_order_relaxed));
+
+  if (request.getRequestSettings().fpsRange) {
+    const int maxFps =
+        std::max(1, request.getRequestSettings().fpsRange->maxFps);
+    const std::chrono::nanoseconds minFrameDuration(
+        static_cast<uint64_t>(1e9 / maxFps));
+    const std::chrono::nanoseconds frameDuration =
+        timestamp - lastAcquisitionTimestamp;
+    if (frameDuration < minFrameDuration) {
+      // We're too fast for the configured maxFps, let's wait a bit.
+      const std::chrono::nanoseconds sleepTime =
+          minFrameDuration - frameDuration;
+      ALOGV("Current frame duration would  be %" PRIu64
+            " ns corresponding to, "
+            "sleeping for %" PRIu64
+            " ns before updating texture to match maxFps %d",
+            static_cast<uint64_t>(frameDuration.count()),
+            static_cast<uint64_t>(sleepTime.count()), maxFps);
+
+      std::this_thread::sleep_for(sleepTime);
+      timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch());
+      mLastAcquisitionTimestampNanoseconds.store(timestamp.count(),
+                                                 std::memory_order_relaxed);
+    }
+  }
+
+  // Calculate the maximal amount of time we can afford to wait for next frame.
+  const std::chrono::nanoseconds maxFrameDuration =
+      getMaxFrameDuration(request.getRequestSettings());
+  const std::chrono::nanoseconds elapsedDuration =
+      timestamp - lastAcquisitionTimestamp;
+  if (elapsedDuration < maxFrameDuration) {
+    // We can afford to wait for next frame.
+    // Note that if there's already new frame in the input Surface, the call
+    // below returns immediatelly.
+    bool gotNewFrame = mEglSurfaceTexture->waitForNextFrame(maxFrameDuration -
+                                                            elapsedDuration);
+    timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch());
+    if (!gotNewFrame) {
+      ALOGV(
+          "%s: No new frame received on input surface after waiting for "
+          "%" PRIu64 "ns, repeating last frame.",
+          __func__,
+          static_cast<uint64_t>((timestamp - lastAcquisitionTimestamp).count()));
+    }
+    mLastAcquisitionTimestampNanoseconds.store(timestamp.count(),
+                                               std::memory_order_relaxed);
+  }
+  // Acquire new (most recent) image from the Surface.
+  mEglSurfaceTexture->updateTexture();
 
   CaptureResult captureResult;
   captureResult.fmqResultSize = 0;
@@ -425,14 +498,6 @@ void VirtualCameraRenderThread::processCaptureRequest(
 
   const std::vector<CaptureRequestBuffer>& buffers = request.getBuffers();
   captureResult.outputBuffers.resize(buffers.size());
-
-  if (mTestMode) {
-    // In test mode let's just render something to the Surface ourselves.
-    renderTestPatternYCbCr420(mEglSurfaceTexture->getSurface(),
-                              request.getFrameNumber());
-  }
-
-  mEglSurfaceTexture->updateTexture();
 
   for (int i = 0; i < buffers.size(); ++i) {
     const CaptureRequestBuffer& reqBuffer = buffers[i];
@@ -489,7 +554,7 @@ void VirtualCameraRenderThread::processCaptureRequest(
     return;
   }
 
-  ALOGD("%s: Successfully called processCaptureResult", __func__);
+  ALOGV("%s: Successfully called processCaptureResult", __func__);
 }
 
 void VirtualCameraRenderThread::flushCaptureRequest(

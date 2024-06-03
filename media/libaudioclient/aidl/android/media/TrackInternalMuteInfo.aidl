@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,10 @@
  * limitations under the License.
  */
 
-#include <stdint.h>
+package android.media;
 
-namespace android {
-class CameraThreadState {
-public:
-  static int64_t clearCallingIdentity();
-
-  static void restoreCallingIdentity(int64_t token);
-
-  static int getCallingUid();
-
-  static int getCallingPid();
-};
-
-} // android
+parcelable TrackInternalMuteInfo {
+    /* Interpreted as audio_port_handle_t. */
+    int portId;
+    boolean muted;
+}

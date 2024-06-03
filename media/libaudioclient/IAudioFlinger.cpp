@@ -918,11 +918,17 @@ status_t AudioFlingerClientAdapter::getAudioMixPort(const struct audio_port_v7 *
     return OK;
 }
 
+status_t AudioFlingerClientAdapter::setTracksInternalMute(
+        const std::vector<media::TrackInternalMuteInfo>& tracksInternalMuted) {
+    return statusTFromBinderStatus(mDelegate->setTracksInternalMute(tracksInternalMuted));
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // AudioFlingerServerAdapter
 AudioFlingerServerAdapter::AudioFlingerServerAdapter(
         const sp<AudioFlingerServerAdapter::Delegate>& delegate) : mDelegate(delegate) {
     setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    setInheritRt(true);
 }
 
 status_t AudioFlingerServerAdapter::onTransact(uint32_t code,
@@ -1474,6 +1480,11 @@ Status AudioFlingerServerAdapter::getAudioMixPort(const media::AudioPortFw &devi
     RETURN_BINDER_IF_ERROR(mDelegate->getAudioMixPort(&devicePortLegacy, &mixPortLegacy));
     *_aidl_return = VALUE_OR_RETURN_BINDER(legacy2aidl_audio_port_v7_AudioPortFw(mixPortLegacy));
     return Status::ok();
+}
+
+Status AudioFlingerServerAdapter::setTracksInternalMute(
+        const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) {
+    return Status::fromStatusT(mDelegate->setTracksInternalMute(tracksInternalMute));
 }
 
 } // namespace android

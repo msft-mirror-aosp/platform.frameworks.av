@@ -39,7 +39,8 @@ class VirtualCameraDevice
   explicit VirtualCameraDevice(
       uint32_t cameraId,
       const aidl::android::companion::virtualcamera::VirtualCameraConfiguration&
-          configuration);
+          configuration,
+      int32_t deviceId);
 
   virtual ~VirtualCameraDevice() override = default;
 
@@ -124,6 +125,9 @@ class VirtualCameraDevice
 
   // Default JPEG orientation.
   static constexpr uint8_t kDefaultJpegOrientation = 0;
+
+  // Lowest min fps advertised in supported fps ranges.
+  static constexpr int kMinFps = 1;
 
   // Default Make and Model for Exif
   static constexpr char kDefaultMakeAndModel[] = "Android Virtual Camera";

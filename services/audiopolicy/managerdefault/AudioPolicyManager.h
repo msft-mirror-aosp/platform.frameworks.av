@@ -103,7 +103,7 @@ public:
         virtual status_t setDeviceConnectionState(audio_policy_dev_state_t state,
                 const android::media::audio::common::AudioPort& port, audio_format_t encodedFormat);
         virtual audio_policy_dev_state_t getDeviceConnectionState(audio_devices_t device,
-                                                                              const char *device_address);
+                                                                  const char *device_address);
         virtual status_t handleDeviceConfigChange(audio_devices_t device,
                                                   const char *device_address,
                                                   const char *device_name,
@@ -151,6 +151,10 @@ public:
         virtual status_t stopInput(audio_port_handle_t portId);
         virtual void releaseInput(audio_port_handle_t portId);
         virtual void checkCloseInputs();
+        virtual status_t setDeviceAbsoluteVolumeEnabled(audio_devices_t deviceType,
+                                                        const char *address,
+                                                        bool enabled,
+                                                        audio_stream_type_t streamToDriveAbs);
         /**
          * @brief initStreamVolume: even if the engine volume files provides min and max, keep this
          * api for compatibility reason.
@@ -565,12 +569,36 @@ protected:
         status_t resetInputDevice(audio_io_handle_t input,
                                   audio_patch_handle_t *patchHandle = NULL);
 
-        // compute the actual volume for a given stream according to the requested index and a particular
-        // device
-        virtual float computeVolume(IVolumeCurves &curves,
-                                    VolumeSource volumeSource,
-                                    int index,
-                                    const DeviceTypeSet& deviceTypes);
+        /**
+         * Compute volume in DB that should be applied for a volume source and device types for a
+         * particular volume index.
+         *
+         * <p><b>Note:</b>Internally the compute method recursively calls itself to accurately
+         * determine the volume given the currently active sources and devices. Some of the
+         * interaction that require recursive computation are:
+         * <ul>
+         * <li>Match accessibility volume if ringtone volume is much louder</li>
+         * <li>If voice call is active cap other volumes (except ringtone and accessibility)</li>
+         * <li>Attenuate notification if headset is connected to prevent burst in user's ear</li>
+         * <li>Attenuate ringtone if headset is connected and music is not playing and speaker is
+         *      part of the devices to prevent burst in user's ear</li>
+         * <li>Limit music volume if headset is connected and notification is also active</li>
+         * </ul>
+         *
+         * @param curves volume curves to use for calculating volume value given the index
+         * @param volumeSource source (use case) of the volume
+         * @param index index to match in the volume curves for the calculation
+         * @param deviceTypes devices that should be considered in the volume curves for the
+         *        calculation
+         * @param computeInternalInteraction boolean indicating whether recursive volume computation
+         *        should continue within the volume computation. Defaults to {@code true} so the
+         *        volume interactions can be computed. Calls within the method should always set the
+         *        the value to {@code false} to prevent infinite recursion.
+         * @return computed volume in DB
+         */
+        virtual float computeVolume(IVolumeCurves &curves, VolumeSource volumeSource,
+                               int index, const DeviceTypeSet& deviceTypes,
+                               bool computeInternalInteraction = true);
 
         // rescale volume index from srcStream within range of dstStream
         int rescaleVolumeIndex(int srcIndex,
@@ -1359,6 +1387,20 @@ private:
 
         PortHandleVector getClientsForStream(audio_stream_type_t streamType) const;
         void invalidateStreams(StreamTypeVector streams) const;
+
+        bool checkHapticCompatibilityOnSpatializerOutput(const audio_config_t* config,
+                                                         audio_session_t sessionId) const;
+
+        void updateClientsInternalMute(const sp<SwAudioOutputDescriptor>& desc);
+
+        float adjustDeviceAttenuationForAbsVolume(IVolumeCurves &curves,
+                                                  VolumeSource volumeSource,
+                                                  int index,
+                                                  const DeviceTypeSet &deviceTypes);
+
+        // Contains for devices that support absolute volume the audio attributes
+        // corresponding to the streams that are driving the volume changes
+        std::unordered_map<audio_devices_t, audio_attributes_t> mAbsoluteVolumeDrivingStreams;
 };
 
 };

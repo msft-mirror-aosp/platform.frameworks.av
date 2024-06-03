@@ -66,7 +66,6 @@
 #include "util/EglProgram.h"
 #include "util/JpegUtil.h"
 #include "util/MetadataUtil.h"
-#include "util/TestPatternHelper.h"
 #include "util/Util.h"
 
 namespace android {
@@ -265,7 +264,8 @@ RequestSettings createSettingsFromMetadata(const CameraMetadata& metadata) {
       .fpsRange = getFpsRange(metadata),
       .captureIntent = getCaptureIntent(metadata).value_or(
           ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW),
-      .gpsCoordinates = getGpsCoordinates(metadata)};
+      .gpsCoordinates = getGpsCoordinates(metadata),
+      .aePrecaptureTrigger = getPrecaptureTrigger(metadata)};
 }
 
 }  // namespace
@@ -359,12 +359,9 @@ ndk::ScopedAStatus VirtualCameraSession::configureStreams(
       return cameraStatus(Status::ILLEGAL_ARGUMENT);
     }
     if (mRenderThread == nullptr) {
-      // If there's no client callback, start camera in test mode.
-      const bool testMode = mVirtualCameraClientCallback == nullptr;
       mRenderThread = std::make_unique<VirtualCameraRenderThread>(
           mSessionContext, resolutionFromInputConfig(*inputConfig),
-          virtualCamera->getMaxInputResolution(), mCameraDeviceCallback,
-          testMode);
+          virtualCamera->getMaxInputResolution(), mCameraDeviceCallback);
       mRenderThread->start();
       inputSurface = mRenderThread->getInputSurface();
     }
@@ -518,7 +515,7 @@ std::set<int> VirtualCameraSession::getStreamIds() const {
 
 ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
     const CaptureRequest& request) {
-  ALOGD("%s: request: %s", __func__, request.toString().c_str());
+  ALOGV("%s: request: %s", __func__, request.toString().c_str());
 
   std::shared_ptr<ICameraDeviceCallback> cameraCallback = nullptr;
   RequestSettings requestSettings;

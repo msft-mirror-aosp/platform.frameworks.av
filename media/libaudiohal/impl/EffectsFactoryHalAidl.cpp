@@ -31,6 +31,7 @@
 #include <system/audio_aidl_utils.h>
 #include <utils/Log.h>
 
+#include "AidlUtils.h"
 #include "EffectBufferHalAidl.h"
 #include "EffectHalAidl.h"
 #include "EffectProxy.h"
@@ -187,7 +188,6 @@ status_t EffectsFactoryHalAidl::createEffect(const effect_uuid_t* uuid, int32_t 
         aidlEffect = ndk::SharedRefBase::make<EffectProxy>(
                 aidlUuid, mProxyUuidDescriptorMap.at(aidlUuid) /* sub-effect descriptor list */,
                 mFactory);
-        mProxyList.emplace_back(std::static_pointer_cast<EffectProxy>(aidlEffect));
     } else {
         RETURN_STATUS_IF_ERROR(
                 statusTFromBinderStatus(mFactory->createEffect(aidlUuid, &aidlEffect)));
@@ -204,15 +204,9 @@ status_t EffectsFactoryHalAidl::createEffect(const effect_uuid_t* uuid, int32_t 
 }
 
 status_t EffectsFactoryHalAidl::dumpEffects(int fd) {
-    status_t ret = OK;
-    // record the error ret and continue dump as many effects as possible
-    for (const auto& proxy : mProxyList) {
-        if (status_t temp = BAD_VALUE; proxy && (temp = proxy->dump(fd, nullptr, 0)) != OK) {
-            ret = temp;
-        }
-    }
+    // TODO: b/333803769 improve the effect dump implementation
     RETURN_STATUS_IF_ERROR(mFactory->dump(fd, nullptr, 0));
-    return ret;
+    return OK;
 }
 
 status_t EffectsFactoryHalAidl::allocateBuffer(size_t size, sp<EffectBufferHalInterface>* buffer) {
@@ -356,14 +350,7 @@ std::shared_ptr<const effectsConfig::Processings> EffectsFactoryHalAidl::getProc
 // exports from a static library are optimized out unless actually used by
 // the shared library. See EffectsFactoryHalEntry.cpp.
 extern "C" void* createIEffectsFactoryImpl() {
-    auto serviceName = std::string(IFactory::descriptor) + "/default";
-    auto service = IFactory::fromBinder(
-            ndk::SpAIBinder(AServiceManager_waitForService(serviceName.c_str())));
-    if (!service) {
-        ALOGE("%s binder service %s not exist", __func__, serviceName.c_str());
-        return nullptr;
-    }
-    return new effect::EffectsFactoryHalAidl(service);
+    return new effect::EffectsFactoryHalAidl(getServiceInstance<IFactory>("default"));
 }
 
 } // namespace android

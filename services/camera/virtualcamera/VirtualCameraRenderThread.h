@@ -17,6 +17,7 @@
 #ifndef ANDROID_COMPANION_VIRTUALCAMERA_VIRTUALCAMERARENDERTHREAD_H
 #define ANDROID_COMPANION_VIRTUALCAMERA_VIRTUALCAMERARENDERTHREAD_H
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <future>
@@ -64,6 +65,8 @@ struct RequestSettings {
   camera_metadata_enum_android_control_capture_intent_t captureIntent =
       VirtualCameraDevice::kDefaultCaptureIntent;
   std::optional<GpsCoordinates> gpsCoordinates;
+  std::optional<camera_metadata_enum_android_control_ae_precapture_trigger>
+      aePrecaptureTrigger;
 };
 
 // Represents single capture request to fill set of buffers.
@@ -108,8 +111,7 @@ class VirtualCameraRenderThread {
       Resolution reportedSensorSize,
       std::shared_ptr<
           ::aidl::android::hardware::camera::device::ICameraDeviceCallback>
-          cameraDeviceCallback,
-      bool testMode = false);
+          cameraDeviceCallback);
 
   ~VirtualCameraRenderThread();
 
@@ -181,7 +183,6 @@ class VirtualCameraRenderThread {
 
   const Resolution mInputSurfaceSize;
   const Resolution mReportedSensorSize;
-  const int mTestMode;
 
   VirtualCameraSessionContext& mSessionContext;
 
@@ -193,6 +194,9 @@ class VirtualCameraRenderThread {
   std::condition_variable mCondVar;
   volatile bool mPendingExit GUARDED_BY(mLock);
 
+  // Acquisition timestamp of last frame.
+  std::atomic<uint64_t> mLastAcquisitionTimestampNanoseconds;
+
   // EGL helpers - constructed and accessed only from rendering thread.
   std::unique_ptr<EglDisplayContext> mEglDisplayContext;
   std::unique_ptr<EglTextureProgram> mEglTextureYuvProgram;
@@ -200,6 +204,7 @@ class VirtualCameraRenderThread {
   std::unique_ptr<EglSurfaceTexture> mEglSurfaceTexture;
 
   std::promise<sp<Surface>> mInputSurfacePromise;
+  std::shared_future<sp<Surface>> mInputSurfaceFuture;
 };
 
 }  // namespace virtualcamera

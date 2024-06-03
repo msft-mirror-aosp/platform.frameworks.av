@@ -21,7 +21,6 @@
 #include <android/hardware/BnCameraService.h>
 #include <android/hardware/BnSensorPrivacyListener.h>
 #include <android/hardware/ICameraServiceListener.h>
-#include <android/hardware/CameraIdRemapping.h>
 #include <android/hardware/camera2/BnCameraInjectionSession.h>
 #include <android/hardware/camera2/ICameraInjectionCallback.h>
 
@@ -55,12 +54,14 @@
 #include "utils/IPCTransport.h"
 #include "utils/CameraServiceProxyWrapper.h"
 #include "utils/AttributionAndPermissionUtils.h"
+#include "utils/VirtualDeviceCameraIdMapper.h"
 
 #include <set>
 #include <string>
 #include <list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <utility>
 #include <unordered_map>
@@ -150,14 +151,17 @@ public:
     /////////////////////////////////////////////////////////////////////
     // ICameraService
     // IMPORTANT: All binder calls that deal with logicalCameraId should use
-    // resolveCameraId(logicalCameraId) to arrive at the correct cameraId to
-    // perform the operation on (in case of Id Remapping).
-    virtual binder::Status     getNumberOfCameras(int32_t type, int32_t* numCameras);
+    // resolveCameraId(logicalCameraId, deviceId, devicePolicy) to arrive at the correct
+    // cameraId to perform the operation on (in case of contexts
+    // associated with virtual devices).
+    virtual binder::Status     getNumberOfCameras(int32_t type, int32_t deviceId,
+            int32_t devicePolicy, int32_t* numCameras);
 
-    virtual binder::Status     getCameraInfo(int cameraId, bool overrideToPortrait,
-            hardware::CameraInfo* cameraInfo) override;
+    virtual binder::Status     getCameraInfo(int cameraId, int rotationOverride,
+            int32_t deviceId, int32_t devicePolicy, hardware::CameraInfo* cameraInfo) override;
     virtual binder::Status     getCameraCharacteristics(const std::string& cameraId,
-            int targetSdkVersion, bool overrideToPortrait, CameraMetadata* cameraInfo) override;
+            int targetSdkVersion, int rotationOverride, int32_t deviceId,
+            int32_t devicePolicy, CameraMetadata* cameraInfo) override;
     virtual binder::Status     getCameraVendorTagDescriptor(
             /*out*/
             hardware::camera2::params::VendorTagDescriptor* desc);
@@ -168,15 +172,15 @@ public:
     virtual binder::Status     connect(const sp<hardware::ICameraClient>& cameraClient,
             int32_t cameraId, const std::string& clientPackageName,
             int32_t clientUid, int clientPid, int targetSdkVersion,
-            bool overrideToPortrait, bool forceSlowJpegMode,
-            /*out*/
-            sp<hardware::ICamera>* device) override;
+            int rotationOverride, bool forceSlowJpegMode, int32_t deviceId,
+            int32_t devicePolicy, /*out*/ sp<hardware::ICamera>* device) override;
 
     virtual binder::Status     connectDevice(
             const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
             const std::string& cameraId,
             const std::string& clientPackageName, const std::optional<std::string>& clientFeatureId,
-            int32_t clientUid, int scoreOffset, int targetSdkVersion, bool overrideToPortrait,
+            int32_t clientUid, int scoreOffset, int targetSdkVersion, int rotationOverride,
+            int32_t deviceId, int32_t devicePolicy,
             /*out*/
             sp<hardware::camera2::ICameraDeviceUser>* device);
 
@@ -192,7 +196,8 @@ public:
 
     virtual binder::Status isConcurrentSessionConfigurationSupported(
         const std::vector<hardware::camera2::utils::CameraIdAndSessionConfiguration>& sessions,
-        int targetSdkVersion, /*out*/bool* supported);
+        int targetSdkVersion, int32_t deviceId, int32_t devicePolicy,
+        /*out*/bool* supported);
 
     virtual binder::Status    getLegacyParameters(
             int32_t cameraId,
@@ -200,13 +205,14 @@ public:
             std::string* parameters);
 
     virtual binder::Status    setTorchMode(const std::string& cameraId, bool enabled,
-            const sp<IBinder>& clientBinder);
+            const sp<IBinder>& clientBinder, int32_t deviceId, int32_t devicePolicy);
 
     virtual binder::Status    turnOnTorchWithStrengthLevel(const std::string& cameraId,
-            int32_t torchStrength, const sp<IBinder>& clientBinder);
+            int32_t torchStrength, const sp<IBinder>& clientBinder, int32_t deviceId,
+            int32_t devicePolicy);
 
-    virtual binder::Status    getTorchStrengthLevel(const std::string& cameraId,
-            int32_t* torchStrength);
+    virtual binder::Status    getTorchStrengthLevel(const std::string& cameraId, int32_t deviceId,
+            int32_t devicePolicy, int32_t* torchStrength);
 
     virtual binder::Status    notifySystemEvent(int32_t eventId,
             const std::vector<int32_t>& args);
@@ -236,27 +242,25 @@ public:
     virtual binder::Status reportExtensionSessionStats(
             const hardware::CameraExtensionSessionStats& stats, std::string* sessionKey /*out*/);
 
-    virtual binder::Status remapCameraIds(const hardware::CameraIdRemapping&
-            cameraIdRemapping);
-
     virtual binder::Status injectSessionParams(
             const std::string& cameraId,
             const hardware::camera2::impl::CameraMetadataNative& sessionParams);
 
     virtual binder::Status createDefaultRequest(const std::string& cameraId, int templateId,
+            int32_t deviceId, int32_t devicePolicy,
             /*out*/
             hardware::camera2::impl::CameraMetadataNative* request);
 
     virtual binder::Status isSessionConfigurationWithParametersSupported(
-            const std::string& cameraId,
+            const std::string& cameraId, int targetSdkVersion,
             const SessionConfiguration& sessionConfiguration,
-            /*out*/
-            bool* supported);
+            int32_t deviceId, int32_t devicePolicy,
+            /*out*/ bool* supported);
 
     virtual binder::Status getSessionCharacteristics(
-            const std::string& cameraId, int targetSdkVersion, bool overrideToPortrait,
-            const SessionConfiguration& sessionConfiguration,
-            /*out*/ CameraMetadata* outMetadata);
+            const std::string& cameraId, int targetSdkVersion, int rotationOverride,
+            const SessionConfiguration& sessionConfiguration, int32_t deviceId,
+            int32_t devicePolicy, /*out*/ CameraMetadata* outMetadata);
 
     // Extra permissions checks
     virtual status_t    onTransact(uint32_t code, const Parcel& data,
@@ -299,7 +303,8 @@ public:
     /////////////////////////////////////////////////////////////////////
     // CameraDeviceFactory functionality
     std::pair<int, IPCTransport>    getDeviceVersion(const std::string& cameraId,
-            bool overrideToPortrait, int* portraitRotation,
+            int rotationOverride,
+            int* portraitRotation,
             int* facing = nullptr, int* orientation = nullptr);
 
     /////////////////////////////////////////////////////////////////////
@@ -349,7 +354,7 @@ public:
         }
 
         bool getOverrideToPortrait() const {
-            return mOverrideToPortrait;
+            return mRotationOverride == ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT;
         }
 
         // Disallows dumping over binder interface
@@ -453,7 +458,7 @@ public:
                 int clientPid,
                 uid_t clientUid,
                 int servicePid,
-                bool overrideToPortrait);
+                int rotationOverride);
 
         virtual ~BasicClient();
 
@@ -476,7 +481,7 @@ public:
         const pid_t                     mServicePid;
         bool                            mDisconnected;
         bool                            mUidIsTrusted;
-        bool                            mOverrideToPortrait;
+        int                             mRotationOverride;
 
         mutable Mutex                   mAudioRestrictionLock;
         int32_t                         mAudioRestriction;
@@ -568,7 +573,7 @@ public:
                 int clientPid,
                 uid_t clientUid,
                 int servicePid,
-                bool overrideToPortrait);
+                int rotationOverride);
         ~Client();
 
         // return our camera client
@@ -1000,7 +1005,8 @@ private:
             int api1CameraId, const std::string& clientPackageNameMaybe, bool systemNativeClient,
             const std::optional<std::string>& clientFeatureId, int clientUid, int clientPid,
             apiLevel effectiveApiLevel, bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
-            bool overrideToPortrait, bool forceSlowJpegMode, const std::string& originalCameraId,
+            int rotationOverride, bool forceSlowJpegMode,
+            const std::string& originalCameraId,
             /*out*/sp<CLIENT>& device);
 
     // Lock guarding camera service state
@@ -1022,6 +1028,10 @@ private:
     // Adds client logs during closed session to the file pointed by fd.
     void dumpClosedSessionClientLogs(int fd, const std::string& cameraId);
 
+    binder::Status isSessionConfigurationWithParametersSupportedUnsafe(
+            const std::string& cameraId, const SessionConfiguration& sessionConfiguration,
+            bool overrideForPerfClass, /*out*/ bool* supported);
+
     // Mapping from camera ID -> state for each device, map is protected by mCameraStatesLock
     std::map<std::string, std::shared_ptr<CameraState>> mCameraStates;
 
@@ -1029,44 +1039,18 @@ private:
     mutable Mutex mCameraStatesLock;
 
     /**
-     * Mapping from packageName -> {cameraIdToReplace -> newCameraIdtoUse}.
+     * Resolve the (potentially remapped) camera id for the given input camera id and the given
+     * device id and device policy (for the device associated with the context of the caller).
      *
-     * This specifies that for packageName, for every binder operation targeting
-     * cameraIdToReplace, use newCameraIdToUse instead.
+     * For any context associated with a virtual device with custom camera policy, this will return
+     * the actual camera id if inputCameraId corresponds to the mapped id of a virtual camera
+     * (for virtual devices with custom camera policy, the back and front virtual cameras of that
+     * device would have 0 and 1 respectively as their mapped camera id).
      */
-    typedef std::map<std::string, std::map<std::string, std::string>> TCameraIdRemapping;
-    TCameraIdRemapping mCameraIdRemapping{};
-    /** Mutex guarding mCameraIdRemapping. */
-    Mutex mCameraIdRemappingLock;
-
-    /** Parses cameraIdRemapping parcelable into the native cameraIdRemappingMap. */
-    binder::Status parseCameraIdRemapping(
-            const hardware::CameraIdRemapping& cameraIdRemapping,
-            /* out */ TCameraIdRemapping* cameraIdRemappingMap);
-
-    /**
-     * Resolve the (potentially remapped) camera Id to use for packageName.
-     *
-     * This returns the Camera Id to use in case inputCameraId was remapped to a
-     * different Id for the given packageName. Otherwise, it returns the inputCameraId.
-     *
-     * If the packageName is not provided, it will be inferred from the clientUid.
-     */
-    std::string resolveCameraId(
+    std::optional<std::string> resolveCameraId(
             const std::string& inputCameraId,
-            int clientUid,
-            const std::string& packageName = "");
-
-    /**
-     * Updates the state of mCameraIdRemapping, while disconnecting active clients as necessary.
-     */
-    void remapCameraIds(const TCameraIdRemapping& cameraIdRemapping);
-
-    /**
-     * Finds the Camera Ids that were remapped to the inputCameraId for the given client.
-     */
-    std::vector<std::string> findOriginalIdsForRemappedCameraId(
-        const std::string& inputCameraId, int clientUid);
+            int32_t deviceId,
+            int32_t devicePolicy);
 
     // Circular buffer for storing event logging for dumps
     RingBuffer<std::string> mEventLog;
@@ -1122,13 +1106,13 @@ private:
      * Returns the underlying camera Id string mapped to a camera id int
      * Empty string is returned when the cameraIdInt is invalid.
      */
-    std::string cameraIdIntToStr(int cameraIdInt);
+    std::string cameraIdIntToStr(int cameraIdInt, int32_t deviceId, int32_t devicePolicy);
 
     /**
      * Returns the underlying camera Id string mapped to a camera id int
      * Empty string is returned when the cameraIdInt is invalid.
      */
-    std::string cameraIdIntToStrLocked(int cameraIdInt);
+    std::string cameraIdIntToStrLocked(int cameraIdInt, int32_t deviceId, int32_t devicePolicy);
 
     /**
      * Remove a single client corresponding to the given camera id from the list of active clients.
@@ -1328,6 +1312,8 @@ private:
      *
      * This method must be idempotent.
      * This method acquires mStatusLock and mStatusListenerLock.
+     * For any virtual camera, this method must pass its mapped camera id and device id to
+     * ICameraServiceListeners (using mVirtualDeviceCameraIdMapper).
      */
     void updateStatus(StatusInternal status,
             const std::string& cameraId,
@@ -1381,7 +1367,8 @@ private:
     // notify physical camera status when the physical camera is public.
     // Expects mStatusListenerLock to be locked.
     void notifyPhysicalCameraStatusLocked(int32_t status, const std::string& physicalCameraId,
-            const std::list<std::string>& logicalCameraIds, SystemCameraKind deviceKind);
+            const std::list<std::string>& logicalCameraIds, SystemCameraKind deviceKind,
+            int32_t virtualDeviceId);
 
     // get list of logical cameras which are backed by physicalCameraId
     std::list<std::string> getLogicalCameras(const std::string& physicalCameraId);
@@ -1496,6 +1483,12 @@ private:
     // responsibility to acquire mLogLock before calling this functions.
     bool isClientWatchedLocked(const BasicClient *client);
 
+    // Filters out fingerprintable keys if the calling process does not have CAMERA permission.
+    // Note: function caller should ensure that shouldRejectSystemCameraConnection is checked
+    // for the calling process before calling this function.
+    binder::Status filterSensitiveMetadataIfNeeded(const std::string& cameraId,
+                                                   CameraMetadata* metadata);
+
     /**
      * Get the current system time as a formatted string.
      */
@@ -1507,7 +1500,7 @@ private:
             const std::string& cameraId, int api1CameraId, int facing, int sensorOrientation,
             int clientPid, uid_t clientUid, int servicePid,
             std::pair<int, IPCTransport> deviceVersionAndIPCTransport, apiLevel effectiveApiLevel,
-            bool overrideForPerfClass, bool overrideToPortrait, bool forceSlowJpegMode,
+            bool overrideForPerfClass, int rotationOverride, bool forceSlowJpegMode,
             const std::string& originalCameraId,
             /*out*/ sp<BasicClient>* client);
 
@@ -1617,6 +1610,8 @@ private:
     int64_t mDeviceState;
 
     void updateTorchUidMapLocked(const std::string& cameraId, int uid);
+
+    VirtualDeviceCameraIdMapper mVirtualDeviceCameraIdMapper;
 };
 
 } // namespace android
