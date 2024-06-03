@@ -136,8 +136,8 @@ status_t Hal2AidlMapper::createOrUpdatePatch(
     // 'sinks' will not be updated because 'setAudioPatch' only needs IDs. Here we log
     // the source arguments, where only the audio configuration and device specifications
     // are relevant.
-    ALOGD("%s: [disregard IDs] sources: %s, sinks: %s",
-            __func__, ::android::internal::ToString(sources).c_str(),
+    ALOGD("%s: patch ID: %d, [disregard IDs] sources: %s, sinks: %s",
+            __func__, *patchId, ::android::internal::ToString(sources).c_str(),
             ::android::internal::ToString(sinks).c_str());
     auto fillPortConfigs = [&](
             const std::vector<AudioPortConfig>& configs,
@@ -209,11 +209,24 @@ status_t Hal2AidlMapper::createOrUpdatePatch(
         // that there can only be one patch for an I/O thread.
         PatchMatch match = sourceIsDevice && sinkIsDevice ?
                 MATCH_BOTH : (sourceIsDevice ? MATCH_SINKS : MATCH_SOURCES);
+        auto requestedPatch = patch;
         RETURN_STATUS_IF_ERROR(findOrCreatePatch(patch, match,
                                                  &patch, &created));
         // No cleanup of the patch is needed, it is managed by the framework.
         *patchId = patch.id;
         if (!created) {
+            requestedPatch.id = patch.id;
+            if (patch != requestedPatch) {
+                ALOGI("%s: Updating transient patch. Current: %s, new: %s",
+                        __func__, patch.toString().c_str(), requestedPatch.toString().c_str());
+                // Since matching may be done by mix port only, update the patch if the device port
+                // config has changed.
+                patch = requestedPatch;
+                RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+                                mModule->setAudioPatch(patch, &patch)));
+                existingPatchIt = mPatches.find(patch.id);
+                existingPatchIt->second = patch;
+            }
             // The framework might have "created" a patch which already existed due to
             // stream creation. Need to release the ownership from the stream.
             for (auto& s : mStreams) {
@@ -458,7 +471,7 @@ status_t Hal2AidlMapper::findPortConfig(const AudioDevice& device, AudioPortConf
         *portConfig = it->second;
         return OK;
     }
-    ALOGE("%s: could not find a configured device port for device %s",
+    ALOGE("%s: could not find a device port config for device %s",
             __func__, device.toString().c_str());
     return BAD_VALUE;
 }
@@ -1037,6 +1050,13 @@ status_t Hal2AidlMapper::setDevicePortConnectedState(const AudioPort& devicePort
                 }
             }
             resetUnusedPortConfigs();
+            // Patches created by Hal2AidlMapper during stream creation and not "claimed"
+            // by the framework must not be surfaced to it.
+            for (auto& s : mStreams) {
+                if (auto it = releasedPatches.find(s.second.second); it != releasedPatches.end()) {
+                    releasedPatches.erase(it);
+                }
+            }
             mFwkPatches.merge(releasedPatches);
             LOG_ALWAYS_FATAL_IF(!releasedPatches.empty(),
                     "mFwkPatches already contains some of released patches");
