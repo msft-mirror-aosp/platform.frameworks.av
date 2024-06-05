@@ -208,6 +208,9 @@ status_t MediaMuxer::writeSampleData(const sp<ABuffer> &buffer, size_t trackInde
         ALOGE("WriteSampleData() get an NULL buffer.");
         return -EINVAL;
     }
+    if (!mWriter->isSampleMetadataValid(trackIndex, timeUs)) {
+        return -EINVAL;
+    }
     {
         /* As MediaMuxer's writeSampleData handles inputs from multiple tracks,
          * limited the scope of mMuxerLock to this inner block so that the
@@ -244,6 +247,11 @@ status_t MediaMuxer::writeSampleData(const sp<ABuffer> &buffer, size_t trackInde
 
     if (flags & MediaCodec::BUFFER_FLAG_MUXER_DATA) {
         sampleMetaData.setInt32(kKeyIsMuxerData, 1);
+    }
+
+    if (flags & MediaCodec::BUFFER_FLAG_CODECCONFIG) {
+        sampleMetaData.setInt32(kKeyIsCodecConfig, true);
+        ALOGV("BUFFER_FLAG_CODEC_CONFIG");
     }
 
     if (flags & MediaCodec::BUFFER_FLAG_EOS) {

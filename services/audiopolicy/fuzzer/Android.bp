@@ -17,6 +17,7 @@
  ******************************************************************************/
 
 package {
+    default_team: "trendy_team_android_media_audio_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -36,25 +37,25 @@ cc_fuzz {
     shared_libs: [
         "android.hardware.audio.common-util",
         "capture_state_listener-aidl-cpp",
+        "framework-permission-aidl-cpp",
         "libaudioclient",
         "libaudiofoundation",
+        "libaudiopolicy",
+        "libaudiopolicycomponents",
+        "libaudiopolicymanagerdefault",
         "libbase",
+        "libbinder",
         "libcutils",
-        "libhidlbase",
         "libdl",
+        "libhidlbase",
         "liblog",
         "libmedia_helper",
         "libmediametrics",
         "libutils",
         "libxml2",
-        "libbinder",
-        "libaudiopolicy",
-        "libaudiopolicymanagerdefault",
-        "framework-permission-aidl-cpp",
     ],
     static_libs: [
         "android.hardware.audio.common@7.0-enums",
-        "libaudiopolicycomponents",
     ],
     header_libs: [
         "libaudiopolicycommon",
@@ -63,7 +64,7 @@ cc_fuzz {
     ],
     data: [":audiopolicyfuzzer_configuration_files"],
     fuzz_config: {
-        cc: ["mnaganov@google.com"],
+        cc: ["android-audio-fuzzing-reports@google.com"],
         componentid: 155276,
         hotlists: [
             "4593311",

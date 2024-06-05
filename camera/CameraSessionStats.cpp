@@ -16,10 +16,12 @@
 
 // #define LOG_NDEBUG 0
 #define LOG_TAG "CameraSessionStats"
+
 #include <utils/Log.h>
 #include <utils/String16.h>
 
 #include <camera/CameraSessionStats.h>
+#include <camera/StringUtils.h>
 
 #include <binder/Parcel.h>
 
@@ -282,8 +284,8 @@ CameraSessionStats::CameraSessionStats() :
         mSessionIndex(0),
         mCameraExtensionSessionStats() {}
 
-CameraSessionStats::CameraSessionStats(const String16& cameraId,
-        int facing, int newCameraState, const String16& clientName,
+CameraSessionStats::CameraSessionStats(const std::string& cameraId,
+        int facing, int newCameraState, const std::string& clientName,
         int apiLevel, bool isNdk, int32_t latencyMs, int64_t logId) :
                 mCameraId(cameraId),
                 mFacing(facing),
@@ -413,6 +415,18 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
         return err;
     }
 
+    bool usedUltraWide = false;
+    if ((err = parcel->readBool(&usedUltraWide)) != OK) {
+        ALOGE("%s: Failed to read ultrawide usage from parcel", __FUNCTION__);
+        return err;
+    }
+
+    bool usedZoomOverride = false;
+    if ((err = parcel->readBool(&usedZoomOverride)) != OK) {
+        ALOGE("%s: Failed to read zoom override usage from parcel", __FUNCTION__);
+        return err;
+    }
+
     int32_t sessionIdx;
     if ((err = parcel->readInt32(&sessionIdx)) != OK) {
         ALOGE("%s: Failed to read session index from parcel", __FUNCTION__);
@@ -425,10 +439,20 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
         return err;
     }
 
-    mCameraId = id;
+    auto mostRequestedFpsRange = std::make_pair(0,0);
+    if ((err = parcel->readInt32(&mostRequestedFpsRange.first)) != OK) {
+        ALOGE("%s: Failed to read frame rate range min info!", __FUNCTION__);
+        return err;
+    }
+    if ((err = parcel->readInt32(&mostRequestedFpsRange.second)) != OK) {
+        ALOGE("%s: Failed to read frame rate range max info!", __FUNCTION__);
+        return err;
+    }
+
+    mCameraId = toStdString(id);
     mFacing = facing;
     mNewCameraState = newCameraState;
-    mClientName = clientName;
+    mClientName = toStdString(clientName);
     mApiLevel = apiLevel;
     mIsNdk = isNdk;
     mLatencyMs = latencyMs;
@@ -440,10 +464,13 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
     mResultErrorCount = resultErrorCount;
     mDeviceError = deviceError;
     mStreamStats = std::move(streamStats);
-    mUserTag = userTag;
+    mUserTag = toStdString(userTag);
     mVideoStabilizationMode = videoStabilizationMode;
+    mUsedUltraWide = usedUltraWide;
+    mUsedZoomOverride = usedZoomOverride;
     mSessionIndex = sessionIdx;
     mCameraExtensionSessionStats = extStats;
+    mMostRequestedFpsRange = mostRequestedFpsRange;
 
     return OK;
 }
@@ -456,7 +483,7 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
 
     status_t err = OK;
 
-    if ((err = parcel->writeString16(mCameraId)) != OK) {
+    if ((err = parcel->writeString16(toString16(mCameraId))) != OK) {
         ALOGE("%s: Failed to write camera id!", __FUNCTION__);
         return err;
     }
@@ -471,7 +498,7 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
         return err;
     }
 
-    if ((err = parcel->writeString16(mClientName)) != OK) {
+    if ((err = parcel->writeString16(toString16(mClientName))) != OK) {
         ALOGE("%s: Failed to write client name!", __FUNCTION__);
         return err;
     }
@@ -531,13 +558,23 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
         return err;
     }
 
-    if ((err = parcel->writeString16(mUserTag)) != OK) {
+    if ((err = parcel->writeString16(toString16(mUserTag))) != OK) {
         ALOGE("%s: Failed to write user tag!", __FUNCTION__);
         return err;
     }
 
     if ((err = parcel->writeInt32(mVideoStabilizationMode)) != OK) {
         ALOGE("%s: Failed to write video stabilization mode!", __FUNCTION__);
+        return err;
+    }
+
+    if ((err = parcel->writeBool(mUsedUltraWide)) != OK) {
+        ALOGE("%s: Failed to write ultrawide usage!", __FUNCTION__);
+        return err;
+    }
+
+    if ((err = parcel->writeBool(mUsedZoomOverride)) != OK) {
+        ALOGE("%s: Failed to write zoom override usage!", __FUNCTION__);
         return err;
     }
 
@@ -548,6 +585,16 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
 
     if ((err = mCameraExtensionSessionStats.writeToParcel(parcel)) != OK) {
         ALOGE("%s: Failed to write extension sessions stats!", __FUNCTION__);
+        return err;
+    }
+
+    if ((err = parcel->writeInt32(mMostRequestedFpsRange.first)) != OK) {
+        ALOGE("%s: Failed to write frame rate range min info!", __FUNCTION__);
+        return err;
+    }
+
+    if ((err = parcel->writeInt32(mMostRequestedFpsRange.second)) != OK) {
+        ALOGE("%s: Failed to write frame rate range max info!", __FUNCTION__);
         return err;
     }
 

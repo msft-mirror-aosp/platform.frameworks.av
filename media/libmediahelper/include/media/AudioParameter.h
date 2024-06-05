@@ -41,6 +41,7 @@ public:
     //  keyInputSource: to change audio input source, value is an int in audio_source_t
     //     (defined in media/mediarecorder.h)
     //  keyScreenState: either "on" or "off"
+    //  keyScreenRotation: one of: 0, 90, 180, 270
     static const char * const keyRouting;
     static const char * const keySamplingRate;
     static const char * const keyFormat;
@@ -48,9 +49,9 @@ public:
     static const char * const keyFrameCount;
     static const char * const keyInputSource;
     static const char * const keyScreenState;
+    static const char * const keyScreenRotation;
 
-    // TODO(b/73175392) consider improvement to AIDL StreamOut interface.
-    // keyClosing: "true" when AudioOutputDescriptor is closing.  Used by A2DP HAL.
+    // keyClosing: "true" on AudioFlinger Thread preExit.  Used by A2DP HAL.
     // keyExiting: "1" on AudioFlinger Thread preExit.  Used by remote_submix and A2DP HAL.
     static const char * const keyClosing;
     static const char * const keyExiting;
@@ -67,6 +68,16 @@ public:
     static const char * const keyBtHfpEnable;
     static const char * const keyBtHfpSamplingRate;
     static const char * const keyBtHfpVolume;
+
+    static const char * const keyTtyMode;
+    static const char * const valueTtyModeOff;
+    static const char * const valueTtyModeFull;
+    static const char * const valueTtyModeHco;
+    static const char * const valueTtyModeVco;
+
+    static const char * const keyHacSetting;
+    static const char * const valueHacOff;
+    static const char * const valueHacOn;
 
     //  keyHwAvSync: get HW synchronization source identifier from a device
     //  keyMonoOutput: Enable mono audio playback
@@ -110,10 +121,14 @@ public:
     // keyReconfigA2dp: Ask HwModule to reconfigure A2DP offloaded codec
     // keyReconfigA2dpSupported: Query if HwModule supports A2DP offload codec config
     // keyBtLeSuspended: 'true' or 'false'
+    // keyReconfigLe: Ask HwModule to reconfigure LE offloaded codec
+    // keyReconfigLeSupported: Query if HwModule supports LE offload codec config
     static const char * const keyBtA2dpSuspended;
     static const char * const keyReconfigA2dp;
     static const char * const keyReconfigA2dpSupported;
     static const char * const keyBtLeSuspended;
+    static const char * const keyReconfigLe;
+    static const char * const keyReconfigLeSupported;
 
     // For querying device supported encapsulation capabilities. All returned values are integer,
     // which are bit fields composed from using encapsulation capability values as position bits.

@@ -14,21 +14,21 @@
  * limitations under the License.
  */
 
-#include "BundleTypes.h"
-#define LOG_TAG "EffectBundleAidl"
-#include <Utils.h>
 #include <algorithm>
+#include <limits.h>
 #include <unordered_set>
+#define LOG_TAG "EffectBundleAidl"
 
-#include <android-base/logging.h>
-#include <fmq/AidlMessageQueue.h>
 #include <audio_effects/effect_bassboost.h>
 #include <audio_effects/effect_equalizer.h>
 #include <audio_effects/effect_virtualizer.h>
-
-#include "EffectBundleAidl.h"
+#include <android-base/logging.h>
+#include <fmq/AidlMessageQueue.h>
 #include <LVM.h>
-#include <limits.h>
+#include <Utils.h>
+
+#include "BundleTypes.h"
+#include "EffectBundleAidl.h"
 
 using aidl::android::hardware::audio::effect::getEffectImplUuidBassBoostBundle;
 using aidl::android::hardware::audio::effect::Descriptor;
@@ -55,7 +55,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<EffectBundleAidl>(*uuid);
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -83,7 +82,6 @@ extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descrip
 namespace aidl::android::hardware::audio::effect {
 
 EffectBundleAidl::EffectBundleAidl(const AudioUuid& uuid) {
-    LOG(DEBUG) << __func__ << uuid.toString();
     if (uuid == getEffectImplUuidEqualizerBundle()) {
         mType = lvm::BundleEffectType::EQUALIZER;
         mDescriptor = &lvm::kEqualizerDesc;
@@ -107,12 +105,10 @@ EffectBundleAidl::EffectBundleAidl(const AudioUuid& uuid) {
 
 EffectBundleAidl::~EffectBundleAidl() {
     cleanUp();
-    LOG(DEBUG) << __func__;
 }
 
 ndk::ScopedAStatus EffectBundleAidl::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << _aidl_return->toString();
     *_aidl_return = *mDescriptor;
     return ndk::ScopedAStatus::ok();
 }
@@ -154,7 +150,6 @@ ndk::ScopedAStatus EffectBundleAidl::setParameterCommon(const Parameter& param) 
 }
 
 ndk::ScopedAStatus EffectBundleAidl::setParameterSpecific(const Parameter::Specific& specific) {
-    LOG(DEBUG) << __func__ << " specific " << specific.toString();
     RETURN_IF(!mContext, EX_NULL_POINTER, "nullContext");
 
     auto tag = specific.getTag();
@@ -355,7 +350,7 @@ ndk::ScopedAStatus EffectBundleAidl::getParameterVolume(const Volume::Id& id,
     auto tag = id.get<Volume::Id::commonTag>();
     switch (tag) {
         case Volume::levelDb: {
-            volParam.set<Volume::levelDb>(mContext->getVolumeLevel());
+            volParam.set<Volume::levelDb>(static_cast<int>(mContext->getVolumeLevel()));
             break;
         }
         case Volume::mute: {
@@ -384,6 +379,7 @@ ndk::ScopedAStatus EffectBundleAidl::getParameterVirtualizer(const Virtualizer::
 
     if (id.getTag() == Virtualizer::Id::speakerAnglesPayload) {
         auto angles = mContext->getSpeakerAngles(id.get<Virtualizer::Id::speakerAnglesPayload>());
+        RETURN_IF(angles.size() == 0, EX_ILLEGAL_ARGUMENT, "getSpeakerAnglesFailed");
         Virtualizer param = Virtualizer::make<Virtualizer::speakerAngles>(angles);
         specific->set<Parameter::Specific::virtualizer>(param);
         return ndk::ScopedAStatus::ok();
@@ -424,10 +420,6 @@ std::shared_ptr<EffectContext> EffectBundleAidl::createContext(const Parameter::
     return mContext;
 }
 
-std::shared_ptr<EffectContext> EffectBundleAidl::getContext() {
-    return mContext;
-}
-
 RetCode EffectBundleAidl::releaseContext() {
     if (mContext) {
         GlobalSession::getGlobalSession().releaseSession(mType, mContext->getSessionId());
@@ -461,7 +453,7 @@ ndk::ScopedAStatus EffectBundleAidl::commandImpl(CommandId command) {
 IEffect::Status EffectBundleAidl::effectProcessImpl(float* in, float* out, int sampleToProcess) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, sampleToProcess);
+    return mContext->process(in, out, sampleToProcess);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

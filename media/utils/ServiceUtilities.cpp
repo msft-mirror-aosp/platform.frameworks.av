@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+//#define LOG_NDEBUG 0
 #define LOG_TAG "ServiceUtilities"
 
 #include <audio_utils/clock.h>
@@ -85,7 +86,7 @@ int32_t getOpForSource(audio_source_t source) {
 }
 
 std::optional<AttributionSourceState> resolveAttributionSource(
-        const AttributionSourceState& callerAttributionSource) {
+        const AttributionSourceState& callerAttributionSource, const uint32_t virtualDeviceId) {
     AttributionSourceState nextAttributionSource = callerAttributionSource;
 
     if (!nextAttributionSource.packageName.has_value()) {
@@ -100,6 +101,7 @@ std::optional<AttributionSourceState> resolveAttributionSource(
             return std::nullopt;
         }
     }
+    nextAttributionSource.deviceId = virtualDeviceId;
 
     AttributionSourceState myAttributionSource;
     myAttributionSource.uid = VALUE_OR_FATAL(android::legacy2aidl_uid_t_int32_t(getuid()));
@@ -108,13 +110,15 @@ std::optional<AttributionSourceState> resolveAttributionSource(
     // audioserver to the app ops system
     static sp<BBinder> appOpsToken = sp<BBinder>::make();
     myAttributionSource.token = appOpsToken;
+    myAttributionSource.deviceId = virtualDeviceId;
     myAttributionSource.next.push_back(nextAttributionSource);
 
     return std::optional<AttributionSourceState>{myAttributionSource};
 }
 
-static bool checkRecordingInternal(const AttributionSourceState& attributionSource,
-        const String16& msg, bool start, audio_source_t source) {
+    static bool checkRecordingInternal(const AttributionSourceState &attributionSource,
+                                       const uint32_t virtualDeviceId,
+                                       const String16 &msg, bool start, audio_source_t source) {
     // Okay to not track in app ops as audio server or media server is us and if
     // device is rooted security model is considered compromised.
     // system_server loses its RECORD_AUDIO permission when a secondary
@@ -126,8 +130,8 @@ static bool checkRecordingInternal(const AttributionSourceState& attributionSour
     // We specify a pid and uid here as mediaserver (aka MediaRecorder or StageFrightRecorder)
     // may open a record track on behalf of a client. Note that pid may be a tid.
     // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
-    const std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource);
+    std::optional<AttributionSourceState> resolvedAttributionSource =
+            resolveAttributionSource(attributionSource, virtualDeviceId);
     if (!resolvedAttributionSource.has_value()) {
         return false;
     }
@@ -149,16 +153,30 @@ static bool checkRecordingInternal(const AttributionSourceState& attributionSour
     return permitted;
 }
 
-bool recordingAllowed(const AttributionSourceState& attributionSource, audio_source_t source) {
-    return checkRecordingInternal(attributionSource, String16(), /*start*/ false, source);
+static constexpr int DEVICE_ID_DEFAULT = 0;
+
+bool recordingAllowed(const AttributionSourceState &attributionSource, audio_source_t source) {
+    return checkRecordingInternal(attributionSource, DEVICE_ID_DEFAULT, String16(), /*start*/ false,
+                                  source);
 }
 
-bool startRecording(const AttributionSourceState& attributionSource, const String16& msg,
-        audio_source_t source) {
-    return checkRecordingInternal(attributionSource, msg, /*start*/ true, source);
+bool recordingAllowed(const AttributionSourceState &attributionSource,
+                      const uint32_t virtualDeviceId,
+                      audio_source_t source) {
+    return checkRecordingInternal(attributionSource, virtualDeviceId,
+                                  String16(), /*start*/ false, source);
 }
 
-void finishRecording(const AttributionSourceState& attributionSource, audio_source_t source) {
+bool startRecording(const AttributionSourceState& attributionSource,
+                    const uint32_t virtualDeviceId,
+                    const String16& msg,
+                    audio_source_t source) {
+    return checkRecordingInternal(attributionSource, virtualDeviceId, msg, /*start*/ true,
+                                  source);
+}
+
+void finishRecording(const AttributionSourceState &attributionSource, uint32_t virtualDeviceId,
+                     audio_source_t source) {
     // Okay to not track in app ops as audio server is us and if
     // device is rooted security model is considered compromised.
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
@@ -168,7 +186,7 @@ void finishRecording(const AttributionSourceState& attributionSource, audio_sour
     // may open a record track on behalf of a client. Note that pid may be a tid.
     // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
     const std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource);
+            resolveAttributionSource(attributionSource, virtualDeviceId);
     if (!resolvedAttributionSource.has_value()) {
         return;
     }
@@ -392,7 +410,7 @@ bool mustAnonymizeBluetoothAddress(
         return false;
     }
     const std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource);
+            resolveAttributionSource(attributionSource, DEVICE_ID_DEFAULT);
     if (!resolvedAttributionSource.has_value()) {
         return true;
     }
@@ -446,7 +464,7 @@ std::optional<bool> MediaPackageManager::doIsAllowed(uid_t uid) {
     PermissionController{}.getPackagesForUid(uid, str16PackageNames);
     std::vector<std::string> packageNames;
     for (const auto& str16PackageName : str16PackageNames) {
-        packageNames.emplace_back(String8(str16PackageName).string());
+        packageNames.emplace_back(String8(str16PackageName).c_str());
     }
     if (packageNames.empty()) {
         ALOGW("%s: Playback capture for uid %u is denied as no package name could be retrieved "

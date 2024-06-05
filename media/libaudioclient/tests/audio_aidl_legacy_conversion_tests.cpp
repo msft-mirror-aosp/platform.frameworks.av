@@ -43,7 +43,9 @@ using media::audio::common::AudioFormatType;
 using media::audio::common::AudioGain;
 using media::audio::common::AudioGainConfig;
 using media::audio::common::AudioGainMode;
+using media::audio::common::AudioInputFlags;
 using media::audio::common::AudioIoFlags;
+using media::audio::common::AudioOutputFlags;
 using media::audio::common::AudioPortDeviceExt;
 using media::audio::common::AudioProfile;
 using media::audio::common::AudioStandard;
@@ -94,6 +96,11 @@ AudioChannelLayout make_ACL_Stereo() {
             AudioChannelLayout::LAYOUT_STEREO);
 }
 
+AudioChannelLayout make_ACL_Tri() {
+    return AudioChannelLayout::make<AudioChannelLayout::Tag::layoutMask>(
+            AudioChannelLayout::LAYOUT_TRI);
+}
+
 AudioChannelLayout make_ACL_LayoutArbitrary() {
     return AudioChannelLayout::make<AudioChannelLayout::Tag::layoutMask>(
             // Use channels that exist both for input and output,
@@ -138,7 +145,8 @@ AudioDeviceDescription make_ADD_MicIn() {
 }
 
 AudioDeviceDescription make_ADD_RSubmixIn() {
-    return make_AudioDeviceDescription(AudioDeviceType::IN_SUBMIX);
+    return make_AudioDeviceDescription(AudioDeviceType::IN_SUBMIX,
+                                       AudioDeviceDescription::CONNECTION_VIRTUAL());
 }
 
 AudioDeviceDescription make_ADD_DefaultOut() {
@@ -311,8 +319,8 @@ INSTANTIATE_TEST_SUITE_P(
         AudioChannelLayoutRoundTrip, AudioChannelLayoutRoundTripTest,
         testing::Combine(
                 testing::Values(AudioChannelLayout{}, make_ACL_Invalid(), make_ACL_Stereo(),
-                                make_ACL_LayoutArbitrary(), make_ACL_ChannelIndex2(),
-                                make_ACL_ChannelIndexArbitrary(),
+                                make_ACL_Tri(), make_ACL_LayoutArbitrary(),
+                                make_ACL_ChannelIndex2(), make_ACL_ChannelIndexArbitrary(),
                                 AudioChannelLayout::make<AudioChannelLayout::Tag::layoutMask>(
                                         AudioChannelLayout::CHANNEL_FRONT_LEFT),
                                 AudioChannelLayout::make<AudioChannelLayout::Tag::layoutMask>(
@@ -844,4 +852,28 @@ TEST(AudioMicrophoneInfoFw, ChannelMapping) {
     EXPECT_EQ(MicrophoneDynamicInfo::ChannelMapping::DIRECT, aidl.dynamic.channelMapping[1]);
     EXPECT_EQ(MicrophoneDynamicInfo::ChannelMapping::UNUSED, aidl.dynamic.channelMapping[2]);
     EXPECT_EQ(MicrophoneDynamicInfo::ChannelMapping::PROCESSED, aidl.dynamic.channelMapping[3]);
+}
+
+TEST(AudioInputFlags, Aidl2Legacy2Aidl) {
+    for (auto flag : enum_range<AudioInputFlags>()) {
+        int32_t aidlMask = 1 << static_cast<int32_t>(flag);
+        auto convMask = aidl2legacy_int32_t_audio_input_flags_t_mask(aidlMask);
+        ASSERT_TRUE(convMask.ok());
+        ASSERT_EQ(1, __builtin_popcount(convMask.value()));
+        auto convFlag = legacy2aidl_audio_input_flags_t_AudioInputFlags(convMask.value());
+        ASSERT_TRUE(convFlag.ok());
+        EXPECT_EQ(flag, convFlag.value());
+    }
+}
+
+TEST(AudioOutputFlags, Aidl2Legacy2Aidl) {
+    for (auto flag : enum_range<AudioOutputFlags>()) {
+        int32_t aidlMask = 1 << static_cast<int32_t>(flag);
+        auto convMask = aidl2legacy_int32_t_audio_output_flags_t_mask(aidlMask);
+        ASSERT_TRUE(convMask.ok());
+        ASSERT_EQ(1, __builtin_popcount(convMask.value()));
+        auto convFlag = legacy2aidl_audio_output_flags_t_AudioOutputFlags(convMask.value());
+        ASSERT_TRUE(convFlag.ok());
+        EXPECT_EQ(flag, convFlag.value());
+    }
 }

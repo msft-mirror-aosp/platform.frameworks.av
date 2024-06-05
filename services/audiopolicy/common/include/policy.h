@@ -17,6 +17,7 @@
 #pragma once
 
 #include <system/audio.h>
+#include <set>
 #include <vector>
 
 #include <media/AudioContainers.h>
@@ -26,6 +27,10 @@ namespace android {
 using StreamTypeVector = std::vector<audio_stream_type_t>;
 
 static const audio_attributes_t defaultAttr = AUDIO_ATTRIBUTES_INITIALIZER;
+
+static const std::set<audio_usage_t > gHighPriorityUseCases = {
+        AUDIO_USAGE_ALARM, AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE
+};
 
 } // namespace android
 
@@ -115,7 +120,7 @@ static inline bool device_distinguishes_on_address(audio_devices_t device)
  */
 static inline bool device_has_encoding_capability(audio_devices_t device)
 {
-    return audio_is_a2dp_out_device(device);
+    return audio_is_a2dp_out_device(device) || audio_is_ble_out_device(device);
 }
 
 /**

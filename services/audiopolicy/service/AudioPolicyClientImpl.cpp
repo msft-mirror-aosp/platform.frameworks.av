@@ -164,6 +164,8 @@ status_t AudioPolicyService::AudioPolicyClient::openInput(audio_module_handle_t 
     status_t status = af->openInput(request, &response);
     if (status == OK) {
         *input = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_module_handle_t(response.input));
+        *config = VALUE_OR_RETURN_STATUS(
+                aidl2legacy_AudioConfig_audio_config_t(response.config, true /*isInput*/));
     }
     return status;
 }
@@ -190,7 +192,7 @@ void AudioPolicyService::AudioPolicyClient::setParameters(audio_io_handle_t io_h
                    const String8& keyValuePairs,
                    int delay_ms)
 {
-    mAudioPolicyService->setParameters(io_handle, keyValuePairs.string(), delay_ms);
+    mAudioPolicyService->setParameters(io_handle, keyValuePairs.c_str(), delay_ms);
 }
 
 String8 AudioPolicyService::AudioPolicyClient::getParameters(audio_io_handle_t io_handle,
@@ -338,6 +340,25 @@ status_t AudioPolicyService::AudioPolicyClient::invalidateTracks(
     }
 
     return af->invalidateTracks(portIds);
+}
+
+status_t AudioPolicyService::AudioPolicyClient::getAudioMixPort(
+        const struct audio_port_v7 *devicePort,
+        struct audio_port_v7 *port) {
+    sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
+    if (af == 0) {
+        return PERMISSION_DENIED;
+    }
+    return af->getAudioMixPort(devicePort, port);
+}
+
+status_t AudioPolicyService::AudioPolicyClient::setTracksInternalMute(
+        const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) {
+    sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
+    if (af == nullptr) {
+        return PERMISSION_DENIED;
+    }
+    return af->setTracksInternalMute(tracksInternalMute);
 }
 
 } // namespace android

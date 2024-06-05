@@ -27,22 +27,21 @@ class HapticGeneratorImpl final : public EffectImpl {
   public:
     static const std::string kEffectName;
     static const Descriptor kDescriptor;
-    HapticGeneratorImpl() { LOG(DEBUG) << __func__; }
-    ~HapticGeneratorImpl() {
-        cleanUp();
-        LOG(DEBUG) << __func__;
-    }
+    HapticGeneratorImpl() = default;
+    ~HapticGeneratorImpl() { cleanUp(); }
 
-    ndk::ScopedAStatus commandImpl(CommandId command) override;
+    ndk::ScopedAStatus commandImpl(CommandId command) REQUIRES(mImplMutex) override;
     ndk::ScopedAStatus getDescriptor(Descriptor* _aidl_return) override;
-    ndk::ScopedAStatus setParameterSpecific(const Parameter::Specific& specific) override;
-    ndk::ScopedAStatus getParameterSpecific(const Parameter::Id& id,
-                                            Parameter::Specific* specific) override;
-    IEffect::Status effectProcessImpl(float* in, float* out, int process) override;
-    std::shared_ptr<EffectContext> createContext(const Parameter::Common& common) override;
-    RetCode releaseContext() override;
+    ndk::ScopedAStatus setParameterSpecific(const Parameter::Specific& specific)
+            REQUIRES(mImplMutex) override;
+    ndk::ScopedAStatus getParameterSpecific(const Parameter::Id& id, Parameter::Specific* specific)
+            REQUIRES(mImplMutex) override;
+    IEffect::Status effectProcessImpl(float* in, float* out, int process)
+            REQUIRES(mImplMutex) override;
+    std::shared_ptr<EffectContext> createContext(const Parameter::Common& common)
+            REQUIRES(mImplMutex) override;
+    RetCode releaseContext() REQUIRES(mImplMutex) override;
 
-    std::shared_ptr<EffectContext> getContext() override { return mContext; }
     std::string getEffectName() override { return kEffectName; }
 
   private:

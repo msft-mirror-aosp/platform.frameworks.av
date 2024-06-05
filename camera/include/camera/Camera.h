@@ -27,6 +27,7 @@
 #include <camera/android/hardware/ICamera.h>
 #include <camera/android/hardware/ICameraClient.h>
 #include <camera/CameraBase.h>
+#include <camera/CameraUtils.h>
 
 namespace android {
 
@@ -56,9 +57,9 @@ struct CameraTraits<Camera>
     typedef CameraListener                     TCamListener;
     typedef ::android::hardware::ICamera       TCamUser;
     typedef ::android::hardware::ICameraClient TCamCallbacks;
-    typedef ::android::binder::Status(::android::hardware::ICameraService::*TCamConnectService)
+    typedef ::android::binder::Status (::android::hardware::ICameraService::*TCamConnectService)
         (const sp<::android::hardware::ICameraClient>&,
-        int, const String16&, int, int, int, bool, bool,
+        int, const std::string&, int, int, int, int, bool, int32_t, int32_t,
         /*out*/
         sp<::android::hardware::ICamera>*);
     static TCamConnectService     fnConnectService;
@@ -80,9 +81,10 @@ public:
             // construct a camera client from an existing remote
     static  sp<Camera>  create(const sp<::android::hardware::ICamera>& camera);
     static  sp<Camera>  connect(int cameraId,
-                                const String16& clientPackageName,
+                                const std::string& clientPackageName,
                                 int clientUid, int clientPid, int targetSdkVersion,
-                                bool overrideToPortrait, bool forceSlowJpegMode);
+                                int rotationOverride, bool forceSlowJpegMode,
+                                int32_t deviceId = kDefaultDeviceId, int32_t devicePolicy = 0);
 
             virtual     ~Camera();
 
@@ -197,6 +199,6 @@ protected:
     friend class        CameraBase;
 };
 
-}; // namespace android
+} // namespace android
 
 #endif

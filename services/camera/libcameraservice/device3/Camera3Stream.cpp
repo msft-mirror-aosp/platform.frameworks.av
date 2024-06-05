@@ -22,6 +22,7 @@
 
 #include <utils/Log.h>
 #include <utils/Trace.h>
+#include <camera/StringUtils.h>
 #include "device3/Camera3Stream.h"
 #include "device3/StatusTracker.h"
 #include "utils/TraceHFR.h"
@@ -52,7 +53,7 @@ Camera3Stream::Camera3Stream(int id,
         camera_stream_type type,
         uint32_t width, uint32_t height, size_t maxSize, int format,
         android_dataspace dataSpace, camera_stream_rotation_t rotation,
-        const String8& physicalCameraId,
+        const std::string& physicalCameraId,
         const std::unordered_set<int32_t> &sensorPixelModesUsed,
         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
         int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
@@ -60,7 +61,7 @@ Camera3Stream::Camera3Stream(int id,
     camera_stream(),
     mId(id),
     mSetId(setId),
-    mName(String8::format("Camera3Stream[%d]", id)),
+    mName(fmt::sprintf("Camera3Stream[%d]", id)),
     mMaxSize(maxSize),
     mState(STATE_CONSTRUCTED),
     mStatusId(StatusTracker::NO_STATUS_ID),
@@ -92,7 +93,7 @@ Camera3Stream::Camera3Stream(int id,
     camera_stream::data_space = dataSpace;
     camera_stream::rotation = rotation;
     camera_stream::max_buffers = 0;
-    camera_stream::physical_camera_id = mPhysicalCameraId.string();
+    camera_stream::physical_camera_id = mPhysicalCameraId;
     camera_stream::sensor_pixel_modes_used = sensorPixelModesUsed;
     camera_stream::dynamic_range_profile = dynamicRangeProfile;
     camera_stream::use_case = streamUseCase;
@@ -177,7 +178,7 @@ android_dataspace Camera3Stream::getOriginalDataSpace() const {
     return mOriginalDataSpace;
 }
 
-const String8& Camera3Stream::physicalCameraId() const {
+const std::string& Camera3Stream::physicalCameraId() const {
     return mPhysicalCameraId;
 }
 
@@ -376,7 +377,7 @@ status_t Camera3Stream::finishConfiguration(/*out*/bool* streamReconfigured) {
     sp<StatusTracker> statusTracker = mStatusTracker.promote();
     if (statusTracker != 0 && mStatusId == StatusTracker::NO_STATUS_ID) {
         std::string name = std::string("Stream ") + std::to_string(mId);
-        mStatusId = statusTracker->addComponent(name.c_str());
+        mStatusId = statusTracker->addComponent(name);
     }
 
     // Check if the stream configuration is unchanged, and skip reallocation if
@@ -771,7 +772,8 @@ status_t Camera3Stream::returnBuffer(const camera_stream_buffer &buffer,
 
     // Buffer status may be changed, so make a copy of the stream_buffer struct.
     camera_stream_buffer b = buffer;
-    if (timestampIncreasing && timestamp != 0 && timestamp <= mLastTimestamp) {
+    if (timestampIncreasing && timestamp != 0 && timestamp <= mLastTimestamp
+            && b.status != CAMERA_BUFFER_STATUS_ERROR) {
         ALOGE("%s: Stream %d: timestamp %" PRId64 " is not increasing. Prev timestamp %" PRId64,
                 __FUNCTION__, mId, timestamp, mLastTimestamp);
         b.status = CAMERA_BUFFER_STATUS_ERROR;
@@ -955,7 +957,7 @@ status_t Camera3Stream::disconnect() {
     }
 }
 
-void Camera3Stream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) const
+void Camera3Stream::dump(int fd, [[maybe_unused]] const Vector<String16> &args)
 {
     mBufferLimitLatency.dump(fd,
             "      Latency histogram for wait on max_buffers");
@@ -963,11 +965,6 @@ void Camera3Stream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) 
 
 status_t Camera3Stream::getBufferLocked(camera_stream_buffer *,
         const std::vector<size_t>&) {
-    ALOGE("%s: This type of stream does not support output", __FUNCTION__);
-    return INVALID_OPERATION;
-}
-
-status_t Camera3Stream::getBuffersLocked(std::vector<OutstandingBuffer>*) {
     ALOGE("%s: This type of stream does not support output", __FUNCTION__);
     return INVALID_OPERATION;
 }
@@ -1043,92 +1040,6 @@ void Camera3Stream::setBufferFreedListener(
         return;
     }
     mBufferFreedListener = listener;
-}
-
-status_t Camera3Stream::getBuffers(std::vector<OutstandingBuffer>* buffers,
-        nsecs_t waitBufferTimeout) {
-    ATRACE_CALL();
-    Mutex::Autolock l(mLock);
-    status_t res = OK;
-
-    if (buffers == nullptr) {
-        ALOGI("%s: buffers must not be null!", __FUNCTION__);
-        return BAD_VALUE;
-    }
-
-    size_t numBuffersRequested = buffers->size();
-    if (numBuffersRequested == 0) {
-        ALOGE("%s: 0 buffers are requested!", __FUNCTION__);
-        return BAD_VALUE;
-    }
-
-    // This function should be only called when the stream is configured already.
-    if (mState != STATE_CONFIGURED) {
-        ALOGE("%s: Stream %d: Can't get buffers if stream is not in CONFIGURED state %d",
-                __FUNCTION__, mId, mState);
-        if (mState == STATE_ABANDONED) {
-            return DEAD_OBJECT;
-        } else {
-            return INVALID_OPERATION;
-        }
-    }
-
-    size_t numOutstandingBuffers = getHandoutOutputBufferCountLocked();
-    size_t numCachedBuffers = getCachedOutputBufferCountLocked();
-    size_t maxNumCachedBuffers = getMaxCachedOutputBuffersLocked();
-    // Wait for new buffer returned back if we are running into the limit. There
-    // are 2 limits:
-    // 1. The number of HAL buffers is greater than max_buffers
-    // 2. The number of HAL buffers + cached buffers is greater than max_buffers
-    //    + maxCachedBuffers
-    while (numOutstandingBuffers + numBuffersRequested > camera_stream::max_buffers ||
-            numOutstandingBuffers + numCachedBuffers + numBuffersRequested >
-            camera_stream::max_buffers + maxNumCachedBuffers) {
-        ALOGV("%s: Already dequeued %zu(+%zu) output buffers and requesting %zu "
-                "(max is %d(+%zu)), waiting.", __FUNCTION__, numOutstandingBuffers,
-                numCachedBuffers, numBuffersRequested, camera_stream::max_buffers,
-                maxNumCachedBuffers);
-        nsecs_t waitStart = systemTime(SYSTEM_TIME_MONOTONIC);
-        if (waitBufferTimeout < kWaitForBufferDuration) {
-            waitBufferTimeout = kWaitForBufferDuration;
-        }
-        res = mOutputBufferReturnedSignal.waitRelative(mLock, waitBufferTimeout);
-        nsecs_t waitEnd = systemTime(SYSTEM_TIME_MONOTONIC);
-        mBufferLimitLatency.add(waitStart, waitEnd);
-        if (res != OK) {
-            if (res == TIMED_OUT) {
-                ALOGE("%s: wait for output buffer return timed out after %lldms (max_buffers %d)",
-                        __FUNCTION__, waitBufferTimeout / 1000000LL,
-                        camera_stream::max_buffers);
-            }
-            return res;
-        }
-        size_t updatedNumOutstandingBuffers = getHandoutOutputBufferCountLocked();
-        size_t updatedNumCachedBuffers = getCachedOutputBufferCountLocked();
-        if (updatedNumOutstandingBuffers >= numOutstandingBuffers &&
-                updatedNumCachedBuffers == numCachedBuffers) {
-            ALOGE("%s: outstanding buffer count goes from %zu to %zu, "
-                    "getBuffer(s) call must not run in parallel!", __FUNCTION__,
-                    numOutstandingBuffers, updatedNumOutstandingBuffers);
-            return INVALID_OPERATION;
-        }
-        numOutstandingBuffers = updatedNumOutstandingBuffers;
-        numCachedBuffers = updatedNumCachedBuffers;
-    }
-
-    res = getBuffersLocked(buffers);
-    if (res == OK) {
-        for (auto& outstandingBuffer : *buffers) {
-            camera_stream_buffer* buffer = outstandingBuffer.outBuffer;
-            fireBufferListenersLocked(*buffer, /*acquired*/true, /*output*/true);
-            if (buffer->buffer) {
-                Mutex::Autolock l(mOutstandingBuffersLock);
-                mOutstandingBuffers.push_back(*buffer->buffer);
-            }
-        }
-    }
-
-    return res;
 }
 
 void Camera3Stream::queueHDRMetadata(buffer_handle_t buffer, sp<ANativeWindow>& anw,

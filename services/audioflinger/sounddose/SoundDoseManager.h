@@ -32,6 +32,17 @@ namespace android {
 
 using aidl::android::hardware::audio::core::sounddose::ISoundDose;
 
+class IMelReporterCallback : public virtual RefBase {
+public:
+    IMelReporterCallback() {};
+    virtual ~IMelReporterCallback() {};
+
+    virtual void stopMelComputationForDeviceId(audio_port_handle_t deviceId) = 0;
+    virtual void startMelComputationForDeviceId(audio_port_handle_t deviceId) = 0;
+
+    virtual void applyAllAudioPatches() = 0;
+};
+
 class SoundDoseManager : public audio_utils::MelProcessor::MelCallback {
 public:
     /** CSD is computed with a rolling window of 7 days. */
@@ -39,9 +50,17 @@ public:
     /** Default RS2 upper bound in dBA as defined in IEC 62368-1 3rd edition. */
     static constexpr float kDefaultRs2UpperBound = 100.f;
 
-    SoundDoseManager()
-        : mMelAggregator(sp<audio_utils::MelAggregator>::make(kCsdWindowSeconds)),
+    explicit SoundDoseManager(const sp<IMelReporterCallback>& melReporterCallback)
+        : mMelReporterCallback(melReporterCallback),
+          mMelAggregator(sp<audio_utils::MelAggregator>::make(kCsdWindowSeconds)),
           mRs2UpperBound(kDefaultRs2UpperBound) {};
+
+    // Used only for testing
+    SoundDoseManager(const sp<IMelReporterCallback>& melReporterCallback,
+                     const sp<audio_utils::MelAggregator>& melAggregator)
+            : mMelReporterCallback(melReporterCallback),
+              mMelAggregator(melAggregator),
+              mRs2UpperBound(kDefaultRs2UpperBound) {};
 
     /**
      * \brief Creates or gets the MelProcessor assigned to the streamHandle
@@ -84,12 +103,15 @@ public:
     sp<media::ISoundDose> getSoundDoseInterface(const sp<media::ISoundDoseCallback>& callback);
 
     /**
-     * Sets the HAL sound dose interface to use for the MEL computation. Use nullptr
-     * for using the internal MEL computation.
+     * Sets the HAL sound dose interface for a specific module to use for the MEL computation.
      *
      * @return true if setting the HAL sound dose value was successful, false otherwise.
      */
-    bool setHalSoundDoseInterface(const std::shared_ptr<ISoundDose>& halSoundDose);
+    bool setHalSoundDoseInterface(const std::string &module,
+                                  const std::shared_ptr<ISoundDose> &halSoundDose);
+
+    /** Reset all the stored HAL sound dose interface. */
+    void resetHalSoundDoseInterfaces();
 
     /** Returns the cached audio port id from the active devices. */
     audio_port_handle_t getIdForAudioDevice(
@@ -104,19 +126,34 @@ public:
     /** Returns true if CSD is enabled. */
     bool isCsdEnabled();
 
+    void initCachedAudioDeviceCategories(
+            const std::vector<media::ISoundDose::AudioDeviceCategory>& deviceCategories);
+
+    void setAudioDeviceCategory(
+            const media::ISoundDose::AudioDeviceCategory& audioDevice);
+
+    /**
+     * Returns true if the type can compute CSD. For bluetooth devices we rely on whether we
+     * categorized the address as headphones/headsets, only in this case we return true.
+     */
+    bool shouldComputeCsdForDeviceWithAddress(const audio_devices_t type,
+                                              const std::string& deviceAddress);
+    /** Returns true for all device types which could support CSD computation. */
+    bool shouldComputeCsdForDeviceType(audio_devices_t device);
+
     std::string dump() const;
 
     // used for testing only
     size_t getCachedMelRecordsSize() const;
-    bool forceUseFrameworkMel() const;
-    bool forceComputeCsdOnAllDevices() const;
+    bool isFrameworkMelForced() const;
+    bool isComputeCsdForcedOnAllDevices() const;
 
     /** Method for converting from audio_utils::CsdRecord to media::SoundDoseRecord. */
     static media::SoundDoseRecord csdRecordToSoundDoseRecord(const audio_utils::CsdRecord& legacy);
 
     // ------ Override audio_utils::MelProcessor::MelCallback ------
     void onNewMelValues(const std::vector<float>& mels, size_t offset, size_t length,
-                        audio_port_handle_t deviceId) const override;
+                        audio_port_handle_t deviceId, bool attenuated) const override;
 
     void onMomentaryExposure(float currentMel, audio_port_handle_t deviceId) const override;
 
@@ -129,7 +166,7 @@ private:
               mSoundDoseCallback(callback) {}
 
         /** IBinder::DeathRecipient. Listen to the death of ISoundDoseCallback. */
-        virtual void binderDied(const wp<IBinder>& who);
+        void binderDied(const wp<IBinder>& who) override;
 
         /** BnSoundDose override */
         binder::Status setOutputRs2UpperBound(float value) override;
@@ -138,6 +175,13 @@ private:
         binder::Status updateAttenuation(float attenuationDB, int device) override;
         binder::Status getOutputRs2UpperBound(float* value) override;
         binder::Status setCsdEnabled(bool enabled) override;
+
+        binder::Status initCachedAudioDeviceCategories(
+                const std::vector<media::ISoundDose::AudioDeviceCategory> &btDeviceCategories)
+                override;
+
+        binder::Status setAudioDeviceCategory(
+                const media::ISoundDose::AudioDeviceCategory& btAudioDevice) override;
 
         binder::Status getCsd(float* value) override;
         binder::Status forceUseFrameworkMel(bool useFrameworkMel) override;
@@ -161,6 +205,7 @@ private:
                 const aidl::android::media::audio::common::AudioDevice& in_audioDevice) override;
 
         wp<SoundDoseManager> mSoundDoseManager;
+        std::mutex mCbLock;
     };
 
     void resetSoundDose();
@@ -169,15 +214,22 @@ private:
 
     sp<media::ISoundDoseCallback> getSoundDoseCallback() const;
 
+    float getAttenuationForDeviceId(audio_port_handle_t id) const;
+
     void updateAttenuation(float attenuationDB, audio_devices_t deviceType);
     void setCsdEnabled(bool enabled);
     void setUseFrameworkMel(bool useFrameworkMel);
     void setComputeCsdOnAllDevices(bool computeCsdOnAllDevices);
     bool isSoundDoseHalSupported() const;
-    /** Returns the HAL sound dose interface or null if internal MEL computation is used. */
-    void getHalSoundDose(std::shared_ptr<ISoundDose>* halSoundDose) const;
+    /**
+     * Returns true if there is one active HAL sound dose interface or null if internal MEL
+     * computation is used.
+     **/
+    bool useHalSoundDose() const;
 
     mutable std::mutex mLock;
+
+    const sp<IMelReporterCallback> mMelReporterCallback;
 
     // no need for lock since MelAggregator is thread-safe
     const sp<audio_utils::MelAggregator> mMelAggregator;
@@ -191,15 +243,26 @@ private:
     std::map<AudioDeviceTypeAddr, audio_port_handle_t> mActiveDevices GUARDED_BY(mLock);
     std::unordered_map<audio_port_handle_t, audio_devices_t> mActiveDeviceTypes GUARDED_BY(mLock);
 
+    struct bt_device_type_hash {
+        std::size_t operator() (const std::pair<std::string, audio_devices_t> &deviceType) const {
+            return std::hash<std::string>()(deviceType.first) ^
+                   std::hash<audio_devices_t>()(deviceType.second);
+        }
+    };
+    // storing the BT cached information as received from the java side
+    // see SoundDoseManager::setCachedAudioDeviceCategories
+    std::unordered_map<std::pair<std::string, audio_devices_t>, bool, bt_device_type_hash>
+            mBluetoothDevicesWithCsd GUARDED_BY(mLock);
+
     float mRs2UpperBound GUARDED_BY(mLock);
     std::unordered_map<audio_devices_t, float> mMelAttenuationDB GUARDED_BY(mLock);
 
     sp<SoundDose> mSoundDose GUARDED_BY(mLock);
 
-    std::shared_ptr<ISoundDose> mHalSoundDose GUARDED_BY(mLock);
+    std::unordered_map<std::string, std::shared_ptr<ISoundDose>> mHalSoundDose GUARDED_BY(mLock);
     std::shared_ptr<HalSoundDoseCallback> mHalSoundDoseCallback GUARDED_BY(mLock);
 
-    bool mUseFrameworkMel GUARDED_BY(mLock) = true;
+    bool mUseFrameworkMel GUARDED_BY(mLock) = false;
     bool mComputeCsdOnAllDevices GUARDED_BY(mLock) = false;
 
     bool mEnabledCsd GUARDED_BY(mLock) = true;

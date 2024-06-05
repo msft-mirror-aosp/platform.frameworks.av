@@ -68,10 +68,9 @@ status_t AudioRecord::getMinFrameCount(
     }
 
     // We double the size of input buffer for ping pong use of record buffer.
-    // Assumes audio_is_linear_pcm(format)
-    const auto sampleSize = audio_channel_count_from_in_mask(channelMask) *
-                                      audio_bytes_per_sample(format);
-    if (sampleSize == 0 || ((*frameCount = (size * 2) / sampleSize) == 0)) {
+    const auto frameSize = audio_bytes_per_frame(
+            audio_channel_count_from_in_mask(channelMask), format);
+    if (frameSize == 0 || ((*frameCount = (size * 2) / frameSize) == 0)) {
         ALOGE("%s(): Unsupported configuration: sampleRate %u, format %#x, channelMask %#x",
                 __func__, sampleRate, format, channelMask);
         return BAD_VALUE;
@@ -131,11 +130,7 @@ status_t AudioRecord::getMetrics(mediametrics::Item * &item)
 }
 
 AudioRecord::AudioRecord(const AttributionSourceState &client)
-    : mActive(false), mStatus(NO_INIT), mClientAttributionSource(client),
-      mSessionId(AUDIO_SESSION_ALLOCATE), mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT), mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mRoutedDeviceId(AUDIO_PORT_HANDLE_NONE), mSelectedMicDirection(MIC_DIRECTION_UNSPECIFIED),
-      mSelectedMicFieldDimension(MIC_FIELD_DIMENSION_DEFAULT)
+    : mClientAttributionSource(client)
 {
 }
 
@@ -155,13 +150,7 @@ AudioRecord::AudioRecord(
         audio_port_handle_t selectedDeviceId,
         audio_microphone_direction_t selectedMicDirection,
         float microphoneFieldDimension)
-    : mActive(false),
-      mStatus(NO_INIT),
-      mClientAttributionSource(client),
-      mSessionId(AUDIO_SESSION_ALLOCATE),
-      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT),
-      mProxy(nullptr)
+    : mClientAttributionSource(client)
 {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(mClientAttributionSource.uid));
     pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(mClientAttributionSource.pid));
@@ -200,9 +189,6 @@ AudioRecord::~AudioRecord()
 }
 
 void AudioRecord::stopAndJoinCallbacks() {
-    // Prevent nullptr crash if it did not open properly.
-    if (mStatus != NO_ERROR) return;
-
     // Make sure that callback function exits in the case where
     // it is looping on buffer empty condition in obtainBuffer().
     // Otherwise the callback thread will never exit.
@@ -353,12 +339,7 @@ status_t AudioRecord::set(
     }
 
     mChannelCount = audio_channel_count_from_in_mask(mChannelMask);
-
-    if (audio_is_linear_pcm(mFormat)) {
-        mFrameSize = mChannelCount * audio_bytes_per_sample(mFormat);
-    } else {
-        mFrameSize = sizeof(uint8_t);
-    }
+    mFrameSize = audio_bytes_per_frame(mChannelCount, mFormat);
 
     // mFrameCount is initialized in createRecord_l
     mReqFrameCount = frameCount;
@@ -699,16 +680,27 @@ status_t AudioRecord::setInputDevice(audio_port_handle_t deviceId) {
     AutoMutex lock(mLock);
     ALOGV("%s(%d): deviceId=%d mSelectedDeviceId=%d",
             __func__, mPortId, deviceId, mSelectedDeviceId);
+
     if (mSelectedDeviceId != deviceId) {
         mSelectedDeviceId = deviceId;
         if (mStatus == NO_ERROR) {
-            // stop capture so that audio policy manager does not reject the new instance start request
-            // as only one capture can be active at a time.
-            if (mAudioRecord != 0 && mActive) {
-                mAudioRecord->stop();
+            if (mActive) {
+                if (mSelectedDeviceId != mRoutedDeviceId) {
+                    // stop capture so that audio policy manager does not reject the new instance
+                    // start request as only one capture can be active at a time.
+                    if (mAudioRecord != 0) {
+                        mAudioRecord->stop();
+                    }
+                    android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+                    mProxy->interrupt();
+                }
+            } else {
+                // if the track is idle, try to restore now and
+                // defer to next start if not possible
+                if (restoreRecord_l("setInputDevice") != OK) {
+                    android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+                }
             }
-            android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
-            mProxy->interrupt();
         }
     }
     return NO_ERROR;
@@ -760,7 +752,7 @@ status_t AudioRecord::dump(int fd, const Vector<String16>& args __unused) const
                         mInput, mLatency, mSelectedDeviceId, mRoutedDeviceId);
     result.appendFormat("  mic direction(%d) mic field dimension(%f)",
                         mSelectedMicDirection, mSelectedMicFieldDimension);
-    ::write(fd, result.string(), result.size());
+    ::write(fd, result.c_str(), result.size());
     return NO_ERROR;
 }
 
@@ -1231,8 +1223,12 @@ ssize_t AudioRecord::read(void* buffer, size_t userSize, bool blocking)
         }
 
         size_t bytesRead = audioBuffer.frameCount * mFrameSize;
-        memcpy_by_audio_format(buffer, mFormat, audioBuffer.raw, mServerConfig.format,
-                               audioBuffer.mSize / mServerSampleSize);
+        if (audio_is_linear_pcm(mFormat)) {
+            memcpy_by_audio_format(buffer, mFormat, audioBuffer.raw, mServerConfig.format,
+                                audioBuffer.mSize / mServerSampleSize);
+        } else {
+            memcpy(buffer, audioBuffer.raw, audioBuffer.mSize);
+        }
         buffer = ((char *) buffer) + bytesRead;
         userSize -= bytesRead;
         read += bytesRead;
@@ -1523,7 +1519,7 @@ status_t AudioRecord::restoreRecord_l(const char *from)
             .set(AMEDIAMETRICS_PROP_WHERE, from)
             .record(); });
 
-    ALOGW("%s(%d): dead IAudioRecord, creating a new one from %s()", __func__, mPortId, from);
+    ALOGW("%s(%d) called from %s()", __func__, mPortId, from);
     ++mSequence;
 
     const int INITIAL_RETRIES = 3;

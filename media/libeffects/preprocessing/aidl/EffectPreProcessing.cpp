@@ -50,7 +50,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<EffectPreProcessing>(*uuid);
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -78,7 +77,6 @@ extern "C" binder_exception_t queryEffect(const AudioUuid* in_impl_uuid, Descrip
 namespace aidl::android::hardware::audio::effect {
 
 EffectPreProcessing::EffectPreProcessing(const AudioUuid& uuid) {
-    LOG(DEBUG) << __func__ << uuid.toString();
     if (uuid == getEffectImplUuidAcousticEchoCancelerSw()) {
         mType = PreProcessingEffectType::ACOUSTIC_ECHO_CANCELLATION;
         mDescriptor = &kAcousticEchoCancelerDesc;
@@ -102,18 +100,16 @@ EffectPreProcessing::EffectPreProcessing(const AudioUuid& uuid) {
 
 EffectPreProcessing::~EffectPreProcessing() {
     cleanUp();
-    LOG(DEBUG) << __func__;
 }
 
 ndk::ScopedAStatus EffectPreProcessing::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << _aidl_return->toString();
     *_aidl_return = *mDescriptor;
     return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus EffectPreProcessing::setParameterSpecific(const Parameter::Specific& specific) {
-    LOG(DEBUG) << __func__ << " specific " << specific.toString();
+    LOG(VERBOSE) << __func__ << " specific " << specific.toString();
     RETURN_IF(!mContext, EX_NULL_POINTER, "nullContext");
 
     auto tag = specific.getTag();
@@ -412,10 +408,6 @@ std::shared_ptr<EffectContext> EffectPreProcessing::createContext(const Paramete
     return mContext;
 }
 
-std::shared_ptr<EffectContext> EffectPreProcessing::getContext() {
-    return mContext;
-}
-
 RetCode EffectPreProcessing::releaseContext() {
     if (mContext) {
         PreProcessingSession::getPreProcessingSession().releaseSession(mType,
@@ -450,7 +442,7 @@ ndk::ScopedAStatus EffectPreProcessing::commandImpl(CommandId command) {
 IEffect::Status EffectPreProcessing::effectProcessImpl(float* in, float* out, int sampleToProcess) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, sampleToProcess);
+    return mContext->process(in, out, sampleToProcess);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

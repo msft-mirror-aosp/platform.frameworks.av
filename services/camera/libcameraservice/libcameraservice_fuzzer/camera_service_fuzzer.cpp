@@ -27,6 +27,7 @@
 #include <android/hardware/camera2/BnCameraDeviceCallbacks.h>
 #include <android/hardware/ICameraServiceListener.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
+#include <camera/CameraUtils.h>
 #include <camera/camera2/OutputConfiguration.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
@@ -38,6 +39,9 @@
 using namespace android;
 using namespace hardware;
 using namespace std;
+
+using ICameraService::ROTATION_OVERRIDE_NONE;
+using ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT;
 
 const int32_t kPreviewThreshold = 8;
 const int32_t kNumRequestsTested = 8;
@@ -147,7 +151,7 @@ void CameraFuzzer::notifyCallback(int32_t msgType, int32_t, int32_t) {
         mAutoFocusMessage = true;
         mAutoFocusCondition.broadcast();
     }
-};
+}
 
 void CameraFuzzer::dataCallback(int32_t msgType, const sp<IMemory> & /*data*/,
                                 camera_frame_metadata_t *) {
@@ -169,7 +173,7 @@ void CameraFuzzer::dataCallback(int32_t msgType, const sp<IMemory> & /*data*/,
         default:
             break;
     }
-};
+}
 
 status_t CameraFuzzer::waitForPreviewStart() {
     status_t rc = NO_ERROR;
@@ -215,17 +219,17 @@ void CameraFuzzer::getNumCameras() {
     } else {
         camType = kCamType[mFuzzedDataProvider->ConsumeBool()];
     }
-    mCameraService->getNumberOfCameras(camType, &mNumCameras);
+    mCameraService->getNumberOfCameras(camType, kDefaultDeviceId, /*devicePolicy*/0, &mNumCameras);
 }
 
 void CameraFuzzer::getCameraInformation(int32_t cameraId) {
-    String16 cameraIdStr = String16(String8::format("%d", cameraId));
+    std::string cameraIdStr = std::to_string(cameraId);
     bool isSupported = false;
     mCameraService->supportsCameraApi(
         cameraIdStr, kCameraApiVersion[mFuzzedDataProvider->ConsumeBool()], &isSupported);
     mCameraService->isHiddenPhysicalCamera(cameraIdStr, &isSupported);
 
-    String16 parameters;
+    std::string parameters;
     mCameraService->getLegacyParameters(cameraId, &parameters);
 
     std::vector<hardware::camera2::utils::ConcurrentCameraIdCombination> concurrentCameraIds;
@@ -235,11 +239,13 @@ void CameraFuzzer::getCameraInformation(int32_t cameraId) {
     mCameraService->getCameraVendorTagCache(&cache);
 
     CameraInfo cameraInfo;
-    mCameraService->getCameraInfo(cameraId, /*overrideToPortrait*/false, &cameraInfo);
+    mCameraService->getCameraInfo(cameraId, ROTATION_OVERRIDE_NONE, kDefaultDeviceId,
+            /*devicePolicy*/0, &cameraInfo);
 
     CameraMetadata metadata;
     mCameraService->getCameraCharacteristics(cameraIdStr,
-            /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false, &metadata);
+            /*targetSdkVersion*/__ANDROID_API_FUTURE__, ROTATION_OVERRIDE_NONE,
+            kDefaultDeviceId, /*devicePolicy*/0, &metadata);
 }
 
 void CameraFuzzer::invokeCameraSound() {
@@ -318,15 +324,16 @@ void CameraFuzzer::invokeNotifyCalls() {
 }
 
 void CameraFuzzer::invokeTorchAPIs(int32_t cameraId) {
-    String16 cameraIdStr = String16(String8::format("%d", cameraId));
+    std::string cameraIdStr = std::to_string(cameraId);
     sp<IBinder> binder = new BBinder;
 
-    mCameraService->setTorchMode(cameraIdStr, true, binder);
+    mCameraService->setTorchMode(cameraIdStr, true, binder, kDefaultDeviceId, /*devicePolicy*/0);
     ALOGV("Turned torch on.");
     int32_t torchStrength = rand() % 5 + 1;
     ALOGV("Changing torch strength level to %d", torchStrength);
-    mCameraService->turnOnTorchWithStrengthLevel(cameraIdStr, torchStrength, binder);
-    mCameraService->setTorchMode(cameraIdStr, false, binder);
+    mCameraService->turnOnTorchWithStrengthLevel(cameraIdStr, torchStrength, binder,
+            kDefaultDeviceId, /*devicePolicy*/0);
+    mCameraService->setTorchMode(cameraIdStr, false, binder, kDefaultDeviceId, /*devicePolicy*/0);
     ALOGV("Turned torch off.");
 }
 
@@ -342,12 +349,13 @@ void CameraFuzzer::invokeCameraAPIs() {
     ::android::binder::Status rc;
     sp<ICamera> cameraDevice;
 
-    rc = mCameraService->connect(this, cameraId, String16(),
+    rc = mCameraService->connect(this, cameraId, std::string(),
                                  android::CameraService::USE_CALLING_UID,
                                  android::CameraService::USE_CALLING_PID,
                                  /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
-                                 /*overrideToPortrait*/true, /*forceSlowJpegMode*/false,
-                                 &cameraDevice);
+                                 ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
+                                 /*forceSlowJpegMode*/false,
+                                 kDefaultDeviceId, /*devicePolicy*/0, &cameraDevice);
     if (!rc.isOk()) {
         // camera not connected
         return;
@@ -484,38 +492,41 @@ class TestCameraServiceListener : public hardware::BnCameraServiceListener {
 public:
     virtual ~TestCameraServiceListener() {};
 
-    virtual binder::Status onStatusChanged(int32_t , const String16&) {
+    virtual binder::Status onStatusChanged(int32_t /*status*/, const std::string& /*cameraId*/,
+            int32_t /*deviceId*/) {
         return binder::Status::ok();
-    };
+    }
 
     virtual binder::Status onPhysicalCameraStatusChanged(int32_t /*status*/,
-            const String16& /*cameraId*/, const String16& /*physicalCameraId*/) {
+            const std::string& /*cameraId*/, const std::string& /*physicalCameraId*/,
+            int32_t /*deviceId*/) {
         // No op
         return binder::Status::ok();
-    };
+    }
 
-    virtual binder::Status onTorchStatusChanged(int32_t /*status*/, const String16& /*cameraId*/) {
+    virtual binder::Status onTorchStatusChanged(int32_t /*status*/,
+            const std::string& /*cameraId*/, int32_t /*deviceId*/) {
         return binder::Status::ok();
-    };
+    }
 
     virtual binder::Status onCameraAccessPrioritiesChanged() {
         // No op
         return binder::Status::ok();
     }
 
-    virtual binder::Status onCameraOpened(const String16& /*cameraId*/,
-            const String16& /*clientPackageName*/) {
+    virtual binder::Status onCameraOpened(const std::string& /*cameraId*/,
+            const std::string& /*clientPackageName*/, int32_t /*deviceId*/) {
         // No op
         return binder::Status::ok();
     }
 
-    virtual binder::Status onCameraClosed(const String16& /*cameraId*/) {
+    virtual binder::Status onCameraClosed(const std::string& /*cameraId*/, int32_t /*deviceId*/) {
         // No op
         return binder::Status::ok();
     }
 
-    virtual binder::Status onTorchStrengthLevelChanged(const String16& /*cameraId*/,
-            int32_t /*torchStrength*/) {
+    virtual binder::Status onTorchStrengthLevelChanged(const std::string& /*cameraId*/,
+            int32_t /*torchStrength*/, int32_t /*deviceId*/) {
         // No op
         return binder::Status::ok();
     }
@@ -579,10 +590,11 @@ void Camera2Fuzzer::process() {
     for (auto s : statuses) {
         sp<TestCameraDeviceCallbacks> callbacks(new TestCameraDeviceCallbacks());
         sp<hardware::camera2::ICameraDeviceUser> device;
-        mCameraService->connectDevice(callbacks, String16(s.cameraId), String16(), {},
+        mCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
                 android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/true,
-                &device);
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
+                kDefaultDeviceId, /*devicePolicy*/0, &device);
         if (device == nullptr) {
             continue;
         }
@@ -600,7 +612,7 @@ void Camera2Fuzzer::process() {
 
         sp<Surface> surface(new Surface(gbProducer, /*controlledByApp*/false));
 
-        String16 noPhysicalId;
+        std::string noPhysicalId;
         size_t rotations = sizeof(kRotations) / sizeof(int32_t) - 1;
         OutputConfiguration output(gbProducer,
                 kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
@@ -626,9 +638,9 @@ void Camera2Fuzzer::process() {
                     kSensorPixelModes[mFuzzedDataProvider->ConsumeBool() ? 1 : 0];
             requestTemplate.update(ANDROID_SENSOR_PIXEL_MODE, &sensorPixelMode, 1);
             request.mPhysicalCameraSettings.clear();
-            request.mPhysicalCameraSettings.push_back({s.cameraId.string(), requestTemplate});
+            request.mPhysicalCameraSettings.push_back({s.cameraId, requestTemplate});
             device->submitRequest(request, /*streaming*/false, /*out*/&info);
-            ALOGV("%s : camera id %s submit request id %d",__FUNCTION__, s.cameraId.string(),
+            ALOGV("%s : camera id %s submit request id %d",__FUNCTION__, s.cameraId.c_str(),
                     info.mRequestId);
         }
         device->disconnect();

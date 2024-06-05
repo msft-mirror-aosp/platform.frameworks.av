@@ -70,6 +70,22 @@ public:
             return BAD_VALUE;
         }
         *input = mNextIoHandle++;
+        mOpenedInputs.insert(*input);
+        ALOGD("%s: opened input %d", __func__, *input);
+        return NO_ERROR;
+    }
+
+    status_t closeInput(audio_io_handle_t input) override {
+        if (mOpenedInputs.erase(input) != 1) {
+            if (input >= mNextIoHandle) {
+                ALOGE("%s: I/O handle %d has not been allocated yet (next is %d)",
+                      __func__, input, mNextIoHandle);
+            } else {
+                ALOGE("%s: Attempt to close input %d twice", __func__, input);
+            }
+            return BAD_VALUE;
+        }
+        ALOGD("%s: closed input %d", __func__, input);
         return NO_ERROR;
     }
 
@@ -123,6 +139,8 @@ public:
         auto it = --mActivePatches.end();
         return &it->second;
     };
+
+    size_t getOpenedInputsCount() const { return mOpenedInputs.size(); }
 
     audio_module_handle_t peekNextModuleHandle() const { return mNextModuleHandle; }
 
@@ -201,12 +219,46 @@ public:
         return mAudioParameters.toString();
     }
 
+    status_t getAudioMixPort(const struct audio_port_v7 *devicePort __unused,
+                             struct audio_port_v7 *mixPort) override {
+        mixPort->num_audio_profiles = 0;
+        for (auto format : mSupportedFormats) {
+            const int i = mixPort->num_audio_profiles;
+            mixPort->audio_profiles[i].format = format;
+            mixPort->audio_profiles[i].num_sample_rates = 1;
+            mixPort->audio_profiles[i].sample_rates[0] = 48000;
+            mixPort->audio_profiles[i].num_channel_masks = 0;
+            for (const auto& cm : mSupportedChannelMasks) {
+                if (audio_channel_mask_is_valid(cm)) {
+                    mixPort->audio_profiles[i].channel_masks[
+                            mixPort->audio_profiles[i].num_channel_masks++] = cm;
+                }
+            }
+            mixPort->num_audio_profiles++;
+        }
+        return NO_ERROR;
+    }
+
+    status_t setTracksInternalMute(
+            const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) override {
+        for (const auto& trackInternalMute : tracksInternalMute) {
+            mTracksInternalMute[(audio_port_handle_t)trackInternalMute.portId] =
+                    trackInternalMute.muted;
+        }
+        return NO_ERROR;
+    }
+
     void addSupportedFormat(audio_format_t format) {
         mSupportedFormats.insert(format);
     }
 
     void addSupportedChannelMask(audio_channel_mask_t channelMask) {
         mSupportedChannelMasks.insert(channelMask);
+    }
+
+    bool getTrackInternalMute(audio_port_handle_t portId) {
+        auto it = mTracksInternalMute.find(portId);
+        return it == mTracksInternalMute.end() ? false : it->second;
     }
 
 private:
@@ -221,6 +273,8 @@ private:
     std::vector<struct audio_port_v7> mDisconnectedDevicePorts;
     std::set<audio_format_t> mSupportedFormats;
     std::set<audio_channel_mask_t> mSupportedChannelMasks;
+    std::map<audio_port_handle_t, bool> mTracksInternalMute;
+    std::set<audio_io_handle_t> mOpenedInputs;
 };
 
 } // namespace android

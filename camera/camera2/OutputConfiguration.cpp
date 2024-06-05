@@ -21,9 +21,11 @@
 #include <utils/Log.h>
 
 #include <camera/camera2/OutputConfiguration.h>
+#include <camera/StringUtils.h>
 #include <binder/Parcel.h>
 #include <gui/view/Surface.h>
 #include <system/camera_metadata.h>
+#include <system/graphics.h>
 #include <utils/String8.h>
 
 
@@ -65,7 +67,7 @@ bool OutputConfiguration::isShared() const {
     return mIsShared;
 }
 
-String16 OutputConfiguration::getPhysicalCameraId() const {
+std::string OutputConfiguration::getPhysicalCameraId() const {
     return mPhysicalCameraId;
 }
 
@@ -101,6 +103,25 @@ bool OutputConfiguration::useReadoutTimestamp() const {
     return mUseReadoutTimestamp;
 }
 
+int OutputConfiguration::getFormat() const {
+    return mFormat;
+}
+
+int OutputConfiguration::getDataspace() const {
+    return mDataspace;
+}
+
+int64_t OutputConfiguration::getUsage() const {
+    return mUsage;
+}
+
+bool OutputConfiguration::isComplete() const {
+    return !((mSurfaceType == SURFACE_TYPE_MEDIA_RECORDER ||
+             mSurfaceType == SURFACE_TYPE_MEDIA_CODEC ||
+             mSurfaceType == SURFACE_TYPE_IMAGE_READER) &&
+             mGbps.empty());
+}
+
 OutputConfiguration::OutputConfiguration() :
         mRotation(INVALID_ROTATION),
         mSurfaceSetID(INVALID_SET_ID),
@@ -115,7 +136,10 @@ OutputConfiguration::OutputConfiguration() :
         mStreamUseCase(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT),
         mTimestampBase(TIMESTAMP_BASE_DEFAULT),
         mMirrorMode(MIRROR_MODE_AUTO),
-        mUseReadoutTimestamp(false) {
+        mUseReadoutTimestamp(false),
+        mFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED),
+        mDataspace(0),
+        mUsage(0) {
 }
 
 OutputConfiguration::OutputConfiguration(const android::Parcel& parcel) :
@@ -183,7 +207,9 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
         return err;
     }
 
-    parcel->readString16(&mPhysicalCameraId);
+    String16 physicalCameraId;
+    parcel->readString16(&physicalCameraId);
+    mPhysicalCameraId = toStdString(physicalCameraId);
 
     int isMultiResolution = 0;
     if ((err = parcel->readInt32(&isMultiResolution)) != OK) {
@@ -231,6 +257,24 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
         return err;
     }
 
+    int format = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
+    if ((err = parcel->readInt32(&format)) != OK) {
+        ALOGE("%s: Failed to read format from parcel", __FUNCTION__);
+        return err;
+    }
+
+    int dataspace = 0;
+    if ((err = parcel->readInt32(&dataspace)) != OK) {
+        ALOGE("%s: Failed to read dataspace from parcel", __FUNCTION__);
+        return err;
+    }
+
+    int64_t usage = 0;
+    if ((err = parcel->readInt64(&usage)) != OK) {
+        ALOGE("%s: Failed to read usage flag from parcel", __FUNCTION__);
+        return err;
+    }
+
     mRotation = rotation;
     mSurfaceSetID = setID;
     mSurfaceType = surfaceType;
@@ -246,26 +290,30 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
     for (auto& surface : surfaceShims) {
         ALOGV("%s: OutputConfiguration: %p, name %s", __FUNCTION__,
                 surface.graphicBufferProducer.get(),
-                String8(surface.name).string());
+                toString8(surface.name).c_str());
         mGbps.push_back(surface.graphicBufferProducer);
     }
 
     mSensorPixelModesUsed = std::move(sensorPixelModesUsed);
     mDynamicRangeProfile = dynamicProfile;
     mColorSpace = colorSpace;
+    mFormat = format;
+    mDataspace = dataspace;
+    mUsage = usage;
 
     ALOGV("%s: OutputConfiguration: rotation = %d, setId = %d, surfaceType = %d,"
           " physicalCameraId = %s, isMultiResolution = %d, streamUseCase = %" PRId64
-          ", timestampBase = %d, mirrorMode = %d, useReadoutTimestamp = %d",
+          ", timestampBase = %d, mirrorMode = %d, useReadoutTimestamp = %d, format = %d, "
+          "dataspace = %d, usage = %" PRId64,
           __FUNCTION__, mRotation, mSurfaceSetID, mSurfaceType,
-          String8(mPhysicalCameraId).string(), mIsMultiResolution, mStreamUseCase, timestampBase,
-          mMirrorMode, mUseReadoutTimestamp);
+          mPhysicalCameraId.c_str(), mIsMultiResolution, mStreamUseCase, timestampBase,
+          mMirrorMode, mUseReadoutTimestamp, mFormat, mDataspace, mUsage);
 
     return err;
 }
 
 OutputConfiguration::OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int rotation,
-        const String16& physicalId,
+        const std::string& physicalId,
         int surfaceSetID, bool isShared) {
     mGbps.push_back(gbp);
     mRotation = rotation;
@@ -280,11 +328,14 @@ OutputConfiguration::OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int ro
     mTimestampBase = TIMESTAMP_BASE_DEFAULT;
     mMirrorMode = MIRROR_MODE_AUTO;
     mUseReadoutTimestamp = false;
+    mFormat = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
+    mDataspace = 0;
+    mUsage = 0;
 }
 
 OutputConfiguration::OutputConfiguration(
         const std::vector<sp<IGraphicBufferProducer>>& gbps,
-    int rotation, const String16& physicalCameraId, int surfaceSetID,  int surfaceType,
+    int rotation, const std::string& physicalCameraId, int surfaceSetID,  int surfaceType,
     int width, int height, bool isShared)
   : mGbps(gbps), mRotation(rotation), mSurfaceSetID(surfaceSetID), mSurfaceType(surfaceType),
     mWidth(width), mHeight(height), mIsDeferred(false), mIsShared(isShared),
@@ -293,7 +344,9 @@ OutputConfiguration::OutputConfiguration(
     mColorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED),
     mStreamUseCase(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT),
     mTimestampBase(TIMESTAMP_BASE_DEFAULT),
-    mMirrorMode(MIRROR_MODE_AUTO), mUseReadoutTimestamp(false) { }
+    mMirrorMode(MIRROR_MODE_AUTO), mUseReadoutTimestamp(false),
+    mFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED), mDataspace(0),
+    mUsage(0) { }
 
 status_t OutputConfiguration::writeToParcel(android::Parcel* parcel) const {
 
@@ -331,7 +384,8 @@ status_t OutputConfiguration::writeToParcel(android::Parcel* parcel) const {
     err = parcel->writeParcelableVector(surfaceShims);
     if (err != OK) return err;
 
-    err = parcel->writeString16(mPhysicalCameraId);
+    String16 physicalCameraId = toString16(mPhysicalCameraId);
+    err = parcel->writeString16(physicalCameraId);
     if (err != OK) return err;
 
     err = parcel->writeInt32(mIsMultiResolution ? 1 : 0);
@@ -356,6 +410,15 @@ status_t OutputConfiguration::writeToParcel(android::Parcel* parcel) const {
     if (err != OK) return err;
 
     err = parcel->writeInt32(mUseReadoutTimestamp ? 1 : 0);
+    if (err != OK) return err;
+
+    err = parcel->writeInt32(mFormat);
+    if (err != OK) return err;
+
+    err = parcel->writeInt32(mDataspace);
+    if (err != OK) return err;
+
+    err = parcel->writeInt64(mUsage);
     if (err != OK) return err;
 
     return OK;

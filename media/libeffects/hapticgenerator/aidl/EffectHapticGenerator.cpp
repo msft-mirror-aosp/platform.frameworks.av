@@ -37,7 +37,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* in_impl_uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<HapticGeneratorImpl>();
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -67,7 +66,6 @@ const Descriptor HapticGeneratorImpl::kDescriptor = {
 
 ndk::ScopedAStatus HapticGeneratorImpl::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << __func__ << kDescriptor.toString();
     *_aidl_return = kDescriptor;
     return ndk::ScopedAStatus::ok();
 }
@@ -185,7 +183,7 @@ RetCode HapticGeneratorImpl::releaseContext() {
 IEffect::Status HapticGeneratorImpl::effectProcessImpl(float* in, float* out, int samples) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, samples);
+    return mContext->process(in, out, samples);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

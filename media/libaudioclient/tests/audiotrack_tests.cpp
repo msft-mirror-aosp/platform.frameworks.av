@@ -15,12 +15,33 @@
  */
 
 //#define LOG_NDEBUG 0
+#define LOG_TAG "AudioTrackTests"
 
+#include <binder/ProcessState.h>
 #include <gtest/gtest.h>
 
 #include "audio_test_utils.h"
+#include "test_execution_tracer.h"
 
 using namespace android;
+
+// Test that the basic constructor returns an object that doesn't crash
+// on stop() or destruction.
+
+TEST(AudioTrackTestBasic, EmptyAudioTrack) {
+    AttributionSourceState attributionSource;
+    attributionSource.packageName = "AudioTrackTest";
+    attributionSource.uid = VALUE_OR_FATAL(legacy2aidl_uid_t_int32_t(getuid()));
+    attributionSource.pid = VALUE_OR_FATAL(legacy2aidl_pid_t_int32_t(getpid()));
+    attributionSource.token = sp<BBinder>::make();
+    const auto at = sp<AudioTrack>::make(attributionSource);
+
+    EXPECT_EQ(NO_INIT, at->initCheck());
+    EXPECT_EQ(true, at->stopped());
+
+    // ensure we do not crash.
+    at->stop();
+}
 
 TEST(AudioTrackTest, TestPlayTrack) {
     const auto ap = sp<AudioPlayback>::make(44100 /* sampleRate */, AUDIO_FORMAT_PCM_16_BIT,
@@ -144,7 +165,7 @@ TEST(AudioTrackTest, TestAudioCbNotifier) {
     EXPECT_EQ(cb->mDeviceId, ap->getAudioTrackHandle()->getRoutedDeviceId());
     String8 keys;
     keys = ap->getAudioTrackHandle()->getParameters(keys);
-    if (!keys.isEmpty()) {
+    if (!keys.empty()) {
         std::cerr << "track parameters :: " << keys << std::endl;
     }
     EXPECT_TRUE(checkPatchPlayback(cb->mAudioIo, cb->mDeviceId));
@@ -209,3 +230,10 @@ INSTANTIATE_TEST_SUITE_P(
                                              AUDIO_OUTPUT_FLAG_RAW | AUDIO_OUTPUT_FLAG_FAST,
                                              AUDIO_OUTPUT_FLAG_DEEP_BUFFER),
                            ::testing::Values(AUDIO_SESSION_NONE)));
+
+int main(int argc, char** argv) {
+    android::ProcessState::self()->startThreadPool();
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
+    return RUN_ALL_TESTS();
+}

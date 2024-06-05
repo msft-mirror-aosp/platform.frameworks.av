@@ -46,11 +46,12 @@ public:
     ~DepthCompositeStream() override;
 
     static bool isDepthCompositeStream(const sp<Surface> &surface);
+    static bool isDepthCompositeStreamInfo(const OutputStreamInfo& streamInfo);
 
     // CompositeStream overrides
     status_t createInternalStreams(const std::vector<sp<Surface>>& consumers,
             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
-            camera_stream_rotation_t rotation, int *id, const String8& physicalCameraId,
+            camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
             const std::unordered_set<int32_t> &sensorPixelModesUsed,
             std::vector<int> *surfaceIds,
             int streamSetId, bool isShared, int32_t colorSpace,

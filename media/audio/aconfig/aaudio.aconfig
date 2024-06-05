@@ -1,0 +1,20 @@
+# Flags for aaudio
+#
+# Please add flags in alphabetical order.
+
+package: "com.android.media.aaudio"
+container: "system"
+
+flag {
+    name: "sample_rate_conversion"
+    namespace: "media_audio"
+    description: "Enable the AAudio sample rate converter."
+    bug: "219533889"
+}
+
+flag {
+    name: "start_stop_client_from_command_thread"
+    namespace: "media_audio"
+    description: "Start or stop client from command thread."
+    bug: "341627085"
+}

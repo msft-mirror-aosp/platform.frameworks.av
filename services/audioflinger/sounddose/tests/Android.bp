@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_android_media_audio_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_base_license"
@@ -11,13 +12,13 @@ cc_test {
     name: "sounddosemanager_tests",
 
     srcs: [
-        "sounddosemanager_tests.cpp"
+        "sounddosemanager_tests.cpp",
     ],
 
     defaults: [
-        "latest_android_media_audio_common_types_ndk_static",
         "latest_android_hardware_audio_core_sounddose_ndk_static",
         "latest_android_hardware_audio_sounddose_ndk_static",
+        "latest_android_media_audio_common_types_ndk_static",
     ],
 
     shared_libs: [
@@ -42,10 +43,10 @@ cc_test {
     ],
 
     cflags: [
+        "-DBACKEND_NDK",
         "-Wall",
         "-Werror",
         "-Wextra",
-        "-DBACKEND_NDK",
     ],
 
     test_suites: [

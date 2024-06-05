@@ -86,6 +86,8 @@ enum SystemCameraKind {
 };
 
 #define CAMERA_DEVICE_API_VERSION_1_0 HARDWARE_DEVICE_API_VERSION(1, 0)
+#define CAMERA_DEVICE_API_VERSION_1_2 HARDWARE_DEVICE_API_VERSION(1, 2)
+#define CAMERA_DEVICE_API_VERSION_1_3 HARDWARE_DEVICE_API_VERSION(1, 3)
 #define CAMERA_DEVICE_API_VERSION_3_0 HARDWARE_DEVICE_API_VERSION(3, 0)
 #define CAMERA_DEVICE_API_VERSION_3_1 HARDWARE_DEVICE_API_VERSION(3, 1)
 #define CAMERA_DEVICE_API_VERSION_3_2 HARDWARE_DEVICE_API_VERSION(3, 2)
@@ -173,21 +175,48 @@ public:
         virtual hardware::hidl_vec<hardware::hidl_string> listServices() override;
     };
 
+    // Proxy to inject fake services in test.
+    class AidlServiceInteractionProxy {
+      public:
+        // Returns the Aidl service with the given serviceName. Will wait indefinitely
+        // for the service to come up if not running.
+        virtual std::shared_ptr<aidl::android::hardware::camera::provider::ICameraProvider>
+        getService(const std::string& serviceName) = 0;
+
+        // Attempts to get an already running AIDL service of the given serviceName.
+        // Returns nullptr immediately if service is not running.
+        virtual std::shared_ptr<aidl::android::hardware::camera::provider::ICameraProvider>
+        tryGetService(const std::string& serviceName) = 0;
+
+        virtual ~AidlServiceInteractionProxy() = default;
+    };
+
+    // Standard use case - call into the normal static methods which invoke
+    // the real service manager
+    class AidlServiceInteractionProxyImpl : public AidlServiceInteractionProxy {
+      public:
+        virtual std::shared_ptr<aidl::android::hardware::camera::provider::ICameraProvider>
+        getService(const std::string& serviceName) override;
+
+        virtual std::shared_ptr<aidl::android::hardware::camera::provider::ICameraProvider>
+        tryGetService(const std::string& serviceName) override;
+    };
+
     /**
      * Listener interface for device/torch status changes
      */
     struct StatusListener : virtual public RefBase {
         ~StatusListener() {}
 
-        virtual void onDeviceStatusChanged(const String8 &cameraId,
+        virtual void onDeviceStatusChanged(const std::string &cameraId,
                 CameraDeviceStatus newStatus) = 0;
-        virtual void onDeviceStatusChanged(const String8 &cameraId,
-                const String8 &physicalCameraId,
+        virtual void onDeviceStatusChanged(const std::string &cameraId,
+                const std::string &physicalCameraId,
                 CameraDeviceStatus newStatus) = 0;
-        virtual void onTorchStatusChanged(const String8 &cameraId,
+        virtual void onTorchStatusChanged(const std::string &cameraId,
                 TorchModeStatus newStatus,
                 SystemCameraKind kind) = 0;
-        virtual void onTorchStatusChanged(const String8 &cameraId,
+        virtual void onTorchStatusChanged(const std::string &cameraId,
                 TorchModeStatus newStatus) = 0;
         virtual void onNewProviderRegistered() = 0;
     };
@@ -208,7 +237,8 @@ public:
      * used for testing. The lifetime of the proxy must exceed the lifetime of the manager.
      */
     status_t initialize(wp<StatusListener> listener,
-            HidlServiceInteractionProxy *hidlProxy = &sHidlServiceInteractionProxy);
+                        HidlServiceInteractionProxy* hidlProxy = &sHidlServiceInteractionProxy,
+                        AidlServiceInteractionProxy* aidlProxy = &sAidlServiceInteractionProxy);
 
     status_t getCameraIdIPCTransport(const std::string &id,
             IPCTransport *providerTransport) const;
@@ -262,7 +292,8 @@ public:
      * Return the old camera API camera info
      */
     status_t getCameraInfo(const std::string &id,
-            bool overrideToPortrait, int *portraitRotation, hardware::CameraInfo* info) const;
+            int rotationOverride, int *portraitRotation,
+            hardware::CameraInfo* info) const;
 
     /**
      * Return API2 camera characteristics - returns NAME_NOT_FOUND if a device ID does
@@ -270,7 +301,7 @@ public:
      */
     status_t getCameraCharacteristics(const std::string &id,
             bool overrideForPerfClass, CameraMetadata* characteristics,
-            bool overrideToPortrait) const;
+            int rotationOverride) const;
 
     status_t isConcurrentSessionConfigurationSupported(
             const std::vector<hardware::camera2::utils::CameraIdAndSessionConfiguration>
@@ -279,13 +310,30 @@ public:
             int targetSdkVersion, bool *isSupported);
 
     std::vector<std::unordered_set<std::string>> getConcurrentCameraIds() const;
+
+    /**
+     * Create a default capture request metadata for a camera and a specific
+     * template.
+     */
+    status_t createDefaultRequest(const std::string& id,
+            camera3::camera_request_template_t templateId,
+            hardware::camera2::impl::CameraMetadataNative* request) const;
     /**
      * Check for device support of specific stream combination.
      */
     status_t isSessionConfigurationSupported(const std::string& id,
             const SessionConfiguration &configuration,
-            bool overrideForPerfClass, camera3::metadataGetter getMetadata,
+            bool overrideForPerfClass, bool checkSessionParams,
             bool *status /*out*/) const;
+
+    /**
+     * Get session characteristics for a particular session.
+     */
+     status_t getSessionCharacteristics(const std::string& id,
+            const SessionConfiguration &configuration,
+            bool overrideForPerfClass,
+            int rotationOverride,
+            CameraMetadata* sessionCharacteristics /*out*/) const;
 
     /**
      * Return the highest supported device interface version for this ID
@@ -423,6 +471,7 @@ private:
 
     wp<StatusListener> mListener;
     HidlServiceInteractionProxy* mHidlServiceProxy;
+    AidlServiceInteractionProxy* mAidlServiceProxy;
 
     // Current overall Android device physical status
     int64_t mDeviceState;
@@ -431,6 +480,7 @@ private:
     mutable std::mutex mProviderLifecycleLock;
 
     static HidlServiceInteractionProxyImpl sHidlServiceInteractionProxy;
+    static AidlServiceInteractionProxyImpl sAidlServiceInteractionProxy;
 
     struct HalCameraProvider {
       // Empty parent struct for storing either aidl / hidl camera provider reference
@@ -488,7 +538,7 @@ private:
                 CameraProviderManager *manager);
         ~ProviderInfo();
 
-        virtual IPCTransport getIPCTransport() = 0;
+        virtual IPCTransport getIPCTransport() const = 0;
 
         const std::string& getType() const;
 
@@ -577,7 +627,8 @@ private:
             virtual status_t setTorchMode(bool enabled) = 0;
             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
             virtual status_t getTorchStrengthLevel(int32_t *torchStrength) = 0;
-            virtual status_t getCameraInfo(bool overrideToPortrait,
+            virtual status_t getCameraInfo(
+                    int rotationOverride,
                     int *portraitRotation,
                     hardware::CameraInfo *info) const = 0;
             virtual bool isAPI1Compatible() const = 0;
@@ -585,7 +636,7 @@ private:
             virtual status_t getCameraCharacteristics(
                     [[maybe_unused]] bool overrideForPerfClass,
                     [[maybe_unused]] CameraMetadata *characteristics,
-                    [[maybe_unused]] bool overrideToPortrait) {
+                    [[maybe_unused]] int rotationOverride) {
                 return INVALID_OPERATION;
             }
             virtual status_t getPhysicalCameraCharacteristics(
@@ -598,11 +649,25 @@ private:
                     const SessionConfiguration &/*configuration*/,
                     bool /*overrideForPerfClass*/,
                     camera3::metadataGetter /*getMetadata*/,
+                    bool /*checkSessionParams*/,
                     bool * /*status*/) {
                 return INVALID_OPERATION;
             }
+
+            virtual status_t getSessionCharacteristics(
+                    const SessionConfiguration &/*configuration*/,
+                    bool /*overrideForPerfClass*/,
+                    camera3::metadataGetter /*getMetadata*/, CameraMetadata* /*outChars*/) {
+                return INVALID_OPERATION;
+            }
+
             virtual status_t filterSmallJpegSizes() = 0;
             virtual void notifyDeviceStateChange(int64_t /*newState*/) {}
+            virtual status_t createDefaultRequest(
+                    camera3::camera_request_template_t /*templateId*/,
+                    CameraMetadata* /*metadata*/) {
+                return INVALID_OPERATION;
+            }
 
             DeviceInfo(const std::string& name, const metadata_vendor_id_t tagId,
                     const std::string &id, const hardware::hidl_version& version,
@@ -642,7 +707,8 @@ private:
             virtual status_t setTorchMode(bool enabled) = 0;
             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
             virtual status_t getTorchStrengthLevel(int32_t *torchStrength) = 0;
-            virtual status_t getCameraInfo(bool overrideToPortrait,
+            virtual status_t getCameraInfo(
+                    int rotationOverride,
                     int *portraitRotation,
                     hardware::CameraInfo *info) const override;
             virtual bool isAPI1Compatible() const override;
@@ -650,13 +716,9 @@ private:
             virtual status_t getCameraCharacteristics(
                     bool overrideForPerfClass,
                     CameraMetadata *characteristics,
-                    bool overrideToPortrait) override;
+                    int rotationOverride) override;
             virtual status_t getPhysicalCameraCharacteristics(const std::string& physicalCameraId,
                     CameraMetadata *characteristics) const override;
-            virtual status_t isSessionConfigurationSupported(
-                    const SessionConfiguration &configuration, bool /*overrideForPerfClass*/,
-                    camera3::metadataGetter /*getMetadata*/,
-                    bool *status /*out*/) = 0;
             virtual status_t filterSmallJpegSizes() override;
             virtual void notifyDeviceStateChange(
                         int64_t newState) override;
@@ -678,10 +740,15 @@ private:
             // Only contains characteristics for hidden physical cameras,
             // not for public physical cameras.
             std::unordered_map<std::string, CameraMetadata> mPhysicalCameraCharacteristics;
+            // Value filled in from addSessionConfigQueryVersionTag.
+            // Cached to make lookups faster
+            int mSessionConfigQueryVersion = 0;
+
             void queryPhysicalCameraIds();
             SystemCameraKind getSystemCameraKind();
             status_t fixupMonochromeTags();
             status_t fixupTorchStrengthTags();
+            status_t fixupManualFlashStrengthControlTags(CameraMetadata& ch);
             status_t addDynamicDepthTags(bool maxResolution = false);
             status_t deriveHeicTags(bool maxResolution = false);
             status_t deriveJpegRTags(bool maxResolution = false);
@@ -689,6 +756,7 @@ private:
             status_t addAutoframingTags();
             status_t addPreCorrectionActiveArraySize();
             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
+            status_t addSessionConfigQueryVersionTag();
 
             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
                     android_pixel_format_t format,
@@ -784,7 +852,7 @@ private:
         void torchModeStatusChangeInternal(const std::string& cameraDeviceName,
                 TorchModeStatus newStatus);
 
-        void removeDevice(std::string id);
+        void removeDevice(const std::string &id);
 
     };
 
@@ -852,7 +920,7 @@ private:
         const hardware::camera::common::V1_0::TorchModeStatus&);
 
     status_t getCameraCharacteristicsLocked(const std::string &id, bool overrideForPerfClass,
-            CameraMetadata* characteristics, bool overrideToPortrait) const;
+            CameraMetadata* characteristics, int rotationOverride) const;
     void filterLogicalCameraIdsLocked(std::vector<std::string>& deviceIds) const;
 
     status_t getSystemCameraKindLocked(const std::string& id, SystemCameraKind *kind) const;
@@ -864,8 +932,8 @@ private:
             std::vector<std::string>& systemCameraDeviceIds) const;
 
     status_t usbDeviceDetached(const std::string &usbDeviceId);
-    ndk::ScopedAStatus onAidlRegistration(const std::string& in_name,
-            const ::ndk::SpAIBinder& in_binder);
+
+    static bool isVirtualCameraHalEnabled();
 };
 
 } // namespace android

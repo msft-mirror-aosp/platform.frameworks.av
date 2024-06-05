@@ -28,6 +28,7 @@
 #include <media/MediaMetrics.h>
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/AHandler.h>
+#include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/CodecErrorLog.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <media/stagefright/MediaHistogram.h>
@@ -56,7 +57,9 @@ struct AReplyToken;
 struct AString;
 struct BatteryChecker;
 class BufferChannelBase;
+struct AccessUnitInfo;
 struct CodecBase;
+struct CodecCryptoInfo;
 struct CodecParameterDescriptor;
 class IBatteryStats;
 struct ICrypto;
@@ -64,6 +67,7 @@ class CryptoAsync;
 class MediaCodecBuffer;
 class IMemory;
 struct PersistentSurface;
+class RenderedFrameInfo;
 class SoftwareRenderer;
 class Surface;
 namespace hardware {
@@ -77,6 +81,9 @@ using hardware::cas::native::V1_0::IDescrambler;
 using aidl::android::media::MediaResourceParcel;
 using aidl::android::media::ClientConfigParcel;
 
+typedef WrapperObject<std::vector<AccessUnitInfo>> BufferInfosWrapper;
+typedef WrapperObject<std::vector<std::unique_ptr<CodecCryptoInfo>>> CryptoInfosWrapper;
+
 struct MediaCodec : public AHandler {
     enum Domain {
         DOMAIN_UNKNOWN = 0,
@@ -89,6 +96,7 @@ struct MediaCodec : public AHandler {
         CONFIGURE_FLAG_ENCODE           = 1,
         CONFIGURE_FLAG_USE_BLOCK_MODEL  = 2,
         CONFIGURE_FLAG_USE_CRYPTO_ASYNC = 4,
+        CONFIGURE_FLAG_DETACHED_SURFACE = 8,
     };
 
     enum BufferFlags {
@@ -114,6 +122,7 @@ struct MediaCodec : public AHandler {
         CB_OUTPUT_FORMAT_CHANGED = 4,
         CB_RESOURCE_RECLAIMED = 5,
         CB_CRYPTO_ERROR = 6,
+        CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
     };
 
     static const pid_t kNoPid = -1;
@@ -184,6 +193,13 @@ struct MediaCodec : public AHandler {
             uint32_t flags,
             AString *errorDetailMsg = NULL);
 
+    status_t queueInputBuffers(
+            size_t index,
+            size_t offset,
+            size_t size,
+            const sp<BufferInfosWrapper> &accessUnitInfo,
+            AString *errorDetailMsg = NULL);
+
     status_t queueSecureInputBuffer(
             size_t index,
             size_t offset,
@@ -197,11 +213,18 @@ struct MediaCodec : public AHandler {
             uint32_t flags,
             AString *errorDetailMsg = NULL);
 
+    status_t queueSecureInputBuffers(
+            size_t index,
+            size_t offset,
+            size_t size,
+            const sp<BufferInfosWrapper> &accessUnitInfo,
+            const sp<CryptoInfosWrapper> &cryptoInfos,
+            AString *errorDetailMsg = NULL);
+
     status_t queueBuffer(
             size_t index,
             const std::shared_ptr<C2Buffer> &buffer,
-            int64_t presentationTimeUs,
-            uint32_t flags,
+            const sp<BufferInfosWrapper> &bufferInfos,
             const sp<AMessage> &tunings,
             AString *errorDetailMsg = NULL);
 
@@ -209,14 +232,9 @@ struct MediaCodec : public AHandler {
             size_t index,
             const sp<hardware::HidlMemory> &memory,
             size_t offset,
-            const CryptoPlugin::SubSample *subSamples,
-            size_t numSubSamples,
-            const uint8_t key[16],
-            const uint8_t iv[16],
-            CryptoPlugin::Mode mode,
-            const CryptoPlugin::Pattern &pattern,
-            int64_t presentationTimeUs,
-            uint32_t flags,
+            size_t size,
+            const sp<BufferInfosWrapper> &bufferInfos,
+            const sp<CryptoInfosWrapper> &cryptoInfos,
             const sp<AMessage> &tunings,
             AString *errorDetailMsg = NULL);
 
@@ -257,6 +275,8 @@ struct MediaCodec : public AHandler {
 
     status_t setSurface(const sp<Surface> &nativeWindow);
 
+    status_t detachOutputSurface();
+
     status_t requestIDRFrame();
 
     // Notification will be posted once there "is something to do", i.e.
@@ -280,6 +300,8 @@ struct MediaCodec : public AHandler {
     // Create a MediaCodec notification message from a list of rendered or dropped render infos
     // by adding rendered frame information to a base notification message. Returns the number
     // of frames that were rendered.
+    static size_t CreateFramesRenderedMessage(
+            const std::list<RenderedFrameInfo> &done, sp<AMessage> &msg);
     static size_t CreateFramesRenderedMessage(
             const std::list<FrameRenderTracker::Info> &done, sp<AMessage> &msg);
 
@@ -317,6 +339,12 @@ private:
     status_t reclaim(bool force = false);
     friend struct ResourceManagerClient;
 
+    // to create the metrics associated with this codec.
+    // Any error in this function will be captured by the output argument err.
+    mediametrics_handle_t createMediaMetrics(const sp<AMessage>& format,
+                                             uint32_t flags,
+                                             status_t* err);
+
 private:
     enum State {
         UNINITIALIZED,
@@ -343,6 +371,7 @@ private:
         kWhatInit                           = 'init',
         kWhatConfigure                      = 'conf',
         kWhatSetSurface                     = 'sSur',
+        kWhatDetachSurface                  = 'dSur',
         kWhatCreateInputSurface             = 'cisf',
         kWhatSetInputSurface                = 'sisf',
         kWhatStart                          = 'strt',
@@ -446,7 +475,12 @@ private:
     int64_t mPresentationTimeUs = 0;
     status_t mStickyError;
     sp<Surface> mSurface;
+    uint32_t mSurfaceGeneration = 0;
     SoftwareRenderer *mSoftRenderer;
+
+    // Get the detached BufferQueue surface for a video decoder, and create it
+    // if it did not yet exist.
+    sp<Surface> getOrCreateDetachedSurface();
 
     Mutex mMetricsLock;
     mediametrics_handle_t mMetricsHandle = 0;
@@ -458,6 +492,7 @@ private:
     void resetMetricsFields();
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
+    void updateCodecImportance(const sp<AMessage>& msg);
     void onGetMetrics(const sp<AMessage>& msg);
     constexpr const char *asString(TunnelPeekState state, const char *default_string="?");
     void updateTunnelPeek(const sp<AMessage> &msg);
@@ -472,7 +507,7 @@ private:
     sp<AMessage> mAsyncReleaseCompleteNotification;
     sp<AMessage> mOnFirstTunnelFrameReadyNotification;
 
-    sp<ResourceManagerServiceProxy> mResourceManagerProxy;
+    std::shared_ptr<ResourceManagerServiceProxy> mResourceManagerProxy;
 
     Domain mDomain;
     AString mLogSessionId;
@@ -556,6 +591,7 @@ private:
     int32_t mTunneledInputHeight;
     bool mTunneled;
     TunnelPeekState mTunnelPeekState;
+    bool mTunnelPeekEnabled;
 
     sp<IDescrambler> mDescrambler;
 
@@ -614,7 +650,14 @@ private:
     status_t queueCSDInputBuffer(size_t bufferIndex);
 
     status_t handleSetSurface(const sp<Surface> &surface);
-    status_t connectToSurface(const sp<Surface> &surface);
+
+    // Common reimplementation of changing the output surface.
+    // Handles setting null surface, which is used during configure and init.
+    // Set |callCodec| to true if the codec needs to be notified (e.g. during executing state).
+    // Setting |onShutdown| to true will avoid extra work, if this is used for detaching on
+    // delayed release.
+    status_t handleSetSurface(const sp<Surface> &surface, bool callCodec, bool onShutdown = false);
+    status_t connectToSurface(const sp<Surface> &surface, uint32_t *generation);
     status_t disconnectFromSurface();
 
     bool hasCryptoOrDescrambler() {
@@ -686,7 +729,7 @@ private:
     sp<AMessage> mMsgPollForRenderedBuffers;
 
     class ReleaseSurface;
-    std::unique_ptr<ReleaseSurface> mReleaseSurface;
+    std::unique_ptr<ReleaseSurface> mDetachedSurface;
 
     std::list<sp<AMessage>> mLeftover;
     status_t handleLeftover(size_t index);
@@ -720,6 +763,7 @@ private:
 
     // An unique ID for the codec - Used by the metrics.
     uint64_t mCodecId = 0;
+    bool     mIsHardware = false;
 
     std::function<sp<CodecBase>(const AString &, const char *)> mGetCodecBase;
     std::function<status_t(const AString &, sp<MediaCodecInfo> *)> mGetCodecInfo;

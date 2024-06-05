@@ -15,10 +15,14 @@
  */
 
 #define LOG_TAG "AidlUtils"
+//#define LOG_NDEBUG 0
 
 #include <aidl/AidlUtils.h>
+#include <aidl/ExtensionMetadataTags.h>
+#include <aidl/SessionCharacteristicsTags.h>
 #include <aidl/VndkVersionMetadataTags.h>
 #include <aidlcommonsupport/NativeHandle.h>
+#include <camera/StringUtils.h>
 #include <device3/Camera3StreamInterface.h>
 #include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
 #include <mediautils/AImageReaderUtils.h>
@@ -72,19 +76,49 @@ int32_t convertFromAidl(SStreamConfigurationMode streamConfigurationMode) {
 
 UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
     std::vector<sp<IGraphicBufferProducer>> iGBPs;
-    auto &windowHandles = src.windowHandles;
-    iGBPs.reserve(windowHandles.size());
+    if (!src.surfaces.empty()) {
+        auto& surfaces = src.surfaces;
+        iGBPs.reserve(surfaces.size());
 
-    for (auto &handle : windowHandles) {
-        native_handle_t* nh = makeFromAidl(handle);
-        iGBPs.push_back(new H2BGraphicBufferProducer(AImageReader_getHGBPFromHandle(nh)));
-        native_handle_delete(nh);
+        for (auto& sSurface : surfaces) {
+            sp<IGraphicBufferProducer> igbp =
+                    Surface::getIGraphicBufferProducer(sSurface.get());
+            if (igbp == nullptr) {
+                ALOGE("%s: ANativeWindow (%p) not backed by a Surface.",
+                      __FUNCTION__, sSurface.get());
+                continue;
+            }
+            iGBPs.push_back(igbp);
+        }
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        // HIDL token manager (and consequently 'windowHandles') is deprecated and will be removed
+        // in the future. However, cameraservice must still support old NativeHandle pathway until
+        // all vendors have moved away from using NativeHandles
+        auto &windowHandles = src.windowHandles;
+#pragma clang diagnostic pop
+
+        iGBPs.reserve(windowHandles.size());
+
+        for (auto &handle : windowHandles) {
+            native_handle_t* nh = makeFromAidl(handle);
+            auto igbp = AImageReader_getHGBPFromHandle(nh);
+            if (igbp == nullptr) {
+                ALOGE("%s: Could not get HGBP from NativeHandle: %s. Skipping.",
+                        __FUNCTION__, handle.toString().c_str());
+                continue;
+            }
+
+            iGBPs.push_back(new H2BGraphicBufferProducer(igbp));
+            native_handle_delete(nh);
+        }
     }
-    String16 physicalCameraId16(src.physicalCameraId.c_str());
+
     UOutputConfiguration outputConfiguration(
-        iGBPs, convertFromAidl(src.rotation), physicalCameraId16,
+        iGBPs, convertFromAidl(src.rotation), src.physicalCameraId,
         src.windowGroupId, OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0,
-        (windowHandles.size() > 1));
+        (iGBPs.size() > 1));
     return outputConfiguration;
 }
 
@@ -175,7 +209,7 @@ SCaptureResultExtras convertToAidl(const UCaptureResultExtras &src) {
     dst.frameNumber = src.frameNumber;
     dst.partialResultCount = src.partialResultCount;
     dst.errorStreamId = src.errorStreamId;
-    dst.errorPhysicalCameraId = String8(src.errorPhysicalCameraId).string();
+    dst.errorPhysicalCameraId = src.errorPhysicalCameraId;
     return dst;
 }
 
@@ -217,7 +251,7 @@ std::vector<SPhysicalCaptureResultInfo> convertToAidl(
 SPhysicalCaptureResultInfo convertToAidl(const UPhysicalCaptureResultInfo & src,
                                          std::shared_ptr<CaptureResultMetadataQueue> & fmq) {
     SPhysicalCaptureResultInfo dst;
-    dst.physicalCameraId = String8(src.mPhysicalCameraId).string();
+    dst.physicalCameraId = src.mPhysicalCameraId;
 
     const camera_metadata_t *rawMetadata = src.mPhysicalCameraMetadata.getAndLock();
     // Try using fmq at first.
@@ -242,12 +276,12 @@ void convertToAidl(const std::vector<hardware::CameraStatus> &src,
     size_t i = 0;
     for (const auto &statusAndId : src) {
         auto &a = (*dst)[i++];
-        a.cameraId = statusAndId.cameraId.c_str();
+        a.cameraId = statusAndId.cameraId;
         a.deviceStatus = convertCameraStatusToAidl(statusAndId.status);
         size_t numUnvailPhysicalCameras = statusAndId.unavailablePhysicalIds.size();
         a.unavailPhysicalCameraIds.resize(numUnvailPhysicalCameras);
         for (size_t j = 0; j < numUnvailPhysicalCameras; j++) {
-            a.unavailPhysicalCameraIds[j] = statusAndId.unavailablePhysicalIds[j].c_str();
+            a.unavailPhysicalCameraIds[j] = statusAndId.unavailablePhysicalIds[j];
         }
     }
 }
@@ -279,8 +313,9 @@ bool areBindersEqual(const ndk::SpAIBinder& b1, const ndk::SpAIBinder& b2) {
 
 status_t filterVndkKeys(int vndkVersion, CameraMetadata &metadata, bool isStatic) {
     if (vndkVersion == __ANDROID_API_FUTURE__) {
-        // VNDK version in ro.vndk.version is a version code-name that
-        // corresponds to the current version.
+        // VNDK version derived from ro.board.api_level is a version code-name that
+        // corresponds to the current SDK version.
+        ALOGV("%s: VNDK version is API FUTURE, not filtering any keys", __FUNCTION__);
         return OK;
     }
     const auto &apiLevelToKeys =
@@ -289,15 +324,106 @@ status_t filterVndkKeys(int vndkVersion, CameraMetadata &metadata, bool isStatic
     // versions above the given one, need to have their keys filtered from the
     // metadata in order to avoid metadata invalidation.
     auto it = apiLevelToKeys.upper_bound(vndkVersion);
+    ALOGV("%s: VNDK version for filtering is %d", __FUNCTION__ , vndkVersion);
     while (it != apiLevelToKeys.end()) {
         for (const auto &key : it->second) {
             status_t res = metadata.erase(key);
+            // Should be okay to not use get_local_camera_metadata_tag_name
+            // since we're not filtering vendor tags
+            ALOGV("%s: Metadata key being filtered is %s", __FUNCTION__ ,
+                    get_camera_metadata_tag_name(key));
             if (res != OK) {
                 ALOGE("%s metadata key %d could not be erased", __FUNCTION__, key);
                 return res;
             }
         }
         it++;
+    }
+    return OK;
+}
+
+status_t copySessionCharacteristics(const CameraMetadata& from, CameraMetadata* to,
+                                    int queryVersion) {
+    // Ensure the vendor ID are the same before attempting
+    // anything else. If vendor IDs differ we cannot safely copy the characteristics.
+    if (from.getVendorId() != to->getVendorId()) {
+        ALOGE("%s: Incompatible CameraMetadata objects. Vendor IDs differ. From: %lu; To: %lu",
+              __FUNCTION__, from.getVendorId(), to->getVendorId());
+        return BAD_VALUE;
+    }
+
+    // Allow public tags according to the queryVersion
+    std::unordered_set<uint32_t> validPublicTags;
+    auto last = api_level_to_session_characteristic_keys.upper_bound(queryVersion);
+    for (auto it = api_level_to_session_characteristic_keys.begin(); it != last; it++) {
+        validPublicTags.insert(it->second.cbegin(), it->second.cend());
+    }
+
+    const camera_metadata_t* src = from.getAndLock();
+    camera_metadata_ro_entry_t entry{};
+    for (size_t i = 0; i < get_camera_metadata_entry_count(src); i++) {
+        int ret = get_camera_metadata_ro_entry(src, i, &entry);
+        if (ret != OK) {
+            ALOGE("%s: Could not fetch entry at index %lu. Error: %d", __FUNCTION__, i, ret);
+            from.unlock(src);
+            return BAD_VALUE;
+        }
+
+        if (entry.tag < (uint32_t)VENDOR_SECTION_START &&
+                validPublicTags.find(entry.tag) == validPublicTags.end()) {
+            ALOGI("%s: Session Characteristics contains tag %s but not supported by query version "
+                  "(%d)",
+                  __FUNCTION__, get_camera_metadata_tag_name(entry.tag), queryVersion);
+            continue;
+        }
+
+        // The entry is either a vendor tag, or a valid session characteristic key.
+        // Copy over the value
+        to->update(entry);
+    }
+    from.unlock(src);
+    return OK;
+}
+
+bool areExtensionKeysSupported(const CameraMetadata& metadata) {
+    auto requestKeys = metadata.find(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS);
+    if (requestKeys.count == 0) {
+        ALOGE("%s: No ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS entries!", __FUNCTION__);
+        return false;
+    }
+
+    auto resultKeys = metadata.find(ANDROID_REQUEST_AVAILABLE_RESULT_KEYS);
+    if (resultKeys.count == 0) {
+        ALOGE("%s: No ANDROID_REQUEST_AVAILABLE_RESULT_KEYS entries!", __FUNCTION__);
+        return false;
+    }
+
+    for (const auto& extensionKey : extension_metadata_keys) {
+        if (std::find(requestKeys.data.i32, requestKeys.data.i32 + requestKeys.count, extensionKey)
+                != requestKeys.data.i32 + requestKeys.count) {
+            return true;
+        }
+
+        if (std::find(resultKeys.data.i32, resultKeys.data.i32 + resultKeys.count, extensionKey)
+                != resultKeys.data.i32 + resultKeys.count) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+status_t filterExtensionKeys(CameraMetadata* metadata /*out*/) {
+    if (metadata == nullptr) {
+        return BAD_VALUE;
+    }
+
+    for (const auto& key : extension_metadata_keys) {
+        status_t res = metadata->erase(key);
+        if (res != OK) {
+            ALOGE("%s metadata key %d could not be erased", __FUNCTION__, key);
+            return res;
+        }
     }
     return OK;
 }

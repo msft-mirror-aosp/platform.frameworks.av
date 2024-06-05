@@ -66,7 +66,7 @@ class CameraDevice final : public RefBase {
                   ACameraDevice* wrapper);
     ~CameraDevice();
 
-    inline const char* getId() const { return mCameraId.string(); }
+    inline const char* getId() const { return mCameraId.c_str(); }
 
     camera_status_t createCaptureRequest(
             ACameraDevice_request_template templateId,
@@ -151,7 +151,7 @@ class CameraDevice final : public RefBase {
 
     camera_status_t updateOutputConfigurationLocked(ACaptureSessionOutput *output);
 
-    camera_status_t prepareLocked(ACameraWindowType *window);
+    camera_status_t prepareLocked(ANativeWindow *window);
 
     camera_status_t allocateCaptureRequest(
             const ACaptureRequest* request, sp<CaptureRequest>& outReq);

@@ -77,7 +77,7 @@ status_t AidlConversionVirtualizer::setParameter(EffectParamReader& param) {
         default: {
             // for vendor extension, copy data area to the DefaultExtension, parameter ignored
             VendorExtension ext = VALUE_OR_RETURN_STATUS(
-                    aidl::android::legacy2aidl_EffectParameterReader_Data_VendorExtension(param));
+                    aidl::android::legacy2aidl_EffectParameterReader_VendorExtension(param));
             aidlParam = MAKE_SPECIFIC_PARAMETER(Virtualizer, virtualizer, vendor, ext);
             break;
         }
@@ -133,7 +133,6 @@ status_t AidlConversionVirtualizer::getParameter(EffectParamWriter& param) {
                 const audio_channel_mask_t chMask = ::aidl::android::
                         aidl2legacy_AudioChannelLayout_layout_audio_channel_mask_t_bits(
                                 angle.channel, false);
-                ALOGW("%s aidl %d ch %d", __func__, angle.channel, chMask);
                 if (OK != param.writeToValue(&chMask) ||
                     OK != param.writeToValue(&angle.azimuthDegree) ||
                     OK != param.writeToValue(&angle.elevationDegree)) {

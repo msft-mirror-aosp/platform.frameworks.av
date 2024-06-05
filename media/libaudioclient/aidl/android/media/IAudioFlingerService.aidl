@@ -41,6 +41,7 @@ import android.media.ISoundDose;
 import android.media.ISoundDoseCallback;
 import android.media.MicrophoneInfoFw;
 import android.media.RenderPosition;
+import android.media.TrackInternalMuteInfo;
 import android.media.TrackSecondaryOutputInfo;
 import android.media.audio.common.AudioChannelLayout;
 import android.media.audio.common.AudioFormatDescription;
@@ -287,6 +288,16 @@ interface IAudioFlingerService {
      * used to be in the XML file.
      */
     AudioPolicyConfig getAudioPolicyConfig();
+
+    /**
+     * Get the attributes of the mix port when connecting to the given device port.
+     */
+    AudioPortFw getAudioMixPort(in AudioPortFw devicePort, in AudioPortFw mixPort);
+
+    /**
+     * Set internal mute for a list of tracks.
+     */
+    void setTracksInternalMute(in TrackInternalMuteInfo[] tracksInternalMute);
 
     // When adding a new method, please review and update
     // IAudioFlinger.h AudioFlingerServerAdapter::Delegate::TransactionCode

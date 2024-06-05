@@ -29,6 +29,12 @@
 
 #include "C2SoftAomEnc.h"
 
+/* Quantization param values defined by the spec */
+#define AOM_QP_MIN 0
+#define AOM_QP_MAX 63
+#define AOM_QP_DEFAULT_MIN AOM_QP_MIN
+#define AOM_QP_DEFAULT_MAX AOM_QP_MAX
+
 namespace android {
 
 constexpr char COMPONENT_NAME[] = "c2.android.av1.encoder";
@@ -50,11 +56,13 @@ C2SoftAomEnc::IntfImpl::IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helpe
                                  0u, (uint64_t)C2MemoryUsage::CPU_READ))
                          .build());
 
+    // Odd dimension support in encoders requires Android V and above
+    size_t stepSize = isAtLeastV() ? 1 : 2;
     addParameter(DefineParam(mSize, C2_PARAMKEY_PICTURE_SIZE)
                          .withDefault(new C2StreamPictureSizeInfo::input(0u, 320, 240))
                          .withFields({
-                                 C2F(mSize, width).inRange(2, 2048, 2),
-                                 C2F(mSize, height).inRange(2, 2048, 2),
+                                 C2F(mSize, width).inRange(2, 2048, stepSize),
+                                 C2F(mSize, height).inRange(2, 2048, stepSize),
                          })
                          .withSetter(SizeSetter)
                          .build());
@@ -107,7 +115,7 @@ C2SoftAomEnc::IntfImpl::IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helpe
 
     addParameter(DefineParam(mProfileLevel, C2_PARAMKEY_PROFILE_LEVEL)
                          .withDefault(new C2StreamProfileLevelInfo::output(0u, PROFILE_AV1_0,
-                                                                           LEVEL_AV1_4_1))
+                                                                           LEVEL_AV1_2))
                          .withFields({
                                  C2F(mProfileLevel, profile).equalTo(PROFILE_AV1_0),
                                  C2F(mProfileLevel, level)
@@ -116,7 +124,7 @@ C2SoftAomEnc::IntfImpl::IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helpe
                                             LEVEL_AV1_3_2, LEVEL_AV1_3_3, LEVEL_AV1_4,
                                             LEVEL_AV1_4_1}),
                          })
-                         .withSetter(ProfileLevelSetter)
+                         .withSetter(ProfileLevelSetter, mSize, mFrameRate, mBitrate)
                          .build());
 
     std::vector<uint32_t> pixelFormats = {HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
@@ -173,6 +181,19 @@ C2SoftAomEnc::IntfImpl::IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helpe
                                      .inRange(C2Color::MATRIX_UNSPECIFIED, C2Color::MATRIX_OTHER)})
                     .withSetter(CodedColorAspectsSetter, mColorAspects)
                     .build());
+
+    addParameter(
+            DefineParam(mPictureQuantization, C2_PARAMKEY_PICTURE_QUANTIZATION)
+            .withDefault(C2StreamPictureQuantizationTuning::output::AllocShared(
+                    0 /* flexCount */, 0u /* stream */))
+            .withFields({C2F(mPictureQuantization, m.values[0].type_).oneOf(
+                            {C2Config::I_FRAME, C2Config::P_FRAME}),
+                         C2F(mPictureQuantization, m.values[0].min).inRange(
+                            AOM_QP_DEFAULT_MIN, AOM_QP_DEFAULT_MAX),
+                         C2F(mPictureQuantization, m.values[0].max).inRange(
+                            AOM_QP_DEFAULT_MIN, AOM_QP_DEFAULT_MAX)})
+            .withSetter(PictureQuantizationSetter)
+            .build());
 }
 
 C2R C2SoftAomEnc::IntfImpl::BitrateSetter(bool mayBlock, C2P<C2StreamBitrateInfo::output>& me) {
@@ -201,12 +222,69 @@ C2R C2SoftAomEnc::IntfImpl::SizeSetter(bool mayBlock,
 }
 
 C2R C2SoftAomEnc::IntfImpl::ProfileLevelSetter(bool mayBlock,
-                                               C2P<C2StreamProfileLevelInfo::output>& me) {
+                                               C2P<C2StreamProfileLevelInfo::output>& me,
+                                               const C2P<C2StreamPictureSizeInfo::input>& size,
+                                               const C2P<C2StreamFrameRateInfo::output>& frameRate,
+                                               const C2P<C2StreamBitrateInfo::output>& bitrate) {
     (void)mayBlock;
     if (!me.F(me.v.profile).supportsAtAll(me.v.profile)) {
         me.set().profile = PROFILE_AV1_0;
     }
+    struct LevelLimits {
+        C2Config::level_t level;
+        float samplesPerSec;
+        uint64_t samples;
+        uint32_t bitrate;
+        size_t maxHSize;
+        size_t maxVSize;
+    };
+    constexpr LevelLimits kLimits[] = {
+            {LEVEL_AV1_2, 4423680, 147456, 1500000, 2048, 1152},
+            {LEVEL_AV1_2_1, 8363520, 278784, 3000000, 2816, 1584},
+            {LEVEL_AV1_3, 19975680, 665856, 6000000, 4352, 2448},
+            {LEVEL_AV1_3_1, 37950720, 1065024, 10000000, 5504, 3096},
+            {LEVEL_AV1_4, 70778880, 2359296, 12000000, 6144, 3456},
+            {LEVEL_AV1_4_1, 141557760, 2359296, 20000000, 6144, 3456},
+    };
+
+    uint64_t samples = size.v.width * size.v.height;
+    float samplesPerSec = float(samples) * frameRate.v.value;
+
+    // Check if the supplied level meets the samples / bitrate requirements.
+    // If not, update the level with the lowest level meeting the requirements.
+    bool found = false;
+
+    // By default needsUpdate = false in case the supplied level does meet
+    // the requirements.
+    bool needsUpdate = false;
     if (!me.F(me.v.level).supportsAtAll(me.v.level)) {
+        needsUpdate = true;
+    }
+    for (const LevelLimits& limit : kLimits) {
+        if (samples <= limit.samples && samplesPerSec <= limit.samplesPerSec &&
+            bitrate.v.value <= limit.bitrate && size.v.width <= limit.maxHSize &&
+            size.v.height <= limit.maxVSize) {
+            // This is the lowest level that meets the requirements, and if
+            // we haven't seen the supplied level yet, that means we don't
+            // need the update.
+            if (needsUpdate) {
+                ALOGD("Given level %x does not cover current configuration: "
+                        "adjusting to %x",
+                        me.v.level, limit.level);
+                me.set().level = limit.level;
+            }
+            found = true;
+            break;
+        }
+        if (me.v.level == limit.level) {
+            // We break out of the loop when the lowest feasible level is
+            // found. The fact that we're here means that our level doesn't
+            // meet the requirement and needs to be updated.
+            needsUpdate = true;
+        }
+    }
+    if (!found) {
+        // We set to the highest supported level.
         me.set().level = LEVEL_AV1_4_1;
     }
     return C2R::Ok();
@@ -248,6 +326,58 @@ C2R C2SoftAomEnc::IntfImpl::CodedColorAspectsSetter(
     return C2R::Ok();
 }
 
+C2R C2SoftAomEnc::IntfImpl::PictureQuantizationSetter(
+        bool mayBlock, C2P<C2StreamPictureQuantizationTuning::output>& me) {
+    (void)mayBlock;
+    int32_t iMin = AOM_QP_DEFAULT_MIN, pMin = AOM_QP_DEFAULT_MIN;
+    int32_t iMax = AOM_QP_DEFAULT_MAX, pMax = AOM_QP_DEFAULT_MAX;
+    for (size_t i = 0; i < me.v.flexCount(); ++i) {
+        const C2PictureQuantizationStruct &layer = me.v.m.values[i];
+        // layerMin is clamped to [AOM_QP_MIN, layerMax] to avoid error
+        // cases where layer.min > layer.max
+        int32_t layerMax = std::clamp(layer.max, AOM_QP_MIN, AOM_QP_MAX);
+        int32_t layerMin = std::clamp(layer.min, AOM_QP_MIN, layerMax);
+        if (layer.type_ == C2Config::picture_type_t(I_FRAME)) {
+            iMax = layerMax;
+            iMin = layerMin;
+            ALOGV("iMin %d iMax %d", iMin, iMax);
+        } else if (layer.type_ == C2Config::picture_type_t(P_FRAME)) {
+            pMax = layerMax;
+            pMin = layerMin;
+            ALOGV("pMin %d pMax %d", pMin, pMax);
+        }
+    }
+    ALOGV("PictureQuantizationSetter(entry): i %d-%d p %d-%d",
+          iMin, iMax, pMin, pMax);
+
+    // aom library takes same range for I/P picture type
+    int32_t maxFrameQP = std::min(iMax, pMax);
+    int32_t minFrameQP = std::max(iMin, pMin);
+    if (minFrameQP > maxFrameQP) {
+        minFrameQP = maxFrameQP;
+    }
+    // put them back into the structure
+    for (size_t i = 0; i < me.v.flexCount(); ++i) {
+        const C2PictureQuantizationStruct &layer = me.v.m.values[i];
+
+        if (layer.type_ == C2Config::picture_type_t(I_FRAME)) {
+            me.set().m.values[i].max = maxFrameQP;
+            me.set().m.values[i].min = minFrameQP;
+        }
+        else if (layer.type_ == C2Config::picture_type_t(P_FRAME)) {
+            me.set().m.values[i].max = maxFrameQP;
+            me.set().m.values[i].min = minFrameQP;
+        }
+    }
+    ALOGV("PictureQuantizationSetter(exit): minFrameQP = %d maxFrameQP = %d",
+          minFrameQP, maxFrameQP);
+    return C2R::Ok();
+}
+
+uint32_t C2SoftAomEnc::IntfImpl::getLevel_l() const {
+        return mProfileLevel->level - LEVEL_AV1_2;
+}
+
 C2SoftAomEnc::C2SoftAomEnc(const char* name, c2_node_id_t id,
                            const std::shared_ptr<IntfImpl>& intfImpl)
     : SimpleC2Component(std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
@@ -277,6 +407,19 @@ c2_status_t C2SoftAomEnc::onInit() {
 }
 
 c2_status_t C2SoftAomEnc::onStop() {
+    IntfImpl::Lock lock = mIntf->lock();
+    std::shared_ptr<C2StreamRequestSyncFrameTuning::output> requestSync = mIntf->getRequestSync_l();
+    lock.unlock();
+    if (requestSync != mRequestSync) {
+        // we can handle IDR immediately
+        if (requestSync->value) {
+            // unset request
+            C2StreamRequestSyncFrameTuning::output clearSync(0u, C2_FALSE);
+            std::vector<std::unique_ptr<C2SettingResult>> failures;
+            mIntf->config({ &clearSync }, C2_MAY_BLOCK, &failures);
+        }
+        mRequestSync = requestSync;
+    }
     onRelease();
     return C2_OK;
 }
@@ -323,6 +466,9 @@ static int MapC2ComplexityToAOMSpeed (int c2Complexity) {
 
 aom_codec_err_t C2SoftAomEnc::setupCodecParameters() {
     aom_codec_err_t codec_return = AOM_CODEC_OK;
+
+    codec_return = aom_codec_control(mCodecContext, AV1E_SET_TARGET_SEQ_LEVEL_IDX, mAV1EncLevel);
+    if (codec_return != AOM_CODEC_OK) goto BailOut;
 
     codec_return = aom_codec_control(mCodecContext, AOME_SET_CPUUSED,
                                      MapC2ComplexityToAOMSpeed(mComplexity->value));
@@ -478,6 +624,8 @@ status_t C2SoftAomEnc::initEncoder() {
         mColorAspects = mIntf->getCodedColorAspects_l();
         mQuality = mIntf->getQuality_l();
         mComplexity = mIntf->getComplexity_l();
+        mAV1EncLevel = mIntf->getLevel_l();
+        mQpBounds = mIntf->getPictureQuantization_l();
     }
 
 
@@ -493,6 +641,18 @@ status_t C2SoftAomEnc::initEncoder() {
         default:
             mBitrateControlMode = AOM_VBR;
             break;
+    }
+
+    if (mQpBounds->flexCount() > 0) {
+        // read min max qp for sequence
+        for (size_t i = 0; i < mQpBounds->flexCount(); ++i) {
+            const C2PictureQuantizationStruct &layer = mQpBounds->m.values[i];
+            if (layer.type_ == C2Config::picture_type_t(I_FRAME)) {
+                mMaxQuantizer = layer.max;
+                mMinQuantizer = layer.min;
+                break;
+            }
+        }
     }
 
     mCodecInterface = aom_codec_av1_cx();
@@ -527,7 +687,7 @@ status_t C2SoftAomEnc::initEncoder() {
     mCodecConfiguration->g_timebase.den = 1000000;
     // rc_target_bitrate is in kbps, mBitrate in bps
     mCodecConfiguration->rc_target_bitrate = (mBitrate->value + 500) / 1000;
-    mCodecConfiguration->rc_end_usage = mBitrateControlMode == AOM_Q ? AOM_Q : AOM_CBR;
+    mCodecConfiguration->rc_end_usage = mBitrateControlMode;
     // Disable frame drop - not allowed in MediaCodec now.
     mCodecConfiguration->rc_dropframe_thresh = 0;
     // Disable lagged encoding.

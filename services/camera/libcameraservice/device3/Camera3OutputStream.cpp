@@ -27,10 +27,12 @@
 #include "aidl/android/hardware/graphics/common/Dataspace.h"
 
 #include <android-base/unique_fd.h>
+#include <com_android_internal_camera_flags.h>
 #include <cutils/properties.h>
 #include <ui/GraphicBuffer.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
+#include <camera/StringUtils.h>
 
 #include <common/CameraDeviceBase.h>
 #include "api1/client2/JpegProcessor.h"
@@ -41,6 +43,8 @@
 #define container_of(ptr, type, member) \
     (type *)((char*)(ptr) - offsetof(type, member))
 #endif
+
+namespace flags = com::android::internal::camera::flags;
 
 namespace android {
 
@@ -53,7 +57,7 @@ Camera3OutputStream::Camera3OutputStream(int id,
         sp<Surface> consumer,
         uint32_t width, uint32_t height, int format,
         android_dataspace dataSpace, camera_stream_rotation_t rotation,
-        nsecs_t timestampOffset, const String8& physicalCameraId,
+        nsecs_t timestampOffset, const std::string& physicalCameraId,
         const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
         int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
@@ -88,7 +92,7 @@ Camera3OutputStream::Camera3OutputStream(int id,
         sp<Surface> consumer,
         uint32_t width, uint32_t height, size_t maxSize, int format,
         android_dataspace dataSpace, camera_stream_rotation_t rotation,
-        nsecs_t timestampOffset, const String8& physicalCameraId,
+        nsecs_t timestampOffset, const std::string& physicalCameraId,
         const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
         int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
@@ -128,7 +132,7 @@ Camera3OutputStream::Camera3OutputStream(int id,
         uint32_t width, uint32_t height, int format,
         uint64_t consumerUsage, android_dataspace dataSpace,
         camera_stream_rotation_t rotation, nsecs_t timestampOffset,
-        const String8& physicalCameraId,
+        const std::string& physicalCameraId,
         const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
         int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
@@ -164,7 +168,6 @@ Camera3OutputStream::Camera3OutputStream(int id,
         mState = STATE_ERROR;
     }
 
-    mConsumerName = String8("Deferred");
     bool needsReleaseNotify = setId > CAMERA3_STREAM_SET_ID_INVALID;
     mBufferProducerListener = new BufferProducerListener(this, needsReleaseNotify);
 }
@@ -174,7 +177,7 @@ Camera3OutputStream::Camera3OutputStream(int id, camera_stream_type_t type,
                                          int format,
                                          android_dataspace dataSpace,
                                          camera_stream_rotation_t rotation,
-                                         const String8& physicalCameraId,
+                                         const std::string& physicalCameraId,
                                          const std::unordered_set<int32_t> &sensorPixelModesUsed,
                                          IPCTransport transport,
                                          uint64_t consumerUsage, nsecs_t timestampOffset,
@@ -231,65 +234,6 @@ status_t Camera3OutputStream::getBufferLocked(camera_stream_buffer *buffer,
     handoutBufferLocked(*buffer, &(anb->handle), /*acquireFence*/fenceFd,
                         /*releaseFence*/-1, CAMERA_BUFFER_STATUS_OK, /*output*/true);
 
-    return OK;
-}
-
-status_t Camera3OutputStream::getBuffersLocked(std::vector<OutstandingBuffer>* outBuffers) {
-    status_t res;
-
-    if ((res = getBufferPreconditionCheckLocked()) != OK) {
-        return res;
-    }
-
-    if (mUseBufferManager) {
-        ALOGE("%s: stream %d is managed by buffer manager and does not support batch operation",
-                __FUNCTION__, mId);
-        return INVALID_OPERATION;
-    }
-
-    sp<Surface> consumer = mConsumer;
-    /**
-     * Release the lock briefly to avoid deadlock for below scenario:
-     * Thread 1: StreamingProcessor::startStream -> Camera3Stream::isConfiguring().
-     * This thread acquired StreamingProcessor lock and try to lock Camera3Stream lock.
-     * Thread 2: Camera3Stream::returnBuffer->StreamingProcessor::onFrameAvailable().
-     * This thread acquired Camera3Stream lock and bufferQueue lock, and try to lock
-     * StreamingProcessor lock.
-     * Thread 3: Camera3Stream::getBuffer(). This thread acquired Camera3Stream lock
-     * and try to lock bufferQueue lock.
-     * Then there is circular locking dependency.
-     */
-    mLock.unlock();
-
-    size_t numBuffersRequested = outBuffers->size();
-    std::vector<Surface::BatchBuffer> buffers(numBuffersRequested);
-
-    nsecs_t dequeueStart = systemTime(SYSTEM_TIME_MONOTONIC);
-    res = consumer->dequeueBuffers(&buffers);
-    nsecs_t dequeueEnd = systemTime(SYSTEM_TIME_MONOTONIC);
-    mDequeueBufferLatency.add(dequeueStart, dequeueEnd);
-
-    mLock.lock();
-
-    if (res != OK) {
-        if (shouldLogError(res, mState)) {
-            ALOGE("%s: Stream %d: Can't dequeue %zu output buffers: %s (%d)",
-                    __FUNCTION__, mId, numBuffersRequested, strerror(-res), res);
-        }
-        checkRetAndSetAbandonedLocked(res);
-        return res;
-    }
-    checkRemovedBuffersLocked();
-
-    /**
-     * FenceFD now owned by HAL except in case of error,
-     * in which case we reassign it to acquire_fence
-     */
-    for (size_t i = 0; i < numBuffersRequested; i++) {
-        handoutBufferLocked(*(outBuffers->at(i).outBuffer),
-                &(buffers[i].buffer->handle), /*acquireFence*/buffers[i].fenceFd,
-                /*releaseFence*/-1, CAMERA_BUFFER_STATUS_OK, /*output*/true);
-    }
     return OK;
 }
 
@@ -522,11 +466,12 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
     return res;
 }
 
-void Camera3OutputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) const {
-    String8 lines;
-    lines.appendFormat("    Stream[%d]: Output\n", mId);
-    lines.appendFormat("      Consumer name: %s\n", mConsumerName.string());
-    write(fd, lines.string(), lines.size());
+void Camera3OutputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) {
+    std::string lines;
+    lines += fmt::sprintf("    Stream[%d]: Output\n", mId);
+    lines += fmt::sprintf("      Consumer name: %s\n", (mConsumer.get() != nullptr) ?
+            mConsumer->getConsumerName() : "Deferred");
+    write(fd, lines.c_str(), lines.size());
 
     Camera3IOStreamBase::dump(fd, args);
 
@@ -618,8 +563,6 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
         return res;
     }
 
-    mConsumerName = mConsumer->getConsumerName();
-
     res = native_window_set_usage(mConsumer.get(), mUsage);
     if (res != OK) {
         ALOGE("%s: Unable to configure usage %" PRIu64 " for stream %d",
@@ -667,7 +610,7 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
         return res;
     }
 
-    int maxConsumerBuffers;
+    int maxConsumerBuffers = 0;
     res = static_cast<ANativeWindow*>(mConsumer.get())->query(
             mConsumer.get(),
             NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS, &maxConsumerBuffers);
@@ -710,7 +653,8 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
             // service. So update mMaxCachedBufferCount.
             mMaxCachedBufferCount = 1;
             mTotalBufferCount += mMaxCachedBufferCount;
-            res = mPreviewFrameSpacer->run(String8::format("PreviewSpacer-%d", mId).string());
+            res = mPreviewFrameSpacer->run((std::string("PreviewSpacer-")
+                    + std::to_string(mId)).c_str());
             if (res != OK) {
                 ALOGE("%s: Unable to start preview spacer: %s (%d)", __FUNCTION__,
                         strerror(-res), res);
@@ -743,8 +687,11 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
         }
     }
 
-    res = native_window_set_buffer_count(mConsumer.get(),
-            mTotalBufferCount);
+    if (flags::surface_ipc()) {
+        res = mConsumer->setMaxDequeuedBufferCount(mTotalBufferCount - maxConsumerBuffers);
+    } else {
+        res = native_window_set_buffer_count(mConsumer.get(), mTotalBufferCount);
+    }
     if (res != OK) {
         ALOGE("%s: Unable to set buffer count for stream %d",
                 __FUNCTION__, mId);
@@ -1046,7 +993,7 @@ status_t Camera3OutputStream::disconnectLocked() {
     return OK;
 }
 
-status_t Camera3OutputStream::getEndpointUsage(uint64_t *usage) const {
+status_t Camera3OutputStream::getEndpointUsage(uint64_t *usage) {
 
     status_t res;
 
@@ -1082,17 +1029,24 @@ void Camera3OutputStream::applyZSLUsageQuirk(int format, uint64_t *consumerUsage
 }
 
 status_t Camera3OutputStream::getEndpointUsageForSurface(uint64_t *usage,
-        const sp<Surface>& surface) const {
-    status_t res;
-    uint64_t u = 0;
+        const sp<Surface>& surface) {
+    bool internalConsumer = (mConsumer.get() != nullptr) && (mConsumer == surface);
+    if (mConsumerUsageCachedValue.has_value() && flags::surface_ipc() && internalConsumer) {
+        *usage = mConsumerUsageCachedValue.value();
+        return OK;
+    }
 
-    res = native_window_get_consumer_usage(static_cast<ANativeWindow*>(surface.get()), &u);
-    applyZSLUsageQuirk(camera_stream::format, &u);
-    *usage = u;
+    status_t res;
+
+    res = native_window_get_consumer_usage(static_cast<ANativeWindow*>(surface.get()), usage);
+    applyZSLUsageQuirk(camera_stream::format, usage);
+    if (internalConsumer) {
+        mConsumerUsageCachedValue = *usage;
+    }
     return res;
 }
 
-bool Camera3OutputStream::isVideoStream() const {
+bool Camera3OutputStream::isVideoStream() {
     uint64_t usage = 0;
     status_t res = getEndpointUsage(&usage);
     if (res != OK) {
@@ -1234,7 +1188,7 @@ status_t Camera3OutputStream::dropBuffers(bool dropping) {
     return OK;
 }
 
-const String8& Camera3OutputStream::getPhysicalCameraId() const {
+const std::string& Camera3OutputStream::getPhysicalCameraId() const {
     Mutex::Autolock l(mLock);
     return physicalCameraId();
 }
@@ -1273,7 +1227,7 @@ status_t Camera3OutputStream::setConsumers(const std::vector<sp<Surface>>& consu
     return OK;
 }
 
-bool Camera3OutputStream::isConsumedByHWComposer() const {
+bool Camera3OutputStream::isConsumedByHWComposer() {
     uint64_t usage = 0;
     status_t res = getEndpointUsage(&usage);
     if (res != OK) {
@@ -1284,7 +1238,7 @@ bool Camera3OutputStream::isConsumedByHWComposer() const {
     return (usage & GRALLOC_USAGE_HW_COMPOSER) != 0;
 }
 
-bool Camera3OutputStream::isConsumedByHWTexture() const {
+bool Camera3OutputStream::isConsumedByHWTexture() {
     uint64_t usage = 0;
     status_t res = getEndpointUsage(&usage);
     if (res != OK) {
@@ -1295,7 +1249,7 @@ bool Camera3OutputStream::isConsumedByHWTexture() const {
     return (usage & GRALLOC_USAGE_HW_TEXTURE) != 0;
 }
 
-bool Camera3OutputStream::isConsumedByCPU() const {
+bool Camera3OutputStream::isConsumedByCPU() {
     uint64_t usage = 0;
     status_t res = getEndpointUsage(&usage);
     if (res != OK) {
@@ -1338,7 +1292,7 @@ void Camera3OutputStream::dumpImageToDisk(nsecs_t timestamp,
     // Output image data to file
     std::string filePath = "/data/misc/cameraserver/";
     filePath += imageFileName;
-    std::ofstream imageFile(filePath.c_str(), std::ofstream::binary);
+    std::ofstream imageFile(filePath, std::ofstream::binary);
     if (!imageFile.is_open()) {
         ALOGE("%s: Unable to create file %s", __FUNCTION__, filePath.c_str());
         graphicBuffer->unlock();

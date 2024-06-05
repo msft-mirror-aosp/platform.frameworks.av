@@ -10,12 +10,6 @@ package {
 cc_library_headers {
     name: "libcodec2_client_headers",
     export_include_dirs: ["include"],
-    vendor_available: true,
-    apex_available: [
-        "//apex_available:platform",
-        "com.android.media",
-        "com.android.media.swcodec",
-    ],
     min_sdk_version: "29",
     host_supported: true,
     target: {
@@ -29,9 +23,22 @@ cc_library {
     name: "libcodec2_client",
 
     srcs: [
+        "GraphicBufferAllocator.cpp",
+        "GraphicsTracker.cpp",
         "client.cpp",
         "output.cpp",
     ],
+
+    defaults: [
+        "libcodec2-aidl-client-defaults",
+    ],
+
+    // http://b/343951602#comment4 Explicitly set cpp_std to gnu++20.  The
+    // default inherited from libcodec2-impl-defaults sets it to gnu++17 which
+    // causes a segfault when mixing global std::string symbols built with
+    // gnu++17 and gnu++20.  TODO(b/343951602): clean this after
+    // libcodec2-impl-defaults opt into gnu++17 is removed.
+    cpp_std: "gnu++20",
 
     header_libs: [
         "libcodec2_internal", // private
@@ -43,6 +50,8 @@ cc_library {
         "android.hardware.media.c2@1.0",
         "android.hardware.media.c2@1.1",
         "android.hardware.media.c2@1.2",
+        "android.hardware.media.bufferpool2-V2-ndk",
+        "android.hardware.media.c2-V1-ndk",
         "libbase",
         "libbinder",
         "libbinder_ndk",
@@ -55,9 +64,15 @@ cc_library {
         "libgui",
         "libhidlbase",
         "liblog",
+        "libnativewindow",
+        "libstagefright_aidl_bufferpool2",
         "libstagefright_bufferpool@2.0.1",
         "libui",
         "libutils",
+    ],
+
+    static_libs: [
+        "libaidlcommonsupport",
     ],
 
     export_include_dirs: [

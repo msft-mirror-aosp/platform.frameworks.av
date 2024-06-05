@@ -78,8 +78,9 @@ class DeviceHalInterface : public virtual RefBase
     virtual status_t getParameters(const String8& keys, String8 *values) = 0;
 
     // Returns audio input buffer size according to parameters passed.
-    virtual status_t getInputBufferSize(const struct audio_config *config,
-            size_t *size) = 0;
+    // If there is no possibility for the HAL to open an input with the provided
+    // parameters, the method will return BAD_VALUE and modify the provided `config`.
+    virtual status_t getInputBufferSize(struct audio_config *config, size_t *size) = 0;
 
     // Creates and opens the audio hardware output stream. The stream is closed
     // by releasing all references to the returned object.
@@ -132,9 +133,9 @@ class DeviceHalInterface : public virtual RefBase
             std::vector<audio_microphone_characteristic_t>* microphones) = 0;
 
     virtual status_t addDeviceEffect(
-            audio_port_handle_t device, sp<EffectHalInterface> effect) = 0;
+            const struct audio_port_config *device, sp<EffectHalInterface> effect) = 0;
     virtual status_t removeDeviceEffect(
-            audio_port_handle_t device, sp<EffectHalInterface> effect) = 0;
+            const struct audio_port_config *device, sp<EffectHalInterface> effect) = 0;
 
     virtual status_t getMmapPolicyInfos(
             media::audio::common::AudioMMapPolicyType policyType,
@@ -142,7 +143,7 @@ class DeviceHalInterface : public virtual RefBase
     virtual int32_t getAAudioMixerBurstCount() = 0;
     virtual int32_t getAAudioHardwareBurstMinUsec() = 0;
 
-    virtual int32_t supportsBluetoothVariableLatency(bool* supports) = 0;
+    virtual status_t supportsBluetoothVariableLatency(bool* supports) = 0;
 
     // Update the connection status of an external device.
     virtual status_t setConnectedState(const struct audio_port_v7* port, bool connected) = 0;
@@ -159,6 +160,9 @@ class DeviceHalInterface : public virtual RefBase
                                            ::ndk::SpAIBinder* soundDoseBinder) = 0;
 
     virtual status_t prepareToDisconnectExternalDevice(const struct audio_port_v7* port) = 0;
+
+    virtual status_t getAudioMixPort(const struct audio_port_v7* devicePort,
+                                     struct audio_port_v7* mixPort) = 0;
 
   protected:
     // Subclasses can not be constructed directly by clients.

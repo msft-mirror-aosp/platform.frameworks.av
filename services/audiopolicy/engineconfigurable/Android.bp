@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_android_media_audio_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -19,8 +20,8 @@ cc_library_shared {
     srcs: [
         "src/Engine.cpp",
         "src/EngineInstance.cpp",
-        "src/Stream.cpp",
         "src/InputSource.cpp",
+        "src/Stream.cpp",
     ],
     cflags: [
         "-Wall",
@@ -29,27 +30,31 @@ cc_library_shared {
     ],
     local_include_dirs: ["include"],
     header_libs: [
-        "libbase_headers",
         "libaudiopolicycommon",
         "libaudiopolicyengine_interface_headers",
         "libaudiopolicyengineconfigurable_interface_headers",
+        "libbase_headers",
     ],
     static_libs: [
-        "libaudiopolicycomponents",
         "libaudiopolicyengine_common",
         "libaudiopolicyengine_config",
         "libaudiopolicyengineconfigurable_pfwwrapper",
 
     ],
-  shared_libs: [
+    shared_libs: [
+        "libaudio_aidl_conversion_common_cpp",
         "libaudiofoundation",
-        "libbase",
-        "liblog",
-        "libcutils",
-        "libutils",
-        "libmedia_helper",
         "libaudiopolicy",
+        "libaudiopolicycomponents",
+        "libbase",
+        "libcutils",
+        "liblog",
+        "libmedia_helper",
         "libparameter",
+        "libutils",
         "libxml2",
+    ],
+    defaults: [
+        "aconfig_lib_cc_static_link.defaults",
     ],
 }

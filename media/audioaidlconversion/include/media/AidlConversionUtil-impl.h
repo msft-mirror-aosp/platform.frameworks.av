@@ -25,12 +25,12 @@
 #define AUDIO_AIDL_CONVERSION_AIDL_CONVERSION_UTIL_CPP
 #endif  // BACKEND_NDK_IMPL
 
+#include <functional>
 #include <limits>
 #include <type_traits>
 #include <utility>
 
 #include <android-base/expected.h>
-#include <binder/Status.h>
 
 #if defined(BACKEND_NDK_IMPL)
 #include <android/binder_auto_utils.h>
@@ -40,6 +40,7 @@
 namespace aidl {
 #else
 #include <binder/Enums.h>
+#include <binder/Status.h>
 #endif  // BACKEND_NDK_IMPL
 namespace android {
 
@@ -114,6 +115,20 @@ template<typename InputIterator, typename OutputIterator, typename Func>
     }
     for (InputIterator iter = start; (iter != last); ++iter, ++out) {
         *out = VALUE_OR_RETURN_STATUS(itemConversion(*iter));
+    }
+    return ::android::OK;
+}
+
+/**
+ * A generic template that helps convert containers of convertible types without
+ * using an intermediate container.
+ */
+template<typename InputContainer, typename OutputContainer, typename Func>
+::android::status_t convertContainer(const InputContainer& input, OutputContainer* output,
+        const Func& itemConversion) {
+    auto ins = std::inserter(*output, output->begin());
+    for (const auto& item : input) {
+        *ins = VALUE_OR_RETURN_STATUS(itemConversion(item));
     }
     return ::android::OK;
 }
@@ -208,6 +223,34 @@ using IntegralTypeOf = typename IntegralTypeOfStruct<T>::Type;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Utilities for handling bitmasks.
+// Some AIDL enums are specified using bit indices, for example:
+//   `AidlEnum { FOO = 0, BAR = 1, BAZ = 2' }`
+// while corresponding legacy types universally uses actual bitmasks, for example:
+//   `enum legacy_enum_t { LEGACY_FOO = 1 << 0, LEGACY_BAR = 1 << 1, LEGACY_BAZ = 1 << 2 }`
+// There is also the third type used to store the resulting mask, which is combined
+// from individual bits. In AIDL this is typically an int (`int32_t`), in legacy types this
+// is often the enum type itself (although, strictly this is not correct since masks are not
+// declared as part of the enum type). The bit index value always has an integer type.
+//
+// `indexToEnum_index` constructs an instance of the enum from an index,
+// for example `AidlEnum::BAR` from `1`.
+// `indexToEnum_bitmask` produces a corresponding legacy bitmask enum instance,
+// for example, `LEGACY_BAR` (`2`) from `1`.
+// `enumToMask_bitmask` simply casts an enum type to a bitmask type.
+// `enumToMask_index` creates a mask from an enum type which specifies an index.
+//
+// All these functions can be plugged into `convertBitmask`. For example, to implement
+// conversion from `AidlEnum` to `legacy_enum_t`, with a mask stored in `int32_t`,
+// the following call needs to be made:
+//   convertBitmask<legacy_enum_t /*DestMask*/, int32_t /*SrcMask*/,
+//                  legacy_enum_t /*DestEnum*/, AidlEnum /*SrcEnum*/>(
+//     maskField /*int32_t*/, aidl2legacy_AidlEnum_legacy_enum_t /*enumConversion*/,
+//     indexToEnum_index<AidlEnum> /*srcIndexToEnum*/,
+//     enumToMask_bitmask<legacy_enum_t, legacy_enum_t> /*destEnumToMask*/)
+//
+// The only extra function needed is for mapping between corresponding enum values
+// of the AidlEnum and the legacy_enum_t. Note that the mapping is between values
+// of enums, for example, `AidlEnum::BAZ` maps to `LEGACY_BAZ` and vice versa.
 
 template<typename Enum>
 Enum indexToEnum_index(int index) {
@@ -332,6 +375,30 @@ std::string enumsToString(const T& t) {
  * Note: for EX_TRANSACTION_FAILED and EX_SERVICE_SPECIFIC a more detailed error code
  * can be found from transactionError() or serviceSpecificErrorCode().
  */
+#if defined(BACKEND_NDK_IMPL)
+static inline ::android::status_t statusTFromExceptionCode(binder_exception_t exception) {
+    switch (exception) {
+        case EX_NONE:
+            return ::android::OK;
+        case EX_SECURITY:  // Java SecurityException, rethrows locally in Java
+            return ::android::PERMISSION_DENIED;
+        case EX_BAD_PARCELABLE:  // Java BadParcelableException, rethrows in Java
+        case EX_ILLEGAL_ARGUMENT:  // Java IllegalArgumentException, rethrows in Java
+        case EX_NULL_POINTER:  // Java NullPointerException, rethrows in Java
+            return ::android::BAD_VALUE;
+        case EX_ILLEGAL_STATE:  // Java IllegalStateException, rethrows in Java
+        case EX_UNSUPPORTED_OPERATION:  // Java UnsupportedOperationException, rethrows
+            return ::android::INVALID_OPERATION;
+        case EX_PARCELABLE:  // Java bootclass loader (not standard exception), rethrows
+        case EX_NETWORK_MAIN_THREAD:  // Java NetworkOnMainThreadException, rethrows
+        case EX_TRANSACTION_FAILED: // Native - see error code
+        case EX_SERVICE_SPECIFIC:   // Java ServiceSpecificException,
+                                            // rethrows in Java with integer error code
+            return ::android::UNKNOWN_ERROR;
+    }
+    return ::android::UNKNOWN_ERROR;
+}
+#else
 static inline ::android::status_t statusTFromExceptionCode(int32_t exceptionCode) {
     using namespace ::android::binder;
     switch (exceptionCode) {
@@ -356,6 +423,7 @@ static inline ::android::status_t statusTFromExceptionCode(int32_t exceptionCode
     }
     return ::android::UNKNOWN_ERROR;
 }
+#endif  // BACKEND_NDK_IMPL
 
 /**
  * Return the equivalent Android ::android::status_t from a binder status.
@@ -368,6 +436,7 @@ static inline ::android::status_t statusTFromExceptionCode(int32_t exceptionCode
  *
  * return_type method(type0 param0, ...)
  */
+#if !defined(BACKEND_NDK_IMPL)
 static inline ::android::status_t statusTFromBinderStatus(const ::android::binder::Status &status) {
     return status.isOk() ? ::android::OK // check ::android::OK,
         : status.serviceSpecificErrorCode() // service-side error, not standard Java exception
@@ -376,6 +445,7 @@ static inline ::android::status_t statusTFromBinderStatus(const ::android::binde
         ?: statusTFromExceptionCode(status.exceptionCode()); // a service-side error with a
                                                     // standard Java exception (fromExceptionCode)
 }
+#endif
 
 #if defined(BACKEND_NDK_IMPL)
 static inline ::android::status_t statusTFromBinderStatus(const ::ndk::ScopedAStatus &status) {
@@ -401,6 +471,7 @@ static inline ::android::status_t statusTFromBinderStatusT(binder_status_t statu
  * This is used for methods not returning an explicit status_t,
  * where Java callers expect an exception, not an integer return value.
  */
+#if !defined(BACKEND_NDK_IMPL)
 static inline ::android::binder::Status binderStatusFromStatusT(
         ::android::status_t status, const char *optionalMessage = nullptr) {
     const char * const emptyIfNull = optionalMessage == nullptr ? "" : optionalMessage;
@@ -428,6 +499,7 @@ static inline ::android::binder::Status binderStatusFromStatusT(
     // throw a ServiceSpecificException.
     return Status::fromServiceSpecificError(status, emptyIfNull);
 }
+#endif
 
 } // namespace aidl_utils
 

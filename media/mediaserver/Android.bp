@@ -1,4 +1,3 @@
-
 package {
     default_applicable_licenses: ["frameworks_av_media_mediaserver_license"],
 }

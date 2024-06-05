@@ -17,6 +17,8 @@
 #ifndef ANDROID_HARDWARE_CAMERA2_OUTPUTCONFIGURATION_H
 #define ANDROID_HARDWARE_CAMERA2_OUTPUTCONFIGURATION_H
 
+#include <string>
+
 #include <gui/IGraphicBufferProducer.h>
 #include <binder/Parcelable.h>
 
@@ -33,10 +35,13 @@ public:
 
     static const int INVALID_ROTATION;
     static const int INVALID_SET_ID;
-    enum SurfaceType{
+    enum SurfaceType {
         SURFACE_TYPE_UNKNOWN = -1,
         SURFACE_TYPE_SURFACE_VIEW = 0,
-        SURFACE_TYPE_SURFACE_TEXTURE = 1
+        SURFACE_TYPE_SURFACE_TEXTURE = 1,
+        SURFACE_TYPE_MEDIA_RECORDER = 2,
+        SURFACE_TYPE_MEDIA_CODEC = 3,
+        SURFACE_TYPE_IMAGE_READER = 4
     };
     enum TimestampBaseType {
         TIMESTAMP_BASE_DEFAULT = 0,
@@ -63,12 +68,16 @@ public:
     int32_t                    getColorSpace() const;
     bool                       isDeferred() const;
     bool                       isShared() const;
-    String16                   getPhysicalCameraId() const;
+    std::string                getPhysicalCameraId() const;
     bool                       isMultiResolution() const;
     int64_t                    getStreamUseCase() const;
     int                        getTimestampBase() const;
     int                        getMirrorMode() const;
     bool                       useReadoutTimestamp() const;
+    int                        getFormat() const;
+    int                        getDataspace() const;
+    int64_t                    getUsage() const;
+    bool                       isComplete() const;
 
     // set of sensor pixel mode resolutions allowed {MAX_RESOLUTION, DEFAULT_MODE};
     const std::vector<int32_t>&            getSensorPixelModesUsed() const;
@@ -90,13 +99,13 @@ public:
     OutputConfiguration(const android::Parcel& parcel);
 
     OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int rotation,
-            const String16& physicalCameraId,
+            const std::string& physicalCameraId,
             int surfaceSetID = INVALID_SET_ID, bool isShared = false);
 
     OutputConfiguration(const std::vector<sp<IGraphicBufferProducer>>& gbps,
-                        int rotation, const String16& physicalCameraId,
+                        int rotation, const std::string& physicalCameraId,
                         int surfaceSetID = INVALID_SET_ID,
-                        int surfaceType = OutputConfiguration::SURFACE_TYPE_UNKNOWN, int width = 0,
+                        int surfaceType = SURFACE_TYPE_UNKNOWN, int width = 0,
                         int height = 0, bool isShared = false);
 
     bool operator == (const OutputConfiguration& other) const {
@@ -116,7 +125,10 @@ public:
                 mStreamUseCase == other.mStreamUseCase &&
                 mTimestampBase == other.mTimestampBase &&
                 mMirrorMode == other.mMirrorMode &&
-                mUseReadoutTimestamp == other.mUseReadoutTimestamp);
+                mUseReadoutTimestamp == other.mUseReadoutTimestamp &&
+                mFormat == other.mFormat &&
+                mDataspace == other.mDataspace &&
+                mUsage == other.mUsage);
     }
     bool operator != (const OutputConfiguration& other) const {
         return !(*this == other);
@@ -171,6 +183,15 @@ public:
         if (mUseReadoutTimestamp != other.mUseReadoutTimestamp) {
             return mUseReadoutTimestamp < other.mUseReadoutTimestamp;
         }
+        if (mFormat != other.mFormat) {
+            return mFormat < other.mFormat;
+        }
+        if (mDataspace != other.mDataspace) {
+            return mDataspace < other.mDataspace;
+        }
+        if (mUsage != other.mUsage) {
+            return mUsage < other.mUsage;
+        }
         return gbpsLessThan(other);
     }
 
@@ -192,7 +213,7 @@ private:
     int                        mHeight;
     bool                       mIsDeferred;
     bool                       mIsShared;
-    String16                   mPhysicalCameraId;
+    std::string                mPhysicalCameraId;
     bool                       mIsMultiResolution;
     std::vector<int32_t>       mSensorPixelModesUsed;
     int64_t                    mDynamicRangeProfile;
@@ -201,6 +222,9 @@ private:
     int                        mTimestampBase;
     int                        mMirrorMode;
     bool                       mUseReadoutTimestamp;
+    int                        mFormat;
+    int                        mDataspace;
+    int64_t                    mUsage;
 };
 } // namespace params
 } // namespace camera2

@@ -21,13 +21,14 @@
 #include <gui/BufferItem.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
+#include <camera/StringUtils.h>
 #include "Camera3InputStream.h"
 
 namespace android {
 
 namespace camera3 {
 
-const String8 Camera3InputStream::FAKE_ID;
+const std::string Camera3InputStream::FAKE_ID;
 
 Camera3InputStream::Camera3InputStream(int id,
         uint32_t width, uint32_t height, int format) :
@@ -215,10 +216,10 @@ status_t Camera3InputStream::disconnectLocked() {
     return OK;
 }
 
-void Camera3InputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) const {
-    String8 lines;
-    lines.appendFormat("    Stream[%d]: Input\n", mId);
-    write(fd, lines.string(), lines.size());
+void Camera3InputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &args) {
+    std::string lines;
+    lines += fmt::sprintf("    Stream[%d]: Input\n", mId);
+    write(fd, lines.c_str(), lines.size());
 
     Camera3IOStreamBase::dump(fd, args);
 }
@@ -296,7 +297,7 @@ status_t Camera3InputStream::configureQueueLocked() {
     return OK;
 }
 
-status_t Camera3InputStream::getEndpointUsage(uint64_t *usage) const {
+status_t Camera3InputStream::getEndpointUsage(uint64_t *usage) {
     // Per HAL3 spec, input streams have 0 for their initial usage field.
     *usage = 0;
     return OK;

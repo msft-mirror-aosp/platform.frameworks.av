@@ -17,6 +17,7 @@
 #ifndef ANDROID_MEDIASERVICE_DEATHNOTIFIER_H
 #define ANDROID_MEDIASERVICE_DEATHNOTIFIER_H
 
+#include <android/binder_auto_utils.h>
 #include <android/hidl/base/1.0/IBase.h>
 #include <binder/Binder.h>
 #include <hidl/HidlSupport.h>
@@ -32,13 +33,15 @@ public:
 
     DeathNotifier(sp<IBinder> const& service, Notify const& notify);
     DeathNotifier(sp<HBase> const& service, Notify const& notify);
+    DeathNotifier(::ndk::SpAIBinder const& service, Notify const& notify);
     DeathNotifier(DeathNotifier&& other);
     ~DeathNotifier();
 
-private:
-    std::variant<std::monostate, sp<IBinder>, sp<HBase>> mService;
-
     class DeathRecipient;
+
+private:
+    std::variant<std::monostate, sp<IBinder>, sp<HBase>, ::ndk::SpAIBinder> mService;
+
     sp<DeathRecipient> mDeathRecipient;
 };
 

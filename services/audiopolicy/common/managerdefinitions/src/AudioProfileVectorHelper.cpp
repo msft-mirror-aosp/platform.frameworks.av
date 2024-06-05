@@ -115,12 +115,22 @@ void addProfilesForFormats(AudioProfileVector &audioProfileVector, const FormatV
         profile->setDynamicFormat(true);
         profile->setDynamicChannels(dynamicFormatProfile->isDynamicChannels());
         profile->setDynamicRate(dynamicFormatProfile->isDynamicRate());
-        addAudioProfileAndSort(audioProfileVector, profile);
+        size_t profileIndex = 0;
+        for (; profileIndex < audioProfileVector.size(); profileIndex++) {
+            if (profile->equals(audioProfileVector.at(profileIndex))) {
+                // The dynamic profile is already there
+                break;
+            }
+        }
+        if (profileIndex >= audioProfileVector.size()) {
+            // Only add when the dynamic profile is not there
+            addAudioProfileAndSort(audioProfileVector, profile);
+        }
     }
 }
 
 void addDynamicAudioProfileAndSort(AudioProfileVector &audioProfileVector,
-                                      const sp<AudioProfile> &profileToAdd)
+                                   const sp<AudioProfile> &profileToAdd)
 {
     // Check valid profile to add:
     if (!profileToAdd->hasValidFormat()) {
@@ -143,11 +153,15 @@ void addDynamicAudioProfileAndSort(AudioProfileVector &audioProfileVector,
                 audioProfileVector, profileToAdd->getChannels(), profileToAdd->getFormat());
         return;
     }
+    const bool originalIsDynamicFormat = profileToAdd->isDynamicFormat();
+    profileToAdd->setDynamicFormat(true); // set the format as dynamic to allow removal
     // Go through the list of profile to avoid duplicates
     for (size_t profileIndex = 0; profileIndex < audioProfileVector.size(); profileIndex++) {
         const sp<AudioProfile> &profile = audioProfileVector.at(profileIndex);
-        if (profile->isValid() && profile == profileToAdd) {
-            // Nothing to do
+        if (profile->isValid() && profile->equals(profileToAdd)) {
+            // The same profile is already there, no need to add.
+            // Reset `isDynamicProfile` as original value.
+            profileToAdd->setDynamicFormat(originalIsDynamicFormat);
             return;
         }
     }
@@ -171,6 +185,18 @@ status_t checkExact(const sp<AudioProfile> &audioProfile,
     if (audio_formats_match(format, audioProfile->getFormat()) &&
             audioProfile->supportsChannels(channelMask) &&
             audioProfile->supportsRate(samplingRate)) {
+        return NO_ERROR;
+    }
+    return BAD_VALUE;
+}
+
+status_t checkIdentical(const sp<AudioProfile> &audioProfile,
+                        uint32_t samplingRate,
+                        audio_channel_mask_t channelMask,
+                        audio_format_t format) {
+    if(audioProfile->getFormat() == format &&
+        audioProfile->supportsChannels(channelMask) &&
+        audioProfile->supportsRate(samplingRate)) {
         return NO_ERROR;
     }
     return BAD_VALUE;
@@ -306,21 +332,41 @@ status_t checkCompatibleChannelMask(const sp<AudioProfile> &audioProfile,
     return bestMatch > 0 ? NO_ERROR : BAD_VALUE;
 }
 
-status_t checkExactProfile(const AudioProfileVector& audioProfileVector,
-                           const uint32_t samplingRate,
-                           audio_channel_mask_t channelMask,
-                           audio_format_t format)
-{
+namespace {
+
+status_t checkProfile(const AudioProfileVector& audioProfileVector,
+                      const uint32_t samplingRate,
+                      audio_channel_mask_t channelMask,
+                      audio_format_t format,
+                      std::function<status_t(const sp<AudioProfile> &, uint32_t,
+                                             audio_channel_mask_t, audio_format_t)> check) {
     if (audioProfileVector.empty()) {
         return NO_ERROR;
     }
 
     for (const auto& profile : audioProfileVector) {
-        if (checkExact(profile, samplingRate, channelMask, format) == NO_ERROR) {
+        if (check(profile, samplingRate, channelMask, format) == NO_ERROR) {
             return NO_ERROR;
         }
     }
     return BAD_VALUE;
+}
+
+} // namespace
+
+status_t checkExactProfile(const AudioProfileVector& audioProfileVector,
+                           const uint32_t samplingRate,
+                           audio_channel_mask_t channelMask,
+                           audio_format_t format)
+{
+    return checkProfile(audioProfileVector, samplingRate, channelMask, format, checkExact);
+}
+
+status_t checkIdenticalProfile(const AudioProfileVector &audioProfileVector,
+                               const uint32_t samplingRate,
+                               audio_channel_mask_t channelMask,
+                               audio_format_t format) {
+    return checkProfile(audioProfileVector, samplingRate, channelMask, format, checkIdentical);
 }
 
 status_t checkCompatibleProfile(const AudioProfileVector &audioProfileVector,

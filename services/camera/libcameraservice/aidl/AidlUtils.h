@@ -122,6 +122,12 @@ bool areBindersEqual(const ndk::SpAIBinder& b1, const ndk::SpAIBinder& b2);
 
 status_t filterVndkKeys(int vndkVersion, CameraMetadata &metadata, bool isStatic = true);
 
+status_t copySessionCharacteristics(const CameraMetadata& from, CameraMetadata* to,
+                                    int queryVersion);
+
+bool areExtensionKeysSupported(const CameraMetadata& metadata);
+
+status_t filterExtensionKeys(CameraMetadata* metadata /*out*/);
 } // namespace android::hardware::cameraservice::utils::conversion::aidl
 
 #endif  // FRAMEWORKS_AV_SERVICES_CAMERA_LIBCAMERASERVICE_AIDL_AIDLUTILS_H_

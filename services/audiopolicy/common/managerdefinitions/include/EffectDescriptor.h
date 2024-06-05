@@ -25,14 +25,22 @@
 
 namespace android {
 
+class AudioInputCollection;
+class AudioInputDescriptor;
+class AudioPolicyClientInterface;
+
 class EffectDescriptor : public RefBase
 {
 public:
-    EffectDescriptor(const effect_descriptor_t *desc, bool isMusicEffect,
-                     int id, audio_io_handle_t io, audio_session_t session) :
-        mId(id), mIo(io), mSession(session), mEnabled(false), mSuspended(false),
-        mIsMusicEffect(isMusicEffect)
-    {
+  EffectDescriptor(const effect_descriptor_t* desc, bool isMusicEffect, int id,
+                   audio_io_handle_t io, audio_session_t session)
+      : mId(id),
+        mIo(io),
+        mIsOrphan(io == AUDIO_IO_HANDLE_NONE),
+        mSession(session),
+        mEnabled(false),
+        mSuspended(false),
+        mIsMusicEffect(isMusicEffect) {
         memcpy (&mDesc, desc, sizeof(effect_descriptor_t));
     }
 
@@ -40,6 +48,8 @@ public:
 
     int mId;                   // effect unique ID
     audio_io_handle_t mIo;     // io the effect is attached to
+    bool mIsOrphan = false;    // on creation, effect is not yet attached but not yet orphan
+    bool mEnabledWhenMoved = false;    // Backup enabled state before being moved
     audio_session_t mSession;  // audio session the effect is on
     effect_descriptor_t mDesc; // effect descriptor
     bool mEnabled;             // enabled state: CPU load being used or not
@@ -69,13 +79,41 @@ public:
 
     void moveEffects(audio_session_t session,
                      audio_io_handle_t srcOutput,
-                     audio_io_handle_t dstOutput);
+                     audio_io_handle_t dstOutput,
+                     AudioPolicyClientInterface *clientInterface);
     void moveEffects(const std::vector<int>& ids, audio_io_handle_t dstOutput);
+    void moveEffects(audio_session_t sessionId, audio_io_handle_t srcIo, audio_io_handle_t dstIo,
+            const AudioInputCollection *inputs, AudioPolicyClientInterface *clientInterface);
+    void moveEffectsForIo(audio_session_t sessionId, audio_io_handle_t dstIo,
+            const AudioInputCollection *inputs, AudioPolicyClientInterface *mClientInterface);
+    void putOrphanEffects(audio_session_t sessionId, audio_io_handle_t srcIo,
+            const AudioInputCollection *inputs, AudioPolicyClientInterface *clientInterface);
+    void putOrphanEffectsForIo(audio_io_handle_t srcIo);
 
+    /**
+     * @brief Checks if an effect session was already attached to an io handle and return it if
+     * found. Check only for a given effect type if effectType is not null or for any effect
+     * otherwise.
+     * @param sessionId to consider.
+     * @param effectType to consider.
+     * @return ioHandle if found, AUDIO_IO_HANDLE_NONE otherwise.
+     */
     audio_io_handle_t getIoForSession(audio_session_t sessionId,
-                                      const effect_uuid_t *effectType = nullptr);
-
+                                      const effect_uuid_t *effectType = nullptr) const;
+    bool hasOrphansForSession(audio_session_t sessionId) const;
+    EffectDescriptorCollection getOrphanEffectsForSession(audio_session_t sessionId) const;
     void dump(String8 *dst, int spaces = 0, bool verbose = true) const;
+
+    /**
+     * @brief Checks if there is at least one orphan effect with given sessionId and effect type
+     * uuid.
+     * @param sessionId Session ID.
+     * @param effectType Effect type UUID, the implementation will be same as hasOrphansForSession
+     * if null.
+     * @return True if there is an orphan effect for given sessionId and type UUID, false otherwise.
+     */
+    bool hasOrphanEffectsForSessionAndType(audio_session_t sessionId,
+                                           const effect_uuid_t* effectType) const;
 
 private:
     status_t setEffectEnabled(const sp<EffectDescriptor> &effectDesc, bool enabled);

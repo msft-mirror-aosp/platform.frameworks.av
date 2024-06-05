@@ -20,9 +20,6 @@
 #include <memory>
 #include <mutex>
 
-#include <utils/String8.h>
-#include <utils/String16.h>
-
 #include <android/hardware/camera/device/3.6/ICameraOfflineSession.h>
 
 #include <fmq/MessageQueue.h>
@@ -54,7 +51,8 @@ class Camera3StreamInterface;
 struct Camera3OfflineStates {
     Camera3OfflineStates(
             const TagMonitor& tagMonitor, const metadata_vendor_id_t vendorTagId,
-            const bool useHalBufManager, const bool needFixupMonochromeTags,
+            const bool useHalBufManager, const std::set<int32_t> &halBufferManagedStreamIds,
+            const bool needFixupMonochromeTags,
             const bool usePartialResult, const uint32_t numPartialResults,
             const int64_t lastCompletedRegularFN, const int64_t lastCompletedReprocessFN,
             const int64_t lastCompletedZslFN, const uint32_t nextResultFN,
@@ -67,7 +65,8 @@ struct Camera3OfflineStates {
             const std::unordered_map<std::string, camera3::RotateAndCropMapper>&
                 rotateAndCropMappers) :
             mTagMonitor(tagMonitor), mVendorTagId(vendorTagId),
-            mUseHalBufManager(useHalBufManager), mNeedFixupMonochromeTags(needFixupMonochromeTags),
+            mUseHalBufManager(useHalBufManager), mHalBufManagedStreamIds(halBufferManagedStreamIds),
+            mNeedFixupMonochromeTags(needFixupMonochromeTags),
             mUsePartialResult(usePartialResult), mNumPartialResults(numPartialResults),
             mLastCompletedRegularFrameNumber(lastCompletedRegularFN),
             mLastCompletedReprocessFrameNumber(lastCompletedReprocessFN),
@@ -88,6 +87,7 @@ struct Camera3OfflineStates {
     const metadata_vendor_id_t mVendorTagId;
 
     const bool mUseHalBufManager;
+    const std::set<int32_t > &mHalBufManagedStreamIds;
     const bool mNeedFixupMonochromeTags;
 
     const bool mUsePartialResult;
@@ -138,7 +138,7 @@ class Camera3OfflineSession :
   public:
 
     // initialize by Camera3Device.
-    explicit Camera3OfflineSession(const String8& id,
+    explicit Camera3OfflineSession(const std::string& id,
             const sp<camera3::Camera3Stream>& inputStream,
             const camera3::StreamSet& offlineStreamSet,
             camera3::BufferRecords&& bufferRecords,
@@ -158,7 +158,7 @@ class Camera3OfflineSession :
     /**
      * FrameProducer interface
      */
-    const String8& getId() const override;
+    const std::string& getId() const override;
     const CameraMetadata& info() const override;
     status_t waitForNextFrame(nsecs_t timeout) override;
     status_t getNextResult(CaptureResult *frame) override;
@@ -171,7 +171,7 @@ class Camera3OfflineSession :
 
   protected:
     // Camera device ID
-    const String8 mId;
+    const std::string mId;
     sp<camera3::Camera3Stream> mInputStream;
     camera3::StreamSet mOutputStreams;
     camera3::BufferRecords mBufferRecords;
@@ -184,6 +184,7 @@ class Camera3OfflineSession :
     const metadata_vendor_id_t mVendorTagId;
 
     const bool mUseHalBufManager;
+    const std::set<int32_t > &mHalBufManagedStreamIds;
     const bool mNeedFixupMonochromeTags;
 
     const bool mUsePartialResult;
@@ -236,7 +237,7 @@ class Camera3OfflineSession :
     std::mutex mProcessCaptureResultLock;
 
     // Tracking cause of fatal errors when in STATUS_ERROR
-    String8 mErrorCause;
+    std::string mErrorCause;
 
     // Lock to ensure requestStreamBuffers() callbacks are serialized
     std::mutex mRequestBufferInterfaceLock;

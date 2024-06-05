@@ -50,7 +50,7 @@ class Camera3FakeStream :
      * Camera3Stream interface
      */
 
-    virtual void     dump(int fd, const Vector<String16> &args) const;
+    virtual void     dump(int fd, const Vector<String16> &args);
 
     status_t         setTransform(int transform, bool mayChangeMirror);
 
@@ -65,12 +65,12 @@ class Camera3FakeStream :
     /**
      * Query the physical camera id for the output stream.
      */
-    virtual const String8& getPhysicalCameraId() const override;
+    virtual const std::string& getPhysicalCameraId() const override;
 
     /**
      * Return if this output stream is for video encoding.
      */
-    bool isVideoStream() const;
+    bool isVideoStream();
 
     /**
      * Return if the consumer configuration of this stream is deferred.
@@ -130,7 +130,7 @@ class Camera3FakeStream :
     static const android_dataspace FAKE_DATASPACE = HAL_DATASPACE_UNKNOWN;
     static const camera_stream_rotation_t FAKE_ROTATION = CAMERA_STREAM_ROTATION_0;
     static const uint64_t FAKE_USAGE = GRALLOC_USAGE_HW_COMPOSER;
-    static const String8 FAKE_ID;
+    static const std::string FAKE_ID;
 
     /**
      * Internal Camera3Stream interface
@@ -144,7 +144,7 @@ class Camera3FakeStream :
 
     virtual status_t configureQueueLocked();
 
-    virtual status_t getEndpointUsage(uint64_t *usage) const;
+    virtual status_t getEndpointUsage(uint64_t *usage);
 
 }; // class Camera3FakeStream
 

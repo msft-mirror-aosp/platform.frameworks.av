@@ -16,9 +16,6 @@ cc_library_headers {
 cc_library_shared {
     name: "libstagefright_xmlparser",
     vendor_available: true,
-    vndk: {
-        enabled: true,
-    },
     double_loadable: true,
 
     srcs: [
@@ -55,4 +52,5 @@ xsd_config {
     name: "media_codecs",
     srcs: ["media_codecs.xsd"],
     package_name: "media.codecs",
+    root_elements: ["MediaCodecs"],
 }

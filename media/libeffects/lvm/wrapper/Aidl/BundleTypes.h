@@ -73,9 +73,9 @@ const std::vector<Range::EqualizerRange> kEqRanges = {
         MAKE_RANGE(Equalizer, preset, 0, MAX_NUM_PRESETS - 1),
         MAKE_RANGE(Equalizer, bandLevels,
                    std::vector<Equalizer::BandLevel>{
-                           Equalizer::BandLevel({.index = 0, .levelMb = -15})},
+                           Equalizer::BandLevel({.index = 0, .levelMb = -1500})},
                    std::vector<Equalizer::BandLevel>{
-                           Equalizer::BandLevel({.index = MAX_NUM_BANDS - 1, .levelMb = 15})}),
+                           Equalizer::BandLevel({.index = MAX_NUM_BANDS - 1, .levelMb = 1500})}),
         /* capability definition */
         MAKE_RANGE(Equalizer, bandFrequencies, kEqBandFrequency, kEqBandFrequency),
         MAKE_RANGE(Equalizer, presets, kEqPresets, kEqPresets),
@@ -129,8 +129,7 @@ static const Descriptor kVirtualizerDesc = {
                    .implementor = "NXP Software Ltd."},
         .capability = kVirtualizerCap};
 
-static const std::vector<Range::VolumeRange> kVolumeRanges = {
-        MAKE_RANGE(Volume, levelDb, -9600, 0)};
+static const std::vector<Range::VolumeRange> kVolumeRanges = {MAKE_RANGE(Volume, levelDb, -96, 0)};
 static const Capability kVolumeCap = {.range = kVolumeRanges};
 static const std::string kVolumeEffectName = "Volume";
 static const Descriptor kVolumeDesc = {

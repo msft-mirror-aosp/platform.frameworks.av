@@ -41,7 +41,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* in_impl_uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<DynamicsProcessingImpl>();
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -105,14 +104,14 @@ static const DynamicsProcessing::EqBandConfig kEqBandConfigMin =
         DynamicsProcessing::EqBandConfig({.channel = 0,
                                           .band = 0,
                                           .enable = false,
-                                          .cutoffFrequencyHz = 20,
+                                          .cutoffFrequencyHz = 0,
                                           .gainDb = -200});
 
 static const DynamicsProcessing::EqBandConfig kEqBandConfigMax =
         DynamicsProcessing::EqBandConfig({.channel = std::numeric_limits<int>::max(),
                                           .band = std::numeric_limits<int>::max(),
                                           .enable = true,
-                                          .cutoffFrequencyHz = 20000,
+                                          .cutoffFrequencyHz = 192000,
                                           .gainDb = 200});
 
 static const Range::DynamicsProcessingRange kPreEqBandConfigRange = {
@@ -129,7 +128,7 @@ static const Range::DynamicsProcessingRange kMbcBandConfigRange = {
                         {.channel = 0,
                          .band = 0,
                          .enable = false,
-                         .cutoffFrequencyHz = 20,
+                         .cutoffFrequencyHz = 0,
                          .attackTimeMs = 0,
                          .releaseTimeMs = 0,
                          .ratio = 1,
@@ -144,7 +143,7 @@ static const Range::DynamicsProcessingRange kMbcBandConfigRange = {
                         {.channel = std::numeric_limits<int>::max(),
                          .band = std::numeric_limits<int>::max(),
                          .enable = true,
-                         .cutoffFrequencyHz = 20000,
+                         .cutoffFrequencyHz = 192000,
                          .attackTimeMs = 60000,
                          .releaseTimeMs = 60000,
                          .ratio = 50,
@@ -206,16 +205,21 @@ const Descriptor DynamicsProcessingImpl::kDescriptor = {
 ndk::ScopedAStatus DynamicsProcessingImpl::open(const Parameter::Common& common,
                                                 const std::optional<Parameter::Specific>& specific,
                                                 OpenEffectReturn* ret) {
-    LOG(DEBUG) << __func__;
     // effect only support 32bits float
     RETURN_IF(common.input.base.format.pcm != common.output.base.format.pcm ||
                       common.input.base.format.pcm != PcmType::FLOAT_32_BIT,
               EX_ILLEGAL_ARGUMENT, "dataMustBe32BitsFloat");
+    std::lock_guard lg(mImplMutex);
     RETURN_OK_IF(mState != State::INIT);
-    auto context = createContext(common);
-    RETURN_IF(!context, EX_NULL_POINTER, "createContextFailed");
+    mImplContext = createContext(common);
+    RETURN_IF(!mContext || !mImplContext, EX_NULL_POINTER, "createContextFailed");
+    RETURN_IF(!getInterfaceVersion(&mVersion).isOk(), EX_UNSUPPORTED_OPERATION,
+              "FailedToGetInterfaceVersion");
+    mImplContext->setVersion(version);
+    mEventFlag = mImplContext->getStatusEventFlag();
+    mDataMqNotEmptyEf =
+            mVersion >= kReopenSupportedVersion ? kEventFlagDataMqNotEmpty : kEventFlagNotEmpty;
 
-    RETURN_IF_ASTATUS_NOT_OK(setParameterCommon(common), "setCommParamErr");
     if (specific.has_value()) {
         RETURN_IF_ASTATUS_NOT_OK(setParameterSpecific(specific.value()), "setSpecParamErr");
     } else {
@@ -227,15 +231,15 @@ ndk::ScopedAStatus DynamicsProcessingImpl::open(const Parameter::Common& common,
     }
 
     mState = State::IDLE;
-    context->dupeFmq(ret);
-    RETURN_IF(createThread(context, getEffectName()) != RetCode::SUCCESS, EX_UNSUPPORTED_OPERATION,
-              "FailedToCreateWorker");
+    mContext->dupeFmq(ret);
+    RETURN_IF(createThread(getEffectNameWithVersion()) != RetCode::SUCCESS,
+              EX_UNSUPPORTED_OPERATION, "FailedToCreateWorker");
+    LOG(INFO) << getEffectNameWithVersion() << __func__;
     return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus DynamicsProcessingImpl::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << __func__ << kDescriptor.toString();
     *_aidl_return = kDescriptor;
     return ndk::ScopedAStatus::ok();
 }
@@ -443,7 +447,7 @@ RetCode DynamicsProcessingImpl::releaseContext() {
 IEffect::Status DynamicsProcessingImpl::effectProcessImpl(float* in, float* out, int samples) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!mContext, status, "nullContext");
-    return mContext->lvmProcess(in, out, samples);
+    return mContext->dpeProcess(in, out, samples);
 }
 
 }  // namespace aidl::android::hardware::audio::effect

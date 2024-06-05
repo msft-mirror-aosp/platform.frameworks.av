@@ -111,8 +111,9 @@ status_t setNativeWindowSizeFormatAndUsage(
         }
     }
 
-    int finalUsage = usage | consumerUsage;
-    ALOGV("gralloc usage: %#x(producer) + %#x(consumer) = %#x", usage, consumerUsage, finalUsage);
+    uint64_t finalUsage = (uint32_t) usage | (uint32_t) consumerUsage;
+    ALOGV("gralloc usage: %#x(producer) + %#x(consumer) = 0x%" PRIx64,
+            usage, consumerUsage, finalUsage);
     err = native_window_set_usage(nativeWindow, finalUsage);
     if (err != NO_ERROR) {
         ALOGE("native_window_set_usage failed: %s (%d)", strerror(-err), -err);
@@ -126,7 +127,7 @@ status_t setNativeWindowSizeFormatAndUsage(
         return err;
     }
 
-    ALOGD("set up nativeWindow %p for %dx%d, color %#x, rotation %d, usage %#x",
+    ALOGD("set up nativeWindow %p for %dx%d, color %#x, rotation %d, usage 0x%" PRIx64,
             nativeWindow, width, height, format, rotation, finalUsage);
     return NO_ERROR;
 }
@@ -225,6 +226,13 @@ status_t pushBlankBuffersToNativeWindow(ANativeWindow *nativeWindow /* nonnull *
         return err;
     };
 
+    // We need to set sidebandStream to nullptr before pushing blank buffers
+    err = native_window_set_sideband_stream(nativeWindow, nullptr);
+    if (err != NO_ERROR) {
+        ALOGE("error setting sidebandStream to nullptr: %s (%d)", strerror(-err), -err);
+        return err;
+    }
+
     // We need to reconnect to the ANativeWindow as a CPU client to ensure that
     // no frames get dropped by SurfaceFlinger assuming that these are video
     // frames.
@@ -291,6 +299,11 @@ status_t pushBlankBuffersToNativeWindow(ANativeWindow *nativeWindow /* nonnull *
             ALOGE("error pushing blank frames: lock failed: %s (%d)", strerror(-err), -err);
             break;
         }
+        if (img == nullptr) {
+            (void)buf->unlock(); // Since lock() was successful.
+            ALOGE("error pushing blank frames: lock succeeded: buf mapping is nullptr");
+            break;
+        }
 
         *img = 0;
 
@@ -317,6 +330,16 @@ status_t nativeWindowConnect(ANativeWindow *surface, const char *reason) {
 
     status_t err = native_window_api_connect(surface, NATIVE_WINDOW_API_MEDIA);
     ALOGE_IF(err != OK, "Failed to connect to surface %p, err %d", surface, err);
+
+    return err;
+}
+
+status_t surfaceConnectWithListener(
+        const sp<Surface> &surface, sp<IProducerListener> listener, const char *reason) {
+    ALOGD("connecting to surface %p, reason %s", surface.get(), reason);
+
+    status_t err = surface->connect(NATIVE_WINDOW_API_MEDIA, listener);
+    ALOGE_IF(err != OK, "Failed to connect from surface %p, err %d", surface.get(), err);
 
     return err;
 }

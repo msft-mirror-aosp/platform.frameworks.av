@@ -15,11 +15,13 @@
  */
 
 #include <cstddef>
+#include <cstring>
 #define LOG_TAG "EffectHalAidl"
 //#define LOG_NDEBUG 0
 
 #include <memory>
 
+#include <audio_utils/primitives.h>
 #include <error/expected_utils.h>
 #include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionEffect.h>
@@ -53,31 +55,39 @@
 #include "effectsAidlConversion/AidlConversionVisualizer.h"
 
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
+using ::aidl::android::hardware::audio::effect::CommandId;
 using ::aidl::android::hardware::audio::effect::Descriptor;
 using ::aidl::android::hardware::audio::effect::IEffect;
 using ::aidl::android::hardware::audio::effect::IFactory;
+using ::aidl::android::hardware::audio::effect::kEventFlagDataMqNotEmpty;
+using ::aidl::android::hardware::audio::effect::kEventFlagDataMqUpdate;
+using ::aidl::android::hardware::audio::effect::kEventFlagNotEmpty;
+using ::aidl::android::hardware::audio::effect::kReopenSupportedVersion;
+using ::aidl::android::hardware::audio::effect::State;
 
 namespace android {
 namespace effect {
 
 EffectHalAidl::EffectHalAidl(const std::shared_ptr<IFactory>& factory,
-                             const std::shared_ptr<IEffect>& effect, uint64_t effectId,
-                             int32_t sessionId, int32_t ioId, const Descriptor& desc,
-                             bool isProxyEffect)
+                             const std::shared_ptr<IEffect>& effect, int32_t sessionId,
+                             int32_t ioId, const Descriptor& desc, bool isProxyEffect)
     : mFactory(factory),
       mEffect(effect),
-      mEffectId(effectId),
       mSessionId(sessionId),
       mIoId(ioId),
-      mDesc(desc),
       mIsProxyEffect(isProxyEffect) {
+    assert(mFactory != nullptr);
+    assert(mEffect != nullptr);
     createAidlConversion(effect, sessionId, ioId, desc);
 }
 
 EffectHalAidl::~EffectHalAidl() {
     if (mEffect) {
-        mIsProxyEffect ? std::static_pointer_cast<EffectProxy>(mEffect)->destroy()
-                       : mFactory->destroyEffect(mEffect);
+        if (mIsProxyEffect) {
+            std::static_pointer_cast<EffectProxy>(mEffect)->destroy();
+        } else if (mFactory) {
+            mFactory->destroyEffect(mEffect);
+        }
     }
 }
 
@@ -89,64 +99,65 @@ status_t EffectHalAidl::createAidlConversion(
     ALOGI("%s create UUID %s", __func__, typeUuid.toString().c_str());
     if (typeUuid ==
         ::aidl::android::hardware::audio::effect::getEffectTypeUuidAcousticEchoCanceler()) {
-        mConversion =
-                std::make_unique<android::effect::AidlConversionAec>(effect, sessionId, ioId, desc);
+        mConversion = std::make_unique<android::effect::AidlConversionAec>(effect, sessionId, ioId,
+                                                                           desc, mIsProxyEffect);
     } else if (typeUuid == ::aidl::android::hardware::audio::effect::
                                    getEffectTypeUuidAutomaticGainControlV1()) {
         mConversion = std::make_unique<android::effect::AidlConversionAgc1>(effect, sessionId, ioId,
-                                                                            desc);
+                                                                            desc, mIsProxyEffect);
     } else if (typeUuid == ::aidl::android::hardware::audio::effect::
                                    getEffectTypeUuidAutomaticGainControlV2()) {
         mConversion = std::make_unique<android::effect::AidlConversionAgc2>(effect, sessionId, ioId,
-                                                                            desc);
+                                                                            desc, mIsProxyEffect);
     } else if (typeUuid == ::aidl::android::hardware::audio::effect::getEffectTypeUuidBassBoost()) {
-        mConversion = std::make_unique<android::effect::AidlConversionBassBoost>(effect, sessionId,
-                                                                                 ioId, desc);
+        mConversion = std::make_unique<android::effect::AidlConversionBassBoost>(
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid == ::aidl::android::hardware::audio::effect::getEffectTypeUuidDownmix()) {
-        mConversion = std::make_unique<android::effect::AidlConversionDownmix>(effect, sessionId,
-                                                                               ioId, desc);
+        mConversion = std::make_unique<android::effect::AidlConversionDownmix>(
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidDynamicsProcessing()) {
-        mConversion =
-                std::make_unique<android::effect::AidlConversionDp>(effect, sessionId, ioId, desc);
+        mConversion = std::make_unique<android::effect::AidlConversionDp>(effect, sessionId, ioId,
+                                                                          desc, mIsProxyEffect);
     } else if (typeUuid == ::aidl::android::hardware::audio::effect::getEffectTypeUuidEnvReverb()) {
-        mConversion = std::make_unique<android::effect::AidlConversionEnvReverb>(effect, sessionId,
-                                                                                 ioId, desc);
+        mConversion = std::make_unique<android::effect::AidlConversionEnvReverb>(
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid == ::aidl::android::hardware::audio::effect::getEffectTypeUuidEqualizer()) {
-        mConversion =
-                std::make_unique<android::effect::AidlConversionEq>(effect, sessionId, ioId, desc);
+        mConversion = std::make_unique<android::effect::AidlConversionEq>(effect, sessionId, ioId,
+                                                                          desc, mIsProxyEffect);
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidHapticGenerator()) {
         mConversion = std::make_unique<android::effect::AidlConversionHapticGenerator>(
-                effect, sessionId, ioId, desc);
+                effect, sessionId, ioId, desc, mIsProxyEffect);
+        mIsHapticGenerator = true;
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidLoudnessEnhancer()) {
         mConversion = std::make_unique<android::effect::AidlConversionLoudnessEnhancer>(
-                effect, sessionId, ioId, desc);
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidNoiseSuppression()) {
         mConversion = std::make_unique<android::effect::AidlConversionNoiseSuppression>(
-                effect, sessionId, ioId, desc);
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidPresetReverb()) {
         mConversion = std::make_unique<android::effect::AidlConversionPresetReverb>(
-                effect, sessionId, ioId, desc);
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidSpatializer()) {
         mConversion = std::make_unique<android::effect::AidlConversionSpatializer>(
-                effect, sessionId, ioId, desc);
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidVirtualizer()) {
         mConversion = std::make_unique<android::effect::AidlConversionVirtualizer>(
-                effect, sessionId, ioId, desc);
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidVisualizer()) {
-        mConversion = std::make_unique<android::effect::AidlConversionVisualizer>(effect, sessionId,
-                                                                                  ioId, desc);
+        mConversion = std::make_unique<android::effect::AidlConversionVisualizer>(
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     } else {
         // For unknown UUID, use vendor extension implementation
         mConversion = std::make_unique<android::effect::AidlConversionVendorExtension>(
-                effect, sessionId, ioId, desc);
+                effect, sessionId, ioId, desc, mIsProxyEffect);
     }
     return OK;
 }
@@ -163,20 +174,51 @@ status_t EffectHalAidl::setOutBuffer(const sp<EffectBufferHalInterface>& buffer)
 
 // write to input FMQ here, wait for statusMQ STATUS_OK, and read from output FMQ
 status_t EffectHalAidl::process() {
+    const std::string effectName = mConversion->getDescriptor().common.name;
+    State state = State::INIT;
+    if (mConversion->isBypassing() || !mEffect->getState(&state).isOk() ||
+        state != State::PROCESSING) {
+        ALOGI("%s skipping %s process because it's %s", __func__, effectName.c_str(),
+              mConversion->isBypassing()
+                      ? "bypassing"
+                      : aidl::android::hardware::audio::effect::toString(state).c_str());
+        return -ENODATA;
+    }
+
+    // check if the DataMq needs any update, timeout at 1ns to avoid being blocked
+    auto efGroup = mConversion->getEventFlagGroup();
+    if (!efGroup) {
+        ALOGE("%s invalid efGroup", __func__);
+        return INVALID_OPERATION;
+    }
+
+    // use IFactory HAL version because IEffect can be an EffectProxy instance
+    static const int halVersion = [&]() {
+        int version = 0;
+        return mFactory->getInterfaceVersion(&version).isOk() ? version : 0;
+    }();
+
+    if (uint32_t efState = 0; halVersion >= kReopenSupportedVersion &&
+                              ::android::OK == efGroup->wait(kEventFlagDataMqUpdate, &efState,
+                                                             1 /* ns */, true /* retry */) &&
+                              efState & kEventFlagDataMqUpdate) {
+        ALOGD("%s %s V%d receive dataMQUpdate eventFlag from HAL", __func__, effectName.c_str(),
+              halVersion);
+
+        mConversion->reopen();
+    }
     auto statusQ = mConversion->getStatusMQ();
     auto inputQ = mConversion->getInputMQ();
     auto outputQ = mConversion->getOutputMQ();
-    auto efGroup = mConversion->getEventFlagGroup();
     if (!statusQ || !statusQ->isValid() || !inputQ || !inputQ->isValid() || !outputQ ||
-        !outputQ->isValid() || !efGroup) {
-        ALOGE("%s invalid FMQ [Status %d I %d O %d] efGroup %p", __func__,
-              statusQ ? statusQ->isValid() : 0, inputQ ? inputQ->isValid() : 0,
-              outputQ ? outputQ->isValid() : 0, efGroup.get());
+        !outputQ->isValid()) {
+        ALOGE("%s invalid FMQ [Status %d I %d O %d]", __func__, statusQ ? statusQ->isValid() : 0,
+              inputQ ? inputQ->isValid() : 0, outputQ ? outputQ->isValid() : 0);
         return INVALID_OPERATION;
     }
 
     size_t available = inputQ->availableToWrite();
-    size_t floatsToWrite = std::min(available, mInBuffer->getSize() / sizeof(float));
+    const size_t floatsToWrite = std::min(available, mInBuffer->getSize() / sizeof(float));
     if (floatsToWrite == 0) {
         ALOGE("%s not able to write, floats in buffer %zu, space in FMQ %zu", __func__,
               mInBuffer->getSize() / sizeof(float), available);
@@ -188,32 +230,74 @@ status_t EffectHalAidl::process() {
               floatsToWrite, mInBuffer->audioBuffer(), inputQ->availableToWrite());
         return INVALID_OPERATION;
     }
-    efGroup->wake(aidl::android::hardware::audio::effect::kEventFlagNotEmpty);
+
+    // for V2 audio effect HAL, expect different EventFlag to avoid bit conflict with FMQ_NOT_EMPTY
+    efGroup->wake(halVersion >= kReopenSupportedVersion ? kEventFlagDataMqNotEmpty
+                                                        : kEventFlagNotEmpty);
 
     IEffect::Status retStatus{};
-    if (!statusQ->readBlocking(&retStatus, 1) || retStatus.status != OK ||
-        (size_t)retStatus.fmqConsumed != floatsToWrite || retStatus.fmqProduced == 0) {
-        ALOGE("%s read status failed: %s", __func__, retStatus.toString().c_str());
+    if (!statusQ->readBlocking(&retStatus, 1)) {
+        ALOGE("%s %s V%d read status from status FMQ failed", __func__, effectName.c_str(),
+              halVersion);
+        return INVALID_OPERATION;
+    }
+    if (retStatus.status != OK || (size_t)retStatus.fmqConsumed != floatsToWrite ||
+        retStatus.fmqProduced == 0) {
+        ALOGE("%s read status failed: %s, consumed %d (of %zu) produced %d", __func__,
+              retStatus.toString().c_str(), retStatus.fmqConsumed, floatsToWrite,
+              retStatus.fmqProduced);
         return INVALID_OPERATION;
     }
 
     available = outputQ->availableToRead();
-    size_t floatsToRead = std::min(available, mOutBuffer->getSize() / sizeof(float));
+    const size_t floatsToRead = std::min(available, mOutBuffer->getSize() / sizeof(float));
     if (floatsToRead == 0) {
         ALOGE("%s not able to read, buffer space %zu, floats in FMQ %zu", __func__,
               mOutBuffer->getSize() / sizeof(float), available);
         return INVALID_OPERATION;
     }
+
+    float *outputRawBuffer = mOutBuffer->audioBuffer()->f32;
+    std::vector<float> tempBuffer;
+    // keep original data in the output buffer for accumulate mode or HapticGenerator effect
+    if (mConversion->mOutputAccessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE || mIsHapticGenerator) {
+        tempBuffer.resize(floatsToRead);
+        outputRawBuffer = tempBuffer.data();
+    }
     // always read floating point data for AIDL
-    if (!mOutBuffer->audioBuffer() ||
-        !outputQ->read(mOutBuffer->audioBuffer()->f32, floatsToRead)) {
+    if (!outputQ->read(outputRawBuffer, floatsToRead)) {
         ALOGE("%s failed to read %zu from outputQ to audioBuffer %p", __func__, floatsToRead,
               mOutBuffer->audioBuffer());
         return INVALID_OPERATION;
     }
 
-    ALOGD("%s %s consumed %zu produced %zu", __func__, mDesc.common.name.c_str(), floatsToWrite,
-          floatsToRead);
+    // HapticGenerator needs special handling because the generated haptic samples should append to
+    // the end of audio samples, the generated haptic data pass back from HAL in output FMQ at same
+    // offset as input buffer, here we skip the audio samples in output FMQ and append haptic
+    // samples to the end of input buffer
+    if (mIsHapticGenerator) {
+        static constexpr float kHalFloatSampleLimit = 2.0f;
+        assert(floatsToRead == floatsToWrite);
+        const auto audioChNum = mConversion->getAudioChannelCount();
+        const auto audioSamples =
+                floatsToWrite * audioChNum / (audioChNum + mConversion->getHapticChannelCount());
+        // accumulate or copy input to output, haptic samples remains all zero
+        if (mConversion->mOutputAccessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE) {
+            accumulate_float(mOutBuffer->audioBuffer()->f32, mInBuffer->audioBuffer()->f32,
+                             audioSamples);
+        } else {
+            memcpy_to_float_from_float_with_clamping(mOutBuffer->audioBuffer()->f32,
+                                                     mInBuffer->audioBuffer()->f32, audioSamples,
+                                                     kHalFloatSampleLimit);
+        }
+        // append the haptic sample at the end of input audio samples
+        memcpy_to_float_from_float_with_clamping(mInBuffer->audioBuffer()->f32 + audioSamples,
+                                                 outputRawBuffer + audioSamples,
+                                                 floatsToRead - audioSamples, kHalFloatSampleLimit);
+    } else if (mConversion->mOutputAccessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE) {
+        accumulate_float(mOutBuffer->audioBuffer()->f32, outputRawBuffer, floatsToRead);
+    }
+
     return OK;
 }
 
@@ -250,6 +334,7 @@ status_t EffectHalAidl::getDescriptor(effect_descriptor_t* pDescriptor) {
 
 status_t EffectHalAidl::close() {
     TIME_CHECK();
+    mEffect->command(CommandId::STOP);
     return statusTFromBinderStatus(mEffect->close());
 }
 

@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
-// #define LOG_NDEBUG 0
+//#define LOG_NDEBUG 0
 #define LOG_TAG "media_c2_hidl_test_common"
 #include <stdio.h>
-
+#include <numeric>
 #include "media_c2_hidl_test_common.h"
 
 #include <android/hardware/media/c2/1.0/IComponentStore.h>
+#include <codec2/aidl/ParamTypes.h>
 
 std::string sResourceDir = "";
 
@@ -42,6 +43,14 @@ void printUsage(char* me) {
     std::cerr << "\t                    Eg: c2.android - test codecs starting with c2.android \n";
     std::cerr << "\t                    Eg: c2.android.aac.decoder - test a specific codec \n";
     std::cerr << "\t -h,  --help:   Print usage \n";
+}
+
+C2PooledBlockPool::BufferPoolVer getBufferPoolVer() {
+    if (::aidl::android::hardware::media::c2::utils::IsSelected()) {
+        return C2PooledBlockPool::VER_AIDL2;
+    } else {
+        return C2PooledBlockPool::VER_HIDL;
+    }
 }
 
 void parseArgs(int argc, char** argv) {
@@ -212,6 +221,32 @@ const std::vector<TestParameters>& getTestParameters(C2Component::domain_t domai
     return parameters;
 }
 
+constexpr static std::initializer_list<std::pair<uint32_t, uint32_t>> flagList{
+        {(1 << VTS_BIT_FLAG_SYNC_FRAME), 0},
+        {(1 << VTS_BIT_FLAG_CSD_FRAME), C2FrameData::FLAG_CODEC_CONFIG},
+};
+
+/*
+ * This is a conversion function that can be used to convert
+ * VTS flags to C2 flags and vice-versa based on the initializer list.
+ * @param flags can be a C2 flag or a VTS flag
+ * @param toC2 if true, converts flags to a C2 flag
+ *              if false, converts flags to a VTS flag
+ */
+static uint32_t convertFlags(uint32_t flags, bool toC2) {
+    return std::transform_reduce(
+            flagList.begin(), flagList.end(),
+            0u,
+            std::bit_or{},
+            [flags, toC2](const std::pair<uint32_t, uint32_t> &entry) {
+                if (toC2) {
+                    return (flags & entry.first) ? entry.second : 0;
+                } else {
+                    return (flags & entry.second) ? entry.first : 0;
+                }
+            });
+}
+
 // Populate Info vector and return number of CSDs
 int32_t populateInfoVector(std::string info, android::Vector<FrameInfo>* frameInfo,
                            bool timestampDevTest, std::list<uint64_t>* timestampUslist) {
@@ -224,18 +259,36 @@ int32_t populateInfoVector(std::string info, android::Vector<FrameInfo>* frameIn
     int32_t numCsds = 0;
     int32_t bytesCount = 0;
     uint32_t flags = 0;
+    uint32_t vtsFlags = 0;
     uint32_t timestamp = 0;
+    uint32_t nLargeFrames = 0;
     while (1) {
         if (!(eleInfo >> bytesCount)) break;
         eleInfo >> flags;
+        vtsFlags = mapInfoFlagstoVtsFlags(flags);
+        if (vtsFlags == 0xFF) {
+            ALOGE("unrecognized flag(0x%x) entry in info file %s", flags, info.c_str());
+            return -1;
+        }
         eleInfo >> timestamp;
-        bool codecConfig = flags ? ((1 << (flags - 1)) & C2FrameData::FLAG_CODEC_CONFIG) != 0 : 0;
+        bool codecConfig = (vtsFlags & (1 << VTS_BIT_FLAG_CSD_FRAME)) != 0 ;
         if (codecConfig) numCsds++;
-        bool nonDisplayFrame = ((flags & FLAG_NON_DISPLAY_FRAME) != 0);
+        bool nonDisplayFrame = (vtsFlags & (1 << VTS_BIT_FLAG_NO_SHOW_FRAME)) != 0;
         if (timestampDevTest && !codecConfig && !nonDisplayFrame) {
             timestampUslist->push_back(timestamp);
         }
-        frameInfo->push_back({bytesCount, flags, timestamp});
+        frameInfo->push_back({bytesCount, vtsFlags, timestamp, {}});
+        if (vtsFlags & (1 << VTS_BIT_FLAG_LARGE_AUDIO_FRAME)) {
+            eleInfo >> nLargeFrames;
+            while(nLargeFrames-- > 0) {
+                eleInfo >> bytesCount;
+                eleInfo >> flags;
+                eleInfo >> timestamp;
+                uint32_t c2Flags = convertFlags(flags, true);
+                frameInfo->editItemAt(frameInfo->size() - 1).largeFrameInfo.push_back(
+                        {c2Flags, static_cast<uint32_t>(bytesCount), timestamp});
+            }
+        }
     }
     ALOGV("numCsds : %d", numCsds);
     eleInfo.close();
@@ -263,4 +316,16 @@ void verifyFlushOutput(std::list<std::unique_ptr<C2Work>>& flushedWork,
     }
     ASSERT_EQ(flushedIndices.empty(), true);
     flushedWork.clear();
+}
+
+int mapInfoFlagstoVtsFlags(int infoFlags) {
+    if (infoFlags == 0) return 0;
+    else if (infoFlags == 0x1) return (1 << VTS_BIT_FLAG_SYNC_FRAME);
+    else if (infoFlags == 0x10) return (1 << VTS_BIT_FLAG_NO_SHOW_FRAME);
+    else if (infoFlags == 0x20) return (1 << VTS_BIT_FLAG_CSD_FRAME);
+    else if (infoFlags == 0x40) return (1 << VTS_BIT_FLAG_LARGE_AUDIO_FRAME);
+    else if (infoFlags == 0x80) {
+        return (1 << VTS_BIT_FLAG_LARGE_AUDIO_FRAME) | (1 << VTS_BIT_FLAG_SYNC_FRAME);
+    }
+    return 0xFF;
 }

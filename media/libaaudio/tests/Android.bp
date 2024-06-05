@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_media_framework_audio",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -145,6 +146,7 @@ cc_test {
     srcs: ["test_flowgraph.cpp"],
     shared_libs: [
         "libaaudio_internal",
+        "libaudioutils",
         "libbinder",
         "libcutils",
         "libutils",
@@ -181,7 +183,10 @@ cc_test {
     name: "test_full_queue",
     defaults: ["libaaudio_tests_defaults"],
     srcs: ["test_full_queue.cpp"],
-    shared_libs: ["libaaudio"],
+    shared_libs: [
+        "libaaudio",
+        "liblog",
+    ],
 }
 
 cc_test {
@@ -201,9 +206,9 @@ cc_binary {
     srcs: ["test_steal_exclusive.cpp"],
     shared_libs: [
         "libaaudio",
-        "liblog",
         "libbinder",
         "libcutils",
+        "liblog",
         "libutils",
     ],
 }
@@ -236,4 +241,38 @@ cc_test {
     shared_libs: [
         "libaaudio_internal",
     ],
+}
+
+cc_binary {
+    name: "test_idle_disconnected_shared_stream",
+    defaults: ["libaaudio_tests_defaults"],
+    srcs: ["test_idle_disconnected_shared_stream.cpp"],
+    shared_libs: ["libaaudio"],
+}
+
+cc_test {
+    name: "test_multiple_close_simultaneously",
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_shared",
+        "libaaudio_tests_defaults",
+    ],
+    srcs: ["test_multiple_close_simultaneously.cpp"],
+    shared_libs: [
+        "aaudio-aidl-cpp",
+        "framework-permission-aidl-cpp",
+        "libaaudio",
+        "libbinder",
+        "liblog",
+        "libutils",
+    ],
+    // This test will run 1 minute to ensure there is no crash happen.
+    // In that case, set the timeout as 2 minutes to allow the test to complete.
+    test_options: {
+        test_runner_options: [
+            {
+                name: "native-test-timeout",
+                value: "2m",
+            },
+        ],
+    },
 }

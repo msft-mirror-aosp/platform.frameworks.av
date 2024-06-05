@@ -383,11 +383,10 @@ audio_channel_mask_t AAudioConvert_aaudioToAndroidChannelLayoutMask(
                 return AUDIO_CHANNEL_OUT_7POINT1POINT2;
             case AAUDIO_CHANNEL_7POINT1POINT4:
                 return AUDIO_CHANNEL_OUT_7POINT1POINT4;
-            // TODO: add 9point1point4 and 9point1point6 when they are added in audio-hal-enums.h
-            // case AAUDIO_CHANNEL_9POINT1POINT4:
-            //     return AUDIO_CHANNEL_OUT_9POINT1POINT4;
-            // case AAUDIO_CHANNEL_9POINT1POINT6:
-            //     return AUDIO_CHANNEL_OUT_9POINT1POINT6;
+            case AAUDIO_CHANNEL_9POINT1POINT4:
+                return AUDIO_CHANNEL_OUT_9POINT1POINT4;
+            case AAUDIO_CHANNEL_9POINT1POINT6:
+                return AUDIO_CHANNEL_OUT_9POINT1POINT6;
             default:
                 ALOGE("%s() %#x unrecognized", __func__, channelMask);
                 return AUDIO_CHANNEL_INVALID;
@@ -465,11 +464,10 @@ aaudio_channel_mask_t AAudioConvert_androidToAAudioChannelLayoutMask(
                 return AAUDIO_CHANNEL_7POINT1POINT2;
             case AUDIO_CHANNEL_OUT_7POINT1POINT4:
                 return AAUDIO_CHANNEL_7POINT1POINT4;
-            // TODO: add 9point1point4 and 9point1point6 when they are added in audio-hal-enums.h
-            // case AUDIO_CHANNEL_OUT_9POINT1POINT4:
-            //     return AAUDIO_CHANNEL_9POINT1POINT4;
-            // case AUDIO_CHANNEL_OUT_9POINT1POINT6:
-            //     return AAUDIO_CHANNEL_9POINT1POINT6;
+            case AUDIO_CHANNEL_OUT_9POINT1POINT4:
+                return AAUDIO_CHANNEL_9POINT1POINT4;
+            case AUDIO_CHANNEL_OUT_9POINT1POINT6:
+                return AAUDIO_CHANNEL_9POINT1POINT6;
             default:
                 ALOGE("%s() %#x unrecognized", __func__, channelMask);
                 return AAUDIO_CHANNEL_INVALID;
@@ -682,12 +680,16 @@ aaudio_policy_t aidl2legacy_aaudio_policy(AudioMMapPolicy aidl) {
 
 } // namespace
 
-aaudio_policy_t AAudio_getAAudioPolicy(const std::vector<AudioMMapPolicyInfo>& policyInfos) {
-    if (policyInfos.empty()) return AAUDIO_POLICY_AUTO;
-    for (size_t i = 1; i < policyInfos.size(); ++i) {
-        if (policyInfos.at(i).mmapPolicy != policyInfos.at(0).mmapPolicy) {
+aaudio_policy_t AAudio_getAAudioPolicy(const std::vector<AudioMMapPolicyInfo>& policyInfos,
+                                       AudioMMapPolicy defaultPolicy) {
+    AudioMMapPolicy policy = defaultPolicy;
+    for (const auto& policyInfo : policyInfos) {
+        if (policyInfo.mmapPolicy == AudioMMapPolicy::NEVER) {
+            policy = policyInfo.mmapPolicy;
+        } else if (policyInfo.mmapPolicy == AudioMMapPolicy::AUTO ||
+                   policyInfo.mmapPolicy == AudioMMapPolicy::ALWAYS) {
             return AAUDIO_POLICY_AUTO;
         }
     }
-    return aidl2legacy_aaudio_policy(policyInfos.at(0).mmapPolicy);
+    return aidl2legacy_aaudio_policy(policy);
 }

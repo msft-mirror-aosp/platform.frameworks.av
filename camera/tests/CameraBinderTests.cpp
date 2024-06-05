@@ -43,6 +43,8 @@
 #include <camera/camera2/OutputConfiguration.h>
 #include <camera/camera2/SessionConfiguration.h>
 #include <camera/camera2/SubmitInfo.h>
+#include <camera/CameraUtils.h>
+#include <camera/StringUtils.h>
 
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
@@ -68,52 +70,60 @@ using ::android::hardware::camera2::ICameraDeviceUser;
 
 // Stub listener implementation
 class TestCameraServiceListener : public hardware::BnCameraServiceListener {
-    std::map<String16, int32_t> mCameraTorchStatuses;
-    std::map<String16, int32_t> mCameraStatuses;
+    std::map<std::string, int32_t> mCameraTorchStatuses;
+    std::map<std::string, int32_t> mCameraStatuses;
     mutable Mutex mLock;
     mutable Condition mCondition;
     mutable Condition mTorchCondition;
 public:
     virtual ~TestCameraServiceListener() {};
 
-    virtual binder::Status onStatusChanged(int32_t status, const String16& cameraId) {
+    virtual binder::Status onStatusChanged(int32_t status, const std::string& cameraId,
+            [[maybe_unused]] int32_t /*deviceId*/) override {
         Mutex::Autolock l(mLock);
         mCameraStatuses[cameraId] = status;
         mCondition.broadcast();
         return binder::Status::ok();
-    };
+    }
 
-    virtual binder::Status onPhysicalCameraStatusChanged(int32_t /*status*/,
-            const String16& /*cameraId*/, const String16& /*physicalCameraId*/) {
+    virtual binder::Status onPhysicalCameraStatusChanged([[maybe_unused]] int32_t /*status*/,
+            [[maybe_unused]] const std::string& /*cameraId*/,
+            [[maybe_unused]] const std::string& /*physicalCameraId*/,
+            [[maybe_unused]] int32_t /*deviceId*/) override {
         // No op
         return binder::Status::ok();
-    };
+    }
 
-    virtual binder::Status onTorchStatusChanged(int32_t status, const String16& cameraId) {
+    virtual binder::Status onTorchStatusChanged(int32_t status,
+            const std::string& cameraId, [[maybe_unused]] int32_t /*deviceId*/) override {
         Mutex::Autolock l(mLock);
         mCameraTorchStatuses[cameraId] = status;
         mTorchCondition.broadcast();
         return binder::Status::ok();
-    };
+    }
 
-    virtual binder::Status onTorchStrengthLevelChanged(const String16& /*cameraId*/,
-            int32_t /*torchStrength*/) {
+    virtual binder::Status onTorchStrengthLevelChanged(
+            [[maybe_unused]] const std::string& /*cameraId*/,
+            [[maybe_unused]] int32_t /*torchStrength*/,
+            [[maybe_unused]] int32_t /*deviceId*/) override {
         // No op
         return binder::Status::ok();
     }
 
-    virtual binder::Status onCameraAccessPrioritiesChanged() {
+    virtual binder::Status onCameraAccessPrioritiesChanged() override {
         // No op
         return binder::Status::ok();
     }
 
-    virtual binder::Status onCameraOpened(const String16& /*cameraId*/,
-            const String16& /*clientPackageName*/) {
+    virtual binder::Status onCameraOpened([[maybe_unused]] const std::string& /*cameraId*/,
+            [[maybe_unused]] const std::string& /*clientPackageName*/,
+            [[maybe_unused]] int32_t /*deviceId*/) {
         // No op
         return binder::Status::ok();
     }
 
-    virtual binder::Status onCameraClosed(const String16& /*cameraId*/) {
+    virtual binder::Status onCameraClosed([[maybe_unused]] const std::string& /*cameraId*/,
+            [[maybe_unused]] int32_t /*deviceId*/) override {
         // No op
         return binder::Status::ok();
     }
@@ -131,12 +141,12 @@ public:
             }
         }
         return true;
-    };
+    }
 
     bool waitForTorchState(int32_t status, int32_t cameraId) const {
         Mutex::Autolock l(mLock);
 
-        const auto& iter = mCameraTorchStatuses.find(String16(String8::format("%d", cameraId)));
+        const auto& iter = mCameraTorchStatuses.find(std::to_string(cameraId));
         if (iter != mCameraTorchStatuses.end() && iter->second == status) {
             return true;
         }
@@ -147,29 +157,29 @@ public:
                 return false;
             }
             const auto& iter =
-                    mCameraTorchStatuses.find(String16(String8::format("%d", cameraId)));
+                    mCameraTorchStatuses.find(std::to_string(cameraId));
             foundStatus = (iter != mCameraTorchStatuses.end() && iter->second == status);
         }
         return true;
-    };
+    }
 
     int32_t getTorchStatus(int32_t cameraId) const {
         Mutex::Autolock l(mLock);
-        const auto& iter = mCameraTorchStatuses.find(String16(String8::format("%d", cameraId)));
+        const auto& iter = mCameraTorchStatuses.find(std::to_string(cameraId));
         if (iter == mCameraTorchStatuses.end()) {
             return hardware::ICameraServiceListener::TORCH_STATUS_UNKNOWN;
         }
         return iter->second;
-    };
+    }
 
-    int32_t getStatus(const String16& cameraId) const {
+    int32_t getStatus(const std::string& cameraId) const {
         Mutex::Autolock l(mLock);
         const auto& iter = mCameraStatuses.find(cameraId);
         if (iter == mCameraStatuses.end()) {
             return hardware::ICameraServiceListener::STATUS_UNKNOWN;
         }
         return iter->second;
-    };
+    }
 };
 
 // Callback implementation
@@ -227,7 +237,6 @@ public:
         mStatusCondition.broadcast();
         return binder::Status::ok();
     }
-
 
     virtual binder::Status onResultReceived(const CameraMetadata& metadata,
             const CaptureResultExtras& resultExtras,
@@ -294,7 +303,6 @@ public:
         mStatusesHit.clear();
 
         return true;
-
     }
 
     void clearStatus() const {
@@ -305,7 +313,6 @@ public:
     bool waitForIdle() const {
         return waitForStatus(IDLE);
     }
-
 };
 
 namespace {
@@ -322,7 +329,7 @@ namespace {
         }
     };
     sp<DeathNotifier>         gDeathNotifier;
-}; // anonymous namespace
+} // anonymous namespace
 
 // Exercise basic binder calls for the camera service
 TEST(CameraServiceBinderTest, CheckBinderCameraService) {
@@ -340,7 +347,8 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
     binder::Status res;
 
     int32_t numCameras = 0;
-    res = service->getNumberOfCameras(hardware::ICameraService::CAMERA_TYPE_ALL, &numCameras);
+    res = service->getNumberOfCameras(hardware::ICameraService::CAMERA_TYPE_ALL, kDefaultDeviceId,
+            /*devicePolicy*/0, &numCameras);
     EXPECT_TRUE(res.isOk()) << res;
     EXPECT_LE(0, numCameras);
 
@@ -352,11 +360,11 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
 
     EXPECT_EQ(numCameras, static_cast<const int>(statuses.size()));
     for (const auto &it : statuses) {
-        listener->onStatusChanged(it.status, String16(it.cameraId));
+        listener->onStatusChanged(it.status, it.cameraId, kDefaultDeviceId);
     }
 
     for (int32_t i = 0; i < numCameras; i++) {
-        String16 cameraId = String16(String8::format("%d", i));
+        std::string cameraId = std::to_string(i);
         bool isSupported = false;
         res = service->supportsCameraApi(cameraId,
                 hardware::ICameraService::API_VERSION_2, &isSupported);
@@ -370,7 +378,8 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         // Check metadata binder call
         CameraMetadata metadata;
         res = service->getCameraCharacteristics(cameraId,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false, &metadata);
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
+                kDefaultDeviceId, /*devicePolicy*/0, &metadata);
         EXPECT_TRUE(res.isOk()) << res;
         EXPECT_FALSE(metadata.isEmpty());
 
@@ -384,10 +393,10 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         // Check connect binder calls
         sp<TestCameraDeviceCallbacks> callbacks(new TestCameraDeviceCallbacks());
         sp<hardware::camera2::ICameraDeviceUser> device;
-        res = service->connectDevice(callbacks, cameraId, String16("meeeeeeeee!"),
+        res = service->connectDevice(callbacks, cameraId, "meeeeeeeee!",
                 {}, hardware::ICameraService::USE_CALLING_UID, /*oomScoreOffset*/ 0,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__,
-                /*overrideToPortrait*/false, /*out*/&device);
+                /*overrideToPortrait*/false, kDefaultDeviceId, /*devicePolicy*/0, /*out*/&device);
         EXPECT_TRUE(res.isOk()) << res;
         ASSERT_NE(nullptr, device.get());
         device->disconnect();
@@ -397,12 +406,12 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         if (torchStatus == hardware::ICameraServiceListener::TORCH_STATUS_AVAILABLE_OFF) {
             // Check torch calls
             res = service->setTorchMode(cameraId,
-                    /*enabled*/true, callbacks);
+                    /*enabled*/true, callbacks, kDefaultDeviceId, /*devicePolicy*/0);
             EXPECT_TRUE(res.isOk()) << res;
             EXPECT_TRUE(listener->waitForTorchState(
                     hardware::ICameraServiceListener::TORCH_STATUS_AVAILABLE_ON, i));
             res = service->setTorchMode(cameraId,
-                    /*enabled*/false, callbacks);
+                    /*enabled*/false, callbacks, kDefaultDeviceId, /*devicePolicy*/0);
             EXPECT_TRUE(res.isOk()) << res;
             EXPECT_TRUE(listener->waitForTorchState(
                     hardware::ICameraServiceListener::TORCH_STATUS_AVAILABLE_OFF, i));
@@ -423,15 +432,16 @@ protected:
     sp<TestCameraServiceListener> serviceListener;
 
     std::pair<sp<TestCameraDeviceCallbacks>, sp<hardware::camera2::ICameraDeviceUser>>
-            openNewDevice(const String16& deviceId) {
+            openNewDevice(const std::string& deviceId) {
         sp<TestCameraDeviceCallbacks> callbacks(new TestCameraDeviceCallbacks());
         sp<hardware::camera2::ICameraDeviceUser> device;
         {
             SCOPED_TRACE("openNewDevice");
-            binder::Status res = service->connectDevice(callbacks, deviceId, String16("meeeeeeeee!"),
+            binder::Status res = service->connectDevice(callbacks, deviceId, "meeeeeeeee!",
                     {}, hardware::ICameraService::USE_CALLING_UID, /*oomScoreOffset*/ 0,
                     /*targetSdkVersion*/__ANDROID_API_FUTURE__,
-                    /*overrideToPortrait*/false, /*out*/&device);
+                    /*overrideToPortrait*/false, kDefaultDeviceId, /*devicePolicy*/0,
+                    /*out*/&device);
             EXPECT_TRUE(res.isOk()) << res;
         }
         auto p = std::make_pair(callbacks, device);
@@ -464,10 +474,10 @@ protected:
         std::vector<hardware::CameraStatus> statuses;
         service->addListener(serviceListener, &statuses);
         for (const auto &it : statuses) {
-            serviceListener->onStatusChanged(it.status, String16(it.cameraId));
+            serviceListener->onStatusChanged(it.status, it.cameraId, kDefaultDeviceId);
         }
         service->getNumberOfCameras(hardware::ICameraService::CAMERA_TYPE_BACKWARD_COMPATIBLE,
-                &numCameras);
+                kDefaultDeviceId, /*devicePolicy*/0, &numCameras);
     }
 
     virtual void TearDown() {
@@ -477,16 +487,14 @@ protected:
             closeDevice(p);
         }
     }
-
 };
 
 TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
     ASSERT_NOT_NULL(service);
     EXPECT_TRUE(serviceListener->waitForNumCameras(numCameras));
     for (int32_t i = 0; i < numCameras; i++) {
-        String8 cameraId8 = String8::format("%d", i);
+        std::string cameraId = std::to_string(i);
         // Make sure we're available, or skip device tests otherwise
-        String16 cameraId(cameraId8);
         int32_t s = serviceListener->getStatus(cameraId);
         EXPECT_EQ(hardware::ICameraServiceListener::STATUS_PRESENT, s);
         if (s != hardware::ICameraServiceListener::STATUS_PRESENT) {
@@ -513,7 +521,7 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
 
         sp<Surface> surface(new Surface(gbProducer, /*controlledByApp*/false));
 
-        String16 noPhysicalId;
+        std::string noPhysicalId;
         OutputConfiguration output(gbProducer, /*rotation*/0, noPhysicalId);
 
         // Can we configure?
@@ -550,7 +558,7 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
         EXPECT_TRUE(res.isOk()) << res;
 
         hardware::camera2::CaptureRequest request;
-        request.mPhysicalCameraSettings.push_back({cameraId8.string(), requestTemplate});
+        request.mPhysicalCameraSettings.push_back({cameraId, requestTemplate});
         request.mSurfaceList.add(surface);
         request.mIsReprocess = false;
         int64_t lastFrameNumber = 0;
@@ -577,7 +585,7 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
                 /*out*/&requestTemplate);
         EXPECT_TRUE(res.isOk()) << res;
         hardware::camera2::CaptureRequest request2;
-        request2.mPhysicalCameraSettings.push_back({cameraId8.string(), requestTemplate});
+        request2.mPhysicalCameraSettings.push_back({cameraId, requestTemplate});
         request2.mSurfaceList.add(surface);
         request2.mIsReprocess = false;
         callbacks->clearStatus();
@@ -610,10 +618,10 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
         EXPECT_TRUE(res.isOk()) << res;
         android::hardware::camera2::CaptureRequest request3;
         android::hardware::camera2::CaptureRequest request4;
-        request3.mPhysicalCameraSettings.push_back({cameraId8.string(), requestTemplate});
+        request3.mPhysicalCameraSettings.push_back({cameraId, requestTemplate});
         request3.mSurfaceList.add(surface);
         request3.mIsReprocess = false;
-        request4.mPhysicalCameraSettings.push_back({cameraId8.string(), requestTemplate2});
+        request4.mPhysicalCameraSettings.push_back({cameraId, requestTemplate2});
         request4.mSurfaceList.add(surface);
         request4.mIsReprocess = false;
         std::vector<hardware::camera2::CaptureRequest> requestList;
@@ -646,8 +654,7 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
 
         closeDevice(p);
     }
-
-};
+}
 
 TEST_F(CameraClientBinderTest, CheckBinderCaptureRequest) {
     sp<CaptureRequest> requestOriginal, requestParceled;
@@ -706,4 +713,4 @@ TEST_F(CameraClientBinderTest, CheckBinderCaptureRequest) {
     EXPECT_TRUE(it->settings.exists(ANDROID_CONTROL_CAPTURE_INTENT));
     entry = it->settings.find(ANDROID_CONTROL_CAPTURE_INTENT);
     EXPECT_EQ(entry.data.u8[0], intent2);
-};
+}

@@ -20,9 +20,6 @@ license {
 cc_library_shared {
     name: "libstagefright_omx",
     vendor_available: true,
-    vndk: {
-        enabled: true,
-    },
     double_loadable: true,
 
     srcs: [
@@ -184,6 +181,9 @@ cc_library_shared {
 
 cc_defaults {
     name: "libstagefright_softomx-defaults",
+    // TODO (b/316432618) Software OMX codecs are no longer used, disable building them till
+    // this code is removed completely.
+    enabled: false,
     vendor_available: true,
 
     cflags: [
@@ -215,9 +215,6 @@ cc_defaults {
 cc_library_shared {
     name: "libstagefright_omx_utils",
     vendor_available: true,
-    vndk: {
-        enabled: true,
-    },
     double_loadable: true,
     srcs: ["OMXUtils.cpp"],
     export_include_dirs: [

@@ -18,6 +18,8 @@
 #define LOG_TAG "ACameraMetadata"
 
 #include "ACameraMetadata.h"
+
+#include <camera_metadata_hidden.h>
 #include <utils/Vector.h>
 #include <system/graphics.h>
 #include <media/NdkImage.h>
@@ -85,6 +87,19 @@ ACameraMetadata::init() {
         filterDurations(ANDROID_DEPTH_AVAILABLE_DYNAMIC_DEPTH_STALL_DURATIONS);
     }
     // TODO: filter request/result keys
+    const CameraMetadata& metadata = *mData;
+    const camera_metadata_t *rawMetadata = metadata.getAndLock();
+    metadata_vendor_id_t vendorTagId = get_camera_metadata_vendor_id(rawMetadata);
+    metadata.unlock(rawMetadata);
+    sp<VendorTagDescriptorCache> vtCache = VendorTagDescriptorCache::getGlobalVendorTagCache();
+    if (vtCache == nullptr) {
+        ALOGE("%s: error vendor tag descriptor cache is not initialized", __FUNCTION__);
+        return;
+    }
+    vtCache->getVendorTagDescriptor(vendorTagId, &mVTags);
+    if (mVTags == nullptr) {
+        ALOGE("%s: error retrieving vendor tag descriptor", __FUNCTION__);
+    }
 }
 
 bool
@@ -142,7 +157,7 @@ ACameraMetadata::derivePhysicalCameraIds() {
         if (ids[i] == '\0') {
             if (start != i) {
                 mStaticPhysicalCameraIdValues.push_back(String8((const char *)ids+start));
-                mStaticPhysicalCameraIds.push_back(mStaticPhysicalCameraIdValues.back().string());
+                mStaticPhysicalCameraIds.push_back(mStaticPhysicalCameraIdValues.back().c_str());
             }
             start = i+1;
         }
@@ -400,7 +415,6 @@ ACameraMetadata::getConstEntry(uint32_t tag, ACameraMetadata_const_entry* entry)
 
     camera_metadata_ro_entry rawEntry = static_cast<const CameraMetadata*>(mData.get())->find(tag);
     if (rawEntry.count == 0) {
-        ALOGE("%s: cannot find metadata tag %d", __FUNCTION__, tag);
         return ACAMERA_ERROR_METADATA_NOT_FOUND;
     }
     entry->tag = tag;
@@ -474,6 +488,13 @@ ACameraMetadata::getInternalData() const {
     return (*mData);
 }
 
+camera_status_t
+ACameraMetadata::getTagFromName(const char *name, uint32_t *tag) const {
+    Mutex::Autolock _l(mLock);
+    status_t status = CameraMetadata::getTagFromName(name, mVTags.get(), tag);
+    return status == OK ? ACAMERA_OK : ACAMERA_ERROR_METADATA_NOT_FOUND;
+}
+
 bool
 ACameraMetadata::isLogicalMultiCamera(size_t* count, const char*const** physicalCameraIds) const {
     if (mType != ACM_CHARACTERISTICS) {
@@ -541,6 +562,7 @@ ACameraMetadata::isCaptureRequestTag(const uint32_t tag) {
         case ACAMERA_CONTROL_AUTOFRAMING:
         case ACAMERA_EDGE_MODE:
         case ACAMERA_FLASH_MODE:
+        case ACAMERA_FLASH_STRENGTH_LEVEL:
         case ACAMERA_HOT_PIXEL_MODE:
         case ACAMERA_JPEG_GPS_COORDINATES:
         case ACAMERA_JPEG_GPS_PROCESSING_METHOD:

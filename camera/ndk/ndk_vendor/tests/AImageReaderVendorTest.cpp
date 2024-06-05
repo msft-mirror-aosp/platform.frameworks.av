@@ -35,9 +35,9 @@
 #include <camera/NdkCameraManager.h>
 #include <camera/NdkCameraDevice.h>
 #include <camera/NdkCameraCaptureSession.h>
+#include <hidl/ServiceManagement.h>
 #include <media/NdkImage.h>
 #include <media/NdkImageReader.h>
-#include <cutils/native_handle.h>
 #include <VendorTagDescriptor.h>
 
 namespace {
@@ -50,7 +50,7 @@ static constexpr int kTestImageHeight = 480;
 static constexpr int kTestImageFormat = AIMAGE_FORMAT_YUV_420_888;
 
 using android::hardware::camera::common::V1_0::helper::VendorTagDescriptorCache;
-using ConfiguredWindows = std::set<const native_handle_t *>;
+using ConfiguredWindows = std::set<ANativeWindow*>;
 
 class CameraHelper {
    public:
@@ -60,11 +60,11 @@ class CameraHelper {
 
     struct PhysicalImgReaderInfo {
         const char* physicalCameraId;
-        const native_handle_t* anw;
+        ANativeWindow* anw;
     };
 
     // Retaining the error code in case the caller needs to analyze it.
-    std::variant<int, ConfiguredWindows> initCamera(const native_handle_t* imgReaderAnw,
+    std::variant<int, ConfiguredWindows> initCamera(ANativeWindow* imgReaderAnw,
             const std::vector<PhysicalImgReaderInfo>& physicalImgReaders,
             bool usePhysicalSettings, bool prepareWindows = false) {
         ConfiguredWindows configuredWindows;
@@ -104,7 +104,7 @@ class CameraHelper {
         }
         configuredWindows.insert(mImgReaderAnw);
         std::vector<const char*> idPointerList;
-        std::set<const native_handle_t*> physicalStreamMap;
+        std::set<ANativeWindow*> physicalStreamMap;
         for (auto& physicalStream : physicalImgReaders) {
             ACaptureSessionOutput* sessionOutput = nullptr;
             ret = ACaptureSessionPhysicalOutput_create(physicalStream.anw,
@@ -296,7 +296,7 @@ class CameraHelper {
 
 
    private:
-    static void onPreparedCb(void* obj, ACameraWindowType *anw, ACameraCaptureSession *session) {
+    static void onPreparedCb(void* obj, ANativeWindow *anw, ACameraCaptureSession *session) {
         CameraHelper* thiz = reinterpret_cast<CameraHelper*>(obj);
         thiz->handlePrepared(anw, session);
     }
@@ -312,7 +312,7 @@ class CameraHelper {
         return ret;
     }
 
-    void handlePrepared(ACameraWindowType *anw, ACameraCaptureSession *session) {
+    void handlePrepared(ANativeWindow *anw, ACameraCaptureSession *session) {
         // Reduce the pending prepared count of anw by 1. If count is  0, remove the key.
         std::lock_guard<std::mutex> lock(mMutex);
         if (session != mSession) {
@@ -329,7 +329,7 @@ class CameraHelper {
             mPendingPreparedCbs.erase(anw);
         }
     }
-    void incPendingPrepared(ACameraWindowType *anw) {
+    void incPendingPrepared(ANativeWindow *anw) {
         std::lock_guard<std::mutex> lock(mMutex);
         if ((mPendingPreparedCbs.find(anw) == mPendingPreparedCbs.end())) {
             mPendingPreparedCbs[anw] = 1;
@@ -339,13 +339,13 @@ class CameraHelper {
     }
 
     // ANW -> pending prepared callbacks
-    std::unordered_map<ACameraWindowType *, int> mPendingPreparedCbs;
+    std::unordered_map<ANativeWindow*, int> mPendingPreparedCbs;
     ACameraDevice_StateCallbacks mDeviceCb{this, nullptr, nullptr};
     ACameraCaptureSession_stateCallbacks mSessionCb{ this, nullptr, nullptr, nullptr};
 
     ACameraCaptureSession_prepareCallback mPreparedCb = &onPreparedCb;
 
-    const native_handle_t* mImgReaderAnw = nullptr;  // not owned by us.
+    ANativeWindow* mImgReaderAnw = nullptr;  // not owned by us.
 
     // Camera device
     ACameraDevice* mDevice = nullptr;
@@ -479,7 +479,7 @@ class ImageReaderTestCase {
     ~ImageReaderTestCase() {
         if (mImgReaderAnw) {
             AImageReader_delete(mImgReader);
-            // No need to call native_handle_t_release on imageReaderAnw
+            // No need to call AImageReader_release(mImgReaderAnw).
         }
     }
 
@@ -509,17 +509,18 @@ class ImageReaderTestCase {
             return ret;
         }
 
-        ret = AImageReader_getWindowNativeHandle(mImgReader, &mImgReaderAnw);
+
+        ret = AImageReader_getWindow(mImgReader, &mImgReaderAnw);
         if (ret != AMEDIA_OK || mImgReaderAnw == nullptr) {
-            ALOGE("Failed to get native_handle_t from AImageReader, ret=%d, mImgReaderAnw=%p.", ret,
-                  mImgReaderAnw);
+            ALOGE("Failed to get ANativeWindow* from AImageReader, ret=%d, mImgReader=%p.", ret,
+                  mImgReader);
             return -1;
         }
 
         return 0;
     }
 
-    const native_handle_t* getNativeWindow() { return mImgReaderAnw; }
+    ANativeWindow* getNativeWindow() { return mImgReaderAnw; }
 
     int getAcquiredImageCount() {
         std::lock_guard<std::mutex> lock(mMutex);
@@ -652,7 +653,7 @@ class ImageReaderTestCase {
     int mAcquiredImageCount{0};
 
     AImageReader* mImgReader = nullptr;
-    native_handle_t* mImgReaderAnw = nullptr;
+    ANativeWindow* mImgReaderAnw = nullptr;
 
     AImageReader_ImageListener mReaderAvailableCb{this, onImageAvailable};
     AImageReader_BufferRemovedListener mReaderDetachedCb{this, onBufferRemoved};
@@ -980,7 +981,7 @@ class AImageReaderVendorTest : public ::testing::Test {
 
 
 
-TEST_F(AImageReaderVendorTest, CreateWindowNativeHandle) {
+TEST_F(AImageReaderVendorTest, CreateANativeWindow) {
     testBasicTakePictures(/*prepareSurfaces*/ false);
     testBasicTakePictures(/*prepareSurfaces*/ true);
 }

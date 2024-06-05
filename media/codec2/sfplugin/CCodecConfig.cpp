@@ -19,6 +19,8 @@
 
 #include <initializer_list>
 
+#include <android_media_codec.h>
+
 #include <cutils/properties.h>
 #include <log/log.h>
 #include <utils/NativeHandle.h>
@@ -402,9 +404,18 @@ void CCodecConfig::initializeStandardParams() {
 
     add(ConfigMapper(KEY_MAX_INPUT_SIZE, C2_PARAMKEY_INPUT_MAX_BUFFER_SIZE, "value")
         .limitTo(D::INPUT));
+
     // remove when codecs switch to PARAMKEY
     deprecated(ConfigMapper(KEY_MAX_INPUT_SIZE, "coded.max-frame-size", "value")
                .limitTo(D::INPUT));
+
+    // large frame params
+    add(ConfigMapper(KEY_BUFFER_BATCH_MAX_OUTPUT_SIZE,
+            C2_PARAMKEY_OUTPUT_LARGE_FRAME, "max-size")
+        .limitTo(D::AUDIO & D::OUTPUT));
+    add(ConfigMapper(KEY_BUFFER_BATCH_THRESHOLD_OUTPUT_SIZE,
+            C2_PARAMKEY_OUTPUT_LARGE_FRAME, "threshold-size")
+        .limitTo(D::AUDIO & D::OUTPUT));
 
     // Rotation
     // Note: SDK rotation is clock-wise, while C2 rotation is counter-clock-wise
@@ -582,6 +593,13 @@ void CCodecConfig::initializeStandardParams() {
             }
             return C2Value();
         }));
+
+    if (android::media::codec::provider_->region_of_interest()
+        && android::media::codec::provider_->region_of_interest_support()) {
+        add(ConfigMapper(C2_PARAMKEY_QP_OFFSET_RECTS, C2_PARAMKEY_QP_OFFSET_RECTS, "")
+            .limitTo(D::VIDEO & (D::CONFIG | D::PARAM) & D::ENCODER & D::INPUT));
+    }
+
     deprecated(ConfigMapper(PARAMETER_KEY_REQUEST_SYNC_FRAME,
                      "coding.request-sync", "value")
         .limitTo(D::PARAM & D::ENCODER)
@@ -1112,6 +1130,11 @@ status_t CCodecConfig::initialize(
     mParamUpdater->clear();
     mParamUpdater->supportWholeParam(
             C2_PARAMKEY_TEMPORAL_LAYERING, C2StreamTemporalLayeringTuning::CORE_INDEX);
+    if (android::media::codec::provider_->region_of_interest()
+        && android::media::codec::provider_->region_of_interest_support()) {
+        mParamUpdater->supportWholeParam(
+                C2_PARAMKEY_QP_OFFSET_RECTS, C2StreamQpOffsetRects::CORE_INDEX);
+    }
     mParamUpdater->addParamDesc(mReflector, mParamDescs);
 
     // TEMP: add some standard fields even if not reflected
@@ -1858,6 +1881,39 @@ ReflectedParamUpdater::Dict CCodecConfig::getReflectedFormat(
                 params->setInt32((prefix + ".type").c_str(),
                                  HDR_DYNAMIC_METADATA_TYPE_SMPTE_2094_40);
                 params->setBuffer((prefix + ".data").c_str(), hdrDynamicInfo);
+            }
+        }
+    }
+
+    if (android::media::codec::provider_->region_of_interest()
+        && android::media::codec::provider_->region_of_interest_support()) {
+        if (mDomain == (IS_VIDEO | IS_ENCODER)) {
+            AString qpOffsetRects;
+            if (params->findString(PARAMETER_KEY_QP_OFFSET_RECTS, &qpOffsetRects)) {
+                std::vector<C2QpOffsetRectStruct> c2QpOffsetRects;
+                char mutableStrQpOffsetRects[strlen(qpOffsetRects.c_str()) + 1];
+                strcpy(mutableStrQpOffsetRects, qpOffsetRects.c_str());
+                char* box = strtok(mutableStrQpOffsetRects, ";");
+                while (box != nullptr) {
+                    int top, left, bottom, right, offset;
+                    if (sscanf(box, "%d,%d-%d,%d=%d", &top, &left, &bottom, &right, &offset) == 5) {
+                        left = c2_max(0, left);
+                        top = c2_max(0, top);
+                        if (right > left && bottom > top) {
+                            C2Rect rect(right - left, bottom - top);
+                            rect.at(left, top);
+                            c2QpOffsetRects.push_back(C2QpOffsetRectStruct(rect, offset));
+                        }
+                    }
+                    box = strtok(nullptr, ";");
+                }
+                if (c2QpOffsetRects.size() != 0) {
+                    const std::unique_ptr<C2StreamQpOffsetRects::output> regions =
+                            C2StreamQpOffsetRects::output::AllocUnique(
+                                    c2QpOffsetRects.size(), 0u, c2QpOffsetRects);
+                    params->setBuffer(C2_PARAMKEY_QP_OFFSET_RECTS,
+                                      ABuffer::CreateAsCopy(regions.get(), regions->size()));
+                }
             }
         }
     }

@@ -168,7 +168,13 @@ int main(int argc __unused, char **argv)
         ALOGW_IF(AudioSystem::setLocalAudioFlinger(af) != OK,
                 "%s: AudioSystem already has an AudioFlinger instance!", __func__);
         const auto aps = sp<AudioPolicyService>::make();
+        af->initAudioPolicyLocal(aps);
         ALOGD("%s: AudioPolicy created", __func__);
+        ALOGW_IF(AudioSystem::setLocalAudioPolicyService(aps) != OK,
+                 "%s: AudioSystem already has an AudioPolicyService instance!", __func__);
+
+        // Start initialization of internally managed audio objects such as Device Effects.
+        aps->onAudioSystemReady();
 
         // Add AudioFlinger and AudioPolicy to ServiceManager.
         sp<IServiceManager> sm = defaultServiceManager();
@@ -184,7 +190,7 @@ int main(int argc __unused, char **argv)
         // attempting to call audio flinger on a null pointer could make the process crash
         // and attract attentions.
         std::vector<AudioMMapPolicyInfo> policyInfos;
-        status_t status = af->getMmapPolicyInfos(
+        status_t status = sp<IAudioFlinger>::cast(af)->getMmapPolicyInfos(
                 AudioMMapPolicyType::DEFAULT, &policyInfos);
         // Initialize aaudio service when querying mmap policy succeeds and
         // any of the policy supports MMAP.

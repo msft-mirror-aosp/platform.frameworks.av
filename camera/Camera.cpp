@@ -19,7 +19,6 @@
 #define LOG_TAG "Camera"
 #include <utils/Log.h>
 #include <utils/threads.h>
-#include <utils/String16.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 #include <binder/IMemory.h>
@@ -70,12 +69,13 @@ Camera::~Camera()
     // deadlock if we call any method of ICamera here.
 }
 
-sp<Camera> Camera::connect(int cameraId, const String16& clientPackageName,
-        int clientUid, int clientPid, int targetSdkVersion, bool overrideToPortrait,
-        bool forceSlowJpegMode)
+sp<Camera> Camera::connect(int cameraId, const std::string& clientPackageName,
+        int clientUid, int clientPid, int targetSdkVersion, int rotationOverride,
+        bool forceSlowJpegMode, int32_t deviceId, int32_t devicePolicy)
 {
     return CameraBaseT::connect(cameraId, clientPackageName, clientUid,
-            clientPid, targetSdkVersion, overrideToPortrait, forceSlowJpegMode);
+            clientPid, targetSdkVersion, rotationOverride, forceSlowJpegMode, deviceId,
+            devicePolicy);
 }
 
 status_t Camera::reconnect()
@@ -246,7 +246,7 @@ String8 Camera::getParameters() const
     ALOGV("getParameters");
     String8 params;
     sp <::android::hardware::ICamera> c = mCamera;
-    if (c != 0) params = mCamera->getParameters();
+    if (c != 0) params = c->getParameters();
     return params;
 }
 
@@ -270,7 +270,7 @@ void Camera::setPreviewCallbackFlags(int flag)
     ALOGV("setPreviewCallbackFlags");
     sp <::android::hardware::ICamera> c = mCamera;
     if (c == 0) return;
-    mCamera->setPreviewCallbackFlag(flag);
+    c->setPreviewCallbackFlag(flag);
 }
 
 status_t Camera::setPreviewCallbackTarget(

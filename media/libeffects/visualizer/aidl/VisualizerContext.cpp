@@ -38,14 +38,10 @@ VisualizerContext::VisualizerContext(int statusDepth, const Parameter::Common& c
 }
 
 VisualizerContext::~VisualizerContext() {
-    std::lock_guard lg(mMutex);
-    LOG(DEBUG) << __func__;
     mState = State::UNINITIALIZED;
 }
 
 RetCode VisualizerContext::initParams(const Parameter::Common& common) {
-    std::lock_guard lg(mMutex);
-    LOG(DEBUG) << __func__;
     if (common.input != common.output) {
         LOG(ERROR) << __func__ << " mismatch input: " << common.input.toString()
                    << " and output: " << common.output.toString();
@@ -61,11 +57,11 @@ RetCode VisualizerContext::initParams(const Parameter::Common& common) {
 #endif
     mChannelCount = channelCount;
     mCommon = common;
+    std::fill(mCaptureBuf.begin(), mCaptureBuf.end(), 0x80);
     return RetCode::SUCCESS;
 }
 
 RetCode VisualizerContext::enable() {
-    std::lock_guard lg(mMutex);
     if (mState != State::INITIALIZED) {
         return RetCode::ERROR_EFFECT_LIB_ERROR;
     }
@@ -74,7 +70,6 @@ RetCode VisualizerContext::enable() {
 }
 
 RetCode VisualizerContext::disable() {
-    std::lock_guard lg(mMutex);
     if (mState != State::ACTIVE) {
         return RetCode::ERROR_EFFECT_LIB_ERROR;
     }
@@ -83,48 +78,39 @@ RetCode VisualizerContext::disable() {
 }
 
 void VisualizerContext::reset() {
-    std::lock_guard lg(mMutex);
-    std::fill_n(mCaptureBuf.begin(), kMaxCaptureBufSize, 0x80);
+    std::fill(mCaptureBuf.begin(), mCaptureBuf.end(), 0x80);
 }
 
 RetCode VisualizerContext::setCaptureSamples(int samples) {
-    std::lock_guard lg(mMutex);
     mCaptureSamples = samples;
     return RetCode::SUCCESS;
 }
-int VisualizerContext::getCaptureSamples() {
-    std::lock_guard lg(mMutex);
+int32_t VisualizerContext::getCaptureSamples() {
     return mCaptureSamples;
 }
 
 RetCode VisualizerContext::setMeasurementMode(Visualizer::MeasurementMode mode) {
-    std::lock_guard lg(mMutex);
     mMeasurementMode = mode;
     return RetCode::SUCCESS;
 }
 Visualizer::MeasurementMode VisualizerContext::getMeasurementMode() {
-    std::lock_guard lg(mMutex);
     return mMeasurementMode;
 }
 
 RetCode VisualizerContext::setScalingMode(Visualizer::ScalingMode mode) {
-    std::lock_guard lg(mMutex);
     mScalingMode = mode;
     return RetCode::SUCCESS;
 }
 Visualizer::ScalingMode VisualizerContext::getScalingMode() {
-    std::lock_guard lg(mMutex);
     return mScalingMode;
 }
 
 RetCode VisualizerContext::setDownstreamLatency(int latency) {
-    std::lock_guard lg(mMutex);
     mDownstreamLatency = latency;
     return RetCode::SUCCESS;
 }
 
 int VisualizerContext::getDownstreamLatency() {
-    std::lock_guard lg(mMutex);
     return mDownstreamLatency;
 }
 
@@ -151,7 +137,6 @@ Visualizer::Measurement VisualizerContext::getMeasure() {
     uint8_t nbValidMeasurements = 0;
 
     {
-        std::lock_guard lg(mMutex);
         // reset measurements if last measurement was too long ago (which implies stored
         // measurements aren't relevant anymore and shouldn't bias the new one)
         const uint32_t delayMs = getDeltaTimeMsFromUpdatedTime_l();
@@ -184,19 +169,17 @@ Visualizer::Measurement VisualizerContext::getMeasure() {
     // convert from I16 sample values to mB and write results
     measure.rms = (rms < 0.000016f) ? -9600 : (int32_t)(2000 * log10(rms / 32767.0f));
     measure.peak = (peakU16 == 0) ? -9600 : (int32_t)(2000 * log10(peakU16 / 32767.0f));
-    LOG(INFO) << __func__ << " peak " << peakU16 << " (" << measure.peak << "mB), rms " << rms
-              << " (" << measure.rms << "mB)";
+    LOG(VERBOSE) << __func__ << " peak " << peakU16 << " (" << measure.peak << "mB), rms " << rms
+                 << " (" << measure.rms << "mB)";
     return measure;
 }
 
 std::vector<uint8_t> VisualizerContext::capture() {
-    std::vector<uint8_t> result;
-    std::lock_guard lg(mMutex);
+    uint32_t captureSamples = mCaptureSamples;
+    std::vector<uint8_t> result(captureSamples, 0x80);
     // cts android.media.audio.cts.VisualizerTest expecting silence data when effect not running
     // RETURN_VALUE_IF(mState != State::ACTIVE, result, "illegalState");
     if (mState != State::ACTIVE) {
-        result.resize(mCaptureSamples);
-        memset(result.data(), 0x80, mCaptureSamples);
         return result;
     }
 
@@ -205,7 +188,6 @@ std::vector<uint8_t> VisualizerContext::capture() {
     // clear the capture buffer to return silence
     if ((mLastCaptureIdx == mCaptureIdx) && (mBufferUpdateTime.tv_sec != 0) &&
         (deltaMs > kMaxStallTimeMs)) {
-        LOG(INFO) << __func__ << " capture going to idle";
         mBufferUpdateTime.tv_sec = 0;
         return result;
     }
@@ -214,7 +196,7 @@ std::vector<uint8_t> VisualizerContext::capture() {
     if (latencyMs < 0) {
         latencyMs = 0;
     }
-    uint32_t deltaSamples = mCaptureSamples + mCommon.input.base.sampleRate * latencyMs / 1000;
+    uint32_t deltaSamples = captureSamples + mCommon.input.base.sampleRate * latencyMs / 1000;
 
     // large sample rate, latency, or capture size, could cause overflow.
     // do not offset more than the size of buffer.
@@ -224,21 +206,21 @@ std::vector<uint8_t> VisualizerContext::capture() {
     }
 
     int32_t capturePoint;
-    //capturePoint = (int32_t)mCaptureIdx - deltaSamples;
     __builtin_sub_overflow((int32_t) mCaptureIdx, deltaSamples, &capturePoint);
     // a negative capturePoint means we wrap the buffer.
     if (capturePoint < 0) {
         uint32_t size = -capturePoint;
-        if (size > mCaptureSamples) {
-            size = mCaptureSamples;
+        if (size > captureSamples) {
+            size = captureSamples;
         }
-        result.insert(result.end(), &mCaptureBuf[kMaxCaptureBufSize + capturePoint],
-                        &mCaptureBuf[kMaxCaptureBufSize + capturePoint + size]);
-        mCaptureSamples -= size;
+        std::copy(std::begin(mCaptureBuf) + kMaxCaptureBufSize - size,
+                  std::begin(mCaptureBuf) + kMaxCaptureBufSize, result.begin());
+        captureSamples -= size;
         capturePoint = 0;
     }
-    result.insert(result.end(), &mCaptureBuf[capturePoint],
-                    &mCaptureBuf[capturePoint + mCaptureSamples]);
+    std::copy(std::begin(mCaptureBuf) + capturePoint,
+              std::begin(mCaptureBuf) + capturePoint + captureSamples,
+              result.begin() + mCaptureSamples - captureSamples);
     mLastCaptureIdx = mCaptureIdx;
     return result;
 }
@@ -247,25 +229,22 @@ IEffect::Status VisualizerContext::process(float* in, float* out, int samples) {
     IEffect::Status result = {STATUS_NOT_ENOUGH_DATA, 0, 0};
     RETURN_VALUE_IF(in == nullptr || out == nullptr || samples == 0, result, "dataBufferError");
 
-    std::lock_guard lg(mMutex);
     result.status = STATUS_INVALID_OPERATION;
     RETURN_VALUE_IF(mState != State::ACTIVE, result, "stateNotActive");
-    LOG(DEBUG) << __func__ << " in " << in << " out " << out << " sample " << samples;
     // perform measurements if needed
     if (mMeasurementMode == Visualizer::MeasurementMode::PEAK_RMS) {
         // find the peak and RMS squared for the new buffer
         float rmsSqAcc = 0;
         float maxSample = 0.f;
-        for (size_t inIdx = 0; inIdx < (unsigned)samples; ++inIdx) {
+        for (size_t inIdx = 0; inIdx < (unsigned) samples; ++inIdx) {
             maxSample = fmax(maxSample, fabs(in[inIdx]));
             rmsSqAcc += in[inIdx] * in[inIdx];
         }
         maxSample *= 1 << 15; // scale to int16_t, with exactly 1 << 15 representing positive num.
         rmsSqAcc *= 1 << 30; // scale to int16_t * 2
-        mPastMeasurements[mMeasurementBufferIdx] = {
-                .mPeakU16 = (uint16_t)maxSample,
-                .mRmsSquared = rmsSqAcc / samples,
-                .mIsValid = true };
+        mPastMeasurements[mMeasurementBufferIdx] = {.mIsValid = true,
+                                                    .mPeakU16 = (uint16_t)maxSample,
+                                                    .mRmsSquared = rmsSqAcc / samples};
         if (++mMeasurementBufferIdx >= mMeasurementWindowSizeInBuffers) {
             mMeasurementBufferIdx = 0;
         }

@@ -43,12 +43,37 @@ using stats::media_metrics::\
     MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED__RECLAIM_STATUS__RECLAIM_FAILED_NO_CLIENTS;
 using stats::media_metrics::\
     MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED__RECLAIM_STATUS__RECLAIM_FAILED_RECLAIM_RESOURCES;
+using stats::media_metrics::MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_UNSPECIFIED;
+using stats::media_metrics::MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_AUDIO;
+using stats::media_metrics::MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_VIDEO;
+using stats::media_metrics::MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_IMAGE;
+
+// Map MediaResourceSubType to stats::media_metrics::CodecType
+inline int32_t getMetricsCodecType(MediaResourceSubType codecType) {
+    switch (codecType) {
+        case MediaResourceSubType::kHwAudioCodec:
+        case MediaResourceSubType::kSwAudioCodec:
+            return MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_AUDIO;
+        case MediaResourceSubType::kHwVideoCodec:
+        case MediaResourceSubType::kSwVideoCodec:
+            return MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_VIDEO;
+        case MediaResourceSubType::kHwImageCodec:
+        case MediaResourceSubType::kSwImageCodec:
+            return MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_IMAGE;
+        case MediaResourceSubType::kUnspecifiedSubType:
+            return MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_UNSPECIFIED;
+    }
+    return MEDIA_CODEC_STARTED__CODEC_TYPE__CODEC_TYPE_UNSPECIFIED;
+}
 
 inline const char* getCodecType(MediaResourceSubType codecType) {
     switch (codecType) {
-        case MediaResourceSubType::kAudioCodec:         return "Audio";
-        case MediaResourceSubType::kVideoCodec:         return "Video";
-        case MediaResourceSubType::kImageCodec:         return "Image";
+        case MediaResourceSubType::kHwAudioCodec:       return "Hw Audio";
+        case MediaResourceSubType::kSwAudioCodec:       return "Sw Audio";
+        case MediaResourceSubType::kHwVideoCodec:       return "Hw Video";
+        case MediaResourceSubType::kSwVideoCodec:       return "Sw Video";
+        case MediaResourceSubType::kHwImageCodec:       return "Hw Image";
+        case MediaResourceSubType::kSwImageCodec:       return "Sw Image";
         case MediaResourceSubType::kUnspecifiedSubType:
         default:
                                                         return "Unspecified";
@@ -56,61 +81,45 @@ inline const char* getCodecType(MediaResourceSubType codecType) {
     return "Unspecified";
 }
 
-static CodecBucket getCodecBucket(bool isHardware,
-                                  bool isEncoder,
-                                  MediaResourceSubType codecType) {
-    if (isHardware) {
-        switch (codecType) {
-            case MediaResourceSubType::kAudioCodec:
-                if (isEncoder) return HwAudioEncoder;
-                return HwAudioDecoder;
-            case MediaResourceSubType::kVideoCodec:
-                if (isEncoder) return HwVideoEncoder;
-                return HwVideoDecoder;
-            case MediaResourceSubType::kImageCodec:
-                if (isEncoder) return HwImageEncoder;
-                return HwImageDecoder;
-            case MediaResourceSubType::kUnspecifiedSubType:
-            default:
-                return CodecBucketUnspecified;
-        }
-    } else {
-        switch (codecType) {
-            case MediaResourceSubType::kAudioCodec:
-                if (isEncoder) return SwAudioEncoder;
-                return SwAudioDecoder;
-            case MediaResourceSubType::kVideoCodec:
-                if (isEncoder) return SwVideoEncoder;
-                return SwVideoDecoder;
-            case MediaResourceSubType::kImageCodec:
-                if (isEncoder) return SwImageEncoder;
-                return SwImageDecoder;
-            case MediaResourceSubType::kUnspecifiedSubType:
-            default:
-                return CodecBucketUnspecified;
-        }
+inline bool isHardwareCodec(MediaResourceSubType codecType) {
+    return (codecType == MediaResourceSubType::kHwAudioCodec ||
+            codecType == MediaResourceSubType::kHwVideoCodec ||
+            codecType == MediaResourceSubType::kHwImageCodec);
+}
+
+static CodecBucket getCodecBucket(bool isEncoder, MediaResourceSubType codecType) {
+    switch (codecType) {
+    case MediaResourceSubType::kHwAudioCodec:
+        return isEncoder? HwAudioEncoder : HwAudioDecoder;
+    case MediaResourceSubType::kSwAudioCodec:
+        return isEncoder? SwAudioEncoder : SwAudioDecoder;
+    case MediaResourceSubType::kHwVideoCodec:
+        return isEncoder? HwVideoEncoder : HwVideoDecoder;
+    case MediaResourceSubType::kSwVideoCodec:
+        return isEncoder? SwVideoEncoder : SwVideoDecoder;
+    case MediaResourceSubType::kHwImageCodec:
+        return isEncoder? HwImageEncoder : HwImageDecoder;
+    case MediaResourceSubType::kSwImageCodec:
+        return isEncoder? SwImageEncoder : SwImageDecoder;
+    case MediaResourceSubType::kUnspecifiedSubType:
+    default:
+        return CodecBucketUnspecified;
     }
 
     return CodecBucketUnspecified;
 }
 
-static bool getLogMessage(int hwCount, int swCount, std::stringstream& logMsg) {
-    bool update = false;
-    logMsg.clear();
+static std::string getLogMessage(const std::string& firstKey, const long& firstValue,
+                                 const std::string& secondKey, const long& secondValue) {
 
-    if (hwCount > 0) {
-        logMsg << " HW: " << hwCount;
-        update = true;
+    std::stringstream logMsg;
+    if (firstValue > 0) {
+        logMsg << firstKey << firstValue;
     }
-    if (swCount > 0) {
-        logMsg << " SW: " << swCount;
-        update = true;
+    if (secondValue > 0) {
+        logMsg << secondKey << secondValue;
     }
-
-    if (update) {
-        logMsg << " ] ";
-    }
-    return update;
+    return logMsg.str();
 }
 
 ResourceManagerMetrics::ResourceManagerMetrics(const sp<ProcessInfoInterface>& processInfo) {
@@ -179,8 +188,10 @@ void ResourceManagerMetrics::notifyClientConfigChanged(const ClientConfigParcel&
     std::scoped_lock lock(mLock);
     ClientConfigMap::iterator entry = mClientConfigMap.find(clientConfig.clientInfo.id);
     if (entry != mClientConfigMap.end() &&
-        (clientConfig.codecType == MediaResourceSubType::kVideoCodec ||
-        clientConfig.codecType == MediaResourceSubType::kImageCodec)) {
+        (clientConfig.codecType == MediaResourceSubType::kHwVideoCodec ||
+         clientConfig.codecType == MediaResourceSubType::kSwVideoCodec ||
+         clientConfig.codecType == MediaResourceSubType::kHwImageCodec ||
+         clientConfig.codecType == MediaResourceSubType::kSwImageCodec)) {
         int pid = clientConfig.clientInfo.pid;
         // Update the pixel count for this process
         updatePixelCount(pid, clientConfig.width * (long)clientConfig.height,
@@ -201,13 +212,13 @@ void ResourceManagerMetrics::notifyClientStarted(const ClientConfigParcel& clien
     mClientConfigMap[clientConfig.clientInfo.id] = clientConfig;
 
     // Update the concurrent codec count for this process.
-    CodecBucket codecBucket = getCodecBucket(clientConfig.isHardware,
-                                             clientConfig.isEncoder,
-                                             clientConfig.codecType);
+    CodecBucket codecBucket = getCodecBucket(clientConfig.isEncoder, clientConfig.codecType);
     increaseConcurrentCodecs(pid, codecBucket);
 
-    if (clientConfig.codecType == MediaResourceSubType::kVideoCodec ||
-        clientConfig.codecType == MediaResourceSubType::kImageCodec) {
+    if (clientConfig.codecType == MediaResourceSubType::kHwVideoCodec ||
+        clientConfig.codecType == MediaResourceSubType::kSwVideoCodec ||
+        clientConfig.codecType == MediaResourceSubType::kHwImageCodec ||
+        clientConfig.codecType == MediaResourceSubType::kSwImageCodec) {
         // Update the pixel count for this process
         increasePixelCount(pid, clientConfig.width * (long)clientConfig.height);
     }
@@ -234,9 +245,9 @@ void ResourceManagerMetrics::notifyClientStarted(const ClientConfigParcel& clien
          clientConfig.clientInfo.uid,
          clientConfig.id,
          clientConfig.clientInfo.name.c_str(),
-         static_cast<int32_t>(clientConfig.codecType),
+         getMetricsCodecType(clientConfig.codecType),
          clientConfig.isEncoder,
-         clientConfig.isHardware,
+         isHardwareCodec(clientConfig.codecType),
          clientConfig.width, clientConfig.height,
          systemConcurrentCodecs,
          appConcurrentCodecs,
@@ -249,7 +260,7 @@ void ResourceManagerMetrics::notifyClientStarted(const ClientConfigParcel& clien
 
     ALOGV("%s: Pushed MEDIA_CODEC_STARTED atom: "
           "Process[pid(%d): uid(%d)] "
-          "Codec: [%s: %ju] is %s %s %s "
+          "Codec: [%s: %ju] is %s %s "
           "Timestamp: %jd "
           "Resolution: %d x %d "
           "ConcurrentCodec[%d]={System: %d App: %d} "
@@ -259,7 +270,6 @@ void ResourceManagerMetrics::notifyClientStarted(const ClientConfigParcel& clien
           pid, clientConfig.clientInfo.uid,
           clientConfig.clientInfo.name.c_str(),
           clientConfig.id,
-          clientConfig.isHardware? "hardware" : "software",
           getCodecType(clientConfig.codecType),
           clientConfig.isEncoder? "encoder" : "decoder",
           clientConfig.timeStamp,
@@ -273,13 +283,13 @@ void ResourceManagerMetrics::notifyClientStopped(const ClientConfigParcel& clien
     std::scoped_lock lock(mLock);
     int pid = clientConfig.clientInfo.pid;
     // Update the concurrent codec count for this process.
-    CodecBucket codecBucket = getCodecBucket(clientConfig.isHardware,
-                                             clientConfig.isEncoder,
-                                             clientConfig.codecType);
+    CodecBucket codecBucket = getCodecBucket(clientConfig.isEncoder, clientConfig.codecType);
     decreaseConcurrentCodecs(pid, codecBucket);
 
-    if (clientConfig.codecType == MediaResourceSubType::kVideoCodec ||
-        clientConfig.codecType == MediaResourceSubType::kImageCodec) {
+    if (clientConfig.codecType == MediaResourceSubType::kHwVideoCodec ||
+        clientConfig.codecType == MediaResourceSubType::kSwVideoCodec ||
+        clientConfig.codecType == MediaResourceSubType::kHwImageCodec ||
+        clientConfig.codecType == MediaResourceSubType::kSwImageCodec) {
         // Update the pixel count for this process
         decreasePixelCount(pid, clientConfig.width * (long)clientConfig.height);
     }
@@ -317,9 +327,9 @@ void ResourceManagerMetrics::notifyClientStopped(const ClientConfigParcel& clien
          clientConfig.clientInfo.uid,
          clientConfig.id,
          clientConfig.clientInfo.name.c_str(),
-         static_cast<int32_t>(clientConfig.codecType),
+         getMetricsCodecType(clientConfig.codecType),
          clientConfig.isEncoder,
-         clientConfig.isHardware,
+         isHardwareCodec(clientConfig.codecType),
          clientConfig.width, clientConfig.height,
          systemConcurrentCodecs,
          appConcurrentCodecs,
@@ -327,7 +337,7 @@ void ResourceManagerMetrics::notifyClientStopped(const ClientConfigParcel& clien
          usageTime);
     ALOGV("%s: Pushed MEDIA_CODEC_STOPPED atom: "
           "Process[pid(%d): uid(%d)] "
-          "Codec: [%s: %ju] is %s %s %s "
+          "Codec: [%s: %ju] is %s %s "
           "Timestamp: %jd Usage time: %jd "
           "Resolution: %d x %d "
           "ConcurrentCodec[%d]={System: %d App: %d} "
@@ -336,7 +346,6 @@ void ResourceManagerMetrics::notifyClientStopped(const ClientConfigParcel& clien
           pid, clientConfig.clientInfo.uid,
           clientConfig.clientInfo.name.c_str(),
           clientConfig.id,
-          clientConfig.isHardware? "hardware" : "software",
           getCodecType(clientConfig.codecType),
           clientConfig.isEncoder? "encoder" : "decoder",
           clientConfig.timeStamp, usageTime,
@@ -349,6 +358,15 @@ void ResourceManagerMetrics::onProcessTerminated(int32_t pid, uid_t uid) {
     std::scoped_lock lock(mLock);
     // post MediaCodecConcurrentUsageReported for this terminated pid.
     pushConcurrentUsageReport(pid, uid);
+    // Remove all the metrics associated with this process.
+    std::map<int32_t, ConcurrentCodecs>::iterator it1 = mProcessConcurrentCodecsMap.find(pid);
+    if (it1 != mProcessConcurrentCodecsMap.end()) {
+        mProcessConcurrentCodecsMap.erase(it1);
+    }
+    std::map<int32_t, PixelCount>::iterator it2 = mProcessPixelsMap.find(pid);
+    if (it2 != mProcessPixelsMap.end()) {
+        mProcessPixelsMap.erase(it2);
+    }
 }
 
 void ResourceManagerMetrics::pushConcurrentUsageReport(int32_t pid, uid_t uid) {
@@ -385,24 +403,30 @@ void ResourceManagerMetrics::pushConcurrentUsageReport(int32_t pid, uid_t uid) {
 
     std::stringstream peakCodecLog;
     peakCodecLog << "Peak { ";
-    std::stringstream logMsg;
-    if (getLogMessage(peakHwAudioEncoderCount, peakSwAudioEncoderCount, logMsg)) {
-        peakCodecLog << "AudioEnc[" << logMsg.str();
+    std::string logMsg;
+    logMsg = getLogMessage(" HW: ", peakHwAudioEncoderCount, " SW: ", peakSwAudioEncoderCount);
+    if (!logMsg.empty()) {
+        peakCodecLog << "AudioEnc[ " << logMsg << " ] ";
     }
-    if (getLogMessage(peakHwAudioDecoderCount, peakSwAudioDecoderCount, logMsg)) {
-        peakCodecLog << "AudioDec[" << logMsg.str();
+    logMsg = getLogMessage(" HW: ", peakHwAudioDecoderCount, " SW: ", peakSwAudioDecoderCount);
+    if (!logMsg.empty()) {
+        peakCodecLog << "AudioDec[" << logMsg << " ] ";
     }
-    if (getLogMessage(peakHwVideoEncoderCount, peakSwVideoEncoderCount, logMsg)) {
-        peakCodecLog << "VideoEnc[" << logMsg.str();
+    logMsg = getLogMessage(" HW: ", peakHwVideoEncoderCount, " SW: ", peakSwVideoEncoderCount);
+    if (!logMsg.empty()) {
+        peakCodecLog << "VideoEnc[" << logMsg << " ] ";
     }
-    if (getLogMessage(peakHwVideoDecoderCount, peakSwVideoDecoderCount, logMsg)) {
-        peakCodecLog << "VideoDec[" << logMsg.str();
+    logMsg = getLogMessage(" HW: ", peakHwVideoDecoderCount, " SW: ", peakSwVideoDecoderCount);
+    if (!logMsg.empty()) {
+        peakCodecLog << "VideoDec[" << logMsg << " ] ";
     }
-    if (getLogMessage(peakHwImageEncoderCount, peakSwImageEncoderCount, logMsg)) {
-        peakCodecLog << "ImageEnc[" << logMsg.str();
+    logMsg = getLogMessage(" HW: ", peakHwImageEncoderCount, " SW: ", peakSwImageEncoderCount);
+    if (!logMsg.empty()) {
+        peakCodecLog << "ImageEnc[" << logMsg << " ] ";
     }
-    if (getLogMessage(peakHwImageDecoderCount, peakSwImageDecoderCount, logMsg)) {
-        peakCodecLog << "ImageDec[" << logMsg.str();
+    logMsg = getLogMessage(" HW: ", peakHwImageDecoderCount, " SW: ", peakSwImageDecoderCount);
+    if (!logMsg.empty()) {
+        peakCodecLog << "ImageDec[" << logMsg << " ] ";
     }
     peakCodecLog << "}";
 
@@ -432,10 +456,46 @@ void ResourceManagerMetrics::pushConcurrentUsageReport(int32_t pid, uid_t uid) {
 #endif
 }
 
+inline void pushReclaimStats(int32_t callingPid,
+                             int32_t requesterUid,
+                             int requesterPriority,
+                             const std::string& clientName,
+                             int32_t noOfConcurrentCodecs,
+                             int32_t reclaimStatus,
+                             int32_t noOfCodecsReclaimed = 0,
+                             int32_t targetIndex = -1,
+                             int32_t targetClientPid = -1,
+                             int32_t targetClientUid = -1,
+                             int32_t targetPriority = -1) {
+    // Post the pushed atom
+    int result = stats_write(
+        MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED,
+        requesterUid,
+        requesterPriority,
+        clientName.c_str(),
+        noOfConcurrentCodecs,
+        reclaimStatus,
+        noOfCodecsReclaimed,
+        targetIndex,
+        targetClientUid,
+        targetPriority);
+    ALOGI("%s: Pushed MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED atom: "
+          "Requester[pid(%d): uid(%d): priority(%d)] "
+          "Codec: [%s] "
+          "No of concurrent codecs: %d "
+          "Reclaim Status: %d "
+          "No of codecs reclaimed: %d "
+          "Target[%d][pid(%d): uid(%d): priority(%d)] result: %d",
+          __func__, callingPid, requesterUid, requesterPriority,
+              clientName.c_str(), noOfConcurrentCodecs,
+          reclaimStatus, noOfCodecsReclaimed,
+          targetIndex, targetClientPid, targetClientUid, targetPriority, result);
+}
+
 void ResourceManagerMetrics::pushReclaimAtom(const ClientInfoParcel& clientInfo,
-                        const std::vector<int>& priorities,
-                        const Vector<std::shared_ptr<IResourceManagerClient>>& clients,
-                        const PidUidVector& idList, bool reclaimed) {
+                                             const std::vector<int>& priorities,
+                                             const std::vector<ClientInfo>& targetClients,
+                                             bool reclaimed) {
     // Construct the metrics for codec reclaim as a pushed atom.
     // 1. Information about the requester.
     //  - UID and the priority (oom score)
@@ -460,7 +520,7 @@ void ResourceManagerMetrics::pushReclaimAtom(const ClientInfoParcel& clientInfo,
     //    - UID and the Priority (oom score)
     int32_t reclaimStatus = MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED__RECLAIM_STATUS__RECLAIM_SUCCESS;
     if (!reclaimed) {
-      if (clients.size() == 0) {
+      if (targetClients.size() == 0) {
         // No clients to reclaim from
         reclaimStatus =
             MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED__RECLAIM_STATUS__RECLAIM_FAILED_NO_CLIENTS;
@@ -470,34 +530,34 @@ void ResourceManagerMetrics::pushReclaimAtom(const ClientInfoParcel& clientInfo,
             MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED__RECLAIM_STATUS__RECLAIM_FAILED_RECLAIM_RESOURCES;
       }
     }
-    int32_t noOfCodecsReclaimed = clients.size();
+
+    if (targetClients.empty()) {
+        // Push the reclaim atom to stats.
+        pushReclaimStats(callingPid,
+                         requesterUid,
+                         requesterPriority,
+                         clientName,
+                         noOfConcurrentCodecs,
+                         reclaimStatus);
+        return;
+    }
+
+    int32_t noOfCodecsReclaimed = targetClients.size();
     int32_t targetIndex = 1;
-    for (PidUidVector::const_reference id : idList) {
-        int32_t targetUid = id.second;
+    for (const ClientInfo& targetClient : targetClients) {
         int targetPriority = priorities[targetIndex];
-        // Post the pushed atom
-        int result = stats_write(
-            MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED,
-            requesterUid,
-            requesterPriority,
-            clientName.c_str(),
-            noOfConcurrentCodecs,
-            reclaimStatus,
-            noOfCodecsReclaimed,
-            targetIndex,
-            targetUid,
-            targetPriority);
-        ALOGI("%s: Pushed MEDIA_CODEC_RECLAIM_REQUEST_COMPLETED atom: "
-              "Requester[pid(%d): uid(%d): priority(%d)] "
-              "Codec: [%s] "
-              "No of concurrent codecs: %d "
-              "Reclaim Status: %d "
-              "No of codecs reclaimed: %d "
-              "Target[%d][pid(%d): uid(%d): priority(%d)] result: %d",
-              __func__, callingPid, requesterUid, requesterPriority,
-              clientName.c_str(), noOfConcurrentCodecs,
-              reclaimStatus, noOfCodecsReclaimed,
-              targetIndex, id.first, targetUid, targetPriority, result);
+        // Push the reclaim atom to stats.
+        pushReclaimStats(callingPid,
+                         requesterUid,
+                         requesterPriority,
+                         clientName,
+                         noOfConcurrentCodecs,
+                         reclaimStatus,
+                         noOfCodecsReclaimed,
+                         targetIndex,
+                         targetClient.mPid,
+                         targetClient.mUid,
+                         targetPriority);
         targetIndex++;
     }
 }
@@ -652,6 +712,116 @@ long ResourceManagerMetrics::getCurrentConcurrentPixelCount(int pid) const {
     }
 
     return 0;
+}
+
+static std::string getConcurrentInstanceCount(const std::map<std::string, int>& resourceMap) {
+    if (resourceMap.empty()) {
+        return "";
+    }
+    std::stringstream concurrentInstanceInfo;
+    for (const auto& [name, count] : resourceMap) {
+        if (count > 0) {
+            concurrentInstanceInfo << "      Name: " << name << " Instances: " << count << "\n";
+        }
+    }
+
+    std::string info = concurrentInstanceInfo.str();
+    if (info.empty()) {
+        return "";
+    }
+    return "    Current Concurrent Codec Instances:\n" + info;
+}
+
+static std::string getAppsPixelCount(const std::map<int32_t, PixelCount>& pixelMap) {
+    if (pixelMap.empty()) {
+        return "";
+    }
+    std::stringstream pixelInfo;
+    for (const auto& [pid, pixelCount] : pixelMap) {
+        std::string logMsg = getLogMessage(" Current Pixels: ", pixelCount.mCurrent,
+                                           " Peak Pixels: ", pixelCount.mPeak);
+        if (!logMsg.empty()) {
+            pixelInfo  << "      PID[" << pid << "]: {" << logMsg << " }\n";
+        }
+    }
+
+    return "    Applications Pixel Usage:\n" + pixelInfo.str();
+}
+
+static std::string getCodecUsageMetrics(const ConcurrentCodecsMap& codecsMap) {
+    int peakHwAudioEncoderCount = codecsMap[HwAudioEncoder];
+    int peakHwAudioDecoderCount = codecsMap[HwAudioDecoder];
+    int peakHwVideoEncoderCount = codecsMap[HwVideoEncoder];
+    int peakHwVideoDecoderCount = codecsMap[HwVideoDecoder];
+    int peakHwImageEncoderCount = codecsMap[HwImageEncoder];
+    int peakHwImageDecoderCount = codecsMap[HwImageDecoder];
+    int peakSwAudioEncoderCount = codecsMap[SwAudioEncoder];
+    int peakSwAudioDecoderCount = codecsMap[SwAudioDecoder];
+    int peakSwVideoEncoderCount = codecsMap[SwVideoEncoder];
+    int peakSwVideoDecoderCount = codecsMap[SwVideoDecoder];
+    int peakSwImageEncoderCount = codecsMap[SwImageEncoder];
+    int peakSwImageDecoderCount = codecsMap[SwImageDecoder];
+    std::stringstream usageMetrics;
+    std::string logMsg;
+    logMsg = getLogMessage(" HW: ", peakHwAudioEncoderCount, " SW: ", peakSwAudioEncoderCount);
+    if (!logMsg.empty()) {
+        usageMetrics << "AudioEnc[" << logMsg << " ] ";
+    }
+    logMsg = getLogMessage(" HW: ", peakHwAudioDecoderCount, " SW: ", peakSwAudioDecoderCount);
+    if (!logMsg.empty()) {
+        usageMetrics << "AudioDec[" << logMsg << " ] ";
+    }
+    logMsg = getLogMessage(" HW: ", peakHwVideoEncoderCount, " SW: ", peakSwVideoEncoderCount);
+    if (!logMsg.empty()) {
+        usageMetrics << "VideoEnc[" << logMsg << " ] ";
+    }
+    logMsg = getLogMessage(" HW: ", peakHwVideoDecoderCount, " SW: ", peakSwVideoDecoderCount);
+    if (!logMsg.empty()) {
+        usageMetrics << "VideoDec[" << logMsg << " ] ";
+    }
+    logMsg = getLogMessage(" HW: ", peakHwImageEncoderCount, " SW: ", peakSwImageEncoderCount);
+    if (!logMsg.empty()) {
+        usageMetrics << "ImageEnc[" << logMsg << " ] ";
+    }
+    logMsg = getLogMessage(" HW: ", peakHwImageDecoderCount, " SW: ", peakSwImageDecoderCount);
+    if (!logMsg.empty()) {
+        usageMetrics << "ImageDec[" << logMsg << " ] ";
+    }
+
+    return usageMetrics.str();
+}
+
+static std::string getAppsCodecUsageMetrics(
+        const std::map<int32_t, ConcurrentCodecs>& processCodecsMap) {
+    if (processCodecsMap.empty()) {
+        return "";
+    }
+    std::stringstream codecUsage;
+    std::string info;
+    for (const auto& [pid, codecMap] : processCodecsMap) {
+        codecUsage << "      PID[" << pid << "]: ";
+        info = getCodecUsageMetrics(codecMap.mCurrent);
+        if (!info.empty()) {
+            codecUsage << "Current Codec Usage: { " << info << "} ";
+        }
+        info = getCodecUsageMetrics(codecMap.mPeak);
+        if (!info.empty()) {
+            codecUsage << "Peak Codec Usage: { " << info << "}";
+        }
+        codecUsage << "\n";
+    }
+
+    return "    Applications Codec Usage:\n" + codecUsage.str();
+}
+
+
+std::string ResourceManagerMetrics::dump() const {
+    std::string metricsLog("  Metrics logs:\n");
+    metricsLog += getConcurrentInstanceCount(mConcurrentResourceCountMap);
+    metricsLog += getAppsPixelCount(mProcessPixelsMap);
+    metricsLog += getAppsCodecUsageMetrics(mProcessConcurrentCodecsMap);
+
+    return std::move(metricsLog);
 }
 
 } // namespace android

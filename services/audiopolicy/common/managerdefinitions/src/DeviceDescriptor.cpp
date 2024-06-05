@@ -132,6 +132,20 @@ void DeviceDescriptor::toAudioPortConfig(struct audio_port_config *dstConfig,
 {
     DeviceDescriptorBase::toAudioPortConfig(dstConfig, srcConfig);
     dstConfig->ext.device.hw_module = getModuleHandle();
+    if (mPreferredConfig.has_value()) {
+        if (mPreferredConfig->format != AUDIO_FORMAT_DEFAULT) {
+            dstConfig->config_mask |= AUDIO_PORT_CONFIG_FORMAT;
+            dstConfig->format = mPreferredConfig->format;
+        }
+        if (mPreferredConfig->sample_rate != 0) {
+            dstConfig->config_mask |= AUDIO_PORT_CONFIG_SAMPLE_RATE;
+            dstConfig->sample_rate = mPreferredConfig->sample_rate;
+        }
+        if (mPreferredConfig->channel_mask != AUDIO_CHANNEL_NONE) {
+            dstConfig->config_mask |= AUDIO_PORT_CONFIG_CHANNEL_MASK;
+            dstConfig->channel_mask = mPreferredConfig->channel_mask;
+        }
+    }
 }
 
 void DeviceDescriptor::toAudioPort(struct audio_port *port) const
@@ -152,6 +166,12 @@ void DeviceDescriptor::importAudioPortAndPickAudioProfile(
     }
     AudioPort::importAudioPort(policyPort->asAudioPort());
     policyPort->pickAudioProfile(mSamplingRate, mChannelMask, mFormat);
+}
+
+status_t DeviceDescriptor::readFromParcelable(const media::AudioPortFw& parcelable) {
+    RETURN_STATUS_IF_ERROR(DeviceDescriptorBase::readFromParcelable(parcelable));
+    mDeclaredAddress = DeviceDescriptorBase::address();
+    return OK;
 }
 
 void DeviceDescriptor::setEncapsulationInfoFromHal(
@@ -177,6 +197,14 @@ void DeviceDescriptor::setEncapsulationInfoFromHal(
     }
 }
 
+void DeviceDescriptor::setPreferredConfig(const audio_config_base_t* preferredConfig) {
+    if (preferredConfig == nullptr) {
+        mPreferredConfig.reset();
+    } else {
+        mPreferredConfig = *preferredConfig;
+    }
+}
+
 void DeviceDescriptor::dump(String8 *dst, int spaces, bool verbose) const
 {
     String8 extraInfo;
@@ -185,8 +213,15 @@ void DeviceDescriptor::dump(String8 *dst, int spaces, bool verbose) const
     }
 
     std::string descBaseDumpStr;
-    DeviceDescriptorBase::dump(&descBaseDumpStr, spaces, extraInfo.string(), verbose);
+    DeviceDescriptorBase::dump(&descBaseDumpStr, spaces, extraInfo.c_str(), verbose);
     dst->append(descBaseDumpStr.c_str());
+
+    if (mPreferredConfig.has_value()) {
+        dst->append(base::StringPrintf(
+                "%*sPreferred Config: format=%#x, channelMask=%#x, sampleRate=%u\n",
+                spaces, "", mPreferredConfig.value().format, mPreferredConfig.value().channel_mask,
+                mPreferredConfig.value().sample_rate).c_str());
+    }
 }
 
 
@@ -225,8 +260,7 @@ void DeviceVector::add(const DeviceVector &devices)
 {
     bool added = false;
     for (const auto& device : devices) {
-        ALOG_ASSERT(device != nullptr, "Null pointer found when adding DeviceVector");
-        if (indexOf(device) < 0 && SortedVector::add(device) >= 0) {
+        if (device && indexOf(device) < 0 && SortedVector::add(device) >= 0) {
             added = true;
         }
     }
@@ -238,7 +272,10 @@ void DeviceVector::add(const DeviceVector &devices)
 
 ssize_t DeviceVector::add(const sp<DeviceDescriptor>& item)
 {
-    ALOG_ASSERT(item != nullptr, "Adding null pointer to DeviceVector");
+    if (!item) {
+        ALOGW("DeviceVector::%s() null device", __func__);
+        return -1;
+    }
     ssize_t ret = indexOf(item);
 
     if (ret < 0) {
@@ -325,7 +362,7 @@ sp<DeviceDescriptor> DeviceVector::getDevice(audio_devices_t type, const String8
         }
     }
     ALOGV("DeviceVector::%s() for type %08x address \"%s\" found %p format %08x",
-            __func__, type, address.string(), device.get(), format);
+            __func__, type, address.c_str(), device.get(), format);
     return device;
 }
 
@@ -448,7 +485,7 @@ void DeviceVector::dump(String8 *dst, const String8 &tag, int spaces, bool verbo
     if (isEmpty()) {
         return;
     }
-    dst->appendFormat("%*s%s devices (%zu):\n", spaces, "", tag.string(), size());
+    dst->appendFormat("%*s%s devices (%zu):\n", spaces, "", tag.c_str(), size());
     for (size_t i = 0; i < size(); i++) {
         const std::string prefix = base::StringPrintf("%*s %zu. ", spaces, "", i + 1);
         dst->appendFormat("%s", prefix.c_str());
