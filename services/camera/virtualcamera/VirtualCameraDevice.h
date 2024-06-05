@@ -104,6 +104,9 @@ class VirtualCameraDevice
   // Returns largest supported input resolution.
   Resolution getMaxInputResolution() const;
 
+  // Allocate and return next id for input stream (input surface).
+  int allocateInputStreamId();
+
   // Maximal number of RAW streams - virtual camera doesn't support RAW streams.
   static constexpr int32_t kMaxNumberOfRawStreams = 0;
 
@@ -126,9 +129,8 @@ class VirtualCameraDevice
   // Default JPEG orientation.
   static constexpr uint8_t kDefaultJpegOrientation = 0;
 
-  // TODO(b/342674104) CDD requires <= 15.
-  // Change this to lower value after confirming it doesn't cause any issue (timeouts).
-  static constexpr int kMinFps = 15;
+  // Lowest min fps advertised in supported fps ranges.
+  static constexpr int kMinFps = 1;
 
   // Default Make and Model for Exif
   static constexpr char kDefaultMakeAndModel[] = "Android Virtual Camera";
@@ -149,6 +151,8 @@ class VirtualCameraDevice
   const std::vector<
       aidl::android::companion::virtualcamera::SupportedStreamConfiguration>
       mSupportedInputConfigurations;
+
+  std::atomic_int mNextInputStreamId;
 };
 
 }  // namespace virtualcamera
