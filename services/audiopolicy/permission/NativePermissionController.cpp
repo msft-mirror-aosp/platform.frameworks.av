@@ -24,9 +24,9 @@
 #include <cutils/android_filesystem_config.h>
 #include <utils/Errors.h>
 
-using ::android::base::unexpected;
 using ::android::binder::Status;
-using ::android::error::Result;
+using ::android::error::BinderResult;
+using ::android::error::unexpectedExceptionCode;
 
 namespace com::android::media::permission {
 static std::optional<std::string> getFixedPackageName(uid_t uid) {
@@ -88,25 +88,46 @@ Status NativePermissionController::updatePackagesForUid(const UidPackageState& n
     return Status::ok();
 }
 
+Status NativePermissionController::populatePermissionState(PermissionEnum perm,
+                                                           const std::vector<int>& uids) {
+    if (perm >= PermissionEnum::ENUM_SIZE || static_cast<int>(perm) < 0) {
+        return Status::fromExceptionCode(Status::EX_ILLEGAL_ARGUMENT);
+    }
+    std::lock_guard l{m_};
+    auto& cursor = permission_map_[static_cast<size_t>(perm)];
+    cursor = std::vector<uid_t>{uids.begin(), uids.end()};
+    // should be sorted
+    std::sort(cursor.begin(), cursor.end());
+    return Status::ok();
+}
+
 // -- End Binder methods
 
-Result<std::vector<std::string>> NativePermissionController::getPackagesForUid(uid_t uid) const {
+BinderResult<std::vector<std::string>> NativePermissionController::getPackagesForUid(
+        uid_t uid) const {
     uid = uid % AID_USER_OFFSET;
     const auto fixed_package_opt = getFixedPackageName(uid);
     if (fixed_package_opt.has_value()) {
-        return Result<std::vector<std::string>>{std::in_place_t{}, {fixed_package_opt.value()}};
+        return BinderResult<std::vector<std::string>>{std::in_place_t{},
+                                                      {fixed_package_opt.value()}};
     }
     std::lock_guard l{m_};
-    if (!is_package_populated_) return unexpected{::android::NO_INIT};
+    if (!is_package_populated_) {
+        return unexpectedExceptionCode(
+                Status::EX_ILLEGAL_STATE,
+                "NPC::getPackagesForUid: controller never populated by system_server");
+    }
     const auto cursor = package_map_.find(uid);
     if (cursor != package_map_.end()) {
         return cursor->second;
     } else {
-        return unexpected{::android::BAD_VALUE};
+        return unexpectedExceptionCode(
+                Status::EX_ILLEGAL_ARGUMENT,
+                ("NPC::getPackagesForUid: uid not found: " + std::to_string(uid)).c_str());
     }
 }
 
-Result<bool> NativePermissionController::validateUidPackagePair(
+BinderResult<bool> NativePermissionController::validateUidPackagePair(
         uid_t uid, const std::string& packageName) const {
     uid = uid % AID_USER_OFFSET;
     const auto fixed_package_opt = getFixedPackageName(uid);
@@ -114,10 +135,28 @@ Result<bool> NativePermissionController::validateUidPackagePair(
         return packageName == fixed_package_opt.value();
     }
     std::lock_guard l{m_};
-    if (!is_package_populated_) return unexpected{::android::NO_INIT};
+    if (!is_package_populated_) {
+        return unexpectedExceptionCode(
+                Status::EX_ILLEGAL_STATE,
+                "NPC::validatedUidPackagePair: controller never populated by system_server");
+    }
     const auto cursor = package_map_.find(uid);
     return (cursor != package_map_.end()) &&
            (std::find(cursor->second.begin(), cursor->second.end(), packageName) !=
             cursor->second.end());
 }
+
+BinderResult<bool> NativePermissionController::checkPermission(PermissionEnum perm,
+                                                               uid_t uid) const {
+    std::lock_guard l{m_};
+    const auto& uids = permission_map_[static_cast<size_t>(perm)];
+    if (!uids.empty()) {
+        return std::binary_search(uids.begin(), uids.end(), uid);
+    } else {
+        return unexpectedExceptionCode(
+                Status::EX_ILLEGAL_STATE,
+                "NPC::checkPermission: controller never populated by system_server");
+    }
+}
+
 }  // namespace com::android::media::permission
