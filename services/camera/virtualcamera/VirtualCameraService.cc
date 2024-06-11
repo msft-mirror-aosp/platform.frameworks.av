@@ -57,16 +57,13 @@ using ::aidl::android::companion::virtualcamera::SensorOrientation;
 using ::aidl::android::companion::virtualcamera::SupportedStreamConfiguration;
 using ::aidl::android::companion::virtualcamera::VirtualCameraConfiguration;
 
-// TODO(b/301023410) Make camera id range configurable / dynamic
-// based on already registered devices.
-std::atomic_int VirtualCameraService::sNextId{1000};
-
 namespace {
 
+constexpr char kCameraIdPrefix[] = "v";
 constexpr int kVgaWidth = 640;
 constexpr int kVgaHeight = 480;
 constexpr int kMaxFps = 60;
-constexpr int kTestCameraInputFps = 30;
+constexpr int kTestCameraDefaultInputFps = 30;
 constexpr char kEnableTestCameraCmd[] = "enable_test_camera";
 constexpr char kDisableTestCameraCmd[] = "disable_test_camera";
 constexpr char kHelp[] = "help";
@@ -78,6 +75,7 @@ Available commands:
      Options:
        --camera_id=(ID) - override numerical ID for test camera instance
        --lens_facing=(front|back|external) - specifies lens facing for test camera instance
+       --input_fps=(fps) - specify input fps for test camera, valid values are from 1 to 1000
  * disable_test_camera
 )";
 constexpr char kCreateVirtualDevicePermission[] =
@@ -88,6 +86,9 @@ constexpr std::array<const char*, 3> kRequiredEglExtensions = {
     "GL_OES_EGL_image_external_essl3",
     "GL_EXT_YUV_target",
 };
+
+// Numerical portion for id to assign to next created camera.
+static std::atomic_int sNextIdNumericalPortion{1000};
 
 ndk::ScopedAStatus validateConfiguration(
     const VirtualCameraConfiguration& configuration) {
@@ -191,7 +192,7 @@ std::variant<CommandWithOptions, std::string> parseCommand(
   }
 
   return cmd;
-};
+}
 
 ndk::ScopedAStatus verifyRequiredEglExtensions() {
   EglDisplayContext context;
@@ -210,6 +211,11 @@ ndk::ScopedAStatus verifyRequiredEglExtensions() {
   return ndk::ScopedAStatus::ok();
 }
 
+std::string createCameraId(const int32_t deviceId) {
+  return kCameraIdPrefix + std::to_string(deviceId) + "_" +
+         std::to_string(sNextIdNumericalPortion++);
+}
+
 }  // namespace
 
 VirtualCameraService::VirtualCameraService(
@@ -223,13 +229,14 @@ ndk::ScopedAStatus VirtualCameraService::registerCamera(
     const ::ndk::SpAIBinder& token,
     const VirtualCameraConfiguration& configuration, const int32_t deviceId,
     bool* _aidl_return) {
-  return registerCamera(token, configuration, sNextId++, deviceId, _aidl_return);
+  return registerCamera(token, configuration, createCameraId(deviceId),
+                        deviceId, _aidl_return);
 }
 
 ndk::ScopedAStatus VirtualCameraService::registerCamera(
     const ::ndk::SpAIBinder& token,
-    const VirtualCameraConfiguration& configuration, const int cameraId,
-    const int32_t deviceId, bool* _aidl_return) {
+    const VirtualCameraConfiguration& configuration,
+    const std::string& cameraId, const int32_t deviceId, bool* _aidl_return) {
   if (!mPermissionProxy.checkCallingPermission(kCreateVirtualDevicePermission)) {
     ALOGE("%s: caller (pid %d, uid %d) doesn't hold %s permission", __func__,
           getpid(), getuid(), kCreateVirtualDevicePermission);
@@ -307,7 +314,7 @@ ndk::ScopedAStatus VirtualCameraService::unregisterCamera(
 }
 
 ndk::ScopedAStatus VirtualCameraService::getCameraId(
-    const ::ndk::SpAIBinder& token, int32_t* _aidl_return) {
+    const ::ndk::SpAIBinder& token, std::string* _aidl_return) {
   if (!mPermissionProxy.checkCallingPermission(kCreateVirtualDevicePermission)) {
     ALOGE("%s: caller (pid %d, uid %d) doesn't hold %s permission", __func__,
           getpid(), getuid(), kCreateVirtualDevicePermission);
@@ -399,13 +406,12 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
     return STATUS_OK;
   }
 
-  std::optional<int> cameraId;
+  std::optional<std::string> cameraId;
   auto it = options.find("camera_id");
   if (it != options.end()) {
-    cameraId = parseInt(it->second);
+    cameraId = it->second;
     if (!cameraId.has_value()) {
-      dprintf(err, "Invalid camera_id: %s\n, must be number > 0",
-              it->second.c_str());
+      dprintf(err, "Invalid camera_id: %s", it->second.c_str());
       return STATUS_BAD_VALUE;
     }
   }
@@ -416,6 +422,18 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
     lensFacing = parseLensFacing(it->second);
     if (!lensFacing.has_value()) {
       dprintf(err, "Invalid lens_facing: %s\n, must be front|back|external",
+              it->second.c_str());
+      return STATUS_BAD_VALUE;
+    }
+  }
+
+  std::optional<int> inputFps;
+  it = options.find("input_fps");
+  if (it != options.end()) {
+    inputFps = parseInt(it->second);
+    if (!inputFps.has_value() || inputFps.value() < 1 ||
+        inputFps.value() > 1000) {
+      dprintf(err, "Invalid input fps: %s\n, must be integer in <1,1000> range.",
               it->second.c_str());
       return STATUS_BAD_VALUE;
     }
@@ -432,8 +450,10 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
                                                   .maxFps = kMaxFps});
   configuration.lensFacing = lensFacing.value_or(LensFacing::EXTERNAL);
   configuration.virtualCameraCallback =
-      ndk::SharedRefBase::make<VirtualCameraTestInstance>(kTestCameraInputFps);
-  registerCamera(mTestCameraToken, configuration, cameraId.value_or(sNextId++),
+      ndk::SharedRefBase::make<VirtualCameraTestInstance>(
+          inputFps.value_or(kTestCameraDefaultInputFps));
+  registerCamera(mTestCameraToken, configuration,
+                 cameraId.value_or(std::to_string(sNextIdNumericalPortion++)),
                  kDefaultDeviceId, &ret);
   if (ret) {
     dprintf(out, "Successfully registered test camera %s\n",
