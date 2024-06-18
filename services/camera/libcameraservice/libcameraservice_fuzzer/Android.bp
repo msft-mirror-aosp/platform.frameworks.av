@@ -85,7 +85,7 @@ cc_fuzz {
         "camera_service_fuzzer.cpp",
     ],
     defaults: [
-        "camera_service_fuzzer_defaults"
+        "camera_service_fuzzer_defaults",
     ],
 }
 
