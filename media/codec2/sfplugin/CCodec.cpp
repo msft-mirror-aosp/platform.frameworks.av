@@ -444,6 +444,10 @@ public:
         mNode->onInputBufferDone(index);
     }
 
+    void onInputBufferEmptied() override {
+        mNode->onInputBufferEmptied();
+    }
+
     android_dataspace getDataspace() override {
         return mNode->getDataspace();
     }
@@ -661,6 +665,10 @@ public:
 
     void onInputBufferDone(c2_cntr64_t index) override {
         mNode->onInputBufferDone(index);
+    }
+
+    void onInputBufferEmptied() override {
+        mNode->onInputBufferEmptied();
     }
 
     android_dataspace getDataspace() override {
@@ -2625,6 +2633,15 @@ void CCodec::signalSetParameters(const sp<AMessage> &msg) {
     if (config->mInputSurface == nullptr
             && (property_get_bool("debug.stagefright.ccodec_delayed_params", false)
                     || comp->getName().find("c2.android.") == 0)) {
+        std::vector<std::unique_ptr<C2Param>> localConfigUpdate;
+        for (const std::unique_ptr<C2Param> &param : configUpdate) {
+            if (param && param->coreIndex().coreIndex() == C2StreamSurfaceScalingInfo::CORE_INDEX) {
+                localConfigUpdate.push_back(C2Param::Copy(*param));
+            }
+        }
+        if (!localConfigUpdate.empty()) {
+            (void)config->setParameters(comp, localConfigUpdate, C2_MAY_BLOCK);
+        }
         mChannel->setParameters(configUpdate);
     } else {
         sp<AMessage> outputFormat = config->mOutputFormat;
