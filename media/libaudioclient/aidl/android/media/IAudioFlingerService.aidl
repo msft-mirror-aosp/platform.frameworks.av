@@ -293,7 +293,7 @@ interface IAudioFlingerService {
      */
     AudioPortFw getAudioMixPort(in AudioPortFw devicePort, in AudioPortFw mixPort);
 
-    /**
+    /*
      * Reset Circular references in AudioFlinger service.
      * Test API
      */
