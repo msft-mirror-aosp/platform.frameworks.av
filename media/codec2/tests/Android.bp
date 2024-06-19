@@ -45,11 +45,6 @@ cc_test {
         "C2SampleComponent_test.cpp",
         "C2UtilTest.cpp",
         "vndk/C2BufferTest.cpp",
-        "vndk/C2FenceTest.cpp",
-    ],
-
-    static_libs: [
-        "libgmock",
     ],
 
     shared_libs: [
@@ -57,7 +52,6 @@ cc_test {
         "libcodec2_vndk",
         "libcutils",
         "liblog",
-        "libui",
         "libutils",
     ],
 
