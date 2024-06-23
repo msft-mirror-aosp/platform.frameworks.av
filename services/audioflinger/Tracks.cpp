@@ -389,6 +389,7 @@ TrackHandle::TrackHandle(const sp<IAfTrack>& track)
       mTrack(track)
 {
     setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    setInheritRt(true);
 }
 
 TrackHandle::~TrackHandle() {
@@ -1233,7 +1234,7 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
                 && (state == IDLE || state == STOPPED || state == FLUSHED)) {
             mFrameMap.reset();
 
-            if (!isFastTrack() && (isDirect() || isOffloaded())) {
+            if (!isFastTrack()) {
                 // Start point of track -> sink frame map. If the HAL returns a
                 // frame position smaller than the first written frame in
                 // updateTrackFrameInfo, the timestamp can be interpolated
@@ -2441,10 +2442,11 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
         size_t bufferSize,
         audio_output_flags_t flags,
         const Timeout& timeout,
-        size_t frameCountToBeReady /** Default behaviour is to start
+        size_t frameCountToBeReady, /** Default behaviour is to start
                                          *  as soon as possible to have
                                          *  the lowest possible latency
-                                         *  even if it might glitch. */)
+                                         *  even if it might glitch. */
+        float speed)
 {
     return sp<PatchTrack>::make(
             playbackThread,
@@ -2457,7 +2459,8 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
             bufferSize,
             flags,
             timeout,
-            frameCountToBeReady);
+            frameCountToBeReady,
+            speed);
 }
 
 PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
@@ -2470,17 +2473,26 @@ PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
                                                      size_t bufferSize,
                                                      audio_output_flags_t flags,
                                                      const Timeout& timeout,
-                                                     size_t frameCountToBeReady)
+                                                     size_t frameCountToBeReady,
+                                                     float speed)
     :   Track(playbackThread, NULL, streamType,
               audio_attributes_t{} /* currently unused for patch track */,
               sampleRate, format, channelMask, frameCount,
               buffer, bufferSize, nullptr /* sharedBuffer */,
               AUDIO_SESSION_NONE, getpid(), audioServerAttributionSource(getpid()), flags,
-              TYPE_PATCH, AUDIO_PORT_HANDLE_NONE, frameCountToBeReady),
-        PatchTrackBase(mCblk ? new ClientProxy(mCblk, mBuffer, frameCount, mFrameSize, true, true)
-                        : nullptr,
+              TYPE_PATCH, AUDIO_PORT_HANDLE_NONE, frameCountToBeReady, speed),
+        PatchTrackBase(mCblk ? new AudioTrackClientProxy(mCblk, mBuffer, frameCount, mFrameSize,
+                        true /*clientInServer*/) : nullptr,
                        playbackThread, timeout)
 {
+    if (mProxy != nullptr) {
+        sp<AudioTrackClientProxy>::cast(mProxy)->setPlaybackRate({
+                /* .mSpeed = */ speed,
+                /* .mPitch = */ AUDIO_TIMESTRETCH_PITCH_NORMAL,
+                /* .mStretchMode = */ AUDIO_TIMESTRETCH_STRETCH_DEFAULT,
+                /* .mFallbackMode = */ AUDIO_TIMESTRETCH_FALLBACK_FAIL
+        });
+    }
     ALOGV("%s(%d): sampleRate %d mPeerTimeout %d.%03d sec",
                                       __func__, mId, sampleRate,
                                       (int)mPeerTimeout.tv_sec,
@@ -2641,6 +2653,7 @@ RecordHandle::RecordHandle(
     mRecordTrack(recordTrack)
 {
     setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    setInheritRt(true);
 }
 
 RecordHandle::~RecordHandle() {
