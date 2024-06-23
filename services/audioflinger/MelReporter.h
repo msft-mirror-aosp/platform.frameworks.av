@@ -27,8 +27,6 @@
 
 namespace android {
 
-constexpr static int kMaxTimestampDeltaInSec = 120;
-
 class IAfMelReporterCallback : public virtual RefBase {
 public:
     virtual audio_utils::mutex& mutex() const
@@ -45,8 +43,10 @@ public:
 class MelReporter : public PatchCommandThread::PatchCommandListener,
                     public IMelReporterCallback {
 public:
-    explicit MelReporter(const sp<IAfMelReporterCallback>& afMelReporterCallback)
-        : mAfMelReporterCallback(afMelReporterCallback) {}
+    MelReporter(const sp<IAfMelReporterCallback>& afMelReporterCallback,
+                const sp<IAfPatchPanel>& afPatchPanel)
+        : mAfMelReporterCallback(afMelReporterCallback),
+          mAfPatchPanel(afPatchPanel) {}
 
     void onFirstRef() override;
 
@@ -80,9 +80,10 @@ public:
 
     // IMelReporterCallback methods
     void stopMelComputationForDeviceId(audio_port_handle_t deviceId) final
-            EXCLUDES_MelReporter_Mutex;
+            EXCLUDES_AudioFlinger_Mutex EXCLUDES_MelReporter_Mutex;
     void startMelComputationForDeviceId(audio_port_handle_t deviceId) final
-            EXCLUDES_MelReporter_Mutex;
+            EXCLUDES_AudioFlinger_Mutex EXCLUDES_MelReporter_Mutex;
+    void applyAllAudioPatches() final EXCLUDES_AudioFlinger_Mutex EXCLUDES_MelReporter_Mutex;
 
     // PatchCommandListener methods
     void onCreateAudioPatch(audio_patch_handle_t handle,
@@ -133,6 +134,7 @@ private:
     bool useHalSoundDoseInterface_l() REQUIRES(mutex());
 
     sp<IAfMelReporterCallback> mAfMelReporterCallback;
+    const sp<IAfPatchPanel> mAfPatchPanel;
 
     /* const */ sp<SoundDoseManager> mSoundDoseManager;  // set onFirstRef
 
