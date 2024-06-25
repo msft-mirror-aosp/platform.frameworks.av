@@ -4645,7 +4645,11 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
 
         // FIXME Note that the above .clear() is no longer necessary since effectChains
         // is now local to this block, but will keep it for now (at least until merge done).
+
+        mThreadloopExecutor.process();
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     threadLoop_exit();
 
@@ -8646,6 +8650,9 @@ reacquire_wakelock:
 
         // loop over each active track
         for (size_t i = 0; i < size; i++) {
+            if (activeTrack) {  // ensure track release is outside lock.
+                oldActiveTracks.emplace_back(std::move(activeTrack));
+            }
             activeTrack = activeTracks[i];
 
             // skip fast tracks, as those are handled directly by FastCapture
@@ -8789,11 +8796,14 @@ unlock:
             mIoJitterMs.add(jitterMs);
             mProcessTimeMs.add(processMs);
         }
+       mThreadloopExecutor.process();
         // update timing info.
         mLastIoBeginNs = lastIoBeginNs;
         mLastIoEndNs = lastIoEndNs;
         lastLoopCountRead = loopCount;
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     standbyIfNotAlreadyInStandby();
 
@@ -10579,7 +10589,10 @@ bool MmapThread::threadLoop()
         unlockEffectChains(effectChains);
         // Effect chains will be actually deleted here if they were removed from
         // mEffectChains list during mixing or effects processing
+        mThreadloopExecutor.process();
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     threadLoop_exit();
 
