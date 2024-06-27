@@ -513,7 +513,7 @@ void CameraService::removeStates(const std::string& cameraId) {
 void CameraService::onDeviceStatusChanged(const std::string& cameraId,
         CameraDeviceStatus newHalStatus) {
     ALOGI("%s: Status changed for cameraId=%s, newStatus=%d", __FUNCTION__,
-            cameraId.c_str(), newHalStatus);
+            cameraId.c_str(), eToI(newHalStatus));
 
     StatusInternal newStatus = mapToInternal(newHalStatus);
 
@@ -537,7 +537,8 @@ void CameraService::onDeviceStatusChanged(const std::string& cameraId,
     StatusInternal oldStatus = state->getStatus();
 
     if (oldStatus == newStatus) {
-        ALOGE("%s: State transition to the same status %#x not allowed", __FUNCTION__, newStatus);
+        ALOGE("%s: State transition to the same status %#x not allowed", __FUNCTION__,
+                eToI(newStatus));
         return;
     }
 
@@ -580,7 +581,7 @@ void CameraService::onDeviceStatusChanged(const std::string& id,
         const std::string& physicalId,
         CameraDeviceStatus newHalStatus) {
     ALOGI("%s: Status changed for cameraId=%s, physicalCameraId=%s, newStatus=%d",
-            __FUNCTION__, id.c_str(), physicalId.c_str(), newHalStatus);
+            __FUNCTION__, id.c_str(), physicalId.c_str(), eToI(newHalStatus));
 
     StatusInternal newStatus = mapToInternal(newHalStatus);
 
@@ -596,7 +597,7 @@ void CameraService::onDeviceStatusChanged(const std::string& id,
     if (logicalCameraStatus != StatusInternal::PRESENT &&
             logicalCameraStatus != StatusInternal::NOT_AVAILABLE) {
         ALOGE("%s: Physical camera id %s status %d change for an invalid logical camera state %d",
-                __FUNCTION__, physicalId.c_str(), newHalStatus, logicalCameraStatus);
+                __FUNCTION__, physicalId.c_str(), eToI(newHalStatus), eToI(logicalCameraStatus));
         return;
     }
 
@@ -688,7 +689,7 @@ void CameraService::broadcastTorchStrengthLevel(const std::string& cameraId,
 void CameraService::onTorchStatusChangedLocked(const std::string& cameraId,
         TorchModeStatus newStatus, SystemCameraKind systemCameraKind) {
     ALOGI("%s: Torch status changed for cameraId=%s, newStatus=%d",
-            __FUNCTION__, cameraId.c_str(), newStatus);
+            __FUNCTION__, cameraId.c_str(), eToI(newStatus));
 
     TorchModeStatus status;
     status_t res = getTorchStatusLocked(cameraId, &status);
@@ -926,8 +927,13 @@ Status CameraService::isSessionConfigurationWithParametersSupported(
                                 SessionConfigurationUtils::targetPerfClassPrimaryCamera(
                                         mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
 
-    return isSessionConfigurationWithParametersSupportedUnsafe(cameraId, sessionConfiguration,
-                                                               overrideForPerfClass, supported);
+    auto ret = isSessionConfigurationWithParametersSupportedUnsafe(cameraId,
+            sessionConfiguration, overrideForPerfClass, supported);
+    if (flags::analytics_24q3()) {
+        mCameraServiceProxyWrapper->logFeatureCombinationQuery(cameraId,
+                getCallingUid(), sessionConfiguration, ret);
+    }
+    return ret;
 }
 
 Status CameraService::isSessionConfigurationWithParametersSupportedUnsafe(
@@ -1071,7 +1077,12 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
             }
     }
 
-    return filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
+    Status res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
+    if (flags::analytics_24q3()) {
+        mCameraServiceProxyWrapper->logSessionCharacteristicsQuery(cameraId,
+                getCallingUid(), sessionConfiguration, res);
+    }
+    return res;
 }
 
 Status CameraService::filterSensitiveMetadataIfNeeded(
@@ -1542,7 +1553,7 @@ int32_t CameraService::mapToInterface(TorchModeStatus status) {
             serviceStatus = ICameraServiceListener::TORCH_STATUS_AVAILABLE_ON;
             break;
         default:
-            ALOGW("Unknown new flash status: %d", status);
+            ALOGW("Unknown new flash status: %d", eToI(status));
     }
     return serviceStatus;
 }
@@ -1560,7 +1571,7 @@ CameraService::StatusInternal CameraService::mapToInternal(CameraDeviceStatus st
             serviceStatus = StatusInternal::ENUMERATING;
             break;
         default:
-            ALOGW("Unknown new HAL device status: %d", status);
+            ALOGW("Unknown new HAL device status: %d", eToI(status));
     }
     return serviceStatus;
 }
@@ -1584,7 +1595,7 @@ int32_t CameraService::mapToInterface(StatusInternal status) {
             serviceStatus = ICameraServiceListener::STATUS_UNKNOWN;
             break;
         default:
-            ALOGW("Unknown new internal device status: %d", status);
+            ALOGW("Unknown new internal device status: %d", eToI(status));
     }
     return serviceStatus;
 }
@@ -5767,7 +5778,7 @@ void CameraService::CameraState::updateStatus(StatusInternal status,
     }
 
     ALOGV("%s: Status has changed for camera ID %s from %#x to %#x", __FUNCTION__,
-            cameraId.c_str(), oldStatus, status);
+            cameraId.c_str(), eToI(oldStatus), eToI(status));
 
     if (oldStatus == StatusInternal::NOT_PRESENT &&
             (status != StatusInternal::PRESENT &&

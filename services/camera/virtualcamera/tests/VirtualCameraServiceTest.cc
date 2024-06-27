@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <regex>
 
 #include "VirtualCameraService.h"
@@ -189,6 +190,16 @@ class VirtualCameraServiceTest : public ::testing::Test {
     CameraMetadata metadata;
     camera->getCameraCharacteristics(&metadata);
     return getLensFacing(metadata);
+  }
+
+  std::optional<int32_t> getCameraSensorOrienation(const std::string& id) {
+    std::shared_ptr<VirtualCameraDevice> camera = mCameraProvider->getCamera(id);
+    if (camera == nullptr) {
+      return std::nullopt;
+    }
+    CameraMetadata metadata;
+    camera->getCameraCharacteristics(&metadata);
+    return getSensorOrientation(metadata);
   }
 
  protected:
@@ -390,7 +401,7 @@ TEST_F(VirtualCameraServiceTest, UnregisterCameraWithoutPermissionFails) {
 }
 
 TEST_F(VirtualCameraServiceTest, GetIdWithoutPermissionFails) {
-  int32_t aidlRet;
+  std::string aidlRet;
   EXPECT_CALL(mMockPermissionsProxy,
               checkCallingPermission(kCreateVirtualDevicePermissions))
       .WillOnce(Return(false));
@@ -445,11 +456,13 @@ TEST_F(VirtualCameraServiceTest, TestCameraShellCmd) {
 }
 
 TEST_F(VirtualCameraServiceTest, TestCameraShellCmdWithId) {
-  EXPECT_THAT(execute_shell_command("enable_test_camera --camera_id=12345"),
-              Eq(NO_ERROR));
+  EXPECT_THAT(
+      execute_shell_command("enable_test_camera --camera_id=hello12345"),
+      Eq(NO_ERROR));
 
   std::vector<std::string> cameraIdsAfterEnable = getCameraIds();
-  EXPECT_THAT(cameraIdsAfterEnable, ElementsAre("device@1.1/virtual/12345"));
+  EXPECT_THAT(cameraIdsAfterEnable,
+              ElementsAre("device@1.1/virtual/hello12345"));
 
   EXPECT_THAT(execute_shell_command("disable_test_camera"), Eq(NO_ERROR));
 
@@ -458,9 +471,8 @@ TEST_F(VirtualCameraServiceTest, TestCameraShellCmdWithId) {
 }
 
 TEST_F(VirtualCameraServiceTest, TestCameraShellCmdWithInvalidId) {
-  EXPECT_THAT(
-      execute_shell_command("enable_test_camera --camera_id=NotNumericalId"),
-      Eq(STATUS_BAD_VALUE));
+  EXPECT_THAT(execute_shell_command("enable_test_camera --camera_id="),
+              Eq(STATUS_BAD_VALUE));
 }
 
 TEST_F(VirtualCameraServiceTest, TestCameraShellCmdWithUnknownCommand) {
@@ -503,6 +515,24 @@ TEST_F(VirtualCameraServiceTest, TestCameraShellCmdWithInvalidInputFps) {
               Eq(STATUS_BAD_VALUE));
   EXPECT_THAT(execute_shell_command("enable_test_camera --input_fps=foo"),
               Eq(STATUS_BAD_VALUE));
+}
+
+TEST_F(VirtualCameraServiceTest, TestCameraShellCmdWithSensorOrientation90) {
+  EXPECT_THAT(
+      execute_shell_command("enable_test_camera --sensor_orientation=90"),
+      Eq(NO_ERROR));
+
+  std::vector<std::string> cameraIds = getCameraIds();
+  ASSERT_THAT(cameraIds, SizeIs(1));
+  EXPECT_THAT(getCameraSensorOrienation(cameraIds[0]), Optional(Eq(90)));
+}
+
+TEST_F(VirtualCameraServiceTest, TestCameraShellCmdWithSensorOrientationNoArgs) {
+  EXPECT_THAT(execute_shell_command("enable_test_camera"), Eq(NO_ERROR));
+
+  std::vector<std::string> cameraIds = getCameraIds();
+  ASSERT_THAT(cameraIds, SizeIs(1));
+  EXPECT_THAT(getCameraSensorOrienation(cameraIds[0]), Optional(Eq(0)));
 }
 
 }  // namespace

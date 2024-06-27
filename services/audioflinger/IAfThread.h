@@ -19,8 +19,9 @@
 #include <android/media/IAudioTrackCallback.h>
 #include <android/media/IEffectClient.h>
 #include <audiomanager/IAudioManager.h>
-#include <audio_utils/mutex.h>
+#include <audio_utils/DeferredExecutor.h>
 #include <audio_utils/MelProcessor.h>
+#include <audio_utils/mutex.h>
 #include <binder/MemoryDealer.h>
 #include <datapath/AudioStreamIn.h>
 #include <datapath/AudioStreamOut.h>
@@ -395,6 +396,12 @@ public:
     // avoid races.
     virtual void waitWhileThreadBusy_l(audio_utils::unique_lock& ul)
             REQUIRES(mutex()) = 0;
+
+    // The ThreadloopExecutor is used to defer functors or dtors
+    // to when the Threadloop does not hold any mutexes (at the end of the
+    // processing period cycle).
+    virtual audio_utils::DeferredExecutor& getThreadloopExecutor() = 0;
+
     // Dynamic cast to derived interface
     virtual sp<IAfDirectOutputThread> asIAfDirectOutputThread() { return nullptr; }
     virtual sp<IAfDuplicatingThread> asIAfDuplicatingThread() { return nullptr; }
