@@ -217,7 +217,8 @@ public:
     }
     status_t setDevices(const AudioDeviceTypeAddrVector& devices) final EXCLUDES_EffectBase_Mutex;
     status_t setInputDevice(const AudioDeviceTypeAddr& device) final EXCLUDES_EffectBase_Mutex;
-    status_t setVolume(uint32_t *left, uint32_t *right, bool controller, bool force) final;
+    status_t setVolume_l(uint32_t* left, uint32_t* right, bool controller, bool force) final
+            REQUIRES(audio_utils::EffectChain_Mutex);
     status_t setMode(audio_mode_t mode) final EXCLUDES_EffectBase_Mutex;
     status_t setAudioSource(audio_source_t source) final EXCLUDES_EffectBase_Mutex;
     status_t start_l() final REQUIRES(audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex;
@@ -265,8 +266,8 @@ private:
                 ? EFFECT_BUFFER_ACCESS_WRITE : EFFECT_BUFFER_ACCESS_ACCUMULATE;
     }
 
-    status_t setVolumeInternal(uint32_t *left, uint32_t *right, bool controller);
-
+    status_t setVolumeInternal(uint32_t* left, uint32_t* right,
+                               bool controller /* the volume controller effect of the chain */);
 
     effect_config_t     mConfig;    // input and output audio configuration
     sp<EffectHalInterface> mEffectInterface; // Effect module HAL
@@ -278,8 +279,6 @@ private:
                                     // sending disable command.
     uint32_t mDisableWaitCnt;       // current process() calls count during disable period.
     bool     mOffloaded;            // effect is currently offloaded to the audio DSP
-    // effect has been added to this HAL input stream
-    audio_io_handle_t mCurrentHalStream = AUDIO_IO_HANDLE_NONE;
     bool     mIsOutput;             // direction of the AF thread
 
     bool    mSupportsFloat;         // effect supports float processing
@@ -595,6 +594,7 @@ public:
         status_t allocateHalBuffer(size_t size, sp<EffectBufferHalInterface>* buffer) override;
         bool updateOrphanEffectChains(const sp<IAfEffectBase>& effect) override;
 
+        bool shouldDispatchAddRemoveToHal(bool isAdded) const override;
         audio_io_handle_t io() const override;
         bool isOutput() const override;
         bool isOffload() const override;
@@ -652,6 +652,8 @@ public:
         mediautils::atomic_wp<IAfThreadBase> mThread;
         sp<IAfThreadCallback> mAfThreadCallback;
         IAfThreadBase::type_t mThreadType = IAfThreadBase::MIXER;
+        // effect has been added to this HAL input stream
+        audio_io_handle_t mCurrentHalStream = AUDIO_IO_HANDLE_NONE;
     };
 
     DISALLOW_COPY_AND_ASSIGN(EffectChain);
@@ -783,6 +785,9 @@ private:
         }
 
         audio_io_handle_t io() const override { return AUDIO_IO_HANDLE_NONE; }
+        bool shouldDispatchAddRemoveToHal(bool isAdded) const override {
+            return isAdded != mAddedToHal;
+        }
         bool isOutput() const override;
         bool isOffload() const override { return false; }
         bool isOffloadOrDirect() const override { return false; }
@@ -823,6 +828,7 @@ private:
     private:
         const wp<DeviceEffectProxy> mProxy;
         const sp<DeviceEffectManagerCallback> mManagerCallback;
+        bool mAddedToHal = false;
     };
 
     status_t checkPort(const IAfPatchPanel::Patch& patch,
