@@ -46,6 +46,7 @@ class EffectCallbackInterface : public RefBase {
 public:
     // Trivial methods usually implemented with help from ThreadBase
     virtual audio_io_handle_t io() const = 0;
+    virtual bool shouldDispatchAddRemoveToHal(bool isAdded) const = 0;
     virtual bool isOutput() const = 0;
     virtual bool isOffload() const = 0;
     virtual bool isOffloadOrDirect() const = 0;
@@ -163,8 +164,9 @@ public:
     virtual int16_t *inBuffer() const = 0;
     virtual status_t setDevices(const AudioDeviceTypeAddrVector &devices) = 0;
     virtual status_t setInputDevice(const AudioDeviceTypeAddr &device) = 0;
-    virtual status_t setVolume(uint32_t *left, uint32_t *right, bool controller,
-                               bool force = false) = 0;
+    virtual status_t setVolume_l(uint32_t* left, uint32_t* right,
+                                 bool controller /* effect controlling chain volume */,
+                                 bool force = false) REQUIRES(audio_utils::EffectChain_Mutex) = 0;
     virtual status_t setOffloaded_l(bool offloaded, audio_io_handle_t io) = 0;
     virtual bool isOffloaded_l() const = 0;
 

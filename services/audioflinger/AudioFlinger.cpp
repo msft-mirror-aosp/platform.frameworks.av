@@ -193,6 +193,7 @@ BINDER_METHOD_ENTRY(supportsBluetoothVariableLatency) \
 BINDER_METHOD_ENTRY(getSoundDoseInterface) \
 BINDER_METHOD_ENTRY(getAudioPolicyConfig) \
 BINDER_METHOD_ENTRY(getAudioMixPort) \
+BINDER_METHOD_ENTRY(resetReferencesForTest) \
 
 // singleton for Binder Method Statistics for IAudioFlinger
 static auto& getIAudioFlingerStatistics() {
@@ -466,6 +467,8 @@ AudioFlinger::~AudioFlinger()
             sMediaLogService->unregisterWriter(iMemory);
         }
     }
+    mMediaLogNotifier->requestExit();
+    mPatchCommandThread->exit();
 }
 
 //static
@@ -3809,7 +3812,11 @@ audio_unique_id_t AudioFlinger::nextUniqueId(audio_unique_id_use_t use)
 
 IAfPlaybackThread* AudioFlinger::primaryPlaybackThread_l() const
 {
-    audio_utils::lock_guard lock(hardwareMutex());
+    // The atomic ptr mPrimaryHardwareDev requires both the
+    // AudioFlinger and the Hardware mutex for modification.
+    // As we hold the AudioFlinger mutex, we access it
+    // safely without the Hardware mutex, to avoid mutex order
+    // inversion with Thread methods and the ThreadBase mutex.
     if (mPrimaryHardwareDev == nullptr) {
         return nullptr;
     }
@@ -3945,7 +3952,8 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
                                                        patchRecord->bufferSize(),
                                                        outputFlags,
                                                        0ns /* timeout */,
-                                                       frameCountToBeReady);
+                                                       frameCountToBeReady,
+                                                       track->getSpeed());
         status = patchTrack->initCheck();
         if (status != NO_ERROR) {
             ALOGE("Secondary output patchTrack init failed: %d", status);
@@ -4563,6 +4571,10 @@ NO_THREAD_SAFETY_ANALYSIS
             if ((pt->type() == IAfThreadBase::MIXER || pt->type() == IAfThreadBase::OFFLOAD) &&
                     ((sessionType & IAfThreadBase::EFFECT_SESSION) != 0)) {
                 srcThread = pt.get();
+                if (srcThread == dstThread) {
+                    ALOGD("%s() same dst and src threads, ignoring move", __func__);
+                    return NO_ERROR;
+                }
                 ALOGW("%s() found srcOutput %d hosting AUDIO_SESSION_OUTPUT_MIX", __func__,
                       pt->id());
                 break;
@@ -4986,6 +4998,13 @@ status_t AudioFlinger::setTracksInternalMute(
     return NO_ERROR;
 }
 
+status_t AudioFlinger::resetReferencesForTest() {
+    mDeviceEffectManager.clear();
+    mPatchPanel.clear();
+    mMelReporter->resetReferencesForTest();
+    return NO_ERROR;
+}
+
 // ----------------------------------------------------------------------------
 
 status_t AudioFlinger::onTransactWrapper(TransactionCode code,
@@ -5021,6 +5040,7 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         case TransactionCode::GET_AUDIO_POLICY_CONFIG:
         case TransactionCode::GET_AUDIO_MIX_PORT:
         case TransactionCode::SET_TRACKS_INTERNAL_MUTE:
+        case TransactionCode::RESET_REFERENCES_FOR_TEST:
             ALOGW("%s: transaction %d received from PID %d",
                   __func__, static_cast<int>(code), IPCThreadState::self()->getCallingPid());
             // return status only for non void methods

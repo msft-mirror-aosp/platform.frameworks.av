@@ -227,6 +227,10 @@ aaudio_result_t AAudioServiceStreamBase::startDevice_l() {
         ALOGE("%s() has no endpoint", __func__);
         return AAUDIO_ERROR_INVALID_STATE;
     }
+    if (!endpoint->isConnected()) {
+        ALOGE("%s() endpoint was already disconnected", __func__);
+        return AAUDIO_ERROR_DISCONNECTED;
+    }
     return endpoint->startStream(this, &mClientHandle);
 }
 
@@ -334,6 +338,7 @@ aaudio_result_t AAudioServiceStreamBase::stop() {
 aaudio_result_t AAudioServiceStreamBase::stop_l() {
     aaudio_result_t result = AAUDIO_OK;
     if (!isRunning()) {
+        ALOGW("%s() stream not running, returning early", __func__);
         return result;
     }
     const int64_t beginNs = AudioClock::getNanoseconds();
@@ -398,6 +403,7 @@ aaudio_result_t AAudioServiceStreamBase::flush_l() {
 }
 
 // implement Runnable, periodically send timestamps to client and process commands from queue.
+// Enter standby mode if idle for a while.
 __attribute__((no_sanitize("integer")))
 void AAudioServiceStreamBase::run() {
     ALOGD("%s() %s entering >>>>>>>>>>>>>> COMMANDS", __func__, getTypeText());
@@ -406,6 +412,7 @@ void AAudioServiceStreamBase::run() {
     TimestampScheduler timestampScheduler;
     int64_t nextTimestampReportTime;
     int64_t nextDataReportTime;
+    // When to try to enter standby.
     int64_t standbyTime = AudioClock::getNanoseconds() + IDLE_TIMEOUT_NANOS;
     // Balance the incStrong from when the thread was launched.
     holdStream->decStrong(nullptr);
@@ -417,28 +424,26 @@ void AAudioServiceStreamBase::run() {
     int32_t loopCount = 0;
     while (mThreadEnabled.load()) {
         loopCount++;
-        int64_t timeoutNanos = -1;
-        if (isDisconnected_l()) {
-            if (!isStandby_l()) {
-                // If the stream is disconnected but not in standby mode, wait until standby time.
+        int64_t timeoutNanos = -1; // wait forever
+        if (isDisconnected_l() || isIdle_l()) {
+            if (isStandbyImplemented() && !isStandby_l()) {
+                // If not in standby mode, wait until standby time.
                 timeoutNanos = standbyTime - AudioClock::getNanoseconds();
                 timeoutNanos = std::max<int64_t>(0, timeoutNanos);
-            } // else {
-                // If the stream is disconnected and in standby mode, keep `timeoutNanos` as
-                // -1 to wait forever until next command as the stream can only be closed.
-            // }
-        } else if (isRunning() || (isIdle_l() && !isStandby_l())) {
-            timeoutNanos = (isRunning() ? std::min(nextTimestampReportTime, nextDataReportTime)
-                                        : standbyTime) - AudioClock::getNanoseconds();
+            }
+            // Otherwise, keep `timeoutNanos` as -1 to wait forever until next command.
+        } else if (isRunning()) {
+            timeoutNanos = std::min(nextTimestampReportTime, nextDataReportTime)
+                    - AudioClock::getNanoseconds();
             timeoutNanos = std::max<int64_t>(0, timeoutNanos);
         }
-
         auto command = mCommandQueue.waitForCommand(timeoutNanos);
         if (!mThreadEnabled) {
             // Break the loop if the thread is disabled.
             break;
         }
 
+        // Is it time to send timestamps?
         if (isRunning() && !isDisconnected_l()) {
             auto currentTimestamp = AudioClock::getNanoseconds();
             if (currentTimestamp >= nextDataReportTime) {
@@ -454,19 +459,24 @@ void AAudioServiceStreamBase::run() {
                 nextTimestampReportTime = timestampScheduler.nextAbsoluteTime();
             }
         }
-        if ((isIdle_l() || isDisconnected_l()) && AudioClock::getNanoseconds() >= standbyTime) {
+
+        // Is it time to enter standby?
+        if ((isIdle_l() || isDisconnected_l())
+                && isStandbyImplemented()
+                && !isStandby_l()
+                && (AudioClock::getNanoseconds() >= standbyTime)) {
+            ALOGD("%s() call standby_l(), %d loops", __func__, loopCount);
             aaudio_result_t result = standby_l();
             if (result != AAUDIO_OK) {
-                // If standby failed because of the function is not implemented, there is no
-                // need to retry. Otherwise, retry standby later.
-                ALOGW("Failed to enter standby, error=%d", result);
-                standbyTime = result == AAUDIO_ERROR_UNIMPLEMENTED
-                        ? std::numeric_limits<int64_t>::max()
-                        : AudioClock::getNanoseconds() + IDLE_TIMEOUT_NANOS;
+                ALOGW("Failed to enter standby, error = %d", result);
+                // Try again later.
+                standbyTime = AudioClock::getNanoseconds() + IDLE_TIMEOUT_NANOS;
             }
         }
 
         if (command != nullptr) {
+            ALOGD("%s() got COMMAND opcode %d after %d loops",
+                    __func__, command->operationCode, loopCount);
             std::scoped_lock<std::mutex> _commandLock(command->lock);
             switch (command->operationCode) {
                 case START:
