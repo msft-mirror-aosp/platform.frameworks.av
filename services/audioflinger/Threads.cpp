@@ -4646,7 +4646,11 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
 
         // FIXME Note that the above .clear() is no longer necessary since effectChains
         // is now local to this block, but will keep it for now (at least until merge done).
+
+        mThreadloopExecutor.process();
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     threadLoop_exit();
 
@@ -5089,7 +5093,6 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         // mPipeSink below
         // mNormalSink below
 {
-    setMasterBalance(afThreadCallback->getMasterBalance_l());
     ALOGV("MixerThread() id=%d type=%d", id, type);
     ALOGV("mSampleRate=%u, mChannelMask=%#x, mChannelCount=%u, mFormat=%#x, mFrameSize=%zu, "
             "mFrameCount=%zu, mNormalFrameCount=%zu",
@@ -5101,6 +5104,8 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         // The Duplicating thread uses the AudioMixer and delivers data to OutputTracks
         // (downstream MixerThreads) in DuplicatingThread::threadLoop_write().
         // Do not create or use mFastMixer, mOutputSink, mPipeSink, or mNormalSink.
+        // Balance is *not* set in the DuplicatingThread here (or from AudioFlinger),
+        // as the downstream MixerThreads implement it.
         return;
     }
     // create an NBAIO sink for the HAL output stream, and negotiate
@@ -5260,6 +5265,9 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         mNormalSink = initFastMixer ? mPipeSink : mOutputSink;
         break;
     }
+    // setMasterBalance needs to be called after the FastMixer
+    // (if any) is set up, in order to deliver the balance settings to it.
+    setMasterBalance(afThreadCallback->getMasterBalance_l());
 }
 
 MixerThread::~MixerThread()
@@ -8813,11 +8821,14 @@ unlock:
             mIoJitterMs.add(jitterMs);
             mProcessTimeMs.add(processMs);
         }
+       mThreadloopExecutor.process();
         // update timing info.
         mLastIoBeginNs = lastIoBeginNs;
         mLastIoEndNs = lastIoEndNs;
         lastLoopCountRead = loopCount;
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     standbyIfNotAlreadyInStandby();
 
@@ -10603,7 +10614,10 @@ bool MmapThread::threadLoop()
         unlockEffectChains(effectChains);
         // Effect chains will be actually deleted here if they were removed from
         // mEffectChains list during mixing or effects processing
+        mThreadloopExecutor.process();
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     threadLoop_exit();
 

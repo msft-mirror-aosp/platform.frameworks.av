@@ -28,23 +28,33 @@
 
 void OnAudioDeviceUpdateNotifier::onAudioDeviceUpdate(audio_io_handle_t audioIo,
                                                       audio_port_handle_t deviceId) {
-    std::unique_lock<std::mutex> lock{mMutex};
     ALOGI("%s: audioIo=%d deviceId=%d", __func__, audioIo, deviceId);
-    mAudioIo = audioIo;
-    mDeviceId = deviceId;
+    {
+        std::lock_guard lock(mMutex);
+        mAudioIo = audioIo;
+        mDeviceId = deviceId;
+    }
     mCondition.notify_all();
 }
 
 status_t OnAudioDeviceUpdateNotifier::waitForAudioDeviceCb(audio_port_handle_t expDeviceId) {
-    std::unique_lock<std::mutex> lock{mMutex};
+    std::unique_lock lock(mMutex);
+    android::base::ScopedLockAssertion lock_assertion(mMutex);
     if (mAudioIo == AUDIO_IO_HANDLE_NONE ||
         (expDeviceId != AUDIO_PORT_HANDLE_NONE && expDeviceId != mDeviceId)) {
         mCondition.wait_for(lock, std::chrono::milliseconds(500));
         if (mAudioIo == AUDIO_IO_HANDLE_NONE ||
-            (expDeviceId != AUDIO_PORT_HANDLE_NONE && expDeviceId != mDeviceId))
+            (expDeviceId != AUDIO_PORT_HANDLE_NONE && expDeviceId != mDeviceId)) {
             return TIMED_OUT;
+        }
     }
     return OK;
+}
+
+std::pair<audio_io_handle_t, audio_port_handle_t>
+OnAudioDeviceUpdateNotifier::getLastPortAndDevice() const {
+    std::lock_guard lock(mMutex);
+    return {mAudioIo, mDeviceId};
 }
 
 AudioPlayback::AudioPlayback(uint32_t sampleRate, audio_format_t format,
@@ -147,9 +157,8 @@ status_t AudioPlayback::start() {
 }
 
 void AudioPlayback::onBufferEnd() {
-    std::unique_lock<std::mutex> lock{mMutex};
+    std::lock_guard lock(mMutex);
     mStopPlaying = true;
-    mCondition.notify_all();
 }
 
 status_t AudioPlayback::fillBuffer() {
@@ -187,7 +196,12 @@ status_t AudioPlayback::waitForConsumption(bool testSeek) {
     const int maxTries = MAX_WAIT_TIME_MS / WAIT_PERIOD_MS;
     int counter = 0;
     size_t totalFrameCount = mMemCapacity / mTrack->frameSize();
-    while (!mStopPlaying && counter < maxTries) {
+    bool stopPlaying;
+    {
+        std::lock_guard lock(mMutex);
+        stopPlaying = mStopPlaying;
+    }
+    while (!stopPlaying && counter < maxTries) {
         uint32_t currPosition;
         mTrack->getPosition(&currPosition);
         if (currPosition >= totalFrameCount) counter++;
@@ -213,7 +227,10 @@ status_t AudioPlayback::waitForConsumption(bool testSeek) {
             mTrack->start();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_PERIOD_MS));
+        std::lock_guard lock(mMutex);
+        stopPlaying = mStopPlaying;
     }
+    std::lock_guard lock(mMutex);
     if (!mStopPlaying && counter == maxTries) return TIMED_OUT;
     return OK;
 }
@@ -228,8 +245,10 @@ status_t AudioPlayback::onProcess(bool testSeek) {
 }
 
 void AudioPlayback::stop() {
-    std::unique_lock<std::mutex> lock{mMutex};
-    mStopPlaying = true;
+    {
+        std::lock_guard lock(mMutex);
+        mStopPlaying = true;
+    }
     if (mState != PLAY_STOPPED && mState != PLAY_NO_INIT) {
         int32_t msec = 0;
         (void)mTrack->pendingDuration(&msec);
@@ -257,10 +276,13 @@ size_t AudioCapture::onMoreData(const AudioRecord::Buffer& buffer) {
         return 0;
     }
 
-    // no more frames to read
-    if (mNumFramesReceived >= mNumFramesToRecord || mStopRecording) {
-        mStopRecording = true;
-        return 0;
+    {
+        std::lock_guard l(mMutex);
+        // no more frames to read
+        if (mNumFramesReceived >= mNumFramesToRecord || mStopRecording) {
+            mStopRecording = true;
+            return 0;
+        }
     }
 
     int64_t timeUs = 0, position = 0, timeNs = 0;
@@ -324,9 +346,12 @@ size_t AudioCapture::onMoreData(const AudioRecord::Buffer& buffer) {
     }
 
     if (tmpQueue.size() > 0) {
-        std::unique_lock<std::mutex> lock{mMutex};
-        for (auto it = tmpQueue.begin(); it != tmpQueue.end(); it++)
-            mBuffersReceived.push_back(std::move(*it));
+        {
+            std::lock_guard lock(mMutex);
+            mBuffersReceived.insert(mBuffersReceived.end(),
+                                    std::make_move_iterator(tmpQueue.begin()),
+                                    std::make_move_iterator(tmpQueue.end()));
+        }
         mCondition.notify_all();
     }
     return buffer.size();
@@ -484,7 +509,10 @@ status_t AudioCapture::start(AudioSystem::sync_event_t event, audio_session_t tr
 
 status_t AudioCapture::stop() {
     status_t status = OK;
-    mStopRecording = true;
+    {
+        std::lock_guard l(mMutex);
+        mStopRecording = true;
+    }
     if (mState != REC_STOPPED && mState != REC_NO_INIT) {
         if (mInputSource != AUDIO_SOURCE_DEFAULT) {
             bool state = false;
@@ -530,7 +558,8 @@ status_t AudioCapture::obtainBufferCb(RawBuffer& buffer) {
     if (REC_STARTED != mState) return INVALID_OPERATION;
     const int maxTries = MAX_WAIT_TIME_MS / WAIT_PERIOD_MS;
     int counter = 0;
-    std::unique_lock<std::mutex> lock{mMutex};
+    std::unique_lock lock(mMutex);
+    android::base::ScopedLockAssertion lock_assertion(mMutex);
     while (mBuffersReceived.empty() && !mStopRecording && counter < maxTries) {
         mCondition.wait_for(lock, std::chrono::milliseconds(WAIT_PERIOD_MS));
         counter++;
