@@ -86,8 +86,8 @@ StreamHalAidl::StreamHalAidl(
           mStream(stream),
           mVendorExt(vext),
           mLastReplyLifeTimeNs(
-                  std::min(static_cast<size_t>(100),
-                          2 * mContext.getBufferDurationMs(mConfig.sample_rate))
+                  std::min(static_cast<size_t>(20),
+                           mContext.getBufferDurationMs(mConfig.sample_rate))
                   * NANOS_PER_MILLISECOND)
 {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
@@ -449,6 +449,11 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
                    state == StreamDescriptor::State::TRANSFER_PAUSED ||
                    state == StreamDescriptor::State::DRAIN_PAUSED) {
             return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
+        } else if (state == StreamDescriptor::State::ACTIVE ||
+                   state == StreamDescriptor::State::TRANSFERRING ||
+                   state == StreamDescriptor::State::DRAINING) {
+            ALOGD("%s: already in stream state: %s", __func__, toString(state).c_str());
+            return OK;
         } else {
             ALOGE("%s: unexpected stream state: %s (expected IDLE or one of *PAUSED states)",
                         __func__, toString(state).c_str());
