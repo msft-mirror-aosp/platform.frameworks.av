@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <android/content/AttributionSourceState.h>
 #include <android/hardware/BnCameraServiceListener.h>
 #include <android/hardware/BnCameraServiceProxy.h>
 #include <android/hardware/camera2/BnCameraDeviceCallbacks.h>
@@ -223,6 +224,10 @@ uid_t CameraPermissionsTest::sOldUid = 0;
 // Test that camera connections fail with ERROR_DISABLED when the camera is disabled via device
 // policy, and succeed when it isn't.
 TEST_F(CameraPermissionsTest, TestCameraDisabled) {
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    clientAttribution.uid = android::CameraService::USE_CALLING_UID;
+
     std::vector<hardware::CameraStatus> statuses;
     sp<TestCameraServiceListener> serviceListener = new TestCameraServiceListener();
     sCameraService->addListenerTest(serviceListener, &statuses);
@@ -234,10 +239,9 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
         sp<hardware::camera2::ICameraDeviceUser> device;
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                kDefaultDeviceId, /*devicePolicy*/0, &device);
+                clientAttribution, /*devicePolicy*/0, &device);
         AutoDisconnectDevice autoDisconnect(device);
         ASSERT_TRUE(!status.isOk()) << "connectDevice returned OK status";
         ASSERT_EQ(status.serviceSpecificErrorCode(), hardware::ICameraService::ERROR_DISABLED)
@@ -250,10 +254,9 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
         sp<hardware::camera2::ICameraDeviceUser> device;
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                kDefaultDeviceId, /*devicePolicy*/0, &device);
+                clientAttribution, /*devicePolicy*/0, &device);
         AutoDisconnectDevice autoDisconnect(device);
         ASSERT_TRUE(status.isOk());
     }
@@ -261,6 +264,10 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
 
 // Test that consecutive camera connections succeed.
 TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    clientAttribution.uid = android::CameraService::USE_CALLING_UID;
+
     std::vector<hardware::CameraStatus> statuses;
     sp<TestCameraServiceListener> serviceListener = new TestCameraServiceListener();
     sCameraService->addListenerTest(serviceListener, &statuses);
@@ -271,19 +278,17 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
         sp<hardware::camera2::ICameraDeviceUser> deviceA, deviceB;
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                kDefaultDeviceId, /*devicePolicy*/0, &deviceA);
+                clientAttribution, /*devicePolicy*/0, &deviceA);
         AutoDisconnectDevice autoDisconnectA(deviceA);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
         status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                kDefaultDeviceId, /*devicePolicy*/0, &deviceB);
+                clientAttribution, /*devicePolicy*/0, &deviceB);
         AutoDisconnectDevice autoDisconnectB(deviceB);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
@@ -293,6 +298,10 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
 // Test that consecutive camera connections succeed even when a nonzero oomScoreOffset is provided
 // in the second call.
 TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    clientAttribution.uid = android::CameraService::USE_CALLING_UID;
+
     std::vector<hardware::CameraStatus> statuses;
     sp<TestCameraServiceListener> serviceListener = new TestCameraServiceListener();
     sCameraService->addListenerTest(serviceListener, &statuses);
@@ -303,19 +312,17 @@ TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
         sp<hardware::camera2::ICameraDeviceUser> deviceA, deviceB;
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                kDefaultDeviceId, /*devicePolicy*/0, &deviceA);
+                clientAttribution, /*devicePolicy*/0, &deviceA);
         AutoDisconnectDevice autoDisconnectA(deviceA);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
         status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 1/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                1/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                kDefaultDeviceId, /*devicePolicy*/0, &deviceB);
+                clientAttribution, /*devicePolicy*/0, &deviceB);
         AutoDisconnectDevice autoDisconnectB(deviceB);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();

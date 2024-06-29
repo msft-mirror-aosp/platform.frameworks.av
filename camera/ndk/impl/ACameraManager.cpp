@@ -810,9 +810,15 @@ camera_status_t ACameraManager::getCameraCharacteristics(
 
     CameraMetadata rawMetadata;
     int targetSdkVersion = android_get_application_target_sdk_version();
+
+    AttributionSourceState clientAttribution;
+    clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
+    clientAttribution.pid = hardware::ICameraService::USE_CALLING_PID;
+    clientAttribution.deviceId = mDeviceContext.deviceId;
+
     binder::Status serviceRet = cs->getCameraCharacteristics(cameraIdStr,
             targetSdkVersion, /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-            mDeviceContext.deviceId, static_cast<int32_t>(mDeviceContext.policy),
+            clientAttribution, static_cast<int32_t>(mDeviceContext.policy),
             &rawMetadata);
     if (!serviceRet.isOk()) {
         switch(serviceRet.serviceSpecificErrorCode()) {
@@ -860,13 +866,18 @@ ACameraManager::openCamera(
     sp<hardware::camera2::ICameraDeviceCallbacks> callbacks = device->getServiceCallback();
     sp<hardware::camera2::ICameraDeviceUser> deviceRemote;
     int targetSdkVersion = android_get_application_target_sdk_version();
+
+    AttributionSourceState clientAttribution;
+    clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
+    clientAttribution.pid = hardware::ICameraService::USE_CALLING_PID;
+    clientAttribution.deviceId = mDeviceContext.deviceId;
+
     // No way to get package name from native.
     // Send a zero length package name and let camera service figure it out from UID
     binder::Status serviceRet = cs->connectDevice(
-            callbacks, cameraId, "", {},
-            hardware::ICameraService::USE_CALLING_UID, /*oomScoreOffset*/0,
+            callbacks, cameraId, "", {}, /*oomScoreOffset*/0,
             targetSdkVersion, /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-            mDeviceContext.deviceId, static_cast<int32_t>(mDeviceContext.policy),
+            clientAttribution, static_cast<int32_t>(mDeviceContext.policy),
             /*out*/&deviceRemote);
 
     if (!serviceRet.isOk()) {
