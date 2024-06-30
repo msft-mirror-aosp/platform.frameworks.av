@@ -364,7 +364,6 @@ cc_library {
         "av-types-aidl-cpp",
         "liblog",
         "libcutils",
-        "libprocessgroup",
         "libutils",
         "libbinder",
         "libbinder_ndk",
