@@ -40,6 +40,7 @@
 #include "common/CameraDeviceBase.h"
 #include "utils/ExifUtils.h"
 #include "utils/SessionConfigurationUtils.h"
+#include "utils/Utils.h"
 #include "HeicEncoderInfoManager.h"
 #include "HeicCompositeStream.h"
 
@@ -1464,7 +1465,7 @@ size_t HeicCompositeStream::findAppSegmentsSize(const uint8_t* appSegmentBuffer,
     const uint8_t *header = appSegmentBuffer + (maxSize - sizeof(CameraBlob));
     const CameraBlob *blob = (const CameraBlob*)(header);
     if (blob->blobId != CameraBlobId::JPEG_APP_SEGMENTS) {
-        ALOGE("%s: Invalid EXIF blobId %d", __FUNCTION__, blob->blobId);
+        ALOGE("%s: Invalid EXIF blobId %d", __FUNCTION__, eToI(blob->blobId));
         return 0;
     }
 

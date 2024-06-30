@@ -51,6 +51,7 @@
 
 #include "api2/HeicCompositeStream.h"
 #include "device3/ZoomRatioMapper.h"
+#include "utils/Utils.h"
 
 namespace android {
 
@@ -92,7 +93,7 @@ const char* FrameworkTorchStatusToString(const TorchModeStatus& s) {
         case TorchModeStatus::AVAILABLE_ON:
             return "AVAILABLE_ON";
     }
-    ALOGW("Unexpected HAL torch mode status code %d", s);
+    ALOGW("Unexpected HAL torch mode status code %d", eToI(s));
     return "UNKNOWN_STATUS";
 }
 
@@ -105,7 +106,7 @@ const char* FrameworkDeviceStatusToString(const CameraDeviceStatus& s) {
         case CameraDeviceStatus::ENUMERATING:
             return "ENUMERATING";
     }
-    ALOGW("Unexpected HAL device status code %d", s);
+    ALOGW("Unexpected HAL device status code %d", eToI(s));
     return "UNKNOWN_STATUS";
 }
 
@@ -2279,7 +2280,7 @@ status_t CameraProviderManager::removeProvider(const std::string& provider) {
                         return tryToInitializeAidlProviderLocked(removedAidlProviderName,
                                 providerInfo);
                     default:
-                        ALOGE("%s Unsupported Transport %d", __FUNCTION__, providerTransport);
+                        ALOGE("%s Unsupported Transport %d", __FUNCTION__, eToI(providerTransport));
                 }
             }
         }
@@ -2366,7 +2367,7 @@ status_t CameraProviderManager::ProviderInfo::addDevice(
             }
             break;
         default:
-            ALOGE("%s Invalid transport %d", __FUNCTION__, transport);
+            ALOGE("%s Invalid transport %d", __FUNCTION__, eToI(transport));
             return BAD_VALUE;
     }
 
@@ -2712,7 +2713,7 @@ void CameraProviderManager::ProviderInfo::torchModeStatusChangeInternal(
         }
         if (!known) {
             ALOGW("Camera provider %s says an unknown camera %s now has torch status %d. Curious.",
-                    mProviderName.c_str(), cameraDeviceName.c_str(), newStatus);
+                mProviderName.c_str(), cameraDeviceName.c_str(), eToI(newStatus));
             return;
         }
         // no lock needed since listener is set up only once during
