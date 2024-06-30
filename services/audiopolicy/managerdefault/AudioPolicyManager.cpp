@@ -3125,43 +3125,115 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
         }
     }
 
+    bool isPreemptor = false;
     if (!profile->canOpenNewIo()) {
-        for (size_t i = 0; i < mInputs.size(); ) {
-            sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
-            if (desc->mProfile != profile) {
-                i++;
-                continue;
-            }
-            // if sound trigger, reuse input if used by other sound trigger on same session
-            // else
-            //    reuse input if active client app is not in IDLE state
-            //
-            RecordClientVector clients = desc->clientsList();
-            bool doClose = false;
-            for (const auto& client : clients) {
-                if (isSoundTrigger != client->isSoundTrigger()) {
+        if (com::android::media::audioserver::fix_input_sharing_logic()) {
+            //  First pick best candidate for preemption (there may not be any):
+            //  - Preempt and input if:
+            //     - It has only strictly lower priority use cases than the new client
+            //     - It has equal priority use cases than the new client, was not
+            //     opened thanks to preemption or has been active since opened.
+            //  - Order the preemption candidates by inactive first and priority second
+            sp<AudioInputDescriptor> closeCandidate;
+            int leastCloseRank = INT_MAX;
+            static const int sCloseActive = 0x100;
+
+            for (size_t i = 0; i < mInputs.size(); i++) {
+                sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
+                if (desc->mProfile != profile) {
                     continue;
                 }
-                if (client->isSoundTrigger()) {
-                    if (session == client->session()) {
+                sp<RecordClientDescriptor> topPrioClient = desc->getHighestPriorityClient();
+                if (topPrioClient == nullptr) {
+                    continue;
+                }
+                int topPrio = source_priority(topPrioClient->source());
+                if (topPrio < source_priority(attributes.source)
+                      || (topPrio == source_priority(attributes.source)
+                          && !desc->isPreemptor())) {
+                    int closeRank = (desc->isActive() ? sCloseActive : 0) + topPrio;
+                    if (closeRank < leastCloseRank) {
+                        leastCloseRank = closeRank;
+                        closeCandidate = desc;
+                    }
+                }
+            }
+
+            if (closeCandidate != nullptr) {
+                closeInput(closeCandidate->mIoHandle);
+                // Mark the new input as being issued from a preemption
+                // so that is will not be preempted later
+                isPreemptor = true;
+            } else {
+                // Then pick the best reusable input (There is always one)
+                // The order of preference is:
+                // 1) active inputs with same use case as the new client
+                // 2) inactive inputs with same use case
+                // 3) active inputs with different use cases
+                // 4) inactive inputs with different use cases
+                sp<AudioInputDescriptor> reuseCandidate;
+                int leastReuseRank = INT_MAX;
+                static const int sReuseDifferentUseCase = 0x100;
+
+                for (size_t i = 0; i < mInputs.size(); i++) {
+                    sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
+                    if (desc->mProfile != profile) {
+                        continue;
+                    }
+                    int reuseRank = sReuseDifferentUseCase;
+                    for (const auto& client: desc->getClientIterable()) {
+                        if (client->source() == attributes.source) {
+                            reuseRank = 0;
+                            break;
+                        }
+                    }
+                    reuseRank += desc->isActive() ? 0 : 1;
+                    if (reuseRank < leastReuseRank) {
+                        leastReuseRank = reuseRank;
+                        reuseCandidate = desc;
+                    }
+                }
+                return reuseCandidate->mIoHandle;
+            }
+        } else { // fix_input_sharing_logic()
+            for (size_t i = 0; i < mInputs.size(); ) {
+                 sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
+                 if (desc->mProfile != profile) {
+                     i++;
+                     continue;
+                 }
+                // if sound trigger, reuse input if used by other sound trigger on same session
+                // else
+                //    reuse input if active client app is not in IDLE state
+                //
+                RecordClientVector clients = desc->clientsList();
+                bool doClose = false;
+                for (const auto& client : clients) {
+                    if (isSoundTrigger != client->isSoundTrigger()) {
+                        continue;
+                    }
+                    if (client->isSoundTrigger()) {
+                        if (session == client->session()) {
+                            return desc->mIoHandle;
+                        }
+                        continue;
+                    }
+                    if (client->active() && client->appState() != APP_STATE_IDLE) {
                         return desc->mIoHandle;
                     }
-                    continue;
+                    doClose = true;
                 }
-                if (client->active() && client->appState() != APP_STATE_IDLE) {
-                    return desc->mIoHandle;
+                if (doClose) {
+                    closeInput(desc->mIoHandle);
+                } else {
+                    i++;
                 }
-                doClose = true;
-            }
-            if (doClose) {
-                closeInput(desc->mIoHandle);
-            } else {
-                i++;
             }
         }
     }
 
-    sp<AudioInputDescriptor> inputDesc = new AudioInputDescriptor(profile, mpClientInterface);
+    sp<AudioInputDescriptor> inputDesc = new AudioInputDescriptor(
+            profile, mpClientInterface, isPreemptor);
 
     audio_config_t lConfig = AUDIO_CONFIG_INITIALIZER;
     lConfig.sample_rate = profileSamplingRate;
@@ -3627,7 +3699,9 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
         if (isVolumeConsistentForCalls(vs, {mCallRxSourceClient->sinkDevice()->type()},
                 isVoiceVolSrc, isBtScoVolSrc, __func__)
                 && (isVoiceVolSrc || isBtScoVolSrc)) {
-            setVoiceVolume(index, curves, isVoiceVolSrc, 0);
+            bool voiceVolumeManagedByHost = isVoiceVolSrc &&
+                    !audio_is_ble_out_device(mCallRxSourceClient->sinkDevice()->type());
+            setVoiceVolume(index, curves, voiceVolumeManagedByHost, 0);
         }
     }
 
@@ -5942,7 +6016,8 @@ status_t AudioPolicyManager::getMasterMono(bool *mono)
 float AudioPolicyManager::getStreamVolumeDB(
         audio_stream_type_t stream, int index, audio_devices_t device)
 {
-    return computeVolume(getVolumeCurves(stream), toVolumeSource(stream), index, {device});
+    return computeVolume(getVolumeCurves(stream), toVolumeSource(stream), index,
+                         {device}, /* adjustAttenuation= */false);
 }
 
 status_t AudioPolicyManager::getSurroundFormats(unsigned int *numSurroundFormats,
@@ -6672,8 +6747,8 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
                     __func__, inProfile->getTagName().c_str());
                 continue;
             }
-            sp<AudioInputDescriptor> inputDesc =
-                    new AudioInputDescriptor(inProfile, mpClientInterface);
+            sp<AudioInputDescriptor> inputDesc = new AudioInputDescriptor(
+                    inProfile, mpClientInterface, false /*isPreemptor*/);
 
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
             status_t status = inputDesc->open(nullptr,
@@ -6983,7 +7058,7 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
                 continue;
             }
 
-            desc = new AudioInputDescriptor(profile, mpClientInterface);
+            desc = new AudioInputDescriptor(profile, mpClientInterface, false  /*isPreemptor*/);
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
             status = desc->open(nullptr, device, AUDIO_SOURCE_MIC, AUDIO_INPUT_FLAG_NONE, &input);
 
@@ -8120,9 +8195,15 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
                                         VolumeSource volumeSource,
                                         int index,
                                         const DeviceTypeSet& deviceTypes,
+                                        bool adjustAttenuation,
                                         bool computeInternalInteraction)
 {
-    float volumeDb = adjustDeviceAttenuationForAbsVolume(curves, volumeSource, index, deviceTypes);
+    float volumeDb;
+    if (adjustAttenuation) {
+        volumeDb = adjustDeviceAttenuationForAbsVolume(curves, volumeSource, index, deviceTypes);
+    } else {
+        volumeDb = curves.volIndexToDb(Volume::getDeviceCategory(deviceTypes), index);
+    }
     ALOGV("%s volume source %d, index %d,  devices %s, compute internal %b ", __func__,
           volumeSource, index, dumpDeviceTypes(deviceTypes).c_str(), computeInternalInteraction);
 
@@ -8143,7 +8224,8 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
             mOutputs.isActive(ringVolumeSrc, 0)) {
         auto &ringCurves = getVolumeCurves(AUDIO_STREAM_RING);
         const float ringVolumeDb = computeVolume(ringCurves, ringVolumeSrc, index, deviceTypes,
-                /* computeInternalInteraction= */ false);
+                                                 adjustAttenuation,
+                                                 /* computeInternalInteraction= */false);
         return ringVolumeDb - 4 > volumeDb ? ringVolumeDb - 4 : volumeDb;
     }
 
@@ -8161,7 +8243,7 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
         int voiceVolumeIndex = voiceCurves.getVolumeIndex(deviceTypes);
         const float maxVoiceVolDb =
                 computeVolume(voiceCurves, callVolumeSrc, voiceVolumeIndex, deviceTypes,
-                              /* computeInternalInteraction= */ false)
+                        adjustAttenuation, /* computeInternalInteraction= */false)
                 + IN_CALL_EARPIECE_HEADROOM_DB;
         // FIXME: Workaround for call screening applications until a proper audio mode is defined
         // to support this scenario : Exempt the RING stream from the audio cap if the audio was
@@ -8214,7 +8296,8 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
                                              musicVolumeSrc,
                                              musicCurves.getVolumeIndex(musicDevice),
                                              musicDevice,
-                                             /* computeInternalInteraction= */ false);
+                                              adjustAttenuation,
+                                              /* computeInternalInteraction= */ false);
             float minVolDb = (musicVolDb > SONIFICATION_HEADSET_VOLUME_MIN_DB) ?
                         musicVolDb : SONIFICATION_HEADSET_VOLUME_MIN_DB;
             if (volumeDb > minVolDb) {
@@ -8308,9 +8391,10 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
 
     float volumeDb = computeVolume(curves, volumeSource, index, deviceTypes);
     if (outputDesc->isFixedVolume(deviceTypes) ||
-            // Force VoIP volume to max for bluetooth SCO device except if muted
+            // Force VoIP volume to max for bluetooth SCO/BLE device except if muted
             (index != 0 && (isVoiceVolSrc || isBtScoVolSrc) &&
-                    isSingleDeviceType(deviceTypes, audio_is_bluetooth_out_sco_device))) {
+                    (isSingleDeviceType(deviceTypes, audio_is_bluetooth_out_sco_device)
+                    || isSingleDeviceType(deviceTypes, audio_is_ble_out_device)))) {
         volumeDb = 0.0f;
     }
     const bool muted = (index == 0) && (volumeDb != 0.0f);
@@ -8318,17 +8402,19 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
             deviceTypes, delayMs, force, isVoiceVolSrc);
 
     if (outputDesc == mPrimaryOutput && (isVoiceVolSrc || isBtScoVolSrc)) {
-        setVoiceVolume(index, curves, isVoiceVolSrc, delayMs);
+        bool voiceVolumeManagedByHost = isVoiceVolSrc &&
+                !isSingleDeviceType(deviceTypes, audio_is_ble_out_device);
+        setVoiceVolume(index, curves, voiceVolumeManagedByHost, delayMs);
     }
     return NO_ERROR;
 }
 
 void AudioPolicyManager::setVoiceVolume(
-        int index, IVolumeCurves &curves, bool isVoiceVolSrc, int delayMs) {
+        int index, IVolumeCurves &curves, bool voiceVolumeManagedByHost, int delayMs) {
     float voiceVolume;
-    // Force voice volume to max or mute for Bluetooth SCO as other attenuations are managed
+    // Force voice volume to max or mute for Bluetooth SCO/BLE as other attenuations are managed
     // by the headset
-    if (isVoiceVolSrc) {
+    if (voiceVolumeManagedByHost) {
         voiceVolume = (float)index/(float)curves.getVolumeIndexMax();
     } else {
         voiceVolume = index == 0 ? 0.0 : 1.0;

@@ -26,6 +26,7 @@
 #include "device3/ZoomRatioMapper.h"
 #include <utils/SessionConfigurationUtilsHidl.h>
 #include <utils/Trace.h>
+#include <utils/Utils.h>
 
 #include <android/hardware/camera/device/3.7/ICameraDevice.h>
 
@@ -69,7 +70,7 @@ status_t HidlProviderInfo::mapToStatusT(const Status& s)  {
         case Status::INTERNAL_ERROR:
             return INVALID_OPERATION;
     }
-    ALOGW("Unexpected HAL status code %d", s);
+    ALOGW("Unexpected HAL status code %d", eToI(s));
     return INVALID_OPERATION;
 }
 
@@ -111,7 +112,7 @@ const char* statusToString(const Status& s) {
         case Status::INTERNAL_ERROR:
             return "INTERNAL_ERROR";
     }
-    ALOGW("Unexpected HAL status code %d", s);
+    ALOGW("Unexpected HAL status code %d", eToI(s));
     return "UNKNOWN_ERROR";
 }
 
@@ -591,7 +592,7 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
     }
     if (status != Status::OK) {
         ALOGE("%s: Unable to get camera characteristics for device %s: %s (%d)",
-                __FUNCTION__, id.c_str(), statusToString(status), status);
+                __FUNCTION__, id.c_str(), statusToString(status), eToI(status));
         return;
     }
 
@@ -770,7 +771,7 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
             if (status != Status::OK) {
                 ALOGE("%s: Unable to get physical camera %s characteristics for device %s: %s (%d)",
                         __FUNCTION__, id.c_str(), mId.c_str(),
-                        statusToString(status), status);
+                        statusToString(status), eToI(status));
                 return;
             }
 
@@ -928,7 +929,7 @@ status_t HidlProviderInfo::HidlDeviceInfo3::isSessionConfigurationSupported(
                 res = INVALID_OPERATION;
                 break;
             default:
-                ALOGE("%s: Session configuration query failed: %d", __FUNCTION__, callStatus);
+                ALOGE("%s: Session configuration query failed: %d", __FUNCTION__, eToI(callStatus));
                 res = UNKNOWN_ERROR;
         }
     } else {
@@ -1076,7 +1077,7 @@ status_t HidlProviderInfo::isConcurrentSessionConfigurationSupported(
                         break;
                     default:
                         ALOGE("%s: Session configuration query failed: %d", __FUNCTION__,
-                                  callStatus);
+                                eToI(callStatus));
                         res = UNKNOWN_ERROR;
                 }
             } else {
