@@ -33,6 +33,7 @@
 #include <hardware/gralloc.h>
 
 #include <camera/CameraMetadata.h>
+#include <android/content/AttributionSourceState.h>
 #include <android/hardware/ICameraService.h>
 #include <android/hardware/ICameraServiceListener.h>
 #include <android/hardware/BnCameraServiceListener.h>
@@ -347,7 +348,10 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
     binder::Status res;
 
     int32_t numCameras = 0;
-    res = service->getNumberOfCameras(hardware::ICameraService::CAMERA_TYPE_ALL, kDefaultDeviceId,
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
+    res = service->getNumberOfCameras(hardware::ICameraService::CAMERA_TYPE_ALL, clientAttribution,
             /*devicePolicy*/0, &numCameras);
     EXPECT_TRUE(res.isOk()) << res;
     EXPECT_LE(0, numCameras);
@@ -360,7 +364,7 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
 
     EXPECT_EQ(numCameras, static_cast<const int>(statuses.size()));
     for (const auto &it : statuses) {
-        listener->onStatusChanged(it.status, it.cameraId, kDefaultDeviceId);
+        listener->onStatusChanged(it.status, it.cameraId, clientAttribution.deviceId);
     }
 
     for (int32_t i = 0; i < numCameras; i++) {
@@ -379,7 +383,7 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         CameraMetadata metadata;
         res = service->getCameraCharacteristics(cameraId,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
-                kDefaultDeviceId, /*devicePolicy*/0, &metadata);
+                clientAttribution, /*devicePolicy*/0, &metadata);
         EXPECT_TRUE(res.isOk()) << res;
         EXPECT_FALSE(metadata.isEmpty());
 
@@ -394,9 +398,9 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         sp<TestCameraDeviceCallbacks> callbacks(new TestCameraDeviceCallbacks());
         sp<hardware::camera2::ICameraDeviceUser> device;
         res = service->connectDevice(callbacks, cameraId, "meeeeeeeee!",
-                {}, hardware::ICameraService::USE_CALLING_UID, /*oomScoreOffset*/ 0,
+                {}, /*oomScoreOffset*/ 0,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__,
-                /*overrideToPortrait*/false, kDefaultDeviceId, /*devicePolicy*/0, /*out*/&device);
+                /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0, /*out*/&device);
         EXPECT_TRUE(res.isOk()) << res;
         ASSERT_NE(nullptr, device.get());
         device->disconnect();
@@ -406,12 +410,12 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         if (torchStatus == hardware::ICameraServiceListener::TORCH_STATUS_AVAILABLE_OFF) {
             // Check torch calls
             res = service->setTorchMode(cameraId,
-                    /*enabled*/true, callbacks, kDefaultDeviceId, /*devicePolicy*/0);
+                    /*enabled*/true, callbacks, clientAttribution, /*devicePolicy*/0);
             EXPECT_TRUE(res.isOk()) << res;
             EXPECT_TRUE(listener->waitForTorchState(
                     hardware::ICameraServiceListener::TORCH_STATUS_AVAILABLE_ON, i));
             res = service->setTorchMode(cameraId,
-                    /*enabled*/false, callbacks, kDefaultDeviceId, /*devicePolicy*/0);
+                    /*enabled*/false, callbacks, clientAttribution, /*devicePolicy*/0);
             EXPECT_TRUE(res.isOk()) << res;
             EXPECT_TRUE(listener->waitForTorchState(
                     hardware::ICameraServiceListener::TORCH_STATUS_AVAILABLE_OFF, i));
@@ -437,10 +441,13 @@ protected:
         sp<hardware::camera2::ICameraDeviceUser> device;
         {
             SCOPED_TRACE("openNewDevice");
+            AttributionSourceState clientAttribution;
+            clientAttribution.deviceId = kDefaultDeviceId;
+            clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
             binder::Status res = service->connectDevice(callbacks, deviceId, "meeeeeeeee!",
-                    {}, hardware::ICameraService::USE_CALLING_UID, /*oomScoreOffset*/ 0,
+                    {}, /*oomScoreOffset*/ 0,
                     /*targetSdkVersion*/__ANDROID_API_FUTURE__,
-                    /*overrideToPortrait*/false, kDefaultDeviceId, /*devicePolicy*/0,
+                    /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0,
                     /*out*/&device);
             EXPECT_TRUE(res.isOk()) << res;
         }
@@ -473,11 +480,13 @@ protected:
         serviceListener = new TestCameraServiceListener();
         std::vector<hardware::CameraStatus> statuses;
         service->addListener(serviceListener, &statuses);
+        AttributionSourceState clientAttribution;
+        clientAttribution.deviceId = kDefaultDeviceId;
         for (const auto &it : statuses) {
-            serviceListener->onStatusChanged(it.status, it.cameraId, kDefaultDeviceId);
+            serviceListener->onStatusChanged(it.status, it.cameraId, clientAttribution.deviceId);
         }
         service->getNumberOfCameras(hardware::ICameraService::CAMERA_TYPE_BACKWARD_COMPATIBLE,
-                kDefaultDeviceId, /*devicePolicy*/0, &numCameras);
+                clientAttribution, /*devicePolicy*/0, &numCameras);
     }
 
     virtual void TearDown() {
