@@ -333,6 +333,9 @@ protected:
                                     // true for Track, false for RecordTrack,
                                     // this could be a track type if needed later
 
+    void deferRestartIfDisabled();
+    virtual void restartIfDisabled() {}
+
     const wp<IAfThreadBase> mThread;
     const alloc_type     mAllocType;
     /*const*/ sp<Client> mClient;   // see explanation at ~TrackBase() why not const
