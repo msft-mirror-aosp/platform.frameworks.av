@@ -35,6 +35,7 @@ cc_defaults {
         "libmedia_headers",
     ],
     shared_libs: [
+        "framework-permission-aidl-cpp",
         "libbinder",
         "libbase",
         "libutils",
@@ -85,7 +86,7 @@ cc_fuzz {
         "camera_service_fuzzer.cpp",
     ],
     defaults: [
-        "camera_service_fuzzer_defaults"
+        "camera_service_fuzzer_defaults",
     ],
 }
 
