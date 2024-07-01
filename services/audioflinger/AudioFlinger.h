@@ -62,6 +62,8 @@ class AudioFlinger
 public:
     static void instantiate() ANDROID_API;
 
+    status_t resetReferencesForTest();
+
 private:
 
     // ---- begin IAudioFlinger interface
@@ -404,6 +406,8 @@ private:
             EXCLUDES_AudioFlinger_ClientMutex;
     void onHardError(std::set<audio_port_handle_t>& trackPortIds) final
             EXCLUDES_AudioFlinger_ClientMutex;
+
+    const ::com::android::media::permission::IPermissionProvider& getPermissionProvider() final;
 
     // ---- end of IAfThreadCallback interface
 
