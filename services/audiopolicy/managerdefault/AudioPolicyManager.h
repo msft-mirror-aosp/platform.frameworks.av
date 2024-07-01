@@ -707,7 +707,7 @@ protected:
         void updateCallAndOutputRouting(bool forceVolumeReeval = true, uint32_t delayMs = 0,
                 bool skipDelays = false);
 
-        void connectTelephonyRxAudioSource();
+        void connectTelephonyRxAudioSource(uint32_t delayMs);
 
         void disconnectTelephonyAudioSource(sp<SourceClientDescriptor> &clientDesc);
 
@@ -932,7 +932,8 @@ protected:
 
         status_t hasPrimaryOutput() const { return mPrimaryOutput != 0; }
 
-        status_t connectAudioSource(const sp<SourceClientDescriptor>& sourceDesc);
+        status_t connectAudioSource(const sp<SourceClientDescriptor>& sourceDesc,
+                                    uint32_t delayMs);
         status_t disconnectAudioSource(const sp<SourceClientDescriptor>& sourceDesc);
 
         status_t connectAudioSourceToSink(const sp<SourceClientDescriptor>& sourceDesc,
@@ -975,7 +976,8 @@ protected:
                                           audio_port_handle_t *portId,
                                           uid_t uid,
                                           bool internal,
-                                          bool isCallRx);
+                                          bool isCallRx,
+                                          uint32_t delayMs);
         const uid_t mUidCached;                         // AID_AUDIOSERVER
         sp<const AudioPolicyConfig> mConfig;
         EngineInstance mEngine;                         // Audio Policy Engine instance
