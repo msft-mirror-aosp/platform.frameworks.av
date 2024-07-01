@@ -120,10 +120,12 @@ TEST_F(AudioRecordTest, TestAudioCbNotifier) {
     EXPECT_EQ(OK, mAC->getAudioRecordHandle()->addAudioDeviceCallback(cb));
     EXPECT_EQ(OK, mAC->start()) << "record creation failed";
     EXPECT_EQ(OK, cb->waitForAudioDeviceCb());
-    EXPECT_EQ(AUDIO_IO_HANDLE_NONE, cbOld->mAudioIo);
-    EXPECT_EQ(AUDIO_PORT_HANDLE_NONE, cbOld->mDeviceId);
-    EXPECT_NE(AUDIO_IO_HANDLE_NONE, cb->mAudioIo);
-    EXPECT_NE(AUDIO_PORT_HANDLE_NONE, cb->mDeviceId);
+    const auto [oldAudioIo, oldDeviceId] = cbOld->getLastPortAndDevice();
+    EXPECT_EQ(AUDIO_IO_HANDLE_NONE, oldAudioIo);
+    EXPECT_EQ(AUDIO_PORT_HANDLE_NONE, oldDeviceId);
+    const auto [audioIo, deviceId] = cb->getLastPortAndDevice();
+    EXPECT_NE(AUDIO_IO_HANDLE_NONE, audioIo);
+    EXPECT_NE(AUDIO_PORT_HANDLE_NONE, deviceId);
     EXPECT_EQ(BAD_VALUE, mAC->getAudioRecordHandle()->removeAudioDeviceCallback(nullptr));
     EXPECT_EQ(INVALID_OPERATION, mAC->getAudioRecordHandle()->removeAudioDeviceCallback(cbOld));
     EXPECT_EQ(OK, mAC->getAudioRecordHandle()->removeAudioDeviceCallback(cb));
@@ -174,6 +176,7 @@ TEST_F(AudioRecordTest, TestGetSetMarker) {
             << "getMarkerPosition() failed";
     EXPECT_EQ(OK, mAC->start()) << "start recording failed";
     EXPECT_EQ(OK, mAC->audioProcess()) << "audioProcess failed";
+    // TODO(b/348658586): Properly synchronize callback updates with the test thread.
     EXPECT_EQ(marker, mAC->mMarkerPosition)
             << "configured marker and received marker are different";
     EXPECT_EQ(mAC->mReceivedCbMarkerAtPosition, mAC->mMarkerPosition)
@@ -189,6 +192,7 @@ TEST_F(AudioRecordTest, TestGetSetMarkerPeriodical) {
             << "getPositionUpdatePeriod() failed";
     EXPECT_EQ(OK, mAC->start()) << "start recording failed";
     EXPECT_EQ(OK, mAC->audioProcess()) << "audioProcess failed";
+    // TODO(b/348658586): Properly synchronize callback updates with the test thread.
     EXPECT_EQ(marker, mAC->mMarkerPeriod) << "configured marker and received marker are different";
     EXPECT_EQ(mAC->mReceivedCbMarkerCount, mAC->mNumFramesToRecord / mAC->mMarkerPeriod)
             << "configured marker and received cb marker are different";

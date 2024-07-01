@@ -314,6 +314,17 @@ status_t TrackBase::setSyncEvent(
     return NO_ERROR;
 }
 
+void TrackBase::deferRestartIfDisabled()
+{
+    const auto thread = mThread.promote();
+    if (thread == nullptr) return;
+    thread->getThreadloopExecutor().defer(
+            [track = wp<TrackBase>::fromExisting(this)] {
+            const auto actual = track.promote();
+            if (actual) actual->restartIfDisabled();
+        });
+}
+
 PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,
         IAfThreadBase* thread, const Timeout& timeout)
     : mProxy(proxy)
@@ -2310,7 +2321,7 @@ ssize_t OutputTrack::write(void* data, uint32_t frames)
                 waitTimeLeftMs = 0;
             }
             if (status == NOT_ENOUGH_DATA) {
-                restartIfDisabled();
+                deferRestartIfDisabled();
                 continue;
             }
         }
@@ -2322,7 +2333,7 @@ ssize_t OutputTrack::write(void* data, uint32_t frames)
         buf.mFrameCount = outFrames;
         buf.mRaw = NULL;
         mClientProxy->releaseBuffer(&buf);
-        restartIfDisabled();
+        deferRestartIfDisabled();
         pInBuffer->frameCount -= outFrames;
         pInBuffer->raw = (int8_t *)pInBuffer->raw + outFrames * mFrameSize;
         mOutBuffer.frameCount -= outFrames;
@@ -2449,10 +2460,11 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
         size_t bufferSize,
         audio_output_flags_t flags,
         const Timeout& timeout,
-        size_t frameCountToBeReady /** Default behaviour is to start
+        size_t frameCountToBeReady, /** Default behaviour is to start
                                          *  as soon as possible to have
                                          *  the lowest possible latency
-                                         *  even if it might glitch. */)
+                                         *  even if it might glitch. */
+        float speed)
 {
     return sp<PatchTrack>::make(
             playbackThread,
@@ -2465,7 +2477,8 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
             bufferSize,
             flags,
             timeout,
-            frameCountToBeReady);
+            frameCountToBeReady,
+            speed);
 }
 
 PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
@@ -2478,17 +2491,26 @@ PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
                                                      size_t bufferSize,
                                                      audio_output_flags_t flags,
                                                      const Timeout& timeout,
-                                                     size_t frameCountToBeReady)
+                                                     size_t frameCountToBeReady,
+                                                     float speed)
     :   Track(playbackThread, NULL, streamType,
               audio_attributes_t{} /* currently unused for patch track */,
               sampleRate, format, channelMask, frameCount,
               buffer, bufferSize, nullptr /* sharedBuffer */,
               AUDIO_SESSION_NONE, getpid(), audioServerAttributionSource(getpid()), flags,
-              TYPE_PATCH, AUDIO_PORT_HANDLE_NONE, frameCountToBeReady),
-        PatchTrackBase(mCblk ? new ClientProxy(mCblk, mBuffer, frameCount, mFrameSize, true, true)
-                        : nullptr,
+              TYPE_PATCH, AUDIO_PORT_HANDLE_NONE, frameCountToBeReady, speed),
+        PatchTrackBase(mCblk ? new AudioTrackClientProxy(mCblk, mBuffer, frameCount, mFrameSize,
+                        true /*clientInServer*/) : nullptr,
                        playbackThread, timeout)
 {
+    if (mProxy != nullptr) {
+        sp<AudioTrackClientProxy>::cast(mProxy)->setPlaybackRate({
+                /* .mSpeed = */ speed,
+                /* .mPitch = */ AUDIO_TIMESTRETCH_PITCH_NORMAL,
+                /* .mStretchMode = */ AUDIO_TIMESTRETCH_STRETCH_DEFAULT,
+                /* .mFallbackMode = */ AUDIO_TIMESTRETCH_FALLBACK_FAIL
+        });
+    }
     ALOGV("%s(%d): sampleRate %d mPeerTimeout %d.%03d sec",
                                       __func__, mId, sampleRate,
                                       (int)mPeerTimeout.tv_sec,
@@ -2566,7 +2588,7 @@ status_t PatchTrack::obtainBuffer(Proxy::Buffer* buffer,
     const size_t originalFrameCount = buffer->mFrameCount;
     do {
         if (status == NOT_ENOUGH_DATA) {
-            restartIfDisabled();
+            deferRestartIfDisabled();
             buffer->mFrameCount = originalFrameCount; // cleared on error, must be restored.
         }
         status = mProxy->obtainBuffer(buffer, timeOut);
@@ -2577,7 +2599,7 @@ status_t PatchTrack::obtainBuffer(Proxy::Buffer* buffer,
 void PatchTrack::releaseBuffer(Proxy::Buffer* buffer)
 {
     mProxy->releaseBuffer(buffer);
-    restartIfDisabled();
+    deferRestartIfDisabled();
 
     // Check if the PatchTrack has enough data to write once in releaseBuffer().
     // If not, prevent an underrun from occurring by moving the track into FS_FILLING;
