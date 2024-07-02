@@ -37,6 +37,10 @@
 
 #include <optional>
 
+namespace com::android::media::permission {
+    class IPermissionProvider;
+}
+
 namespace android {
 
 class IAfDirectOutputThread;
@@ -122,6 +126,9 @@ public:
             EXCLUDES_AudioFlinger_ClientMutex = 0;
 
     virtual void onHardError(std::set<audio_port_handle_t>& trackPortIds) = 0;
+
+    virtual const ::com::android::media::permission::IPermissionProvider&
+            getPermissionProvider() = 0;
 };
 
 class IAfThreadBase : public virtual RefBase {

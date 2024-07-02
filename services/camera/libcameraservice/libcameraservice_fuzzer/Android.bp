@@ -35,6 +35,7 @@ cc_defaults {
         "libmedia_headers",
     ],
     shared_libs: [
+        "framework-permission-aidl-cpp",
         "libbinder",
         "libbase",
         "libutils",
