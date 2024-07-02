@@ -23,6 +23,7 @@
 
 #include <CameraService.h>
 #include <device3/Camera3StreamInterface.h>
+#include <android/content/AttributionSourceState.h>
 #include <android/hardware/BnCameraServiceListener.h>
 #include <android/hardware/camera2/BnCameraDeviceCallbacks.h>
 #include <android/hardware/ICameraServiceListener.h>
@@ -219,7 +220,9 @@ void CameraFuzzer::getNumCameras() {
     } else {
         camType = kCamType[mFuzzedDataProvider->ConsumeBool()];
     }
-    mCameraService->getNumberOfCameras(camType, kDefaultDeviceId, /*devicePolicy*/0, &mNumCameras);
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    mCameraService->getNumberOfCameras(camType, clientAttribution, /*devicePolicy*/0, &mNumCameras);
 }
 
 void CameraFuzzer::getCameraInformation(int32_t cameraId) {
@@ -238,14 +241,17 @@ void CameraFuzzer::getCameraInformation(int32_t cameraId) {
     hardware::camera2::params::VendorTagDescriptorCache cache;
     mCameraService->getCameraVendorTagCache(&cache);
 
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+
     CameraInfo cameraInfo;
-    mCameraService->getCameraInfo(cameraId, ROTATION_OVERRIDE_NONE, kDefaultDeviceId,
+    mCameraService->getCameraInfo(cameraId, ROTATION_OVERRIDE_NONE, clientAttribution,
             /*devicePolicy*/0, &cameraInfo);
 
     CameraMetadata metadata;
     mCameraService->getCameraCharacteristics(cameraIdStr,
             /*targetSdkVersion*/__ANDROID_API_FUTURE__, ROTATION_OVERRIDE_NONE,
-            kDefaultDeviceId, /*devicePolicy*/0, &metadata);
+            clientAttribution, /*devicePolicy*/0, &metadata);
 }
 
 void CameraFuzzer::invokeCameraSound() {
@@ -327,13 +333,15 @@ void CameraFuzzer::invokeTorchAPIs(int32_t cameraId) {
     std::string cameraIdStr = std::to_string(cameraId);
     sp<IBinder> binder = new BBinder;
 
-    mCameraService->setTorchMode(cameraIdStr, true, binder, kDefaultDeviceId, /*devicePolicy*/0);
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    mCameraService->setTorchMode(cameraIdStr, true, binder, clientAttribution, /*devicePolicy*/0);
     ALOGV("Turned torch on.");
     int32_t torchStrength = rand() % 5 + 1;
     ALOGV("Changing torch strength level to %d", torchStrength);
     mCameraService->turnOnTorchWithStrengthLevel(cameraIdStr, torchStrength, binder,
-            kDefaultDeviceId, /*devicePolicy*/0);
-    mCameraService->setTorchMode(cameraIdStr, false, binder, kDefaultDeviceId, /*devicePolicy*/0);
+            clientAttribution, /*devicePolicy*/0);
+    mCameraService->setTorchMode(cameraIdStr, false, binder, clientAttribution, /*devicePolicy*/0);
     ALOGV("Turned torch off.");
 }
 
@@ -349,13 +357,15 @@ void CameraFuzzer::invokeCameraAPIs() {
     ::android::binder::Status rc;
     sp<ICamera> cameraDevice;
 
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    clientAttribution.uid = android::CameraService::USE_CALLING_UID;
+    clientAttribution.pid = android::CameraService::USE_CALLING_PID;
     rc = mCameraService->connect(this, cameraId, std::string(),
-                                 android::CameraService::USE_CALLING_UID,
-                                 android::CameraService::USE_CALLING_PID,
                                  /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
                                  ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
                                  /*forceSlowJpegMode*/false,
-                                 kDefaultDeviceId, /*devicePolicy*/0, &cameraDevice);
+                                 clientAttribution, /*devicePolicy*/0, &cameraDevice);
     if (!rc.isOk()) {
         // camera not connected
         return;
@@ -590,11 +600,14 @@ void Camera2Fuzzer::process() {
     for (auto s : statuses) {
         sp<TestCameraDeviceCallbacks> callbacks(new TestCameraDeviceCallbacks());
         sp<hardware::camera2::ICameraDeviceUser> device;
+
+        AttributionSourceState clientAttribution;
+        clientAttribution.deviceId = kDefaultDeviceId;
+        clientAttribution.uid = android::CameraService::USE_CALLING_UID;
         mCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
-                kDefaultDeviceId, /*devicePolicy*/0, &device);
+                clientAttribution, /*devicePolicy*/0, &device);
         if (device == nullptr) {
             continue;
         }
