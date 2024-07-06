@@ -617,10 +617,11 @@ EffectModule::~EffectModule()
 
 }
 
+// return true if any effect started or stopped
 bool EffectModule::updateState_l() {
     audio_utils::lock_guard _l(mutex());
 
-    bool started = false;
+    bool startedOrStopped = false;
     switch (mState) {
     case RESTART:
         reset_l();
@@ -635,7 +636,7 @@ bool EffectModule::updateState_l() {
         }
         if (start_ll() == NO_ERROR) {
             mState = ACTIVE;
-            started = true;
+            startedOrStopped = true;
         } else {
             mState = IDLE;
         }
@@ -655,6 +656,7 @@ bool EffectModule::updateState_l() {
         // turn off sequence.
         if (--mDisableWaitCnt == 0) {
             reset_l();
+            startedOrStopped = true;
             mState = IDLE;
         }
         break;
@@ -669,7 +671,7 @@ bool EffectModule::updateState_l() {
         break;
     }
 
-    return started;
+    return startedOrStopped;
 }
 
 void EffectModule::process()
@@ -1040,11 +1042,12 @@ void EffectModule::addEffectToHal_l()
 {
     if ((mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_PRE_PROC ||
          (mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_POST_PROC) {
-        if (!getCallback()->shouldDispatchAddRemoveToHal(/* isAdded= */ true)) {
+        if (mCurrentHalStream == getCallback()->io()) {
             return;
         }
 
         (void)getCallback()->addEffectToHal(mEffectInterface);
+        mCurrentHalStream = getCallback()->io();
     }
 }
 
@@ -1141,10 +1144,11 @@ status_t EffectModule::removeEffectFromHal_l()
 {
     if ((mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_PRE_PROC ||
              (mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_POST_PROC) {
-        if (!getCallback()->shouldDispatchAddRemoveToHal(/* isAdded= */ false)) {
-            return (getCallback()->io() == AUDIO_IO_HANDLE_NONE) ? NO_ERROR : INVALID_OPERATION;
+        if (mCurrentHalStream != getCallback()->io()) {
+            return (mCurrentHalStream == AUDIO_IO_HANDLE_NONE) ? NO_ERROR : INVALID_OPERATION;
         }
         getCallback()->removeEffectFromHal(mEffectInterface);
+        mCurrentHalStream = AUDIO_IO_HANDLE_NONE;
     }
     return NO_ERROR;
 }
@@ -2308,6 +2312,9 @@ void EffectChain::process_l() {
     }
     bool doResetVolume = false;
     for (size_t i = 0; i < size; i++) {
+        // reset volume when any effect just started or stopped.
+        // resetVolume_l will check if the volume controller effect in the chain needs update and
+        // apply the correct volume
         doResetVolume = mEffects[i]->updateState_l() || doResetVolume;
     }
     if (doResetVolume) {
@@ -2661,6 +2668,9 @@ bool EffectChain::setVolume_l(uint32_t* left, uint32_t* right, bool force) {
                                        true /* effect chain volume controller */);
         mNewLeftVolume = newLeft;
         mNewRightVolume = newRight;
+        ALOGD("%s sessionId %d volume controller effect %s set (%d, %d), ret (%d, %d)", __func__,
+              mSessionId, mEffects[ctrlIdx]->desc().name, mLeftVolume, mRightVolume, newLeft,
+              newRight);
     }
     // then indicate volume to all other effects in chain.
     // Pass altered volume to effects before volume controller
@@ -3120,16 +3130,12 @@ status_t EffectChain::EffectCallback::addEffectToHal(
         return result;
     }
     result = st->addEffect(effect);
-    if (result == OK) {
-        mCurrentHalStream = t->id();
-    }
     ALOGE_IF(result != OK, "Error when adding effect: %d", result);
     return result;
 }
 
 status_t EffectChain::EffectCallback::removeEffectFromHal(
         const sp<EffectHalInterface>& effect) {
-    mCurrentHalStream = AUDIO_IO_HANDLE_NONE;
     status_t result = NO_INIT;
     const sp<IAfThreadBase> t = thread().promote();
     if (t == nullptr) {
@@ -3142,11 +3148,6 @@ status_t EffectChain::EffectCallback::removeEffectFromHal(
     result = st->removeEffect(effect);
     ALOGE_IF(result != OK, "Error when removing effect: %d", result);
     return result;
-}
-
-bool EffectChain::EffectCallback::shouldDispatchAddRemoveToHal(bool isAdded) const {
-    const bool currentHalStreamMatchesThreadId = (io() == mCurrentHalStream);
-    return isAdded != currentHalStreamMatchesThreadId;
 }
 
 audio_io_handle_t EffectChain::EffectCallback::io() const {
@@ -3741,14 +3742,11 @@ status_t DeviceEffectProxy::ProxyCallback::addEffectToHal(
     if (proxy == nullptr) {
         return NO_INIT;
     }
-    status_t ret = proxy->addEffectToHal(effect);
-    mAddedToHal = (ret == OK);
-    return ret;
+    return proxy->addEffectToHal(effect);
 }
 
 status_t DeviceEffectProxy::ProxyCallback::removeEffectFromHal(
         const sp<EffectHalInterface>& effect) {
-    mAddedToHal = false;
     sp<DeviceEffectProxy> proxy = mProxy.promote();
     if (proxy == nullptr) {
         return NO_INIT;
