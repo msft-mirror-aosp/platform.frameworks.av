@@ -351,6 +351,7 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
     AttributionSourceState clientAttribution;
     clientAttribution.deviceId = kDefaultDeviceId;
     clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
+    clientAttribution.packageName = "meeeeeeeee!";
     res = service->getNumberOfCameras(hardware::ICameraService::CAMERA_TYPE_ALL, clientAttribution,
             /*devicePolicy*/0, &numCameras);
     EXPECT_TRUE(res.isOk()) << res;
@@ -397,8 +398,8 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         // Check connect binder calls
         sp<TestCameraDeviceCallbacks> callbacks(new TestCameraDeviceCallbacks());
         sp<hardware::camera2::ICameraDeviceUser> device;
-        res = service->connectDevice(callbacks, cameraId, "meeeeeeeee!",
-                {}, /*oomScoreOffset*/ 0,
+        res = service->connectDevice(callbacks, cameraId,
+                /*oomScoreOffset*/ 0,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0, /*out*/&device);
         EXPECT_TRUE(res.isOk()) << res;
@@ -444,8 +445,9 @@ protected:
             AttributionSourceState clientAttribution;
             clientAttribution.deviceId = kDefaultDeviceId;
             clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
-            binder::Status res = service->connectDevice(callbacks, deviceId, "meeeeeeeee!",
-                    {}, /*oomScoreOffset*/ 0,
+            clientAttribution.packageName = "meeeeeeeee!";
+            binder::Status res = service->connectDevice(callbacks, deviceId,
+                    /*oomScoreOffset*/ 0,
                     /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                     /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0,
                     /*out*/&device);
