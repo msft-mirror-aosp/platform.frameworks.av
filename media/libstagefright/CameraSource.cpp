@@ -154,8 +154,9 @@ status_t CameraSource::isCameraAvailable(
         clientAttribution.pid = clientPid;
         clientAttribution.uid = clientUid;
         clientAttribution.deviceId = kDefaultDeviceId;
+        clientAttribution.packageName = clientName;
 
-        mCamera = Camera::connect(cameraId, clientName, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+        mCamera = Camera::connect(cameraId, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 /*forceSlowJpegMode*/false, clientAttribution);
         if (mCamera == 0) return -EBUSY;

@@ -129,15 +129,16 @@ bool CameraFuzzer::initCamera() {
     if (mFDP->ConsumeBool()) {
         clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
         clientAttribution.pid = hardware::ICameraService::USE_CALLING_PID;
-        cameraService->connect(this, mFDP->ConsumeIntegral<int32_t>() /* cameraId */, "CAMERAFUZZ",
+        clientAttribution.packageName = "CAMERAFUZZ";
+        cameraService->connect(this, mFDP->ConsumeIntegral<int32_t>() /* cameraId */,
                                /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
                                /*overrideToPortrait*/ false, /*forceSlowJpegMode*/ false,
                                clientAttribution, /*devicePolicy*/0, &cameraDevice);
     } else {
         clientAttribution.uid = mFDP->ConsumeIntegral<int8_t>();
         clientAttribution.pid = mFDP->ConsumeIntegral<int8_t>();
+        clientAttribution.packageName = mFDP->ConsumeRandomLengthString(kMaxBytes).c_str();
         cameraService->connect(this, mFDP->ConsumeIntegral<int32_t>() /* cameraId */,
-                               mFDP->ConsumeRandomLengthString(kMaxBytes).c_str(),
                                /*targetSdkVersion*/ mFDP->ConsumeIntegral<int32_t>(),
                                /*overrideToPortrait*/ mFDP->ConsumeBool(),
                                /*forceSlowJpegMode*/ mFDP->ConsumeBool(), clientAttribution,
