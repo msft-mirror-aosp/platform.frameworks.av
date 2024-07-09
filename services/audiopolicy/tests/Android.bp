@@ -12,6 +12,7 @@ cc_test {
     name: "audiopolicy_tests",
 
     defaults: [
+        "aconfig_lib_cc_shared_link.defaults",
         "latest_android_media_audio_common_types_cpp_static",
     ],
 

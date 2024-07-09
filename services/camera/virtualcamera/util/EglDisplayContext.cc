@@ -54,7 +54,9 @@ EglDisplayContext::EglDisplayContext(std::shared_ptr<ANativeWindow> nativeWindow
   EGLint numConfigs = 0;
   EGLint configAttribs[] = {
       EGL_SURFACE_TYPE,
-      nativeWindow == nullptr ? EGL_PBUFFER_BIT : EGL_WINDOW_BIT,
+      nativeWindow == nullptr
+          ? EGL_PBUFFER_BIT  // Render into individual AHardwareBuffer
+          : EGL_WINDOW_BIT,  // Render into Surface (ANativeWindow)
       EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_RED_SIZE, 8, EGL_GREEN_SIZE,
       8, EGL_BLUE_SIZE, 8,
       // no alpha
@@ -83,6 +85,9 @@ EglDisplayContext::EglDisplayContext(std::shared_ptr<ANativeWindow> nativeWindow
     }
   }
 
+  // EGL is a big state machine. Now that we have a configuration ready, we set
+  // this state machine to that configuration (we make it the "current"
+  // configuration).
   if (!makeCurrent()) {
     ALOGE(
         "Failed to set newly initialized EGLContext and EGLDisplay connection "
@@ -93,16 +98,16 @@ EglDisplayContext::EglDisplayContext(std::shared_ptr<ANativeWindow> nativeWindow
 }
 
 EglDisplayContext::~EglDisplayContext() {
+  eglMakeCurrent(mEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
   if (mEglSurface != EGL_NO_SURFACE) {
     eglDestroySurface(mEglDisplay, mEglSurface);
-  }
-  if (mEglDisplay != EGL_NO_DISPLAY) {
-    eglTerminate(mEglDisplay);
   }
   if (mEglContext != EGL_NO_CONTEXT) {
     eglDestroyContext(mEglDisplay, mEglContext);
   }
-  eglReleaseThread();
+  if (mEglDisplay != EGL_NO_DISPLAY) {
+    eglTerminate(mEglDisplay);
+  }
 }
 
 EGLDisplay EglDisplayContext::getEglDisplay() const {

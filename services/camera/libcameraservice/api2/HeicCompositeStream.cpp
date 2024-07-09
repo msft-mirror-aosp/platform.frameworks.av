@@ -40,6 +40,7 @@
 #include "common/CameraDeviceBase.h"
 #include "utils/ExifUtils.h"
 #include "utils/SessionConfigurationUtils.h"
+#include "utils/Utils.h"
 #include "HeicEncoderInfoManager.h"
 #include "HeicCompositeStream.h"
 
@@ -1464,7 +1465,7 @@ size_t HeicCompositeStream::findAppSegmentsSize(const uint8_t* appSegmentBuffer,
     const uint8_t *header = appSegmentBuffer + (maxSize - sizeof(CameraBlob));
     const CameraBlob *blob = (const CameraBlob*)(header);
     if (blob->blobId != CameraBlobId::JPEG_APP_SEGMENTS) {
-        ALOGE("%s: Invalid EXIF blobId %d", __FUNCTION__, blob->blobId);
+        ALOGE("%s: Invalid EXIF blobId %d", __FUNCTION__, eToI(blob->blobId));
         return 0;
     }
 
@@ -1588,7 +1589,7 @@ status_t HeicCompositeStream::copyOneYuvTile(sp<MediaCodecBuffer>& codecBuffer,
         // The chrome plane could be either Cb first, or Cr first. Take the
         // smaller address.
         uint8_t *src = std::min(yuvBuffer.dataCb, yuvBuffer.dataCr);
-        MediaImage2::PlaneIndex dstPlane = codecUvOffsetDiff > 0 ? MediaImage2::U : MediaImage2::V;
+        MediaImage2::PlaneIndex dstPlane = codecUPlaneFirst ? MediaImage2::U : MediaImage2::V;
         for (auto row = top/2; row < (top+height)/2; row++) {
             uint8_t *dst = codecBuffer->data() + imageInfo->mPlane[dstPlane].mOffset +
                     imageInfo->mPlane[dstPlane].mRowInc * (row - top/2);

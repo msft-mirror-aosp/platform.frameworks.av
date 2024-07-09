@@ -24,6 +24,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "Exif.h"
@@ -78,6 +79,15 @@ using ::android::hardware::camera::common::helper::ExifUtils;
 
 namespace {
 
+// helper type for the visitor
+template <class... Ts>
+struct overloaded : Ts... {
+  using Ts::operator()...;
+};
+// explicit deduction guide (not needed as of C++20)
+template <class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
 using namespace std::chrono_literals;
 
 static constexpr std::chrono::milliseconds kAcquireFenceTimeout = 500ms;
@@ -88,6 +98,8 @@ static constexpr std::chrono::milliseconds kAcquireFenceTimeout = 500ms;
 static constexpr uint8_t kPipelineDepth = 2;
 
 static constexpr size_t kJpegThumbnailBufferSize = 32 * 1024;  // 32 KiB
+
+static constexpr UpdateTextureTask kUpdateTextureTask;
 
 CameraMetadata createCaptureResultMetadata(
     const std::chrono::nanoseconds timestamp,
@@ -287,6 +299,21 @@ std::chrono::nanoseconds getMaxFrameDuration(
       static_cast<uint64_t>(1e9 / VirtualCameraDevice::kMinFps));
 }
 
+class FrameAvailableListenerProxy : public ConsumerBase::FrameAvailableListener {
+ public:
+  FrameAvailableListenerProxy(std::function<void()> callback)
+      : mOnFrameAvailableCallback(callback) {
+  }
+
+  virtual void onFrameAvailable(const BufferItem&) override {
+    ALOGV("%s: onFrameAvailable", __func__);
+    mOnFrameAvailableCallback();
+  }
+
+ private:
+  std::function<void()> mOnFrameAvailableCallback;
+};
+
 }  // namespace
 
 CaptureRequestBuffer::CaptureRequestBuffer(int streamId, int bufferId,
@@ -345,9 +372,25 @@ const RequestSettings& ProcessCaptureRequestTask::getRequestSettings() const {
   return mRequestSettings;
 }
 
+void VirtualCameraRenderThread::requestTextureUpdate() {
+  std::lock_guard<std::mutex> lock(mLock);
+  // If queue is not empty, we don't need to set the mTextureUpdateRequested
+  // flag, since the texture will be updated during ProcessCaptureRequestTask
+  // processing anyway.
+  if (mQueue.empty()) {
+    mTextureUpdateRequested = true;
+    mCondVar.notify_one();
+  }
+}
+
 void VirtualCameraRenderThread::enqueueTask(
     std::unique_ptr<ProcessCaptureRequestTask> task) {
   std::lock_guard<std::mutex> lock(mLock);
+  // When enqueving process capture request task, clear the
+  // mTextureUpdateRequested flag. If this flag is set, the texture was not yet
+  // updated and it will be updated when processing ProcessCaptureRequestTask
+  // anyway.
+  mTextureUpdateRequested = false;
   mQueue.emplace_back(std::move(task));
   mCondVar.notify_one();
 }
@@ -377,8 +420,7 @@ sp<Surface> VirtualCameraRenderThread::getInputSurface() {
   return mInputSurfaceFuture.get();
 }
 
-std::unique_ptr<ProcessCaptureRequestTask>
-VirtualCameraRenderThread::dequeueTask() {
+RenderThreadTask VirtualCameraRenderThread::dequeueTask() {
   std::unique_lock<std::mutex> lock(mLock);
   // Clang's thread safety analysis doesn't perform alias analysis,
   // so it doesn't support moveable std::unique_lock.
@@ -389,12 +431,20 @@ VirtualCameraRenderThread::dequeueTask() {
   ScopedLockAssertion lockAssertion(mLock);
 
   mCondVar.wait(lock, [this]() REQUIRES(mLock) {
-    return mPendingExit || !mQueue.empty();
+    return mPendingExit || mTextureUpdateRequested || !mQueue.empty();
   });
   if (mPendingExit) {
-    return nullptr;
+    // Render thread task with null task signals render thread to terminate.
+    return RenderThreadTask(nullptr);
   }
-  std::unique_ptr<ProcessCaptureRequestTask> task = std::move(mQueue.front());
+  if (mTextureUpdateRequested) {
+    // If mTextureUpdateRequested, it's guaranteed the queue is empty, return
+    // kUpdateTextureTask to signal we want render thread to update the texture
+    // (consume buffer from the queue).
+    mTextureUpdateRequested = false;
+    return RenderThreadTask(kUpdateTextureTask);
+  }
+  RenderThreadTask task(std::move(mQueue.front()));
   mQueue.pop_front();
   return task;
 }
@@ -409,11 +459,23 @@ void VirtualCameraRenderThread::threadLoop() {
       EglTextureProgram::TextureFormat::RGBA);
   mEglSurfaceTexture = std::make_unique<EglSurfaceTexture>(
       mInputSurfaceSize.width, mInputSurfaceSize.height);
+  sp<FrameAvailableListenerProxy> frameAvailableListener =
+      sp<FrameAvailableListenerProxy>::make(
+          [this]() { requestTextureUpdate(); });
+  mEglSurfaceTexture->setFrameAvailableListener(frameAvailableListener);
 
   mInputSurfacePromise.set_value(mEglSurfaceTexture->getSurface());
 
-  while (std::unique_ptr<ProcessCaptureRequestTask> task = dequeueTask()) {
-    processCaptureRequest(*task);
+  while (RenderThreadTask task = dequeueTask()) {
+    std::visit(
+        overloaded{[this](const std::unique_ptr<ProcessCaptureRequestTask>& t) {
+                     processTask(*t);
+                   },
+                   [this](const UpdateTextureTask&) {
+                     ALOGV("Idle update of the texture");
+                     mEglSurfaceTexture->updateTexture();
+                   }},
+        task);
   }
 
   // Destroy EGL utilities still on the render thread.
@@ -425,7 +487,7 @@ void VirtualCameraRenderThread::threadLoop() {
   ALOGV("Render thread exiting");
 }
 
-void VirtualCameraRenderThread::processCaptureRequest(
+void VirtualCameraRenderThread::processTask(
     const ProcessCaptureRequestTask& request) {
   std::chrono::nanoseconds timestamp =
       std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -617,7 +679,7 @@ std::vector<uint8_t> VirtualCameraRenderThread::createThumbnail(
     return {};
   }
 
-  // TODO(b/324383963) Add support for letterboxing if the thumbnail size
+  // TODO(b/324383963) Add support for letterboxing if the thumbnail sizese
   // doesn't correspond
   //  to input texture aspect ratio.
   if (!renderIntoEglFramebuffer(*framebuffer, /*fence=*/nullptr,
@@ -688,9 +750,10 @@ ndk::ScopedAStatus VirtualCameraRenderThread::renderIntoBlobStreamBuffer(
     return status;
   }
 
-  PlanesLockGuard planesLock(hwBuffer, AHARDWAREBUFFER_USAGE_CPU_READ_RARELY,
+  PlanesLockGuard planesLock(hwBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
                              fence);
   if (planesLock.getStatus() != OK) {
+    ALOGE("Failed to lock hwBuffer planes");
     return cameraStatus(Status::INTERNAL_ERROR);
   }
 
@@ -698,23 +761,35 @@ ndk::ScopedAStatus VirtualCameraRenderThread::renderIntoBlobStreamBuffer(
       createExif(Resolution(stream->width, stream->height), resultMetadata,
                  createThumbnail(requestSettings.thumbnailResolution,
                                  requestSettings.thumbnailJpegQuality));
+
+  unsigned long outBufferSize = stream->bufferSize - sizeof(CameraBlob);
+  void* outBuffer = (*planesLock).planes[0].data;
   std::optional<size_t> compressedSize = compressJpeg(
       stream->width, stream->height, requestSettings.jpegQuality,
-      framebuffer->getHardwareBuffer(), app1ExifData,
-      stream->bufferSize - sizeof(CameraBlob), (*planesLock).planes[0].data);
+      framebuffer->getHardwareBuffer(), app1ExifData, outBufferSize, outBuffer);
 
   if (!compressedSize.has_value()) {
     ALOGE("%s: Failed to compress JPEG image", __func__);
     return cameraStatus(Status::INTERNAL_ERROR);
   }
 
+  // Add the transport header at the end of the JPEG output buffer.
+  //
+  // jpegBlobId must start at byte[buffer_size - sizeof(CameraBlob)],
+  // where the buffer_size is the size of gralloc buffer.
+  //
+  // See
+  // hardware/interfaces/camera/device/aidl/android/hardware/camera/device/CameraBlobId.aidl
+  // for the full explanation of the following code.
   CameraBlob cameraBlob{
       .blobId = CameraBlobId::JPEG,
       .blobSizeBytes = static_cast<int32_t>(compressedSize.value())};
 
-  memcpy(reinterpret_cast<uint8_t*>((*planesLock).planes[0].data) +
-             (stream->bufferSize - sizeof(cameraBlob)),
-         &cameraBlob, sizeof(cameraBlob));
+  // Copy the cameraBlob to the end of the JPEG buffer.
+  uint8_t* jpegStreamEndAddress =
+      reinterpret_cast<uint8_t*>((*planesLock).planes[0].data) +
+      (stream->bufferSize - sizeof(cameraBlob));
+  memcpy(jpegStreamEndAddress, &cameraBlob, sizeof(cameraBlob));
 
   ALOGV("%s: Successfully compressed JPEG image, resulting size %zu B",
         __func__, compressedSize.value());
@@ -771,8 +846,8 @@ ndk::ScopedAStatus VirtualCameraRenderThread::renderIntoEglFramebuffer(
 
   Rect viewportRect =
       viewport.value_or(Rect(framebuffer.getWidth(), framebuffer.getHeight()));
-  glViewport(viewportRect.leftTop().x, viewportRect.leftTop().y,
-             viewportRect.getWidth(), viewportRect.getHeight());
+  glViewport(viewportRect.left, viewportRect.top, viewportRect.getWidth(),
+             viewportRect.getHeight());
 
   sp<GraphicBuffer> textureBuffer = mEglSurfaceTexture->getCurrentBuffer();
   if (textureBuffer == nullptr) {
