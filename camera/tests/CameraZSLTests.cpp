@@ -216,8 +216,9 @@ TEST_F(CameraZSLTests, TestAllPictureSizes) {
 
         clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
         clientAttribution.pid = hardware::ICameraService::USE_CALLING_PID;
+        clientAttribution.packageName = "ZSLTest";
         rc = mCameraService->connect(this, cameraId,
-                "ZSLTest", /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 /*overrideToPortrait*/false, /*forceSlowJpegMode*/false, clientAttribution,
                 /*devicePolicy*/0, &cameraDevice);
         EXPECT_TRUE(rc.isOk());
