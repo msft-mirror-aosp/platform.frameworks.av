@@ -179,7 +179,7 @@ protected:
 // the attached track(s) to accumulate their auxiliary channel.
 class EffectModule : public IAfEffectModule, public EffectBase {
 public:
-    EffectModule(const sp<EffectCallbackInterface>& callabck,
+    EffectModule(const sp<EffectCallbackInterface>& callback,
                     effect_descriptor_t *desc,
                     int id,
                     audio_session_t sessionId,
@@ -228,7 +228,7 @@ public:
             REQUIRES(audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex;
     bool isOffloaded_l() const final
             REQUIRES(audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex;
-    void addEffectToHal_l() final REQUIRES(audio_utils::EffectChain_Mutex);
+    void addEffectToHal_l() override REQUIRES(audio_utils::EffectChain_Mutex);
     void release_l(const std::string& from = "") final REQUIRES(audio_utils::EffectChain_Mutex);
 
     sp<IAfEffectModule> asEffectModule() final { return this; }
@@ -250,6 +250,9 @@ public:
 
     void dump(int fd, const Vector<String16>& args) const final;
 
+protected:
+    sp<EffectHalInterface> mEffectInterface; // Effect module HAL
+
 private:
 
     // Maximum time allocated to effect engines to complete the turn off sequence
@@ -259,7 +262,7 @@ private:
 
     status_t start_ll() REQUIRES(audio_utils::EffectChain_Mutex, audio_utils::EffectBase_Mutex);
     status_t stop_ll() REQUIRES(audio_utils::EffectChain_Mutex, audio_utils::EffectBase_Mutex);
-    status_t removeEffectFromHal_l() REQUIRES(audio_utils::EffectChain_Mutex);
+    status_t removeEffectFromHal_l() override REQUIRES(audio_utils::EffectChain_Mutex);
     status_t sendSetAudioDevicesCommand(const AudioDeviceTypeAddrVector &devices, uint32_t cmdCode);
     effect_buffer_access_e requiredEffectBufferAccessMode() const {
         return mConfig.inputCfg.buffer.raw == mConfig.outputCfg.buffer.raw
@@ -270,7 +273,6 @@ private:
                                bool controller /* the volume controller effect of the chain */);
 
     effect_config_t     mConfig;    // input and output audio configuration
-    sp<EffectHalInterface> mEffectInterface; // Effect module HAL
     sp<EffectBufferHalInterface> mInBuffer;  // Buffers for interacting with HAL
     sp<EffectBufferHalInterface> mOutBuffer;
     status_t            mStatus;    // initialization status
@@ -315,6 +317,18 @@ private:
     std::optional<std::vector<uint32_t>> mReturnedVolume;
     // TODO: b/315995877, remove this debugging string after root cause
     std::string mEffectInterfaceDebug;
+};
+
+class HwAccDeviceEffectModule : public EffectModule {
+public:
+    HwAccDeviceEffectModule(const sp<EffectCallbackInterface>& callback, effect_descriptor_t *desc,
+            int id, audio_port_handle_t deviceId) :
+        EffectModule(callback, desc, id, AUDIO_SESSION_DEVICE, /* pinned */ false, deviceId) {}
+    void addEffectToHal_l() final REQUIRES(audio_utils::EffectChain_Mutex);
+
+private:
+    status_t removeEffectFromHal_l() final REQUIRES(audio_utils::EffectChain_Mutex);
+    bool mAddedToHal = false;
 };
 
 // The EffectHandle class implements the IEffect interface. It provides resources
@@ -713,7 +727,7 @@ public:
              uint32_t mRightVolume;      // previous volume on right channel
              uint32_t mNewLeftVolume;       // new volume on left channel
              uint32_t mNewRightVolume;      // new volume on right channel
-             product_strategy_t mStrategy; // strategy for this effect chain
+             product_strategy_t mStrategy = PRODUCT_STRATEGY_NONE; // strategy for this effect chain
              // mSuspendedEffects lists all effects currently suspended in the chain.
              // Use effect type UUID timelow field as key. There is no real risk of identical
              // timeLow fields among effect type UUIDs.
@@ -808,7 +822,7 @@ private:
         void checkSuspendOnEffectEnabled(const sp<IAfEffectBase>& effect __unused,
                               bool enabled __unused, bool threadLocked __unused) override {}
         void resetVolume_l() override REQUIRES(audio_utils::EffectChain_Mutex) {}
-        product_strategy_t strategy() const override  { return static_cast<product_strategy_t>(0); }
+        product_strategy_t strategy() const override  { return PRODUCT_STRATEGY_NONE; }
         int32_t activeTrackCnt() const override { return 0; }
         void onEffectEnable(const sp<IAfEffectBase>& effect __unused) override;
         void onEffectDisable(const sp<IAfEffectBase>& effect __unused) override;
