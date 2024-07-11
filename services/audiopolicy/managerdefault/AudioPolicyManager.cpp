@@ -374,6 +374,7 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
         checkLeBroadcastRoutes(wasLeUnicastActive, nullptr, 0);
 
         mpClientInterface->onAudioPortListUpdate();
+        ALOGV("%s() completed for device: %s", __func__, device->toString().c_str());
         return NO_ERROR;
     }  // end if is output device
 
@@ -388,6 +389,8 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
                 ALOGW("%s() device already connected: %s", __func__, device->toString().c_str());
                 return INVALID_OPERATION;
             }
+
+            ALOGV("%s() connecting device %s", __func__, device->toString().c_str());
 
             if (mAvailableInputDevices.add(device) < 0) {
                 return NO_MEMORY;
@@ -461,6 +464,7 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
         }
 
         mpClientInterface->onAudioPortListUpdate();
+        ALOGV("%s() completed for device: %s", __func__, device->toString().c_str());
         return NO_ERROR;
     } // end if is input device
 
@@ -1516,7 +1520,7 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
                 (config->channel_mask == desc->getChannelMask()) &&
                 (session == desc->mDirectClientSession)) {
                 desc->mDirectOpenCount++;
-                ALOGV("%s reusing direct output %d for session %d", __func__,
+                ALOGI("%s reusing direct output %d for session %d", __func__,
                     mOutputs.keyAt(i), session);
                 *output = mOutputs.keyAt(i);
                 return NO_ERROR;
@@ -1526,17 +1530,23 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
 
     if (!profile->canOpenNewIo()) {
         if (!com::android::media::audioserver::direct_track_reprioritization()) {
+            ALOGW("%s profile %s can't open new output maxOpenCount reached", __func__,
+                  profile->getName().c_str());
             return NAME_NOT_FOUND;
         } else if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) != 0) {
             // MMAP gracefully handles lack of an exclusive track resource by mixing
             // above the audio framework. For AAudio to know that the limit is reached,
             // return an error.
+            ALOGW("%s profile %s can't open new mmap output maxOpenCount reached", __func__,
+                  profile->getName().c_str());
             return NAME_NOT_FOUND;
         } else {
             // Close outputs on this profile, if available, to free resources for this request
             for (int i = 0; i < mOutputs.size() && !profile->canOpenNewIo(); i++) {
                 const auto desc = mOutputs.valueAt(i);
                 if (desc->mProfile == profile) {
+                    ALOGV("%s closeOutput %d to prioritize session %d on profile %s", __func__,
+                          desc->mIoHandle, session, profile->getName().c_str());
                     closeOutput(desc->mIoHandle);
                 }
             }
@@ -1545,6 +1555,8 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
 
     // Unable to close streams to find free resources for this request
     if (!profile->canOpenNewIo()) {
+        ALOGW("%s profile %s can't open new output maxOpenCount reached", __func__,
+              profile->getName().c_str());
         return NAME_NOT_FOUND;
     }
 
@@ -3276,8 +3288,8 @@ status_t AudioPolicyManager::setStreamVolumeIndex(audio_stream_type_t stream,
         ALOGW("%s: no group for stream %s, bailing out", __func__, toString(stream).c_str());
         return NO_ERROR;
     }
-    ALOGV("%s: stream %s attributes=%s", __func__,
-          toString(stream).c_str(), toString(attributes).c_str());
+    ALOGV("%s: stream %s attributes=%s, index %d , device 0x%X", __func__,
+          toString(stream).c_str(), toString(attributes).c_str(), index, device);
     return setVolumeIndexForAttributes(attributes, index, device);
 }
 
@@ -3455,8 +3467,8 @@ status_t AudioPolicyManager::setVolumeCurveIndex(int index,
     bool hasVoice = hasVoiceStream(volumeCurves.getStreamTypes());
     if (((index < volumeCurves.getVolumeIndexMin()) && !(hasVoice && index == 0)) ||
             (index > volumeCurves.getVolumeIndexMax())) {
-        ALOGD("%s: wrong index %d min=%d max=%d", __FUNCTION__, index,
-              volumeCurves.getVolumeIndexMin(), volumeCurves.getVolumeIndexMax());
+        ALOGE("%s: wrong index %d min=%d max=%d, device 0x%X", __FUNCTION__, index,
+              volumeCurves.getVolumeIndexMin(), volumeCurves.getVolumeIndexMax(), device);
         return BAD_VALUE;
     }
     if (!audio_is_output_device(device)) {
@@ -6386,6 +6398,14 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
             if (!mConfig->getOutputDevices().contains(supportedDevice)) {
                 continue;
             }
+
+            if (outProfile->isMmap() && !outProfile->hasDynamicAudioProfile()
+                && availProfileDevices.areAllDevicesAttached()) {
+                ALOGV("%s skip opening output for mmap profile %s", __func__,
+                        outProfile->getTagName().c_str());
+                continue;
+            }
+
             sp<SwAudioOutputDescriptor> outputDesc = new SwAudioOutputDescriptor(outProfile,
                                                                                  mpClientInterface);
             audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
@@ -6445,6 +6465,14 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
                     __func__, inProfile->getTagName().c_str());
                 continue;
             }
+
+            if (inProfile->isMmap() && !inProfile->hasDynamicAudioProfile()
+                && availProfileDevices.areAllDevicesAttached()) {
+                ALOGV("%s skip opening input for mmap profile %s", __func__,
+                        inProfile->getTagName().c_str());
+                continue;
+            }
+
             sp<AudioInputDescriptor> inputDesc =
                     new AudioInputDescriptor(inProfile, mpClientInterface);
 
@@ -6452,12 +6480,12 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
             status_t status = inputDesc->open(nullptr,
                                               availProfileDevices.itemAt(0),
                                               AUDIO_SOURCE_MIC,
-                                              AUDIO_INPUT_FLAG_NONE,
+                                              (audio_input_flags_t) inProfile->getFlags(),
                                               &input);
             if (status != NO_ERROR) {
-                ALOGW("Cannot open input stream for device %s on hw module %s",
-                      availProfileDevices.toString().c_str(),
-                      hwModule->getName());
+                ALOGW("%s: Cannot open input stream for device %s for profile %s on hw module %s",
+                        __func__, availProfileDevices.toString().c_str(),
+                        inProfile->getTagName().c_str(), hwModule->getName());
                 continue;
             }
             for (const auto &device : availProfileDevices) {
@@ -6565,8 +6593,8 @@ status_t AudioPolicyManager::checkOutputsForDevice(const sp<DeviceDescriptor>& d
                 sp<IOProfile> profile = hwModule->getOutputProfiles()[j];
                 if (profile->supportsDevice(device)) {
                     profiles.add(profile);
-                    ALOGV("checkOutputsForDevice(): adding profile %zu from module %s",
-                          j, hwModule->getName());
+                    ALOGV("%s(): adding profile %s from module %s",
+                            __func__, profile->getTagName().c_str(), hwModule->getName());
                 }
             }
         }
@@ -6599,7 +6627,11 @@ status_t AudioPolicyManager::checkOutputsForDevice(const sp<DeviceDescriptor>& d
             if (j != outputs.size()) {
                 continue;
             }
-
+            if (profile->isMmap() && !profile->hasDynamicAudioProfile()) {
+                ALOGV("%s skip opening output for mmap profile %s",
+                      __func__, profile->getTagName().c_str());
+                continue;
+            }
             if (!profile->canOpenNewIo()) {
                 ALOGW("Max Output number %u already opened for this profile %s",
                       profile->maxOpenCount, profile->getTagName().c_str());
@@ -6660,9 +6692,8 @@ status_t AudioPolicyManager::checkOutputsForDevice(const sp<DeviceDescriptor>& d
                 if (!profile->supportsDevice(device)) {
                     continue;
                 }
-                ALOGV("checkOutputsForDevice(): "
-                        "clearing direct output profile %zu on module %s",
-                        j, hwModule->getName());
+                ALOGV("%s(): clearing direct output profile %s on module %s",
+                        __func__, profile->getTagName().c_str(), hwModule->getName());
                 profile->clearAudioProfiles();
                 if (!profile->hasDynamicAudioProfile()) {
                     continue;
@@ -6717,8 +6748,8 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
 
                 if (profile->supportsDevice(device)) {
                     profiles.add(profile);
-                    ALOGV("checkInputsForDevice(): adding profile %zu from module %s",
-                          profile_index, hwModule->getName());
+                    ALOGV("%s : adding profile %s from module %s", __func__,
+                          profile->getTagName().c_str(), hwModule->getName());
                 }
             }
         }
@@ -6750,15 +6781,22 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
                 continue;
             }
 
+            if (profile->isMmap() && !profile->hasDynamicAudioProfile()) {
+                ALOGV("%s skip opening input for mmap profile %s",
+                      __func__, profile->getTagName().c_str());
+                continue;
+            }
             if (!profile->canOpenNewIo()) {
-                ALOGW("Max Input number %u already opened for this profile %s",
-                      profile->maxOpenCount, profile->getTagName().c_str());
+                ALOGW("%s Max Input number %u already opened for this profile %s",
+                      __func__, profile->maxOpenCount, profile->getTagName().c_str());
                 continue;
             }
 
             desc = new AudioInputDescriptor(profile, mpClientInterface);
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
-            status = desc->open(nullptr, device, AUDIO_SOURCE_MIC, AUDIO_INPUT_FLAG_NONE, &input);
+            ALOGV("%s opening input for profile %s", __func__, profile->getTagName().c_str());
+            status = desc->open(nullptr, device, AUDIO_SOURCE_MIC,
+                                (audio_input_flags_t) profile->getFlags(), &input);
 
             if (status == NO_ERROR) {
                 const String8& address = String8(device->address().c_str());
@@ -6769,7 +6807,8 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
                 }
                 updateAudioProfiles(device, input, profile);
                 if (!profile->hasValidAudioProfile()) {
-                    ALOGW("checkInputsForDevice() direct input missing param");
+                    ALOGW("%s direct input missing param for profile %s", __func__,
+                            profile->getTagName().c_str());
                     desc->close();
                     input = AUDIO_IO_HANDLE_NONE;
                 }
@@ -6780,18 +6819,20 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
             } // endif input != 0
 
             if (input == AUDIO_IO_HANDLE_NONE) {
-                ALOGW("%s could not open input for device %s", __func__,
-                       device->toString().c_str());
+                ALOGW("%s could not open input for device %s on profile %s", __func__,
+                       device->toString().c_str(), profile->getTagName().c_str());
                 profiles.removeAt(profile_index);
                 profile_index--;
             } else {
                 if (audio_device_is_digital(device->type())) {
                     device->importAudioPortAndPickAudioProfile(profile);
                 }
-                ALOGV("checkInputsForDevice(): adding input %d", input);
+                ALOGV("%s: adding input %d for profile %s", __func__,
+                        input, profile->getTagName().c_str());
 
                 if (checkCloseInput(desc)) {
-                    ALOGV("%s closing input %d", __func__, input);
+                    ALOGV("%s: closing input %d for profile %s", __func__,
+                            input, profile->getTagName().c_str());
                     closeInput(input);
                 }
             }
@@ -6810,8 +6851,8 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
                  profile_index++) {
                 sp<IOProfile> profile = hwModule->getInputProfiles()[profile_index];
                 if (profile->supportsDevice(device)) {
-                    ALOGV("checkInputsForDevice(): clearing direct input profile %zu on module %s",
-                            profile_index, hwModule->getName());
+                    ALOGV("%s: clearing direct input profile %s on module %s", __func__,
+                            profile->getTagName().c_str(), hwModule->getName());
                     profile->clearAudioProfiles();
                 }
             }
