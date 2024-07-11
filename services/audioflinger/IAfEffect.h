@@ -153,7 +153,7 @@ class IAfEffectModule : public virtual IAfEffectBase {
 
 public:
     static sp<IAfEffectModule> create(
-            const sp<EffectCallbackInterface>& callabck,
+            const sp<EffectCallbackInterface>& callback,
             effect_descriptor_t *desc,
             int id,
             audio_session_t sessionId,
@@ -214,6 +214,7 @@ private:
 
     virtual status_t stop_l() = 0;
     virtual void addEffectToHal_l() = 0;
+    virtual status_t removeEffectFromHal_l() = 0;
     virtual void release_l(const std::string& from) = 0;
 };
 
