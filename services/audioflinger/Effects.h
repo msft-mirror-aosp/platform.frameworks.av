@@ -343,7 +343,8 @@ public:
     EffectHandle(const sp<IAfEffectBase>& effect,
             const sp<Client>& client,
             const sp<media::IEffectClient>& effectClient,
-            int32_t priority, bool notifyFramesProcessed);
+            int32_t priority, bool notifyFramesProcessed, bool isInternal = false,
+            audio_utils::MutexOrder mutexOrder = audio_utils::MutexOrder::kEffectHandle_Mutex);
     ~EffectHandle() override;
     status_t onTransact(
             uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) final;
@@ -363,6 +364,11 @@ public:
                                       int32_t* _aidl_return) final;
 
     const sp<Client>& client() const final { return mClient; }
+    /**
+     * Checks if the handle is internal, aka created by AudioFlinger for internal needs (e.g.
+     * device effect HAL handle or device effect thread handle).
+     */
+    virtual bool isInternal() const { return mIsInternal; }
 
     sp<android::media::IEffect> asIEffect() final {
         return sp<android::media::IEffect>::fromExisting(this);
@@ -400,15 +406,18 @@ private:
 
     void dumpToBuffer(char* buffer, size_t size) const final;
 
+protected:
+    // protects IEffect method calls
+    mutable audio_utils::mutex mMutex;
 
 private:
     DISALLOW_COPY_AND_ASSIGN(EffectHandle);
 
-    audio_utils::mutex& mutex() const RETURN_CAPABILITY(android::audio_utils::EffectHandle_Mutex) {
+    virtual audio_utils::mutex& mutex() const
+            RETURN_CAPABILITY(android::audio_utils::EffectHandle_Mutex) {
         return mMutex;
     }
-    // protects IEffect method calls
-    mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kEffectHandle_Mutex};
+
     const wp<IAfEffectBase> mEffect;               // pointer to controlled EffectModule
     const sp<media::IEffectClient> mEffectClient;  // callback interface for client notifications
     /*const*/ sp<Client> mClient;            // client for shared memory allocation, see
@@ -424,6 +433,28 @@ private:
     bool mDisconnected;                      // Set to true by disconnect()
     const bool mNotifyFramesProcessed;       // true if the client callback event
                                              // EVENT_FRAMES_PROCESSED must be generated
+    const bool mIsInternal;
+};
+
+/**
+ * There are 2 types of effects:
+ * -Session Effect: handle is directly called from the client, without AudioFlinger lock.
+ * -Device Effect: a device effect proxy is aggregating a collection of internal effect handles that
+ * controls the same effect added on all audio patches involving the device effect selected port
+ * requested either by a client or by AudioPolicyEffects. These internal effect handles do not have
+ * client. Sequence flow implies a different locking order, hence the lock is specialied.
+ */
+class InternalEffectHandle : public EffectHandle {
+public:
+    InternalEffectHandle(const sp<IAfEffectBase>& effect, bool notifyFramesProcessed) :
+            EffectHandle(effect, /* client= */ nullptr, /* effectClient= */ nullptr,
+                         /* priority= */ 0, notifyFramesProcessed, /* isInternal */ true,
+                         audio_utils::MutexOrder::kDeviceEffectHandle_Mutex) {}
+
+    virtual audio_utils::mutex& mutex() const
+            RETURN_CAPABILITY(android::audio_utils::DeviceEffectHandle_Mutex) {
+        return mMutex;
+    }
 };
 
 // the EffectChain class represents a group of effects associated to one audio session.
@@ -761,7 +792,7 @@ public:
     status_t onUpdatePatch(audio_patch_handle_t oldPatchHandle, audio_patch_handle_t newPatchHandle,
            const IAfPatchPanel::Patch& patch) final;
 
-    void onReleasePatch(audio_patch_handle_t patchHandle) final;
+    sp<IAfEffectHandle> onReleasePatch(audio_patch_handle_t patchHandle) final;
 
     size_t removeEffect(const sp<IAfEffectModule>& effect) final;
 
@@ -810,7 +841,10 @@ private:
         audio_channel_mask_t outChannelMask() const override;
         uint32_t outChannelCount() const override;
         audio_channel_mask_t hapticChannelMask() const override { return AUDIO_CHANNEL_NONE; }
-        size_t frameCount() const override  { return 0; }
+        /**
+         * frameCount cannot be zero.
+         */
+        size_t frameCount() const override  { return 1; }
         uint32_t latency() const override  { return 0; }
 
         status_t addEffectToHal(const sp<EffectHalInterface>& effect) override;
