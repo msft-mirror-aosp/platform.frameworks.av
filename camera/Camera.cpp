@@ -69,12 +69,11 @@ Camera::~Camera()
     // deadlock if we call any method of ICamera here.
 }
 
-sp<Camera> Camera::connect(int cameraId, const std::string& clientPackageName,
-        int targetSdkVersion, int rotationOverride,
+sp<Camera> Camera::connect(int cameraId, int targetSdkVersion, int rotationOverride,
         bool forceSlowJpegMode, const AttributionSourceState& clientAttribution,
         int32_t devicePolicy)
 {
-    return CameraBaseT::connect(cameraId, clientPackageName, targetSdkVersion, rotationOverride,
+    return CameraBaseT::connect(cameraId, targetSdkVersion, rotationOverride,
             forceSlowJpegMode, clientAttribution, devicePolicy);
 }
 
