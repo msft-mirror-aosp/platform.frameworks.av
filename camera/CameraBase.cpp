@@ -161,7 +161,6 @@ const sp<::android::hardware::ICameraService> CameraBase<TCam, TCamTraits>::getC
 
 template <typename TCam, typename TCamTraits>
 sp<TCam> CameraBase<TCam, TCamTraits>::connect(int cameraId,
-                                               const std::string& clientPackageName,
                                                int targetSdkVersion, int rotationOverride,
                                                bool forceSlowJpegMode,
                                                const AttributionSourceState& clientAttribution,
@@ -177,7 +176,7 @@ sp<TCam> CameraBase<TCam, TCamTraits>::connect(int cameraId,
         TCamConnectService fnConnectService = TCamTraits::fnConnectService;
         ALOGI("Connect camera (legacy API) - rotationOverride %d, forceSlowJpegMode %d",
                 rotationOverride, forceSlowJpegMode);
-        ret = (cs.get()->*fnConnectService)(cl, cameraId, clientPackageName, targetSdkVersion,
+        ret = (cs.get()->*fnConnectService)(cl, cameraId, targetSdkVersion,
                 rotationOverride, forceSlowJpegMode, clientAttribution, devicePolicy,
                 /*out*/ &c->mCamera);
     }
