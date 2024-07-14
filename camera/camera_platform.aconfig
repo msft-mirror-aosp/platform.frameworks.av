@@ -247,3 +247,13 @@ flag {
         purpose: PURPOSE_BUGFIX
     }
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "api1_release_binderlock_before_cameraservice_disconnect"
+    description: "Drop mSerializationLock in Camera1 client when calling into CameraService"
+    bug: "351778072"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}

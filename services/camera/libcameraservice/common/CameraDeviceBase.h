@@ -136,7 +136,7 @@ class CameraDeviceBase : public virtual FrameProducer {
      * Output lastFrameNumber is the expected last frame number of the list of requests.
      */
     virtual status_t captureList(const List<const PhysicalCameraSettingsList> &requests,
-                                 const std::list<const SurfaceMap> &surfaceMaps,
+                                 const std::list<SurfaceMap> &surfaceMaps,
                                  int64_t *lastFrameNumber = NULL) = 0;
 
     /**
@@ -152,7 +152,7 @@ class CameraDeviceBase : public virtual FrameProducer {
      * Output lastFrameNumber is the last frame number of the previous streaming request.
      */
     virtual status_t setStreamingRequestList(const List<const PhysicalCameraSettingsList> &requests,
-                                             const std::list<const SurfaceMap> &surfaceMaps,
+                                             const std::list<SurfaceMap> &surfaceMaps,
                                              int64_t *lastFrameNumber = NULL) = 0;
 
     /**
