@@ -50,15 +50,6 @@ using android::media::audio::common::AudioMMapPolicyType;
 #define AAUDIO_MMAP_POLICY_DEFAULT_AIDL        AudioMMapPolicy::NEVER
 #define AAUDIO_MMAP_EXCLUSIVE_POLICY_DEFAULT_AIDL AudioMMapPolicy::NEVER
 
-// These values are for a pre-check before we ask the lower level service to open a stream.
-// So they are just outside the maximum conceivable range of value,
-// on the edge of being ridiculous.
-// TODO These defines should be moved to a central place in audio.
-#define SAMPLES_PER_FRAME_MIN        1
-#define SAMPLES_PER_FRAME_MAX        FCC_LIMIT
-#define SAMPLE_RATE_HZ_MIN           8000
-// HDMI supports up to 32 channels at 1536000 Hz.
-#define SAMPLE_RATE_HZ_MAX           1600000
 #define FRAMES_PER_DATA_CALLBACK_MIN 1
 #define FRAMES_PER_DATA_CALLBACK_MAX (1024 * 1024)
 

@@ -361,7 +361,7 @@ void CameraFuzzer::invokeCameraAPIs() {
     clientAttribution.deviceId = kDefaultDeviceId;
     clientAttribution.uid = android::CameraService::USE_CALLING_UID;
     clientAttribution.pid = android::CameraService::USE_CALLING_PID;
-    rc = mCameraService->connect(this, cameraId, std::string(),
+    rc = mCameraService->connect(this, cameraId,
                                  /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
                                  ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
                                  /*forceSlowJpegMode*/false,
@@ -604,7 +604,8 @@ void Camera2Fuzzer::process() {
         AttributionSourceState clientAttribution;
         clientAttribution.deviceId = kDefaultDeviceId;
         clientAttribution.uid = android::CameraService::USE_CALLING_UID;
-        mCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
+        clientAttribution.pid = android::CameraService::USE_CALLING_PID;
+        mCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
                 clientAttribution, /*devicePolicy*/0, &device);
