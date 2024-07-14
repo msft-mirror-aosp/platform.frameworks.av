@@ -2134,7 +2134,6 @@ status_t CameraService::handleEvictionsLocked(const std::string& cameraId, int c
 Status CameraService::connect(
         const sp<ICameraClient>& cameraClient,
         int api1CameraId,
-        const std::string& clientPackageName,
         int targetSdkVersion,
         int rotationOverride,
         bool forceSlowJpegMode,
@@ -2156,13 +2155,14 @@ Status CameraService::connect(
 
     sp<Client> client = nullptr;
     ret = connectHelper<ICameraClient,Client>(cameraClient, cameraIdStr, api1CameraId,
-            clientPackageName, /*systemNativeClient*/ false, {}, clientAttribution.uid,
-            clientAttribution.pid, API_1,
+            clientAttribution.packageName.value_or(""), /*systemNativeClient*/ false, {},
+            clientAttribution.uid, clientAttribution.pid, API_1,
             /*shimUpdateOnly*/ false, /*oomScoreOffset*/ 0, targetSdkVersion,
             rotationOverride, forceSlowJpegMode, cameraIdStr, /*out*/client);
 
     if (!ret.isOk()) {
-        logRejected(cameraIdStr, getCallingPid(), clientPackageName, toStdString(ret.toString8()));
+        logRejected(cameraIdStr, getCallingPid(), clientAttribution.packageName.value_or(""),
+                toStdString(ret.toString8()));
         return ret;
     }
 
@@ -2239,8 +2239,6 @@ bool CameraService::shouldRejectSystemCameraConnection(const std::string& camera
 Status CameraService::connectDevice(
         const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
         const std::string& unresolvedCameraId,
-        const std::string& clientPackageName,
-        const std::optional<std::string>& clientFeatureId,
         int oomScoreOffset, int targetSdkVersion,
         int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
         /*out*/
@@ -2249,7 +2247,7 @@ Status CameraService::connectDevice(
     RunThreadWithRealtimePriority priorityBump;
     Status ret = Status::ok();
     sp<CameraDeviceClient> client = nullptr;
-    std::string clientPackageNameAdj = clientPackageName;
+    std::string clientPackageNameAdj = clientAttribution.packageName.value_or("");
     int callingPid = getCallingPid();
     int callingUid = getCallingUid();
     bool systemNativeClient = false;
@@ -2305,10 +2303,10 @@ Status CameraService::connectDevice(
     }
 
     ret = connectHelper<hardware::camera2::ICameraDeviceCallbacks,CameraDeviceClient>(cameraCb,
-            cameraId, /*api1CameraId*/-1, clientPackageNameAdj, systemNativeClient, clientFeatureId,
-            clientAttribution.uid, USE_CALLING_PID, API_2, /*shimUpdateOnly*/ false,
-            oomScoreOffset, targetSdkVersion, rotationOverride, /*forceSlowJpegMode*/false,
-            unresolvedCameraId, /*out*/client);
+            cameraId, /*api1CameraId*/-1, clientPackageNameAdj, systemNativeClient,
+            clientAttribution.attributionTag, clientAttribution.uid, USE_CALLING_PID, API_2,
+            /*shimUpdateOnly*/ false, oomScoreOffset, targetSdkVersion, rotationOverride,
+            /*forceSlowJpegMode*/false, unresolvedCameraId, /*out*/client);
 
     if (!ret.isOk()) {
         logRejected(cameraId, callingPid, clientPackageNameAdj, toStdString(ret.toString8()));

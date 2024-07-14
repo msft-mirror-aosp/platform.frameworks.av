@@ -173,17 +173,15 @@ public:
             hardware::camera2::params::VendorTagDescriptorCache* cache);
 
     virtual binder::Status     connect(const sp<hardware::ICameraClient>& cameraClient,
-            int32_t cameraId, const std::string& clientPackageName,
-            int targetSdkVersion, int rotationOverride, bool forceSlowJpegMode,
+            int32_t cameraId, int targetSdkVersion, int rotationOverride, bool forceSlowJpegMode,
             const AttributionSourceState& clientAttribution,
             int32_t devicePolicy, /*out*/ sp<hardware::ICamera>* device) override;
 
     virtual binder::Status     connectDevice(
             const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
-            const std::string& cameraId,
-            const std::string& clientPackageName, const std::optional<std::string>& clientFeatureId,
-            int scoreOffset, int targetSdkVersion, int rotationOverride,
-            const AttributionSourceState& clientAttribution, int32_t devicePolicy,
+            const std::string& cameraId, int scoreOffset, int targetSdkVersion,
+            int rotationOverride, const AttributionSourceState& clientAttribution,
+            int32_t devicePolicy,
             /*out*/
             sp<hardware::camera2::ICameraDeviceUser>* device);
 

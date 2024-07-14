@@ -12,3 +12,11 @@ flag {
     description: "Feature flag for adding GenericSoundModel to SystemApi"
     bug: "339267254"
 }
+
+flag {
+    name: "sound_trigger_manager_api"
+    is_exported: true
+    namespace: "soundtrigger"
+    description: "Feature flag for adding SoundTriggerManager API to SystemApi"
+    bug: "339267254"
+}

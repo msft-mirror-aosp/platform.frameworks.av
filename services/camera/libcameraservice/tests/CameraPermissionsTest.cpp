@@ -227,6 +227,7 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
     AttributionSourceState clientAttribution;
     clientAttribution.deviceId = kDefaultDeviceId;
     clientAttribution.uid = android::CameraService::USE_CALLING_UID;
+    clientAttribution.pid = android::CameraService::USE_CALLING_PID;
 
     std::vector<hardware::CameraStatus> statuses;
     sp<TestCameraServiceListener> serviceListener = new TestCameraServiceListener();
@@ -238,7 +239,7 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
         sp<TestCameraDeviceCallbacks> callbacks = new TestCameraDeviceCallbacks();
         sp<hardware::camera2::ICameraDeviceUser> device;
         binder::Status status =
-                sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
+                sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 clientAttribution, /*devicePolicy*/0, &device);
@@ -253,7 +254,7 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
         sp<TestCameraDeviceCallbacks> callbacks = new TestCameraDeviceCallbacks();
         sp<hardware::camera2::ICameraDeviceUser> device;
         binder::Status status =
-                sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
+                sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 clientAttribution, /*devicePolicy*/0, &device);
@@ -277,7 +278,7 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
         sp<TestCameraDeviceCallbacks> callbacks = new TestCameraDeviceCallbacks();
         sp<hardware::camera2::ICameraDeviceUser> deviceA, deviceB;
         binder::Status status =
-                sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
+                sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 clientAttribution, /*devicePolicy*/0, &deviceA);
@@ -285,7 +286,7 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
         status =
-                sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
+                sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 clientAttribution, /*devicePolicy*/0, &deviceB);
@@ -311,7 +312,7 @@ TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
         sp<TestCameraDeviceCallbacks> callbacks = new TestCameraDeviceCallbacks();
         sp<hardware::camera2::ICameraDeviceUser> deviceA, deviceB;
         binder::Status status =
-                sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
+                sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 clientAttribution, /*devicePolicy*/0, &deviceA);
@@ -319,7 +320,7 @@ TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
         status =
-                sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
+                sCameraService->connectDevice(callbacks, s.cameraId,
                 1/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 clientAttribution, /*devicePolicy*/0, &deviceB);

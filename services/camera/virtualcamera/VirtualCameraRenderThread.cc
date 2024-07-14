@@ -679,7 +679,7 @@ std::vector<uint8_t> VirtualCameraRenderThread::createThumbnail(
     return {};
   }
 
-  // TODO(b/324383963) Add support for letterboxing if the thumbnail size
+  // TODO(b/324383963) Add support for letterboxing if the thumbnail sizese
   // doesn't correspond
   //  to input texture aspect ratio.
   if (!renderIntoEglFramebuffer(*framebuffer, /*fence=*/nullptr,
@@ -753,6 +753,7 @@ ndk::ScopedAStatus VirtualCameraRenderThread::renderIntoBlobStreamBuffer(
   PlanesLockGuard planesLock(hwBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
                              fence);
   if (planesLock.getStatus() != OK) {
+    ALOGE("Failed to lock hwBuffer planes");
     return cameraStatus(Status::INTERNAL_ERROR);
   }
 
@@ -760,23 +761,35 @@ ndk::ScopedAStatus VirtualCameraRenderThread::renderIntoBlobStreamBuffer(
       createExif(Resolution(stream->width, stream->height), resultMetadata,
                  createThumbnail(requestSettings.thumbnailResolution,
                                  requestSettings.thumbnailJpegQuality));
+
+  unsigned long outBufferSize = stream->bufferSize - sizeof(CameraBlob);
+  void* outBuffer = (*planesLock).planes[0].data;
   std::optional<size_t> compressedSize = compressJpeg(
       stream->width, stream->height, requestSettings.jpegQuality,
-      framebuffer->getHardwareBuffer(), app1ExifData,
-      stream->bufferSize - sizeof(CameraBlob), (*planesLock).planes[0].data);
+      framebuffer->getHardwareBuffer(), app1ExifData, outBufferSize, outBuffer);
 
   if (!compressedSize.has_value()) {
     ALOGE("%s: Failed to compress JPEG image", __func__);
     return cameraStatus(Status::INTERNAL_ERROR);
   }
 
+  // Add the transport header at the end of the JPEG output buffer.
+  //
+  // jpegBlobId must start at byte[buffer_size - sizeof(CameraBlob)],
+  // where the buffer_size is the size of gralloc buffer.
+  //
+  // See
+  // hardware/interfaces/camera/device/aidl/android/hardware/camera/device/CameraBlobId.aidl
+  // for the full explanation of the following code.
   CameraBlob cameraBlob{
       .blobId = CameraBlobId::JPEG,
       .blobSizeBytes = static_cast<int32_t>(compressedSize.value())};
 
-  memcpy(reinterpret_cast<uint8_t*>((*planesLock).planes[0].data) +
-             (stream->bufferSize - sizeof(cameraBlob)),
-         &cameraBlob, sizeof(cameraBlob));
+  // Copy the cameraBlob to the end of the JPEG buffer.
+  uint8_t* jpegStreamEndAddress =
+      reinterpret_cast<uint8_t*>((*planesLock).planes[0].data) +
+      (stream->bufferSize - sizeof(cameraBlob));
+  memcpy(jpegStreamEndAddress, &cameraBlob, sizeof(cameraBlob));
 
   ALOGV("%s: Successfully compressed JPEG image, resulting size %zu B",
         __func__, compressedSize.value());
