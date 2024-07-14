@@ -1334,10 +1334,10 @@ sp<MediaCodecSource> StagefrightRecorder::createAudioSource() {
         // cause out-of-memory due to large input buffer size. And audio recording
         // probably doesn't make sense in the scenario, since the slow-down factor
         // is probably huge (eg. mSampleRate=48K, mCaptureFps=240, mFrameRate=1).
-        const static int32_t SAMPLE_RATE_HZ_MAX = 192000;
+        const static int32_t kSampleRateHzMax = 192000;
         sourceSampleRate =
                 (mSampleRate * mCaptureFps + mFrameRate / 2) / mFrameRate;
-        if (sourceSampleRate < mSampleRate || sourceSampleRate > SAMPLE_RATE_HZ_MAX) {
+        if (sourceSampleRate < mSampleRate || sourceSampleRate > kSampleRateHzMax) {
             ALOGE("source sample rate out of range! "
                     "(mSampleRate %d, mCaptureFps %.2f, mFrameRate %d",
                     mSampleRate, mCaptureFps, mFrameRate);

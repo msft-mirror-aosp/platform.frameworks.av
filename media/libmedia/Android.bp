@@ -278,10 +278,6 @@ cc_library_shared {
         "android.media.codec-aconfig-cc",
     ],
 
-    include_dirs: [
-        "system/libhidl/transport/token/1.0/utils/include",
-    ],
-
     export_include_dirs: [
         "include",
     ],

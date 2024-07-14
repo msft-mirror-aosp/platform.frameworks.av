@@ -33,10 +33,6 @@ static const audio_format_t gDynamicFormat = AUDIO_FORMAT_DEFAULT;
 
 static const uint32_t SONIFICATION_RESPECTFUL_AFTER_MUSIC_DELAY = 5000;
 
-// For mixed output and inputs, the policy will use max mixer sampling rates.
-// Do not limit sampling rate otherwise
-#define SAMPLE_RATE_HZ_MAX 192000
-
 // Used when a client opens a capture stream, without specifying a desired sample rate.
 #define SAMPLE_RATE_HZ_DEFAULT 48000
 
