@@ -269,8 +269,9 @@ private:
                 ? EFFECT_BUFFER_ACCESS_WRITE : EFFECT_BUFFER_ACCESS_ACCUMULATE;
     }
 
-    status_t setVolumeInternal(uint32_t* left, uint32_t* right,
-                               bool controller /* the volume controller effect of the chain */);
+    status_t setVolumeInternal_ll(uint32_t* left, uint32_t* right,
+                                  bool controller /* the volume controller effect of the chain */)
+            REQUIRES(audio_utils::EffectChain_Mutex, audio_utils::EffectBase_Mutex);
 
     effect_config_t     mConfig;    // input and output audio configuration
     sp<EffectBufferHalInterface> mInBuffer;  // Buffers for interacting with HAL
@@ -294,12 +295,12 @@ private:
     template <typename MUTEX>
     class AutoLockReentrant {
     public:
-        AutoLockReentrant(MUTEX& mutex, pid_t allowedTid)
+        AutoLockReentrant(MUTEX& mutex, pid_t allowedTid) ACQUIRE(audio_utils::EffectBase_Mutex)
             : mMutex(gettid() == allowedTid ? nullptr : &mutex)
         {
             if (mMutex != nullptr) mMutex->lock();
         }
-        ~AutoLockReentrant() {
+        ~AutoLockReentrant() RELEASE(audio_utils::EffectBase_Mutex) {
             if (mMutex != nullptr) mMutex->unlock();
         }
     private:
@@ -316,7 +317,7 @@ private:
     // here is used to indicate the volume to apply before this effect.
     std::optional<std::vector<uint32_t>> mReturnedVolume;
     // TODO: b/315995877, remove this debugging string after root cause
-    std::string mEffectInterfaceDebug;
+    std::string mEffectInterfaceDebug GUARDED_BY(audio_utils::EffectChain_Mutex);
 };
 
 class HwAccDeviceEffectModule : public EffectModule {
