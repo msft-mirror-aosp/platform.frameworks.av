@@ -377,6 +377,8 @@ aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(media::AudioPolicy
             return AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS;
         case media::AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL:
             return AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL;
+        case media::AudioPolicyForcedConfig::BT_BLE:
+            return AUDIO_POLICY_FORCE_BT_BLE;
     }
     return unexpected(BAD_VALUE);
 }
@@ -416,6 +418,8 @@ legacy2aidl_audio_policy_forced_cfg_t_AudioPolicyForcedConfig(audio_policy_force
             return media::AudioPolicyForcedConfig::ENCODED_SURROUND_ALWAYS;
         case AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL:
             return media::AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL;
+        case AUDIO_POLICY_FORCE_BT_BLE:
+            return media::AudioPolicyForcedConfig::BT_BLE;
         case AUDIO_POLICY_FORCE_CFG_CNT:
             break;
     }

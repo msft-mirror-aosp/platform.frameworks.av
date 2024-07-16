@@ -142,7 +142,8 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
         }
         break;
     case AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING:
-        if (config != AUDIO_POLICY_FORCE_BT_SCO && config != AUDIO_POLICY_FORCE_NONE) {
+        if (config != AUDIO_POLICY_FORCE_BT_SCO && config != AUDIO_POLICY_FORCE_BT_BLE
+                && config != AUDIO_POLICY_FORCE_NONE) {
             ALOGW("setForceUse() invalid config %d for VIBRATE_RINGING", config);
             return BAD_VALUE;
         }
@@ -355,6 +356,40 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                 }
             }
         }
+
+        // if LEA headset is connected and we are told to use it, play ringtone over
+        // speaker and BT LEA
+        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllBleSet()).isEmpty()) {
+            DeviceVector devices2;
+            devices2 = availableOutputDevices.getFirstDevicesFromTypes({
+                    AUDIO_DEVICE_OUT_BLE_HEADSET, AUDIO_DEVICE_OUT_BLE_SPEAKER});
+            // Use ONLY Bluetooth LEA output when ringing in vibration mode
+            if (!((getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) == AUDIO_POLICY_FORCE_SYSTEM_ENFORCED)
+                    && (strategy == STRATEGY_ENFORCED_AUDIBLE))) {
+                if (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
+                        == AUDIO_POLICY_FORCE_BT_BLE) {
+                    if (!devices2.isEmpty()) {
+                        devices = devices2;
+                        break;
+                    }
+                }
+            }
+            // Use both Bluetooth LEA and phone default output when ringing in normal mode
+            if (audio_is_ble_out_device(getPreferredDeviceTypeForLegacyStrategy(
+                    availableOutputDevices, STRATEGY_PHONE))) {
+                if (strategy == STRATEGY_SONIFICATION) {
+                    devices.replaceDevicesByType(
+                            AUDIO_DEVICE_OUT_SPEAKER,
+                            availableOutputDevices.getDevicesFromType(
+                                    AUDIO_DEVICE_OUT_SPEAKER_SAFE));
+                }
+                if (!devices2.isEmpty()) {
+                    devices.add(devices2);
+                    break;
+                }
+            }
+        }
+
         // The second device used for sonification is the same as the device used by media strategy
         FALLTHROUGH_INTENDED;
 
