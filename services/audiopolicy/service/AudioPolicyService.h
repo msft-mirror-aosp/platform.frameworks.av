@@ -452,8 +452,8 @@ private:
     app_state_t apmStatFromAmState(int amState);
 
     bool isSupportedSystemUsage(audio_usage_t usage);
-    binder::Status validateUsage(const audio_attributes_t& attr);
-    binder::Status validateUsage(const audio_attributes_t& attr,
+    status_t validateUsage(const audio_attributes_t& attr);
+    status_t validateUsage(const audio_attributes_t& attr,
                            const AttributionSourceState& attributionSource);
 
     void updateUidStates();
