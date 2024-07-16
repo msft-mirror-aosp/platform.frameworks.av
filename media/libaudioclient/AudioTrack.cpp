@@ -319,13 +319,6 @@ AudioTrack::AudioTrack(
         const audio_attributes_t* pAttributes,
         bool doNotReconnect,
         float maxRequiredSpeed)
-    : mStatus(NO_INIT),
-      mState(STATE_STOPPED),
-      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT),
-      mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
 
@@ -1173,6 +1166,13 @@ status_t AudioTrack::setSampleRate(uint32_t rate)
 
     mSampleRate = rate;
     mProxy->setSampleRate(effectiveSampleRate);
+
+    mediametrics::LogItem(mMetricsId)
+            .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_SETSAMPLERATE)
+            .set(AMEDIAMETRICS_PROP_PREFIX_EFFECTIVE AMEDIAMETRICS_PROP_SAMPLERATE,
+                    static_cast<int32_t>(effectiveSampleRate))
+            .set(AMEDIAMETRICS_PROP_SAMPLERATE, static_cast<int32_t>(rate))
+            .record();
 
     return NO_ERROR;
 }

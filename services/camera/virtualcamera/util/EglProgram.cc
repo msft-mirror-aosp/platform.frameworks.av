@@ -96,6 +96,7 @@ constexpr char kExternalYuvTextureFragmentShader[] = R"(#version 300 es
       fragColor = texture(uTexture, vTextureCoord);
     })";
 
+// Shader to render a RGBA texture into a YUV buffer.
 constexpr char kExternalRgbaTextureFragmentShader[] = R"(#version 300 es
     #extension GL_OES_EGL_image_external_essl3 : require
     #extension GL_EXT_YUV_target : require
@@ -227,6 +228,15 @@ EglTestPatternProgram::EglTestPatternProgram() {
   glEnableVertexAttribArray(mTextureCoordHandle);
   glVertexAttribPointer(mTextureCoordHandle, 2, GL_FLOAT, false,
                         kTextureCoords.size(), kTextureCoords.data());
+}
+
+EglTestPatternProgram::~EglTestPatternProgram() {
+  if (mPositionHandle != -1) {
+    glDisableVertexAttribArray(mPositionHandle);
+  }
+  if (mTextureCoordHandle != -1) {
+    glDisableVertexAttribArray(mTextureCoordHandle);
+  }
 }
 
 bool EglTestPatternProgram::draw(const std::chrono::nanoseconds timestamp) {

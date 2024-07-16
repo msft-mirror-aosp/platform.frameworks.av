@@ -30,6 +30,7 @@
 #include <PolicyAudioPort.h>
 #include <IOProfile.h>
 #include <AudioIODescriptorInterface.h>
+#include <com_android_media_audioserver.h>
 #include <policy.h>
 #include <media/AudioContainers.h>
 #include <utils/String8.h>
@@ -142,7 +143,8 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
         }
         break;
     case AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING:
-        if (config != AUDIO_POLICY_FORCE_BT_SCO && config != AUDIO_POLICY_FORCE_NONE) {
+        if (config != AUDIO_POLICY_FORCE_BT_SCO && config != AUDIO_POLICY_FORCE_BT_BLE
+                && config != AUDIO_POLICY_FORCE_NONE) {
             ALOGW("setForceUse() invalid config %d for VIBRATE_RINGING", config);
             return BAD_VALUE;
         }
@@ -154,11 +156,57 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
     return EngineBase::setForceUse(usage, config);
 }
 
+bool Engine::isBtScoActive(DeviceVector& availableOutputDevices,
+                           const SwAudioOutputCollection &outputs) const {
+    if (availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()) {
+        return false;
+    }
+    // SCO is active if:
+    // 1) we are in a call and SCO is the preferred device for PHONE strategy
+    if (isInCall() && audio_is_bluetooth_out_sco_device(
+            getPreferredDeviceTypeForLegacyStrategy(availableOutputDevices, STRATEGY_PHONE))) {
+        return true;
+    }
+
+    // 2) A strategy for which the preferred device is SCO is active
+    for (const auto &ps : getOrderedProductStrategies()) {
+        if (outputs.isStrategyActive(ps) &&
+            !getPreferredAvailableDevicesForProductStrategy(availableOutputDevices, ps)
+                .getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()) {
+            return true;
+        }
+    }
+    // 3) a ringtone is active and SCO is used for ringing
+    if (outputs.isActiveLocally(toVolumeSource(AUDIO_STREAM_RING))
+          && (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
+                    == AUDIO_POLICY_FORCE_BT_SCO)) {
+        return true;
+    }
+    // 4) an active input is routed from SCO
+    DeviceVector availableInputDevices = getApmObserver()->getAvailableInputDevices();
+    const auto &inputs = getApmObserver()->getInputs();
+    if (inputs.activeInputsCountOnDevices(availableInputDevices.getDevicesFromType(
+            AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET)) > 0) {
+        return true;
+    }
+    return false;
+}
+
 void Engine::filterOutputDevicesForStrategy(legacy_strategy strategy,
                                             DeviceVector& availableOutputDevices,
                                             const SwAudioOutputCollection &outputs) const
 {
     DeviceVector availableInputDevices = getApmObserver()->getAvailableInputDevices();
+
+    if (com::android::media::audioserver::use_bt_sco_for_media()) {
+        // remove A2DP and LE Audio devices whenever BT SCO is in use
+        if (isBtScoActive(availableOutputDevices, outputs)) {
+            availableOutputDevices.remove(
+                availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllA2dpSet()));
+            availableOutputDevices.remove(
+                availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllBleSet()));
+        }
+    }
 
     switch (strategy) {
     case STRATEGY_SONIFICATION_RESPECTFUL: {
@@ -355,6 +403,40 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                 }
             }
         }
+
+        // if LEA headset is connected and we are told to use it, play ringtone over
+        // speaker and BT LEA
+        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllBleSet()).isEmpty()) {
+            DeviceVector devices2;
+            devices2 = availableOutputDevices.getFirstDevicesFromTypes({
+                    AUDIO_DEVICE_OUT_BLE_HEADSET, AUDIO_DEVICE_OUT_BLE_SPEAKER});
+            // Use ONLY Bluetooth LEA output when ringing in vibration mode
+            if (!((getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) == AUDIO_POLICY_FORCE_SYSTEM_ENFORCED)
+                    && (strategy == STRATEGY_ENFORCED_AUDIBLE))) {
+                if (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
+                        == AUDIO_POLICY_FORCE_BT_BLE) {
+                    if (!devices2.isEmpty()) {
+                        devices = devices2;
+                        break;
+                    }
+                }
+            }
+            // Use both Bluetooth LEA and phone default output when ringing in normal mode
+            if (audio_is_ble_out_device(getPreferredDeviceTypeForLegacyStrategy(
+                    availableOutputDevices, STRATEGY_PHONE))) {
+                if (strategy == STRATEGY_SONIFICATION) {
+                    devices.replaceDevicesByType(
+                            AUDIO_DEVICE_OUT_SPEAKER,
+                            availableOutputDevices.getDevicesFromType(
+                                    AUDIO_DEVICE_OUT_SPEAKER_SAFE));
+                }
+                if (!devices2.isEmpty()) {
+                    devices.add(devices2);
+                    break;
+                }
+            }
+        }
+
         // The second device used for sonification is the same as the device used by media strategy
         FALLTHROUGH_INTENDED;
 
@@ -381,10 +463,12 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
 
         // LE audio broadcast device is only used if:
         // - No call is active
-        // - either MEDIA or SONIFICATION_RESPECTFUL is the highest priority active strategy
-        //   OR the LE audio unicast device is not active
+        // - either MEDIA, SONIFICATION_RESPECTFUL or SONIFICATION is the highest priority
+        // active strategy
+        // OR the LE audio unicast device is not active
         if (devices2.isEmpty() && !isInCall()
-                && (strategy == STRATEGY_MEDIA || strategy == STRATEGY_SONIFICATION_RESPECTFUL)) {
+                && (strategy == STRATEGY_MEDIA || strategy == STRATEGY_SONIFICATION_RESPECTFUL
+                      || strategy == STRATEGY_SONIFICATION)) {
             legacy_strategy topActiveStrategy = STRATEGY_NONE;
             for (const auto &ps : getOrderedProductStrategies()) {
                 if (outputs.isStrategyActive(ps)) {
@@ -396,6 +480,7 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
 
             if (topActiveStrategy == STRATEGY_NONE || topActiveStrategy == STRATEGY_MEDIA
                     || topActiveStrategy == STRATEGY_SONIFICATION_RESPECTFUL
+                    || topActiveStrategy == STRATEGY_SONIFICATION
                     || !outputs.isAnyDeviceTypeActive(getAudioDeviceOutLeAudioUnicastSet())) {
                 devices2 =
                         availableOutputDevices.getDevicesFromType(AUDIO_DEVICE_OUT_BLE_BROADCAST);
@@ -418,15 +503,27 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                         getLastRemovableMediaDevices(GROUP_WIRED, excludedDevices));
             }
         }
+
+        if (com::android::media::audioserver::use_bt_sco_for_media()) {
+            if (devices2.isEmpty() && isBtScoActive(availableOutputDevices, outputs)) {
+                devices2 = availableOutputDevices.getFirstDevicesFromTypes(
+                        { AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT,
+                          AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
+                          AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
+            }
+        }
+
         if ((devices2.isEmpty()) &&
                 (getForceUse(AUDIO_POLICY_FORCE_FOR_DOCK) == AUDIO_POLICY_FORCE_ANALOG_DOCK)) {
             devices2 = availableOutputDevices.getDevicesFromType(
                     AUDIO_DEVICE_OUT_ANLG_DOCK_HEADSET);
         }
+
         if (devices2.isEmpty()) {
             devices2 = availableOutputDevices.getFirstDevicesFromTypes({
                         AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET, AUDIO_DEVICE_OUT_SPEAKER});
         }
+
         DeviceVector devices3;
         if (strategy == STRATEGY_MEDIA) {
             // ARC, SPDIF and AUX_LINE can co-exist with others.
