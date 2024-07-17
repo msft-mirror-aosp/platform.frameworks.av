@@ -24,11 +24,12 @@
 #include <utils/Log.h>
 #include <utils/Trace.h>
 
+#include <android/hardware/camera2/ICameraDeviceCallbacks.h>
 #include <camera/CameraUtils.h>
 #include <camera/StringUtils.h>
+#include <com_android_internal_camera_flags.h>
 #include <cutils/properties.h>
 #include <gui/Surface.h>
-#include <android/hardware/camera2/ICameraDeviceCallbacks.h>
 
 #include "api1/Camera2Client.h"
 
@@ -49,6 +50,8 @@
 
 namespace android {
 using namespace camera2;
+
+namespace flags = com::android::internal::camera::flags;
 
 // Interface used by CameraService
 
@@ -501,7 +504,16 @@ binder::Status Camera2Client::disconnect() {
     bool hasDeviceError = mDevice->hasDeviceError();
     mDevice->disconnect();
 
-    CameraService::Client::disconnect();
+    if (flags::api1_release_binderlock_before_cameraservice_disconnect()) {
+        // CameraService::Client::disconnect calls CameraService which attempts to lock
+        // CameraService's mServiceLock. This might lead to a deadlock if the cameraservice is
+        // currently waiting to lock mSerializationLock on another thread.
+        mBinderSerializationLock.unlock();
+        CameraService::Client::disconnect();
+        mBinderSerializationLock.lock();
+    } else {
+        CameraService::Client::disconnect();
+    }
 
     int32_t closeLatencyMs = ns2ms(systemTime() - startTime);
     mCameraServiceProxyWrapper->logClose(mCameraIdStr, closeLatencyMs, hasDeviceError);
