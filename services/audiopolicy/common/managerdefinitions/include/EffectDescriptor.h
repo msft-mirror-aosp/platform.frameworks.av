@@ -32,11 +32,15 @@ class AudioPolicyClientInterface;
 class EffectDescriptor : public RefBase
 {
 public:
-    EffectDescriptor(const effect_descriptor_t *desc, bool isMusicEffect,
-                     int id, audio_io_handle_t io, audio_session_t session) :
-        mId(id), mIo(io), mSession(session), mEnabled(false), mSuspended(false),
-        mIsMusicEffect(isMusicEffect)
-    {
+  EffectDescriptor(const effect_descriptor_t* desc, bool isMusicEffect, int id,
+                   audio_io_handle_t io, audio_session_t session)
+      : mId(id),
+        mIo(io),
+        mIsOrphan(io == AUDIO_IO_HANDLE_NONE),
+        mSession(session),
+        mEnabled(false),
+        mSuspended(false),
+        mIsMusicEffect(isMusicEffect) {
         memcpy (&mDesc, desc, sizeof(effect_descriptor_t));
     }
 
@@ -95,8 +99,18 @@ public:
      * @return ioHandle if found, AUDIO_IO_HANDLE_NONE otherwise.
      */
     audio_io_handle_t getIoForSession(audio_session_t sessionId,
-                                      const effect_uuid_t *effectType = nullptr);
-    bool hasOrphansForSession(audio_session_t sessionId);
+                                      const effect_uuid_t* effectType = nullptr) const;
+
+    /**
+     * @brief Checks if there is at least one orphan effect with given sessionId and optional effect
+     * type uuid.
+     * @param sessionId Session ID.
+     * @param effectType Optional effect type UUID pointer to effect_uuid_t, nullptr by default.
+     * @return True if there is an orphan effect for given sessionId and type UUID, false otherwise.
+     */
+    bool hasOrphansForSession(audio_session_t sessionId,
+                              const effect_uuid_t* effectType = nullptr) const;
+
     EffectDescriptorCollection getOrphanEffectsForSession(audio_session_t sessionId) const;
     void dump(String8 *dst, int spaces = 0, bool verbose = true) const;
 
