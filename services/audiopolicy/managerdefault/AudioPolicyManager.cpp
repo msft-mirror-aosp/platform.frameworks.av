@@ -2186,8 +2186,7 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
     // matching criteria values in priority order for best matching output so far
     std::vector<uint32_t> bestMatchCriteria(8, 0);
 
-    const bool hasOrphanHaptic =
-            mEffects.hasOrphanEffectsForSessionAndType(sessionId, FX_IID_HAPTICGENERATOR);
+    const bool hasOrphanHaptic = mEffects.hasOrphansForSession(sessionId, FX_IID_HAPTICGENERATOR);
     const uint32_t channelCount = audio_channel_count_from_out_mask(channelMask);
     const uint32_t hapticChannelCount = audio_channel_count_from_out_mask(
         channelMask & AUDIO_CHANNEL_HAPTIC_ALL);
@@ -6410,7 +6409,7 @@ bool AudioPolicyManager::checkHapticCompatibilityOnSpatializerOutput(
         // means haptic use cases (either the client channelmask includes haptic bits, or created a
         // HapticGenerator effect for this session) are not supported.
         return clientHapticChannel == 0 &&
-               !mEffects.hasOrphanEffectsForSessionAndType(sessionId, FX_IID_HAPTICGENERATOR);
+               !mEffects.hasOrphansForSession(sessionId, FX_IID_HAPTICGENERATOR);
     }
 }
 
