@@ -3507,6 +3507,11 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
                                                             bool enabled,
                                                             audio_stream_type_t streamToDriveAbs)
 {
+    if (!enabled) {
+        mAbsoluteVolumeDrivingStreams.erase(deviceType);
+        return NO_ERROR;
+    }
+
     audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
     if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
         ALOGW("%s: no attributes for stream %s, bailing out", __func__,
@@ -3514,12 +3519,7 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
         return BAD_VALUE;
     }
 
-    if (enabled) {
-        mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
-    } else {
-        mAbsoluteVolumeDrivingStreams.erase(deviceType);
-    }
-
+    mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
     return NO_ERROR;
 }
 
