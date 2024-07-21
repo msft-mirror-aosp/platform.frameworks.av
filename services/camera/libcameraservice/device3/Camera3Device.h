@@ -129,12 +129,12 @@ class Camera3Device :
     // idle state
     status_t capture(CameraMetadata &request, int64_t *lastFrameNumber = NULL) override;
     status_t captureList(const List<const PhysicalCameraSettingsList> &requestsList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             int64_t *lastFrameNumber = NULL) override;
     status_t setStreamingRequest(const CameraMetadata &request,
             int64_t *lastFrameNumber = NULL) override;
     status_t setStreamingRequestList(const List<const PhysicalCameraSettingsList> &requestsList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             int64_t *lastFrameNumber = NULL) override;
     status_t clearStreamingRequest(int64_t *lastFrameNumber = NULL) override;
 
@@ -702,17 +702,17 @@ class Camera3Device :
 
     status_t convertMetadataListToRequestListLocked(
             const List<const PhysicalCameraSettingsList> &metadataList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             bool repeating, nsecs_t requestTimeNs,
             /*out*/
             RequestList *requestList);
 
     void convertToRequestList(List<const PhysicalCameraSettingsList>& requestsList,
-            std::list<const SurfaceMap>& surfaceMaps,
+            std::list<SurfaceMap>& surfaceMaps,
             const CameraMetadata& request);
 
     status_t submitRequestsHelper(const List<const PhysicalCameraSettingsList> &requestsList,
-                                  const std::list<const SurfaceMap> &surfaceMaps,
+                                  const std::list<SurfaceMap> &surfaceMaps,
                                   bool repeating,
                                   int64_t *lastFrameNumber = NULL);
 
