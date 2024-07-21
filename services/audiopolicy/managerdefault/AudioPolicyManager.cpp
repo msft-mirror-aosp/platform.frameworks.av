@@ -1654,12 +1654,14 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
     }
 
     // Use the spatializer output if the content can be spatialized, no preferred mixer
-    // was specified and offload or direct playback is not explicitly requested.
+    // was specified and offload or direct playback is not explicitly requested, and there is no
+    // haptic channel included in playback
     *isSpatialized = false;
-    if (mSpatializerOutput != nullptr
-            && canBeSpatializedInt(attr, config, devices.toTypeAddrVector())
-            && prefMixerConfigInfo == nullptr
-            && ((*flags & (AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD | AUDIO_OUTPUT_FLAG_DIRECT)) == 0)) {
+    if (mSpatializerOutput != nullptr &&
+        canBeSpatializedInt(attr, config, devices.toTypeAddrVector()) &&
+        prefMixerConfigInfo == nullptr &&
+        ((*flags & (AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD | AUDIO_OUTPUT_FLAG_DIRECT)) == 0) &&
+        checkHapticCompatibilityOnSpatializerOutput(config, session)) {
         *isSpatialized = true;
         return mSpatializerOutput->mIoHandle;
     }
@@ -2085,6 +2087,7 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
     // matching criteria values in priority order for best matching output so far
     std::vector<uint32_t> bestMatchCriteria(8, 0);
 
+    const bool hasOrphanHaptic = mEffects.hasOrphansForSession(sessionId, FX_IID_HAPTICGENERATOR);
     const uint32_t channelCount = audio_channel_count_from_out_mask(channelMask);
     const uint32_t hapticChannelCount = audio_channel_count_from_out_mask(
         channelMask & AUDIO_CHANNEL_HAPTIC_ALL);
@@ -2105,13 +2108,20 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         // When using haptic output, same audio format and sample rate are required.
         const uint32_t outputHapticChannelCount = audio_channel_count_from_out_mask(
             outputDesc->getChannelMask() & AUDIO_CHANNEL_HAPTIC_ALL);
-        if ((hapticChannelCount == 0) != (outputHapticChannelCount == 0)) {
+        // skip if haptic channel specified but output does not support it, or output support haptic
+        // but there is no haptic channel requested AND no orphan haptic effect exist
+        if ((hapticChannelCount != 0 && outputHapticChannelCount == 0) ||
+            (hapticChannelCount == 0 && outputHapticChannelCount != 0 && !hasOrphanHaptic)) {
             continue;
         }
-        if (outputHapticChannelCount >= hapticChannelCount
-            && format == outputDesc->getFormat()
-            && samplingRate == outputDesc->getSamplingRate()) {
-                currentMatchCriteria[0] = outputHapticChannelCount;
+        // In the case of audio-coupled-haptic playback, there is no format conversion and
+        // resampling in the framework, same format/channel/sampleRate for client and the output
+        // thread is required. In the case of HapticGenerator effect, do not require format
+        // matching.
+        if ((outputHapticChannelCount >= hapticChannelCount && format == outputDesc->getFormat() &&
+             samplingRate == outputDesc->getSamplingRate()) ||
+            (outputHapticChannelCount != 0 && hasOrphanHaptic)) {
+            currentMatchCriteria[0] = outputHapticChannelCount;
         }
 
         // functional flags match
@@ -3600,7 +3610,7 @@ status_t AudioPolicyManager::registerEffect(const effect_descriptor_t *desc,
                                 int session,
                                 int id)
 {
-    if (session != AUDIO_SESSION_DEVICE) {
+    if (session != AUDIO_SESSION_DEVICE && io != AUDIO_IO_HANDLE_NONE) {
         ssize_t index = mOutputs.indexOfKey(io);
         if (index < 0) {
             index = mInputs.indexOfKey(io);
@@ -6110,6 +6120,34 @@ bool AudioPolicyManager::canBeSpatializedInt(const audio_attributes_t *attr,
     return true;
 }
 
+// The Spatializer output is compatible with Haptic use cases if:
+// 1. the Spatializer output thread supports Haptic, and format/sampleRate are same
+// with client if client haptic channel bits were set, or
+// 2. the Spatializer output thread does not support Haptic, and client did not ask haptic by
+// including the haptic bits or creating the HapticGenerator effect for same session.
+bool AudioPolicyManager::checkHapticCompatibilityOnSpatializerOutput(
+        const audio_config_t* config, audio_session_t sessionId) const {
+    const auto clientHapticChannel =
+            audio_channel_count_from_out_mask(config->channel_mask & AUDIO_CHANNEL_HAPTIC_ALL);
+    const auto threadOutputHapticChannel = audio_channel_count_from_out_mask(
+            mSpatializerOutput->getChannelMask() & AUDIO_CHANNEL_HAPTIC_ALL);
+
+    if (threadOutputHapticChannel) {
+        // check format and sampleRate match if client haptic channel mask exist
+        if (clientHapticChannel) {
+            return mSpatializerOutput->getFormat() == config->format &&
+                   mSpatializerOutput->getSamplingRate() == config->sample_rate;
+        }
+        return true;
+    } else {
+        // in the case of the Spatializer output channel mask does not have haptic channel bits, it
+        // means haptic use cases (either the client channelmask includes haptic bits, or created a
+        // HapticGenerator effect for this session) are not supported.
+        return clientHapticChannel == 0 &&
+               !mEffects.hasOrphansForSession(sessionId, FX_IID_HAPTICGENERATOR);
+    }
+}
+
 void AudioPolicyManager::checkVirtualizerClientRoutes() {
     std::set<audio_stream_type_t> streamsToInvalidate;
     for (size_t i = 0; i < mOutputs.size(); i++) {
@@ -6480,7 +6518,7 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
             status_t status = inputDesc->open(nullptr,
                                               availProfileDevices.itemAt(0),
                                               AUDIO_SOURCE_MIC,
-                                              (audio_input_flags_t) inProfile->getFlags(),
+                                              AUDIO_INPUT_FLAG_NONE,
                                               &input);
             if (status != NO_ERROR) {
                 ALOGW("%s: Cannot open input stream for device %s for profile %s on hw module %s",
@@ -6795,8 +6833,7 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
             desc = new AudioInputDescriptor(profile, mpClientInterface);
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
             ALOGV("%s opening input for profile %s", __func__, profile->getTagName().c_str());
-            status = desc->open(nullptr, device, AUDIO_SOURCE_MIC,
-                                (audio_input_flags_t) profile->getFlags(), &input);
+            status = desc->open(nullptr, device, AUDIO_SOURCE_MIC, AUDIO_INPUT_FLAG_NONE, &input);
 
             if (status == NO_ERROR) {
                 const String8& address = String8(device->address().c_str());
