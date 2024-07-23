@@ -42,6 +42,8 @@ using ::aidl::android::aidl_utils::statusTFromBinderStatus;
 using ::aidl::android::hardware::audio::effect::Descriptor;
 using ::aidl::android::hardware::audio::effect::IFactory;
 using ::aidl::android::hardware::audio::effect::Processing;
+using ::aidl::android::media::audio::common::AudioDevice;
+using ::aidl::android::media::audio::common::AudioDeviceAddress;
 using ::aidl::android::media::audio::common::AudioSource;
 using ::aidl::android::media::audio::common::AudioStreamType;
 using ::aidl::android::media::audio::common::AudioUuid;
@@ -281,7 +283,8 @@ std::shared_ptr<const effectsConfig::Processings> EffectsFactoryHalAidl::getProc
 
     auto getConfigProcessingWithAidlProcessing =
             [&](const auto& aidlProcess, std::vector<effectsConfig::InputStream>& preprocess,
-                std::vector<effectsConfig::OutputStream>& postprocess) {
+                std::vector<effectsConfig::OutputStream>& postprocess,
+                std::vector<effectsConfig::DeviceEffects>& deviceprocess) {
                 if (aidlProcess.type.getTag() == Processing::Type::streamType) {
                     AudioStreamType aidlType =
                             aidlProcess.type.template get<Processing::Type::streamType>();
@@ -313,6 +316,25 @@ std::shared_ptr<const effectsConfig::Processings> EffectsFactoryHalAidl::getProc
                     effectsConfig::InputStream stream = {.type = type.value(),
                                                          .effects = std::move(effects)};
                     preprocess.emplace_back(stream);
+                } else if (aidlProcess.type.getTag() == Processing::Type::device) {
+                    AudioDevice aidlDevice =
+                            aidlProcess.type.template get<Processing::Type::device>();
+                    std::vector<std::shared_ptr<const effectsConfig::Effect>> effects;
+                    std::transform(aidlProcess.ids.begin(), aidlProcess.ids.end(),
+                                   std::back_inserter(effects), getConfigEffectWithDescriptor);
+                    audio_devices_t type;
+                    char address[AUDIO_DEVICE_MAX_ADDRESS_LEN];
+                    status_t status = ::aidl::android::aidl2legacy_AudioDevice_audio_device(
+                            aidlDevice, &type, address);
+                    if (status != NO_ERROR) {
+                        ALOGE("%s device effect has invalid device type / address", __func__);
+                        return;
+                    }
+                    effectsConfig::DeviceEffects device = {
+                            {.type = type, .effects = std::move(effects)},
+                            .address = address,
+                    };
+                    deviceprocess.emplace_back(device);
                 }
             };
 
@@ -320,17 +342,21 @@ std::shared_ptr<const effectsConfig::Processings> EffectsFactoryHalAidl::getProc
             [&]() -> std::shared_ptr<const effectsConfig::Processings> {
                 std::vector<effectsConfig::InputStream> preprocess;
                 std::vector<effectsConfig::OutputStream> postprocess;
+                std::vector<effectsConfig::DeviceEffects> deviceprocess;
                 for (const auto& processing : mAidlProcessings) {
-                    getConfigProcessingWithAidlProcessing(processing, preprocess, postprocess);
+                    getConfigProcessingWithAidlProcessing(processing, preprocess, postprocess,
+                                                          deviceprocess);
                 }
 
-                if (0 == preprocess.size() && 0 == postprocess.size()) {
+                if (0 == preprocess.size() && 0 == postprocess.size() &&
+                    0 == deviceprocess.size()) {
                     return nullptr;
                 }
 
                 return std::make_shared<const effectsConfig::Processings>(
                         effectsConfig::Processings({.preprocess = std::move(preprocess),
-                                                    .postprocess = std::move(postprocess)}));
+                                                    .postprocess = std::move(postprocess),
+                                                    .deviceprocess = std::move(deviceprocess)}));
             }());
 
     return processings;
