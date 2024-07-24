@@ -39,6 +39,8 @@ public:
 
     virtual void stopMelComputationForDeviceId(audio_port_handle_t deviceId) = 0;
     virtual void startMelComputationForDeviceId(audio_port_handle_t deviceId) = 0;
+
+    virtual void applyAllAudioPatches() = 0;
 };
 
 class SoundDoseManager : public audio_utils::MelProcessor::MelCallback {
@@ -52,6 +54,13 @@ public:
         : mMelReporterCallback(melReporterCallback),
           mMelAggregator(sp<audio_utils::MelAggregator>::make(kCsdWindowSeconds)),
           mRs2UpperBound(kDefaultRs2UpperBound) {};
+
+    // Used only for testing
+    SoundDoseManager(const sp<IMelReporterCallback>& melReporterCallback,
+                     const sp<audio_utils::MelAggregator>& melAggregator)
+            : mMelReporterCallback(melReporterCallback),
+              mMelAggregator(melAggregator),
+              mRs2UpperBound(kDefaultRs2UpperBound) {};
 
     /**
      * \brief Creates or gets the MelProcessor assigned to the streamHandle
@@ -136,17 +145,19 @@ public:
 
     // used for testing only
     size_t getCachedMelRecordsSize() const;
-    bool forceUseFrameworkMel() const;
-    bool forceComputeCsdOnAllDevices() const;
+    bool isFrameworkMelForced() const;
+    bool isComputeCsdForcedOnAllDevices() const;
 
     /** Method for converting from audio_utils::CsdRecord to media::SoundDoseRecord. */
     static media::SoundDoseRecord csdRecordToSoundDoseRecord(const audio_utils::CsdRecord& legacy);
 
     // ------ Override audio_utils::MelProcessor::MelCallback ------
     void onNewMelValues(const std::vector<float>& mels, size_t offset, size_t length,
-                        audio_port_handle_t deviceId) const override;
+                        audio_port_handle_t deviceId, bool attenuated) const override;
 
     void onMomentaryExposure(float currentMel, audio_port_handle_t deviceId) const override;
+
+    void resetReferencesForTest();
 
 private:
     class SoundDose : public media::BnSoundDose,
@@ -205,6 +216,8 @@ private:
 
     sp<media::ISoundDoseCallback> getSoundDoseCallback() const;
 
+    float getAttenuationForDeviceId(audio_port_handle_t id) const;
+
     void updateAttenuation(float attenuationDB, audio_devices_t deviceType);
     void setCsdEnabled(bool enabled);
     void setUseFrameworkMel(bool useFrameworkMel);
@@ -218,7 +231,7 @@ private:
 
     mutable std::mutex mLock;
 
-    const sp<IMelReporterCallback> mMelReporterCallback;
+    sp<IMelReporterCallback> mMelReporterCallback;
 
     // no need for lock since MelAggregator is thread-safe
     const sp<audio_utils::MelAggregator> mMelAggregator;

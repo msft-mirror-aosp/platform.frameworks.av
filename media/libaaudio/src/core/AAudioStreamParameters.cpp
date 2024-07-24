@@ -23,13 +23,6 @@
 
 using namespace aaudio;
 
-// TODO These defines should be moved to a central place in audio.
-#define SAMPLES_PER_FRAME_MIN        1
-#define SAMPLES_PER_FRAME_MAX        FCC_LIMIT
-#define SAMPLE_RATE_HZ_MIN           8000
-// HDMI supports up to 32 channels at 1536000 Hz.
-#define SAMPLE_RATE_HZ_MAX           1600000
-
 void AAudioStreamParameters::copyFrom(const AAudioStreamParameters &other) {
     mSamplesPerFrame      = other.mSamplesPerFrame;
     mSampleRate           = other.mSampleRate;
@@ -61,6 +54,7 @@ static aaudio_result_t isFormatValid(audio_format_t format) {
         case AUDIO_FORMAT_PCM_32_BIT:
         case AUDIO_FORMAT_PCM_FLOAT:
         case AUDIO_FORMAT_PCM_24_BIT_PACKED:
+        case AUDIO_FORMAT_PCM_8_24_BIT:
         case AUDIO_FORMAT_IEC61937:
             break; // valid
         default:
@@ -72,8 +66,8 @@ static aaudio_result_t isFormatValid(audio_format_t format) {
 }
 
 aaudio_result_t AAudioStreamParameters::validate() const {
-    if (mSamplesPerFrame != AAUDIO_UNSPECIFIED
-        && (mSamplesPerFrame < SAMPLES_PER_FRAME_MIN || mSamplesPerFrame > SAMPLES_PER_FRAME_MAX)) {
+    if (mSamplesPerFrame != AAUDIO_UNSPECIFIED && (mSamplesPerFrame < CHANNEL_COUNT_MIN_AAUDIO ||
+                                                   mSamplesPerFrame > CHANNEL_COUNT_MAX_AAUDIO)) {
         ALOGD("channelCount out of range = %d", mSamplesPerFrame);
         return AAUDIO_ERROR_OUT_OF_RANGE;
     }
@@ -104,8 +98,8 @@ aaudio_result_t AAudioStreamParameters::validate() const {
     aaudio_result_t result = isFormatValid (mAudioFormat);
     if (result != AAUDIO_OK) return result;
 
-    if (mSampleRate != AAUDIO_UNSPECIFIED
-        && (mSampleRate < SAMPLE_RATE_HZ_MIN || mSampleRate > SAMPLE_RATE_HZ_MAX)) {
+    if (mSampleRate != AAUDIO_UNSPECIFIED &&
+        (mSampleRate < SAMPLE_RATE_HZ_MIN_AAUDIO || mSampleRate > SAMPLE_RATE_HZ_MAX_IEC610937)) {
         ALOGD("sampleRate out of range = %d", mSampleRate);
         return AAUDIO_ERROR_INVALID_RATE;
     }
@@ -184,6 +178,8 @@ aaudio_result_t AAudioStreamParameters::validate() const {
         case AAUDIO_INPUT_PRESET_VOICE_RECOGNITION:
         case AAUDIO_INPUT_PRESET_UNPROCESSED:
         case AAUDIO_INPUT_PRESET_VOICE_PERFORMANCE:
+        case AAUDIO_INPUT_PRESET_SYSTEM_ECHO_REFERENCE:
+        case AAUDIO_INPUT_PRESET_SYSTEM_HOTWORD:
             break; // valid
         default:
             ALOGD("input preset not valid = %d", mInputPreset);

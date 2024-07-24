@@ -41,7 +41,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* in_impl_uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<DynamicsProcessingImpl>();
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -206,7 +205,6 @@ const Descriptor DynamicsProcessingImpl::kDescriptor = {
 ndk::ScopedAStatus DynamicsProcessingImpl::open(const Parameter::Common& common,
                                                 const std::optional<Parameter::Specific>& specific,
                                                 OpenEffectReturn* ret) {
-    LOG(DEBUG) << __func__;
     // effect only support 32bits float
     RETURN_IF(common.input.base.format.pcm != common.output.base.format.pcm ||
                       common.input.base.format.pcm != PcmType::FLOAT_32_BIT,
@@ -215,11 +213,12 @@ ndk::ScopedAStatus DynamicsProcessingImpl::open(const Parameter::Common& common,
     RETURN_OK_IF(mState != State::INIT);
     mImplContext = createContext(common);
     RETURN_IF(!mContext || !mImplContext, EX_NULL_POINTER, "createContextFailed");
-    int version = 0;
-    RETURN_IF(!getInterfaceVersion(&version).isOk(), EX_UNSUPPORTED_OPERATION,
+    RETURN_IF(!getInterfaceVersion(&mVersion).isOk(), EX_UNSUPPORTED_OPERATION,
               "FailedToGetInterfaceVersion");
     mImplContext->setVersion(version);
     mEventFlag = mImplContext->getStatusEventFlag();
+    mDataMqNotEmptyEf =
+            mVersion >= kReopenSupportedVersion ? kEventFlagDataMqNotEmpty : kEventFlagNotEmpty;
 
     if (specific.has_value()) {
         RETURN_IF_ASTATUS_NOT_OK(setParameterSpecific(specific.value()), "setSpecParamErr");
@@ -233,14 +232,14 @@ ndk::ScopedAStatus DynamicsProcessingImpl::open(const Parameter::Common& common,
 
     mState = State::IDLE;
     mContext->dupeFmq(ret);
-    RETURN_IF(createThread(getEffectName()) != RetCode::SUCCESS, EX_UNSUPPORTED_OPERATION,
-              "FailedToCreateWorker");
+    RETURN_IF(createThread(getEffectNameWithVersion()) != RetCode::SUCCESS,
+              EX_UNSUPPORTED_OPERATION, "FailedToCreateWorker");
+    LOG(INFO) << getEffectNameWithVersion() << __func__;
     return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus DynamicsProcessingImpl::getDescriptor(Descriptor* _aidl_return) {
     RETURN_IF(!_aidl_return, EX_ILLEGAL_ARGUMENT, "Parameter:nullptr");
-    LOG(DEBUG) << __func__ << kDescriptor.toString();
     *_aidl_return = kDescriptor;
     return ndk::ScopedAStatus::ok();
 }

@@ -102,6 +102,21 @@ static const OMX_U32 kPortIndexOutput = 1;
 
 namespace android {
 
+static bool isValidOmxParamSize(const void *params, OMX_U32 size) {
+    // expect the vector to contain at least the size and version, two OMX_U32 entries.
+    if (size < 2 * sizeof(OMX_U32)) {
+        return false;
+    }
+
+    // expect the vector to be as large as the declared size
+    OMX_U32 *buf = (OMX_U32 *)params;
+    OMX_U32 declaredSize = *(OMX_U32*)buf;
+    if (declaredSize > size) {
+        return false;
+    }
+    return true;
+}
+
 struct BufferMeta {
     explicit BufferMeta(
             const sp<IMemory> &mem, const sp<IHidlMemory> &hidlMemory,
@@ -611,6 +626,10 @@ status_t OMXNodeInstance::sendCommand(
             // ACodec is waiting for all buffers to be returned, do NOT
             // submit any more buffers to the codec.
             bufferSource->onOmxIdle();
+        } else if (param == OMX_StateExecuting) {
+            // Initiating transition from Idle -> Executing
+            // Start submitting buffers to codec.
+            bufferSource->onOmxExecuting();
         } else if (param == OMX_StateLoaded) {
             // Initiating transition from Idle/Executing -> Loaded
             // Buffers are about to be freed.
@@ -688,6 +707,18 @@ bool OMXNodeInstance::isProhibitedIndex_l(OMX_INDEXTYPE index) {
 
 status_t OMXNodeInstance::getParameter(
         OMX_INDEXTYPE index, void *params, size_t size) {
+    OMX_INDEXEXTTYPE extIndex = (OMX_INDEXEXTTYPE)index;
+    if (extIndex == OMX_IndexParamConsumerUsageBits) {
+        // expect the size to be 4 bytes for OMX_IndexParamConsumerUsageBits
+        if (size != sizeof(OMX_U32)) {
+            return BAD_VALUE;
+        }
+    } else {
+        if (!isValidOmxParamSize(params, size)) {
+            return BAD_VALUE;
+        }
+    }
+
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -699,7 +730,6 @@ status_t OMXNodeInstance::getParameter(
     }
 
     OMX_ERRORTYPE err = OMX_GetParameter(mHandle, index, params);
-    OMX_INDEXEXTTYPE extIndex = (OMX_INDEXEXTTYPE)index;
     // some errors are expected for getParameter
     if (err != OMX_ErrorNoMore) {
         CLOG_IF_ERROR(getParameter, err, "%s(%#x)", asString(extIndex), index);
@@ -710,6 +740,10 @@ status_t OMXNodeInstance::getParameter(
 
 status_t OMXNodeInstance::setParameter(
         OMX_INDEXTYPE index, const void *params, size_t size) {
+    if (!isValidOmxParamSize(params, size)) {
+        return BAD_VALUE;
+    }
+
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -736,6 +770,9 @@ status_t OMXNodeInstance::setParameter(
 
 status_t OMXNodeInstance::getConfig(
         OMX_INDEXTYPE index, void *params, size_t size) {
+    if (!isValidOmxParamSize(params, size)) {
+        return BAD_VALUE;
+    }
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -759,6 +796,10 @@ status_t OMXNodeInstance::getConfig(
 
 status_t OMXNodeInstance::setConfig(
         OMX_INDEXTYPE index, const void *params, size_t size) {
+    if (!isValidOmxParamSize(params, size)) {
+        return BAD_VALUE;
+    }
+
     Mutex::Autolock autoLock(mLock);
     if (mHandle == NULL) {
         return DEAD_OBJECT;
@@ -2366,13 +2407,6 @@ void OMXNodeInstance::onEvent(
     CLOGI_(level, onEvent, "%s(%x), %s(%x), %s(%x)",
             asString(event), event, arg1String, arg1, arg2String, arg2);
     const sp<IOMXBufferSource> bufferSource(getBufferSource());
-
-    if (bufferSource != NULL
-            && event == OMX_EventCmdComplete
-            && arg1 == OMX_CommandStateSet
-            && arg2 == OMX_StateExecuting) {
-        bufferSource->onOmxExecuting();
-    }
 
     // allow configuration if we return to the loaded state
     if (event == OMX_EventCmdComplete

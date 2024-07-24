@@ -55,7 +55,7 @@ tidy_errors = [
     "modernize-use-emplace",
     "modernize-use-equals-default",
     "modernize-use-equals-delete",
-    // "modernize-use-nodiscard", // Maybe add this in the future
+    "modernize-use-nodiscard",
     "modernize-use-noexcept",
     "modernize-use-nullptr",
     "modernize-use-override",
@@ -69,22 +69,50 @@ tidy_errors = [
     "-android-cloexec-dup", // found in AAudioServiceEndpointMMAP.cpp
     "-bugprone-narrowing-conversions", // found in several interface from size_t to int32_t
 
-    "-google-readability-casting", // C++ casts not always necessary and may be verbose
-    "-google-readability-todo", // do not require TODO(info)
     "-google-build-using-namespace", // Reenable and fix later.
     "-google-global-names-in-headers", // found in several files
+    "-google-readability-casting", // C++ casts not always necessary and may be verbose
+    "-google-readability-todo", // do not require TODO(info)
 
     "-misc-non-private-member-variables-in-classes", // found in aidl generated files
 
 ]
 
+cc_defaults {
+    name: "libaaudioservice_dependencies",
 
-cc_library {
+    shared_libs: [
+        "aaudio-aidl-cpp",
+        "com.android.media.aaudio-aconfig-cc",
+        "framework-permission-aidl-cpp",
+        "libaaudio_internal",
+        "libaudioclient",
+        "libaudioclient_aidl_conversion",
+        "libaudioutils",
+        "libbase",
+        "libbinder",
+        "libcutils",
+        "liblog",
+        "libmedia_helper",
+        "libmediametrics",
+        "libmediautils",
+        "libutils",
+        "packagemanager_aidl-cpp",
+        "com.android.media.aaudio-aconfig-cc",
+    ],
+
+    static_libs: [
+        "libaudioflinger",
+    ],
+}
+
+cc_library_static {
 
     name: "libaaudioservice",
 
     defaults: [
         "latest_android_media_audio_common_types_cpp_shared",
+        "libaaudioservice_dependencies",
     ],
 
     srcs: [
@@ -110,34 +138,15 @@ cc_library {
     ],
 
     cflags: [
-        "-Wthread-safety",
-        "-Wno-unused-parameter",
         "-Wall",
         "-Werror",
-    ],
-
-    shared_libs: [
-        "libaaudio_internal",
-        "libaudioclient",
-        "libaudioflinger",
-        "libaudioutils",
-        "libmedia_helper",
-        "libmediametrics",
-        "libmediautils",
-        "libbase",
-        "libbinder",
-        "libcutils",
-        "liblog",
-        "libutils",
-        "aaudio-aidl-cpp",
-        "framework-permission-aidl-cpp",
-        "libaudioclient_aidl_conversion",
-        "packagemanager_aidl-cpp",
+        "-Wno-unused-parameter",
+        "-Wthread-safety",
     ],
 
     export_shared_lib_headers: [
-        "libaaudio_internal",
         "framework-permission-aidl-cpp",
+        "libaaudio_internal",
     ],
 
     header_libs: [
@@ -145,8 +154,8 @@ cc_library {
     ],
 
     include_dirs: [
-        "frameworks/av/media/libnbaio/include_mono",
         "frameworks/av/media/libnbaio/include",
+        "frameworks/av/media/libnbaio/include_mono",
     ],
 
     tidy: true,
@@ -154,5 +163,5 @@ cc_library {
     tidy_checks_as_errors: tidy_errors,
     tidy_flags: [
         "-format-style=file",
-    ]
+    ],
 }

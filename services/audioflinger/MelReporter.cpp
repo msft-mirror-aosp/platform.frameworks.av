@@ -30,7 +30,7 @@ namespace android {
 
 bool MelReporter::activateHalSoundDoseComputation(const std::string& module,
         const sp<DeviceHalInterface>& device) {
-    if (mSoundDoseManager->forceUseFrameworkMel()) {
+    if (mSoundDoseManager->isFrameworkMelForced()) {
         ALOGD("%s: Forcing use of internal MEL computation.", __func__);
         activateInternalSoundDoseComputation();
         return false;
@@ -115,6 +115,11 @@ void MelReporter::updateMetadataForCsd(audio_io_handle_t streamHandle,
             activeMelPatchIt->second.csdActive = shouldActivateCsd;
         }
     }
+}
+
+void MelReporter::resetReferencesForTest() {
+    mAfMelReporterCallback.clear();
+    mSoundDoseManager->resetReferencesForTest();
 }
 
 void MelReporter::onCreateAudioPatch(audio_patch_handle_t handle,
@@ -233,7 +238,17 @@ void MelReporter::onReleaseAudioPatch(audio_patch_handle_t handle) {
 
     audio_utils::lock_guard _afl(mAfMelReporterCallback->mutex());  // AudioFlinger_Mutex
     audio_utils::lock_guard _l(mutex());
-    stopMelComputationForPatch_l(melPatch);
+    if (melPatch.csdActive) {
+        // only need to stop if patch was active
+        melPatch.csdActive = false;
+        stopMelComputationForPatch_l(melPatch);
+    }
+}
+
+void MelReporter::onUpdateAudioPatch(audio_patch_handle_t oldHandle,
+        audio_patch_handle_t newHandle, const IAfPatchPanel::Patch& patch) {
+    onReleaseAudioPatch(oldHandle);
+    onCreateAudioPatch(newHandle, patch);
 }
 
 sp<media::ISoundDose> MelReporter::getSoundDoseInterface(
@@ -297,6 +312,22 @@ void MelReporter::stopMelComputationForDeviceId(audio_port_handle_t deviceId) {
 
 }
 
+void MelReporter::applyAllAudioPatches() {
+    ALOGV("%s", __func__);
+
+    std::vector<IAfPatchPanel::Patch> patchesCopy;
+    {
+        audio_utils::lock_guard _laf(mAfMelReporterCallback->mutex());
+        for (const auto& patch : mAfPatchPanel->patches_l()) {
+            patchesCopy.emplace_back(patch.second);
+        }
+    }
+
+    for (const auto& patch : patchesCopy) {
+        onCreateAudioPatch(patch.mHalHandle, patch);
+    }
+}
+
 std::optional<audio_patch_handle_t> MelReporter::activePatchStreamHandle_l(
         audio_io_handle_t streamHandle) {
     for(const auto& patchIt : mActiveMelPatches) {
@@ -308,7 +339,7 @@ std::optional<audio_patch_handle_t> MelReporter::activePatchStreamHandle_l(
 }
 
 bool MelReporter::useHalSoundDoseInterface_l() {
-    return !mSoundDoseManager->forceUseFrameworkMel() & mUseHalSoundDoseInterface;
+    return !mSoundDoseManager->isFrameworkMelForced() & mUseHalSoundDoseInterface;
 }
 
 std::string MelReporter::dump() {

@@ -112,7 +112,8 @@ public:
             return mMutex;
         }
         const int mType; // event type e.g. CFG_EVENT_IO
-        mutable audio_utils::mutex mMutex; // mutex associated with mCondition
+        // mutex associated with mCondition
+        mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kConfigEvent_Mutex};
         audio_utils::condition_variable mCondition; // condition for status return
 
         // NO_THREAD_SAFETY_ANALYSIS Can we add GUARDED_BY?
@@ -435,9 +436,11 @@ public:
                 // ThreadBase mutex before processing the mixer and effects. This guarantees the
                 // integrity of the chains during the process.
                 // Also sets the parameter 'effectChains' to current value of mEffectChains.
-    void lockEffectChains_l(Vector<sp<IAfEffectChain>>& effectChains) final REQUIRES(mutex());
+    void lockEffectChains_l(Vector<sp<IAfEffectChain>>& effectChains) final
+            REQUIRES(audio_utils::ThreadBase_Mutex) ACQUIRE(audio_utils::EffectChain_Mutex);
                 // unlock effect chains after process
-    void unlockEffectChains(const Vector<sp<IAfEffectChain>>& effectChains) final;
+    void unlockEffectChains(const Vector<sp<IAfEffectChain>>& effectChains) final
+            RELEASE(audio_utils::EffectChain_Mutex);
                 // get a copy of mEffectChains vector
     Vector<sp<IAfEffectChain>> getEffectChains_l() const final REQUIRES(mutex()) {
         return mEffectChains;
@@ -537,7 +540,7 @@ public:
     audio_utils::mutex& mutex() const final RETURN_CAPABILITY(audio_utils::ThreadBase_Mutex) {
         return mMutex;
     }
-    mutable audio_utils::mutex mMutex;
+    mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kThreadBase_Mutex};
 
     void onEffectEnable(const sp<IAfEffectModule>& effect) final EXCLUDES_ThreadBase_Mutex;
     void onEffectDisable() final EXCLUDES_ThreadBase_Mutex;
@@ -568,6 +571,10 @@ public:
     void stopMelComputation_l() override
             REQUIRES(audio_utils::AudioFlinger_Mutex);
 
+    audio_utils::DeferredExecutor& getThreadloopExecutor() override {
+        return mThreadloopExecutor;
+    }
+
 protected:
 
                 // entry describing an effect being suspended in mSuspendedSessions keyed vector
@@ -597,6 +604,35 @@ protected:
             audio_session_t sessionId) REQUIRES(mutex());
                 // check if some effects must be suspended when an effect chain is added
     void checkSuspendOnAddEffectChain_l(const sp<IAfEffectChain>& chain) REQUIRES(mutex());
+
+    /**
+     * waitWhileThreadBusy_l() serves as a mutex gate, which does not allow
+     * progress beyond the method while the PlaybackThread is busy (see setThreadBusy_l()).
+     * During the wait, the ThreadBase_Mutex is temporarily unlocked.
+     *
+     * This implementation uses a condition variable.  Alternative methods to gate
+     * the thread may use a second mutex (i.e. entry based on scoped_lock(mutex, gating_mutex)),
+     * but those have less flexibility and more lock order issues.
+     *
+     * Current usage by Track::destroy(), Track::start(), Track::stop(), Track::pause(),
+     * and Track::flush() block this way, and the primary caller is through TrackHandle
+     * with no other mutexes held.
+     *
+     * Special tracks like PatchTrack and OutputTrack may also hold the another thread's
+     * ThreadBase_Mutex during this time.  No other mutex is held.
+     */
+
+    void waitWhileThreadBusy_l(audio_utils::unique_lock& ul) final REQUIRES(mutex()) {
+        // the wait returns immediately if the predicate is satisfied.
+        mThreadBusyCv.wait(ul, [&]{ return mThreadBusy == false;});
+    }
+
+    void setThreadBusy_l(bool busy) REQUIRES(mutex()) {
+        if (busy == mThreadBusy) return;
+        mThreadBusy = busy;
+        if (busy == true) return;  // no need to wake threads if we become busy.
+        mThreadBusyCv.notify_all();
+    }
 
                 // sends the metadata of the active tracks to the HAL
                 struct MetadataUpdate {
@@ -639,6 +675,13 @@ protected:
                 const sp<IAfThreadCallback>  mAfThreadCallback;
                 ThreadMetrics           mThreadMetrics;
                 const bool              mIsOut;
+
+    // mThreadBusy is checked under the ThreadBase_Mutex to ensure that
+    // TrackHandle operations do not proceed while the ThreadBase is busy
+    // with the track.  mThreadBusy is only true if the track is active.
+    //
+    bool mThreadBusy = false; // GUARDED_BY(ThreadBase_Mutex) but read in lambda.
+    audio_utils::condition_variable mThreadBusyCv;
 
                 // updated by PlaybackThread::readOutputParameters_l() or
                 // RecordThread::readInputParameters_l()
@@ -838,7 +881,15 @@ protected:
 
                 SimpleLog mLocalLog;  // locked internally
 
-private:
+    // mThreadloopExecutor contains deferred functors and object (dtors) to
+    // be executed at the end of the processing period, without any
+    // mutexes held.
+    //
+    // mThreadloopExecutor is locked internally, so its methods are thread-safe
+    // for access.
+    audio_utils::DeferredExecutor mThreadloopExecutor;
+
+    private:
     void dumpBase_l(int fd, const Vector<String16>& args) REQUIRES(mutex());
     void dumpEffectChains_l(int fd, const Vector<String16>& args) REQUIRES(mutex());
 };
@@ -909,7 +960,7 @@ protected:
     // StreamOutHalInterfaceCallback implementation
     virtual     void        onWriteReady();
     virtual     void        onDrainReady();
-    virtual     void        onError();
+    virtual     void        onError(bool /*isHardError*/);
 
 public: // AsyncCallbackThread
                 void        resetWriteBlocked(uint32_t sequence);
@@ -921,7 +972,7 @@ protected:
     virtual bool shouldStandby_l() REQUIRES(mutex(), ThreadBase_ThreadLoop);
     virtual void onAddNewTrack_l() REQUIRES(mutex());
 public:  // AsyncCallbackThread
-                void        onAsyncError(); // error reported by AsyncCallbackThread
+                void        onAsyncError(bool isHardError); // error reported by AsyncCallbackThread
 protected:
     // StreamHalInterfaceCodecFormatCallback implementation
                 void        onCodecFormatChanged(
@@ -983,7 +1034,8 @@ public:
                                 audio_port_handle_t portId,
                                 const sp<media::IAudioTrackCallback>& callback,
                                 bool isSpatialized,
-                                bool isBitPerfect) final
+                                bool isBitPerfect,
+                                audio_output_flags_t* afTrackFlags) final
             REQUIRES(audio_utils::AudioFlinger_Mutex);
 
     bool isTrackActive(const sp<IAfTrack>& track) const final {
@@ -1333,6 +1385,8 @@ protected:
     bool destroyTrack_l(const sp<IAfTrack>& track) final REQUIRES(mutex());
 
     void removeTrack_l(const sp<IAfTrack>& track) REQUIRES(mutex());
+    std::set<audio_port_handle_t> getTrackPortIds_l() REQUIRES(mutex());
+    std::set<audio_port_handle_t> getTrackPortIds();
 
     void readOutputParameters_l() REQUIRES(mutex());
     MetadataUpdate updateMetadata_l() final REQUIRES(mutex());
@@ -1453,7 +1507,8 @@ protected:
     sp<AsyncCallbackThread>         mCallbackThread;
 
     audio_utils::mutex& audioTrackCbMutex() const { return mAudioTrackCbMutex; }
-    mutable audio_utils::mutex mAudioTrackCbMutex;
+    mutable audio_utils::mutex mAudioTrackCbMutex{
+            audio_utils::MutexOrder::kPlaybackThread_AudioTrackCbMutex};
     // Record of IAudioTrackCallback
     std::map<sp<IAfTrack>, sp<media::IAudioTrackCallback>> mAudioTrackCallbacks;
 
@@ -1795,7 +1850,7 @@ public:
             void        resetWriteBlocked();
             void        setDraining(uint32_t sequence);
             void        resetDraining();
-            void        setAsyncError();
+            void        setAsyncError(bool isHardError);
 
 private:
     const wp<PlaybackThread>   mPlaybackThread;
@@ -1808,8 +1863,9 @@ private:
     // to indicate that the callback has been received via resetDraining()
     uint32_t                   mDrainSequence;
     audio_utils::condition_variable mWaitWorkCV;
-    mutable audio_utils::mutex mMutex;
-    bool                       mAsyncError;
+    mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kAsyncCallbackThread_Mutex};
+    enum AsyncError { ASYNC_ERROR_NONE, ASYNC_ERROR_SOFT, ASYNC_ERROR_HARD };
+    AsyncError                 mAsyncError;
 
     audio_utils::mutex& mutex() const RETURN_CAPABILITY(audio_utils::AsyncCallbackThread_Mutex) {
         return mMutex;
@@ -1846,6 +1902,7 @@ protected:
     void threadLoop_sleepTime() final REQUIRES(ThreadBase_ThreadLoop);
     ssize_t threadLoop_write() final REQUIRES(ThreadBase_ThreadLoop);
     void threadLoop_standby() final REQUIRES(ThreadBase_ThreadLoop);
+    void threadLoop_exit() final REQUIRES(ThreadBase_ThreadLoop);
     void cacheParameters_l() final REQUIRES(mutex(), ThreadBase_ThreadLoop);
 
 private:
@@ -1896,6 +1953,8 @@ protected:
     void checkOutputStageEffects() final
             REQUIRES(ThreadBase_ThreadLoop) EXCLUDES_ThreadBase_Mutex;
     void setHalLatencyMode_l() final REQUIRES(mutex());
+
+    void threadLoop_exit() final REQUIRES(ThreadBase_ThreadLoop);
 
 private:
             // Do not request a specific mode by default

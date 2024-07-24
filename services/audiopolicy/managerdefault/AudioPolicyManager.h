@@ -292,6 +292,10 @@ public:
 
         virtual status_t registerPolicyMixes(const Vector<AudioMix>& mixes);
         virtual status_t unregisterPolicyMixes(Vector<AudioMix> mixes);
+        virtual status_t getRegisteredPolicyMixes(std::vector<AudioMix>& mixes) override;
+        virtual status_t updatePolicyMix(
+                const AudioMix& mix,
+                const std::vector<AudioMixMatchCriterion>& updatedCriteria) override;
         virtual status_t setUidDeviceAffinities(uid_t uid,
                 const AudioDeviceTypeAddrVector& devices);
         virtual status_t removeUidDeviceAffinities(uid_t uid);
@@ -336,7 +340,8 @@ public:
         virtual status_t startAudioSource(const struct audio_port_config *source,
                                           const audio_attributes_t *attributes,
                                           audio_port_handle_t *portId,
-                                          uid_t uid);
+                                          uid_t uid,
+                                          bool internal = false);
         virtual status_t stopAudioSource(audio_port_handle_t portId);
 
         virtual status_t setMasterMono(bool mono);
@@ -523,9 +528,11 @@ protected:
         void addOutput(audio_io_handle_t output, const sp<SwAudioOutputDescriptor>& outputDesc);
         void removeOutput(audio_io_handle_t output);
         void addInput(audio_io_handle_t input, const sp<AudioInputDescriptor>& inputDesc);
+        bool checkCloseInput(const sp<AudioInputDescriptor>& input);
 
         /**
          * @brief setOutputDevices change the route of the specified output.
+         * @param caller of the method
          * @param outputDesc to be considered
          * @param device to be considered to route the output
          * @param force if true, force the routing even if no change.
@@ -539,7 +546,8 @@ protected:
          * @return the number of ms we have slept to allow new routing to take effect in certain
          *        cases.
          */
-        uint32_t setOutputDevices(const sp<SwAudioOutputDescriptor>& outputDesc,
+        uint32_t setOutputDevices(const char *caller,
+                                  const sp<SwAudioOutputDescriptor>& outputDesc,
                                   const DeviceVector &device,
                                   bool force = false,
                                   int delayMs = 0,
@@ -829,10 +837,10 @@ protected:
 
         bool isPrimaryModule(const sp<HwModule> &module) const
         {
-            if (module == 0 || !hasPrimaryOutput()) {
+            if (module == nullptr || mPrimaryModuleHandle == AUDIO_MODULE_HANDLE_NONE) {
                 return false;
             }
-            return module->getHandle() == mPrimaryOutput->getModuleHandle();
+            return module->getHandle() == mPrimaryModuleHandle;
         }
         DeviceVector availablePrimaryOutputDevices() const
         {
@@ -944,6 +952,8 @@ protected:
         EngineInstance mEngine;                         // Audio Policy Engine instance
         AudioPolicyClientInterface *mpClientInterface;  // audio policy client interface
         sp<SwAudioOutputDescriptor> mPrimaryOutput;     // primary output descriptor
+        // mPrimaryModuleHandle is cached mPrimaryOutput->getModuleHandle();
+        audio_module_handle_t mPrimaryModuleHandle = AUDIO_MODULE_HANDLE_NONE;
         // list of descriptors for outputs currently opened
 
         sp<SwAudioOutputDescriptor> mSpatializerOutput;
@@ -1048,9 +1058,6 @@ protected:
         bool isMsdPatch(const audio_patch_handle_t &handle) const;
 
 private:
-        sp<SourceClientDescriptor> startAudioSourceInternal(
-                const struct audio_port_config *source, const audio_attributes_t *attributes,
-                uid_t uid);
 
         void onNewAudioModulesAvailableInt(DeviceVector *newDevices);
 
@@ -1352,6 +1359,9 @@ private:
 
         PortHandleVector getClientsForStream(audio_stream_type_t streamType) const;
         void invalidateStreams(StreamTypeVector streams) const;
+
+        bool checkHapticCompatibilityOnSpatializerOutput(const audio_config_t* config,
+                                                         audio_session_t sessionId) const;
 };
 
 };

@@ -312,10 +312,6 @@ private:
             /*out*/SurfaceMap* surfaceMap, /*out*/Vector<int32_t>* streamIds,
             /*out*/int32_t*  currentStreamId);
 
-    // Utility method that maps AIDL request templates.
-    binder::Status mapRequestTemplate(int templateId,
-            camera_request_template_t* tempId /*out*/);
-
     // IGraphicsBufferProducer binder -> Stream ID + Surface ID for output streams
     KeyedVector<sp<IBinder>, StreamSurfaceId> mStreamMap;
 
@@ -370,9 +366,13 @@ private:
     std::string mUserTag;
     // The last set video stabilization mode
     int mVideoStabilizationMode = -1;
+    // Whether a zoom_ratio < 1.0 has been used during this session
+    bool mUsedUltraWide = false;
+    // Whether a zoom settings override has been used during this session
+    bool mUsedSettingsOverrideZoom = false;
 
     // This only exists in case of camera ID Remapping.
-    std::string mOriginalCameraId;
+    const std::string mOriginalCameraId;
 };
 
 }; // namespace android

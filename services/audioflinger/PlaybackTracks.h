@@ -64,8 +64,8 @@ private:
 
     wp<IAfThreadBase> mThread;
     std::atomic_bool mHasOpPlayAudio;
-    const AttributionSourceState mAttributionSource;
-    const int32_t mUsage; // on purpose not audio_usage_t because always checked in appOps as int32_t
+    const int32_t mUsage;  // on purpose not audio_usage_t because always checked in appOps as
+                           // int32_t
     const int mId; // for logging purposes only
     const uid_t mUid;
     const String16 mPackageName;
@@ -174,15 +174,15 @@ public:
     void setHapticPlaybackEnabled(bool hapticPlaybackEnabled) final {
                 mHapticPlaybackEnabled = hapticPlaybackEnabled;
             }
-            /** Return at what intensity to play haptics, used in mixer. */
-    os::HapticScale getHapticIntensity() const final { return mHapticIntensity; }
+            /** Return the haptics scale, used in mixer. */
+    os::HapticScale getHapticScale() const final { return mHapticScale; }
             /** Return the maximum amplitude allowed for haptics data, used in mixer. */
     float getHapticMaxAmplitude() const final { return mHapticMaxAmplitude; }
             /** Set intensity of haptic playback, should be set after querying vibrator service. */
-    void setHapticIntensity(os::HapticScale hapticIntensity) final {
-                if (os::isValidHapticScale(hapticIntensity)) {
-                    mHapticIntensity = hapticIntensity;
-                    setHapticPlaybackEnabled(mHapticIntensity != os::HapticScale::MUTE);
+    void setHapticScale(os::HapticScale hapticScale) final {
+                if (os::isValidHapticScale(hapticScale)) {
+                    mHapticScale = hapticScale;
+                    setHapticPlaybackEnabled(!mHapticScale.isScaleMute());
                 }
             }
             /** Set maximum amplitude allowed for haptic data, should be set after querying
@@ -194,7 +194,8 @@ public:
     sp<os::ExternalVibration> getExternalVibration() const final { return mExternalVibration; }
 
             // This function should be called with holding thread lock.
-    void updateTeePatches_l() final;
+    void updateTeePatches_l() final REQUIRES(audio_utils::ThreadBase_Mutex)
+            EXCLUDES_BELOW_ThreadBase_Mutex;
     void setTeePatchesToUpdate_l(TeePatches teePatchesToUpdate) final;
 
     void tallyUnderrunFrames(size_t frames) final {
@@ -328,8 +329,8 @@ protected:
     sp<OpPlayAudioMonitor>  mOpPlayAudioMonitor;
 
     bool                mHapticPlaybackEnabled = false; // indicates haptic playback enabled or not
-    // intensity to play haptic data
-    os::HapticScale mHapticIntensity = os::HapticScale::MUTE;
+    // scale to play haptic data
+    os::HapticScale mHapticScale = os::HapticScale::mute();
     // max amplitude allowed for haptic data
     float mHapticMaxAmplitude = NAN;
     class AudioVibrationController : public os::BnExternalVibrationController {
@@ -448,7 +449,7 @@ private:
     void                queueBuffer(Buffer& inBuffer);
     void                clearBufferQueue();
 
-    void                restartIfDisabled();
+    void restartIfDisabled() override;
 
     // Maximum number of pending buffers allocated by OutputTrack::write()
     static const uint8_t kMaxOverFlowBuffers = 10;
@@ -473,7 +474,8 @@ private:
     SourceMetadatas mTrackMetadatas;
     /** Protects mTrackMetadatas against concurrent access. */
     audio_utils::mutex& trackMetadataMutex() const { return mTrackMetadataMutex; }
-    mutable audio_utils::mutex mTrackMetadataMutex;
+    mutable audio_utils::mutex mTrackMetadataMutex{
+            audio_utils::MutexOrder::kOutputTrack_TrackMetadataMutex};
 };  // end of OutputTrack
 
 // playback track, used by PatchPanel
@@ -489,10 +491,11 @@ public:
                                    size_t bufferSize,
                                    audio_output_flags_t flags,
                                    const Timeout& timeout = {},
-                                   size_t frameCountToBeReady = 1 /** Default behaviour is to start
+                                   size_t frameCountToBeReady = 1, /** Default behaviour is to start
                                                                     *  as soon as possible to have
                                                                     *  the lowest possible latency
-                                                                    *  even if it might glitch. */);
+                                                                    *  even if it might glitch. */
+                                   float speed = 1.0f);
     ~PatchTrack() override;
 
     size_t framesReady() const final;
@@ -510,7 +513,7 @@ public:
     void releaseBuffer(Proxy::Buffer* buffer) final;
 
 private:
-            void restartIfDisabled();
+    void restartIfDisabled() override;
 };  // end of PatchTrack
 
 } // namespace android

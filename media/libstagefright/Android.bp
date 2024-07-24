@@ -318,7 +318,12 @@ cc_library {
         "aconfig_mediacodec_flags_c_lib",
     ],
 
+    defaults: [
+        "aconfig_lib_cc_static_link.defaults",
+    ],
+
     static_libs: [
+        "android.media.codec-aconfig-cc",
         "libstagefright_esds",
         "libstagefright_color_conversion",
         "libyuv_static",

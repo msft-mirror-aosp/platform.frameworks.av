@@ -81,9 +81,6 @@ filegroup {
 cc_library_shared {
     name: "libmedia_omx",
     vendor_available: true,
-    vndk: {
-        enabled: true,
-    },
     double_loadable: true,
 
     srcs: [
@@ -223,7 +220,6 @@ cc_library_static {
         "com.android.media",
     ],
 
-
     srcs: ["MidiIoWrapper.cpp"],
 
     static_libs: [
@@ -278,8 +274,8 @@ cc_library_shared {
         "libutils",
     ],
 
-    include_dirs: [
-        "system/libhidl/transport/token/1.0/utils/include",
+    static_libs: [
+        "android.media.codec-aconfig-cc",
     ],
 
     export_include_dirs: [
@@ -364,7 +360,6 @@ cc_library {
         "av-types-aidl-cpp",
         "liblog",
         "libcutils",
-        "libprocessgroup",
         "libutils",
         "libbinder",
         "libbinder_ndk",

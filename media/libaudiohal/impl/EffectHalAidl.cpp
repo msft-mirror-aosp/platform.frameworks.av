@@ -15,11 +15,13 @@
  */
 
 #include <cstddef>
+#include <cstring>
 #define LOG_TAG "EffectHalAidl"
 //#define LOG_NDEBUG 0
 
 #include <memory>
 
+#include <audio_utils/primitives.h>
 #include <error/expected_utils.h>
 #include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionEffect.h>
@@ -53,10 +55,13 @@
 #include "effectsAidlConversion/AidlConversionVisualizer.h"
 
 using ::aidl::android::aidl_utils::statusTFromBinderStatus;
+using ::aidl::android::hardware::audio::effect::CommandId;
 using ::aidl::android::hardware::audio::effect::Descriptor;
 using ::aidl::android::hardware::audio::effect::IEffect;
 using ::aidl::android::hardware::audio::effect::IFactory;
+using ::aidl::android::hardware::audio::effect::kEventFlagDataMqNotEmpty;
 using ::aidl::android::hardware::audio::effect::kEventFlagDataMqUpdate;
+using ::aidl::android::hardware::audio::effect::kEventFlagNotEmpty;
 using ::aidl::android::hardware::audio::effect::kReopenSupportedVersion;
 using ::aidl::android::hardware::audio::effect::State;
 
@@ -124,6 +129,7 @@ status_t EffectHalAidl::createAidlConversion(
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidHapticGenerator()) {
         mConversion = std::make_unique<android::effect::AidlConversionHapticGenerator>(
                 effect, sessionId, ioId, desc, mIsProxyEffect);
+        mIsHapticGenerator = true;
     } else if (typeUuid ==
                ::aidl::android::hardware::audio::effect::getEffectTypeUuidLoudnessEnhancer()) {
         mConversion = std::make_unique<android::effect::AidlConversionLoudnessEnhancer>(
@@ -196,8 +202,9 @@ status_t EffectHalAidl::process() {
                               ::android::OK == efGroup->wait(kEventFlagDataMqUpdate, &efState,
                                                              1 /* ns */, true /* retry */) &&
                               efState & kEventFlagDataMqUpdate) {
-        ALOGI("%s %s V%d receive dataMQUpdate eventFlag from HAL", __func__, effectName.c_str(),
+        ALOGD("%s %s V%d receive dataMQUpdate eventFlag from HAL", __func__, effectName.c_str(),
               halVersion);
+
         mConversion->reopen();
     }
     auto statusQ = mConversion->getStatusMQ();
@@ -211,7 +218,7 @@ status_t EffectHalAidl::process() {
     }
 
     size_t available = inputQ->availableToWrite();
-    size_t floatsToWrite = std::min(available, mInBuffer->getSize() / sizeof(float));
+    const size_t floatsToWrite = std::min(available, mInBuffer->getSize() / sizeof(float));
     if (floatsToWrite == 0) {
         ALOGE("%s not able to write, floats in buffer %zu, space in FMQ %zu", __func__,
               mInBuffer->getSize() / sizeof(float), available);
@@ -223,32 +230,74 @@ status_t EffectHalAidl::process() {
               floatsToWrite, mInBuffer->audioBuffer(), inputQ->availableToWrite());
         return INVALID_OPERATION;
     }
-    efGroup->wake(aidl::android::hardware::audio::effect::kEventFlagNotEmpty);
+
+    // for V2 audio effect HAL, expect different EventFlag to avoid bit conflict with FMQ_NOT_EMPTY
+    efGroup->wake(halVersion >= kReopenSupportedVersion ? kEventFlagDataMqNotEmpty
+                                                        : kEventFlagNotEmpty);
 
     IEffect::Status retStatus{};
-    if (!statusQ->readBlocking(&retStatus, 1) || retStatus.status != OK ||
-        (size_t)retStatus.fmqConsumed != floatsToWrite || retStatus.fmqProduced == 0) {
-        ALOGE("%s read status failed: %s", __func__, retStatus.toString().c_str());
+    if (!statusQ->readBlocking(&retStatus, 1)) {
+        ALOGE("%s %s V%d read status from status FMQ failed", __func__, effectName.c_str(),
+              halVersion);
+        return INVALID_OPERATION;
+    }
+    if (retStatus.status != OK || (size_t)retStatus.fmqConsumed != floatsToWrite ||
+        retStatus.fmqProduced == 0) {
+        ALOGE("%s read status failed: %s, consumed %d (of %zu) produced %d", __func__,
+              retStatus.toString().c_str(), retStatus.fmqConsumed, floatsToWrite,
+              retStatus.fmqProduced);
         return INVALID_OPERATION;
     }
 
     available = outputQ->availableToRead();
-    size_t floatsToRead = std::min(available, mOutBuffer->getSize() / sizeof(float));
+    const size_t floatsToRead = std::min(available, mOutBuffer->getSize() / sizeof(float));
     if (floatsToRead == 0) {
         ALOGE("%s not able to read, buffer space %zu, floats in FMQ %zu", __func__,
               mOutBuffer->getSize() / sizeof(float), available);
         return INVALID_OPERATION;
     }
+
+    float *outputRawBuffer = mOutBuffer->audioBuffer()->f32;
+    std::vector<float> tempBuffer;
+    // keep original data in the output buffer for accumulate mode or HapticGenerator effect
+    if (mConversion->mOutputAccessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE || mIsHapticGenerator) {
+        tempBuffer.resize(floatsToRead);
+        outputRawBuffer = tempBuffer.data();
+    }
     // always read floating point data for AIDL
-    if (!mOutBuffer->audioBuffer() ||
-        !outputQ->read(mOutBuffer->audioBuffer()->f32, floatsToRead)) {
+    if (!outputQ->read(outputRawBuffer, floatsToRead)) {
         ALOGE("%s failed to read %zu from outputQ to audioBuffer %p", __func__, floatsToRead,
               mOutBuffer->audioBuffer());
         return INVALID_OPERATION;
     }
 
-    ALOGD("%s %s consumed %zu produced %zu", __func__, effectName.c_str(), floatsToWrite,
-          floatsToRead);
+    // HapticGenerator needs special handling because the generated haptic samples should append to
+    // the end of audio samples, the generated haptic data pass back from HAL in output FMQ at same
+    // offset as input buffer, here we skip the audio samples in output FMQ and append haptic
+    // samples to the end of input buffer
+    if (mIsHapticGenerator) {
+        static constexpr float kHalFloatSampleLimit = 2.0f;
+        assert(floatsToRead == floatsToWrite);
+        const auto audioChNum = mConversion->getAudioChannelCount();
+        const auto audioSamples =
+                floatsToWrite * audioChNum / (audioChNum + mConversion->getHapticChannelCount());
+        // accumulate or copy input to output, haptic samples remains all zero
+        if (mConversion->mOutputAccessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE) {
+            accumulate_float(mOutBuffer->audioBuffer()->f32, mInBuffer->audioBuffer()->f32,
+                             audioSamples);
+        } else {
+            memcpy_to_float_from_float_with_clamping(mOutBuffer->audioBuffer()->f32,
+                                                     mInBuffer->audioBuffer()->f32, audioSamples,
+                                                     kHalFloatSampleLimit);
+        }
+        // append the haptic sample at the end of input audio samples
+        memcpy_to_float_from_float_with_clamping(mInBuffer->audioBuffer()->f32 + audioSamples,
+                                                 outputRawBuffer + audioSamples,
+                                                 floatsToRead - audioSamples, kHalFloatSampleLimit);
+    } else if (mConversion->mOutputAccessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE) {
+        accumulate_float(mOutBuffer->audioBuffer()->f32, outputRawBuffer, floatsToRead);
+    }
+
     return OK;
 }
 
@@ -285,6 +334,7 @@ status_t EffectHalAidl::getDescriptor(effect_descriptor_t* pDescriptor) {
 
 status_t EffectHalAidl::close() {
     TIME_CHECK();
+    mEffect->command(CommandId::STOP);
     return statusTFromBinderStatus(mEffect->close());
 }
 

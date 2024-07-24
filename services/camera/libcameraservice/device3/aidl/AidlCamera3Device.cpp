@@ -49,14 +49,17 @@
 #include <utils/Timers.h>
 #include <cutils/properties.h>
 
+#include <aidl/android/hardware/camera/device/ICameraDeviceSession.h>
 #include <aidl/android/hardware/camera/device/ICameraInjectionSession.h>
 #include <aidlcommonsupport/NativeHandle.h>
 #include <android-base/properties.h>
 #include <android/binder_ibinder_platform.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
 #include <camera/StringUtils.h>
+#include <com_android_internal_camera_flags.h>
 
 #include "utils/CameraTraces.h"
+#include "utils/SessionConfigurationUtils.h"
 #include "mediautils/SchedulingPolicyService.h"
 #include "device3/Camera3OutputStream.h"
 #include "device3/Camera3InputStream.h"
@@ -77,11 +80,15 @@
 #include "AidlCamera3Device.h"
 
 using namespace android::camera3;
+using namespace android::camera3::SessionConfigurationUtils;
 using namespace aidl::android::hardware;
 using aidl::android::hardware::camera::metadata::SensorPixelMode;
 using aidl::android::hardware::camera::metadata::RequestAvailableDynamicRangeProfilesMap;
 using aidl::android::hardware::camera::metadata::ScalerAvailableStreamUseCases;
 
+namespace flags = com::android::internal::camera::flags;
+
+const int32_t AIDL_DEVICE_SESSION_V3 = 3;
 namespace android {
 
 RequestAvailableDynamicRangeProfilesMap
@@ -288,6 +295,8 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
     if (bufMgrMode.count > 0) {
         mUseHalBufManager = (bufMgrMode.data.u8[0] ==
                 ANDROID_INFO_SUPPORTED_BUFFER_MANAGEMENT_VERSION_HIDL_DEVICE_3_5);
+        mSessionHalBufManager = (bufMgrMode.data.u8[0] ==
+                ANDROID_INFO_SUPPORTED_BUFFER_MANAGEMENT_VERSION_SESSION_CONFIGURABLE);
     }
 
     camera_metadata_entry_t capabilities = mDeviceInfo.find(ANDROID_REQUEST_AVAILABLE_CAPABILITIES);
@@ -298,7 +307,9 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         }
     }
 
-    mInterface = new AidlHalInterface(session, queue, mUseHalBufManager, mSupportOfflineProcessing);
+    mInterface =
+            new AidlHalInterface(session, queue, mUseHalBufManager, mSupportOfflineProcessing,
+                    mSessionHalBufManager);
 
     std::string providerType;
     mVendorTagId = manager->getProviderTagIdLocked(mId);
@@ -327,6 +338,16 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
     int deviceVersion = HARDWARE_DEVICE_API_VERSION(maxVersion.get_major(), maxVersion.get_minor());
 
     mBatchSizeLimitEnabled = (deviceVersion >= CAMERA_DEVICE_API_VERSION_1_2);
+
+    camera_metadata_entry readoutSupported = mDeviceInfo.find(ANDROID_SENSOR_READOUT_TIMESTAMP);
+    if (readoutSupported.count == 0) {
+        ALOGW("%s: Could not find value corresponding to ANDROID_SENSOR_READOUT_TIMESTAMP. "
+              "Assuming true.", __FUNCTION__);
+        mSensorReadoutTimestampSupported = true;
+    } else {
+        mSensorReadoutTimestampSupported =
+                readoutSupported.data.u8[0] == ANDROID_SENSOR_READOUT_TIMESTAMP_HARDWARE;
+    }
 
     return initializeCommonLocked();
 }
@@ -391,7 +412,7 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         mNextReprocessShutterFrameNumber, mNextZslStillShutterFrameNumber,
         mNextResultFrameNumber,
         mNextReprocessResultFrameNumber, mNextZslStillResultFrameNumber,
-        mUseHalBufManager, mUsePartialResult, mNeedFixupMonochromeTags,
+        mUseHalBufManager, mHalBufManagedStreamIds, mUsePartialResult, mNeedFixupMonochromeTags,
         mNumPartialResults, mVendorTagId, mDeviceInfo, mPhysicalDeviceInfoMap,
         mDistortionMappers, mZoomRatioMappers, mRotateAndCropMappers,
         mTagMonitor, mInputStream, mOutputStreams, mSessionStatsBuilder, listener, *this,
@@ -433,7 +454,7 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         mNextReprocessShutterFrameNumber, mNextZslStillShutterFrameNumber,
         mNextResultFrameNumber,
         mNextReprocessResultFrameNumber, mNextZslStillResultFrameNumber,
-        mUseHalBufManager, mUsePartialResult, mNeedFixupMonochromeTags,
+        mUseHalBufManager, mHalBufManagedStreamIds, mUsePartialResult, mNeedFixupMonochromeTags,
         mNumPartialResults, mVendorTagId, mDeviceInfo, mPhysicalDeviceInfoMap,
         mDistortionMappers, mZoomRatioMappers, mRotateAndCropMappers,
         mTagMonitor, mInputStream, mOutputStreams, mSessionStatsBuilder, listener, *this,
@@ -441,7 +462,7 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
         mOverrideToPortrait, mActivePhysicalId}, mResultMetadataQueue
     };
     for (const auto& msg : msgs) {
-        camera3::notify(states, msg);
+        camera3::notify(states, msg, mSensorReadoutTimestampSupported);
     }
     return ::ndk::ScopedAStatus::ok();
 
@@ -522,7 +543,7 @@ status_t AidlCamera3Device::switchToOffline(
         }
 
         // When not using HAL buf manager, only allow streams requested by app to be preserved
-        if (!mUseHalBufManager) {
+        if (!isHalBufferManagedStream(id)) {
             if (std::find(streamsToKeep.begin(), streamsToKeep.end(), id) == streamsToKeep.end()) {
                 SET_ERR("stream ID %d must not be switched to offline!", id);
                 return UNKNOWN_ERROR;
@@ -602,17 +623,18 @@ status_t AidlCamera3Device::switchToOffline(
     // TODO: check if we need to lock before copying states
     //       though technically no other thread should be talking to Camera3Device at this point
     Camera3OfflineStates offlineStates(
-            mTagMonitor, mVendorTagId, mUseHalBufManager, mNeedFixupMonochromeTags,
-            mUsePartialResult, mNumPartialResults, mLastCompletedRegularFrameNumber,
-            mLastCompletedReprocessFrameNumber, mLastCompletedZslFrameNumber,
-            mNextResultFrameNumber, mNextReprocessResultFrameNumber,
-            mNextZslStillResultFrameNumber, mNextShutterFrameNumber,
-            mNextReprocessShutterFrameNumber, mNextZslStillShutterFrameNumber,
-            mDeviceInfo, mPhysicalDeviceInfoMap, mDistortionMappers,
-            mZoomRatioMappers, mRotateAndCropMappers);
+            mTagMonitor, mVendorTagId, mUseHalBufManager, mHalBufManagedStreamIds,
+            mNeedFixupMonochromeTags, mUsePartialResult, mNumPartialResults,
+            mLastCompletedRegularFrameNumber, mLastCompletedReprocessFrameNumber,
+            mLastCompletedZslFrameNumber, mNextResultFrameNumber,
+            mNextReprocessResultFrameNumber, mNextZslStillResultFrameNumber,
+            mNextShutterFrameNumber, mNextReprocessShutterFrameNumber,
+            mNextZslStillShutterFrameNumber, mDeviceInfo, mPhysicalDeviceInfoMap,
+            mDistortionMappers, mZoomRatioMappers, mRotateAndCropMappers);
 
     *session = new AidlCamera3OfflineSession(mId, inputStream, offlineStreamSet,
-            std::move(bufferRecords), offlineReqs, offlineStates, offlineSession);
+                                             std::move(bufferRecords), offlineReqs, offlineStates,
+                                             offlineSession, mSensorReadoutTimestampSupported);
 
     // Delete all streams that has been transferred to offline session
     Mutex::Autolock l(mLock);
@@ -679,8 +701,8 @@ status_t AidlCamera3Device::switchToOffline(
         aidl::android::hardware::camera::device::BufferRequestStatus* status) {
 
     RequestBufferStates states {
-        mId, mRequestBufferInterfaceLock, mUseHalBufManager, mOutputStreams,
-        mSessionStatsBuilder, *this, *(mInterface), *this};
+        mId, mRequestBufferInterfaceLock, mUseHalBufManager, mHalBufManagedStreamIds,
+        mOutputStreams, mSessionStatsBuilder, *this, *(mInterface), *this};
     camera3::requestStreamBuffers(states, bufReqs, outBuffers, status);
     return ::ndk::ScopedAStatus::ok();
 }
@@ -704,7 +726,7 @@ status_t AidlCamera3Device::switchToOffline(
 ::ndk::ScopedAStatus AidlCamera3Device::returnStreamBuffers(
         const std::vector<camera::device::StreamBuffer>& buffers) {
     ReturnBufferStates states {
-        mId, mUseHalBufManager, mOutputStreams,  mSessionStatsBuilder,
+        mId, mUseHalBufManager, mHalBufManagedStreamIds, mOutputStreams,  mSessionStatsBuilder,
         *(mInterface)};
     camera3::returnStreamBuffers(states, buffers);
     return ::ndk::ScopedAStatus::ok();
@@ -713,21 +735,25 @@ status_t AidlCamera3Device::switchToOffline(
 AidlCamera3Device::AidlHalInterface::AidlHalInterface(
             std::shared_ptr<aidl::android::hardware::camera::device::ICameraDeviceSession> &session,
             std::shared_ptr<AidlRequestMetadataQueue> queue,
-            bool useHalBufManager, bool supportOfflineProcessing) :
+            bool useHalBufManager, bool supportOfflineProcessing,
+            bool supportSessionHalBufManager) :
         HalInterface(useHalBufManager, supportOfflineProcessing),
         mAidlSession(session),
-        mRequestMetadataQueue(queue) { }
+        mRequestMetadataQueue(queue),
+        mSupportSessionHalBufManager(supportSessionHalBufManager) { }
 
 AidlCamera3Device::AidlHalInterface::AidlHalInterface(
             std::shared_ptr<aidl::android::hardware::camera::device::ICameraDeviceSession>
                     &deviceSession,
             std::shared_ptr<aidl::android::hardware::camera::device::ICameraInjectionSession>
                     &injectionSession, std::shared_ptr<AidlRequestMetadataQueue> queue,
-            bool useHalBufManager, bool supportOfflineProcessing) :
+            bool useHalBufManager, bool supportOfflineProcessing,
+            bool supportSessionHalBufManager) :
         HalInterface(useHalBufManager, supportOfflineProcessing),
         mAidlSession(deviceSession),
         mAidlInjectionSession(injectionSession),
-        mRequestMetadataQueue(queue) { }
+        mRequestMetadataQueue(queue),
+        mSupportSessionHalBufManager(supportSessionHalBufManager) { }
 
 bool AidlCamera3Device::AidlHalInterface::valid() {
     return (mAidlSession != nullptr);
@@ -838,33 +864,15 @@ status_t AidlCamera3Device::AidlHalInterface::constructDefaultRequestSettings(
     ATRACE_NAME("CameraAidlHal::constructDefaultRequestSettings");
     using aidl::android::hardware::camera::device::RequestTemplate;
     if (!valid()) return INVALID_OPERATION;
-    status_t res = OK;
 
     RequestTemplate id;
-    aidl::android::hardware::camera::device::CameraMetadata request;
-    switch (templateId) {
-        case CAMERA_TEMPLATE_PREVIEW:
-            id = RequestTemplate::PREVIEW;
-            break;
-        case CAMERA_TEMPLATE_STILL_CAPTURE:
-            id = RequestTemplate::STILL_CAPTURE;
-            break;
-        case CAMERA_TEMPLATE_VIDEO_RECORD:
-            id = RequestTemplate::VIDEO_RECORD;
-            break;
-        case CAMERA_TEMPLATE_VIDEO_SNAPSHOT:
-            id = RequestTemplate::VIDEO_SNAPSHOT;
-            break;
-        case CAMERA_TEMPLATE_ZERO_SHUTTER_LAG:
-            id = RequestTemplate::ZERO_SHUTTER_LAG;
-            break;
-        case CAMERA_TEMPLATE_MANUAL:
-            id = RequestTemplate::MANUAL;
-            break;
-        default:
-            // Unknown template ID, or this HAL is too old to support it
-            return BAD_VALUE;
+    status_t res = SessionConfigurationUtils::mapRequestTemplateToAidl(
+            templateId, &id);
+    if (res != OK) {
+        return res;
     }
+
+    aidl::android::hardware::camera::device::CameraMetadata request;
     auto err = mAidlSession->constructDefaultRequestSettings(id, &request);
 
     if (!err.isOk()) {
@@ -910,6 +918,12 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
         camera3::camera_stream_t *src = config->streams[i];
 
         Camera3Stream* cam3stream = Camera3Stream::cast(src);
+        // For stream configurations with multi res streams, hal buffer manager has to be used.
+        if (!flags::session_hal_buf_manager() && cam3stream->getHalStreamGroupId() != -1 &&
+                src->stream_type != CAMERA_STREAM_INPUT) {
+            mUseHalBufManager = true;
+            config->use_hal_buf_manager = true;
+        }
         cam3stream->setBufferFreedListener(this);
         int streamId = cam3stream->getId();
         StreamType streamType;
@@ -979,14 +993,41 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
     requestedConfiguration.streamConfigCounter = mNextStreamConfigCounter++;
     requestedConfiguration.multiResolutionInputImage = config->input_is_multi_resolution;
     requestedConfiguration.logId = logId;
-    auto err = mAidlSession->configureStreams(requestedConfiguration, &finalConfiguration);
+    ndk::ScopedAStatus err = ndk::ScopedAStatus::ok();
+    int32_t interfaceVersion = 0;
+    camera::device::ConfigureStreamsRet configureStreamsRet;
+    err = mAidlSession->getInterfaceVersion(&interfaceVersion);
+    if (!err.isOk()) {
+        ALOGE("%s: Transaction error getting interface version: %s", __FUNCTION__,
+              err.getMessage());
+        return AidlProviderInfo::mapToStatusT(err);
+    }
+    if (flags::session_hal_buf_manager() && interfaceVersion >= AIDL_DEVICE_SESSION_V3
+            && mSupportSessionHalBufManager) {
+        err = mAidlSession->configureStreamsV2(requestedConfiguration, &configureStreamsRet);
+        finalConfiguration = std::move(configureStreamsRet.halStreams);
+    } else {
+        err = mAidlSession->configureStreams(requestedConfiguration, &finalConfiguration);
+    }
+
     if (!err.isOk()) {
         ALOGE("%s: Transaction error: %s", __FUNCTION__, err.getMessage());
         return AidlProviderInfo::mapToStatusT(err);
     }
 
+    if (flags::session_hal_buf_manager()) {
+        std::set<int32_t> halBufferManagedStreamIds;
+        for (const auto &halStream: finalConfiguration) {
+            if ((interfaceVersion >= AIDL_DEVICE_SESSION_V3 &&
+                    mSupportSessionHalBufManager && halStream.enableHalBufferManager)
+                    || mUseHalBufManager) {
+                halBufferManagedStreamIds.insert(halStream.id);
+            }
+        }
+        mHalBufManagedStreamIds = std::move(halBufferManagedStreamIds);
+        config->hal_buffer_managed_streams = mHalBufManagedStreamIds;
+    }
     // And convert output stream configuration from AIDL
-
     for (size_t i = 0; i < config->num_streams; i++) {
         camera3::camera_stream_t *dst = config->streams[i];
         int streamId = Camera3Stream::cast(dst)->getId();
@@ -1055,6 +1096,10 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
             }
             dstStream->setUsage(
                     mapProducerToFrameworkUsage(src.producerUsage));
+            if (flags::session_hal_buf_manager()) {
+                dstStream->setHalBufferManager(
+                        contains(config->hal_buffer_managed_streams, streamId));
+            }
         }
         dst->max_buffers = src.maxBuffers;
     }
@@ -1377,7 +1422,7 @@ status_t AidlCamera3Device::AidlHalInterface::wrapAsAidlRequest(camera_capture_r
                     handlesCreated->push_back(acquireFence);
                 }
                 dst.acquireFence = camera3::dupToAidlIfNotNull(acquireFence);
-            } else if (mUseHalBufManager) {
+            } else if (isHalBufferManagedStream(streamId)) {
                 // HAL buffer management path
                 dst.bufferId = BUFFER_ID_NO_BUFFER;
                 dst.buffer = aidl::android::hardware::common::NativeHandle();
@@ -1391,7 +1436,7 @@ status_t AidlCamera3Device::AidlHalInterface::wrapAsAidlRequest(camera_capture_r
             dst.releaseFence = aidl::android::hardware::common::NativeHandle();
 
             // Output buffers are empty when using HAL buffer manager
-            if (!mUseHalBufManager) {
+            if (!isHalBufferManagedStream(streamId)) {
                 mBufferRecords.pushInflightBuffer(
                         captureRequest->frameNumber, streamId, src->buffer);
                 inflightBuffers->push_back(std::make_pair(captureRequest->frameNumber, streamId));
@@ -1437,8 +1482,9 @@ AidlCamera3Device::AidlRequestThread::AidlRequestThread(wp<Camera3Device> parent
                 bool supportCameraMute,
                 bool overrideToPortrait,
                 bool supportSettingsOverride) :
-          RequestThread(parent, statusTracker, interface, sessionParamKeys, useHalBufManager,
-                  supportCameraMute, overrideToPortrait, supportSettingsOverride) {}
+          RequestThread(parent, statusTracker, interface, sessionParamKeys,
+                  useHalBufManager, supportCameraMute, overrideToPortrait,
+                  supportSettingsOverride) {}
 
 status_t AidlCamera3Device::AidlRequestThread::switchToOffline(
         const std::vector<int32_t>& streamsToKeep,
@@ -1548,7 +1594,7 @@ status_t AidlCamera3Device::AidlCamera3DeviceInjectionMethods::injectionInitiali
 
     mInjectedCamHalInterface =
             new AidlHalInterface(deviceSession, injectionSession, queue, parent->mUseHalBufManager,
-                       parent->mSupportOfflineProcessing);
+                       parent->mSupportOfflineProcessing, parent->mSessionHalBufManager);
     if (mInjectedCamHalInterface == nullptr) {
         ALOGE("%s: mInjectedCamHalInterface does not exist!", __FUNCTION__);
         return DEAD_OBJECT;
@@ -1671,7 +1717,8 @@ sp<Camera3Device::RequestThread> AidlCamera3Device::createNewRequestThread(
                 bool overrideToPortrait,
                 bool supportSettingsOverride) {
     return new AidlRequestThread(parent, statusTracker, interface, sessionParamKeys,
-            useHalBufManager, supportCameraMute, overrideToPortrait, supportSettingsOverride);
+            useHalBufManager, supportCameraMute, overrideToPortrait,
+            supportSettingsOverride);
 };
 
 sp<Camera3Device::Camera3DeviceInjectionMethods>

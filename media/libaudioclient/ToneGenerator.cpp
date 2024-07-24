@@ -872,6 +872,18 @@ const ToneGenerator::ToneDescriptor ToneGenerator::sToneDescriptors[] = {
                         { .duration = 0 , .waveFreq = { 0 }, 0, 0}},
           .repeatCnt = 3,
           .repeatSegment = 0 },                              // TONE_NZ_CALL_WAITING
+        { .segments = { { .duration = 500, .waveFreq = { 425, 0 }, 0, 0 },
+                        { .duration = 250, .waveFreq = { 0 }, 0, 0 },
+                        { .duration = 0 , .waveFreq = { 0 }, 0, 0}},
+          .repeatCnt = ToneGenerator::TONEGEN_INF,
+          .repeatSegment = 0 },                             // TONE_MY_CONGESTION
+        { .segments = { { .duration = 400, .waveFreq = { 425, 0 }, 0, 0 },
+                        { .duration = 200, .waveFreq = { 0 }, 0, 0 },
+                        { .duration = 400, .waveFreq = { 425, 0 }, 0, 0 },
+                        { .duration = 2000, .waveFreq = { 0 }, 0, 0},
+                        { .duration = 0, .waveFreq = { 0 }, 0, 0}},
+          .repeatCnt = ToneGenerator::TONEGEN_INF,
+          .repeatSegment = 0 }                              // TONE_MY_RINGTONE
 };
 
 // Used by ToneGenerator::getToneForRegion() to convert user specified supervisory tone type
@@ -976,6 +988,16 @@ const unsigned char /*tone_type*/ ToneGenerator::sToneMappingTable[NUM_REGIONS-1
             TONE_SUP_ERROR,               // TONE_SUP_ERROR
             TONE_NZ_CALL_WAITING,         // TONE_SUP_CALL_WAITING
             TONE_GB_RINGTONE              // TONE_SUP_RINGTONE
+        },
+        {   // MALAYSIA
+            TONE_SUP_DIAL,                // TONE_SUP_DIAL
+            TONE_SUP_BUSY,                // TONE_SUP_BUSY
+            TONE_MY_CONGESTION,           // TONE_SUP_CONGESTION
+            TONE_SUP_RADIO_ACK,           // TONE_SUP_RADIO_ACK
+            TONE_SUP_RADIO_NOTAVAIL,      // TONE_SUP_RADIO_NOTAVAIL
+            TONE_SUP_ERROR,               // TONE_SUP_ERROR
+            TONE_SUP_CALL_WAITING,        // TONE_SUP_CALL_WAITING
+            TONE_MY_RINGTONE              // TONE_SUP_RINGTONE
         }
 };
 
@@ -1055,6 +1077,8 @@ ToneGenerator::ToneGenerator(audio_stream_type_t streamType, float volume, bool 
         mRegion = TAIWAN;
     } else if (strstr(value, "nz") != NULL) {
         mRegion = NZ;
+    } else if (strstr(value, "my") != NULL) {
+        mRegion = MY;
     } else {
         mRegion = CEPT;
     }
@@ -1240,13 +1264,10 @@ void ToneGenerator::stopTone() {
                     nsec += 1000000000;
                 }
 
-                if ((sec + 1) > ((time_t)(INT_MAX / mSamplingRate))) {
-                    mMaxSmp = sec * mSamplingRate;
-                } else {
-                    // mSamplingRate is always > 1000
-                    sec = sec * 1000 + nsec / 1000000; // duration in milliseconds
-                    mMaxSmp = (unsigned int)(((int64_t)sec * mSamplingRate) / 1000);
-                }
+                const uint64_t msec = static_cast<uint64_t>(sec) * 1000 + nsec / 1'000'000;
+                mMaxSmp = std::min(static_cast<uint64_t>(TONEGEN_INF - 1),
+                        msec * mSamplingRate / 1000);
+
                 ALOGV("stopTone() forcing mMaxSmp to %d, total for far %" PRIu64, mMaxSmp,
                       mTotalSmp);
             } else {
@@ -1614,14 +1635,11 @@ bool ToneGenerator::prepareWave() {
 
     mpToneDesc = mpNewToneDesc;
 
-    if (mDurationMs == -1) {
+    if (mDurationMs < 0) {  // mDurationMs is signed, treat all neg numbers as INF.
         mMaxSmp = TONEGEN_INF;
     } else {
-        if (mDurationMs > (int)(TONEGEN_INF / mSamplingRate)) {
-            mMaxSmp = (mDurationMs / 1000) * mSamplingRate;
-        } else {
-            mMaxSmp = (mDurationMs * mSamplingRate) / 1000;
-        }
+        mMaxSmp = std::min(static_cast<uint64_t>(TONEGEN_INF - 1),
+                static_cast<uint64_t>(mDurationMs) * mSamplingRate / 1000);
         ALOGV("prepareWave, duration limited to %d ms", mDurationMs);
     }
 
@@ -1652,7 +1670,8 @@ bool ToneGenerator::prepareWave() {
     if (mpToneDesc->segments[0].duration == TONEGEN_INF) {
         mNextSegSmp = TONEGEN_INF;
     } else{
-        mNextSegSmp = (mpToneDesc->segments[0].duration * mSamplingRate) / 1000;
+        mNextSegSmp = std::min(static_cast<uint64_t>(TONEGEN_INF - 1),
+                static_cast<uint64_t>(mpToneDesc->segments[0].duration) * mSamplingRate / 1000);
     }
 
     return true;

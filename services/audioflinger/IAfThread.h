@@ -19,8 +19,9 @@
 #include <android/media/IAudioTrackCallback.h>
 #include <android/media/IEffectClient.h>
 #include <audiomanager/IAudioManager.h>
-#include <audio_utils/mutex.h>
+#include <audio_utils/DeferredExecutor.h>
 #include <audio_utils/MelProcessor.h>
+#include <audio_utils/mutex.h>
 #include <binder/MemoryDealer.h>
 #include <datapath/AudioStreamIn.h>
 #include <datapath/AudioStreamOut.h>
@@ -95,7 +96,8 @@ public:
     virtual bool updateOrphanEffectChains(const sp<IAfEffectModule>& effect)
             EXCLUDES_AudioFlinger_Mutex = 0;
     virtual status_t moveEffectChain_ll(audio_session_t sessionId,
-            IAfPlaybackThread* srcThread, IAfPlaybackThread* dstThread)
+            IAfPlaybackThread* srcThread, IAfPlaybackThread* dstThread,
+            IAfEffectChain* srcChain = nullptr)
             REQUIRES(mutex(), audio_utils::ThreadBase_Mutex) = 0;
 
     virtual void requestLogMerge() = 0;
@@ -115,9 +117,11 @@ public:
             const sp<AudioIoDescriptor>& ioDesc,
             pid_t pid = 0) EXCLUDES_AudioFlinger_ClientMutex = 0;
     virtual void onNonOffloadableGlobalEffectEnable() EXCLUDES_AudioFlinger_Mutex = 0;
-    virtual void onSupportedLatencyModesChanged(
-            audio_io_handle_t output, const std::vector<audio_latency_mode_t>& modes)
+    virtual void onSupportedLatencyModesChanged(audio_io_handle_t output,
+                                                const std::vector<audio_latency_mode_t>& modes)
             EXCLUDES_AudioFlinger_ClientMutex = 0;
+
+    virtual void onHardError(std::set<audio_port_handle_t>& trackPortIds) = 0;
 };
 
 class IAfThreadBase : public virtual RefBase {
@@ -279,7 +283,7 @@ public:
     // integrity of the chains during the process.
     // Also sets the parameter 'effectChains' to current value of mEffectChains.
     virtual void lockEffectChains_l(Vector<sp<IAfEffectChain>>& effectChains)
-            REQUIRES(mutex()) = 0;
+            REQUIRES(mutex()) EXCLUDES_EffectChain_Mutex = 0;
     // unlock effect chains after process
     virtual void unlockEffectChains(const Vector<sp<IAfEffectChain>>& effectChains)
             EXCLUDES_ThreadBase_Mutex = 0;
@@ -386,6 +390,18 @@ public:
             const effect_uuid_t* type, bool suspend, audio_session_t sessionId)
             REQUIRES(mutex()) = 0;
 
+    // Wait while the Thread is busy.  This is done to ensure that
+    // the Thread is not busy releasing the Tracks, during which the Thread mutex
+    // may be temporarily unlocked.  Some Track methods will use this method to
+    // avoid races.
+    virtual void waitWhileThreadBusy_l(audio_utils::unique_lock& ul)
+            REQUIRES(mutex()) = 0;
+
+    // The ThreadloopExecutor is used to defer functors or dtors
+    // to when the Threadloop does not hold any mutexes (at the end of the
+    // processing period cycle).
+    virtual audio_utils::DeferredExecutor& getThreadloopExecutor() = 0;
+
     // Dynamic cast to derived interface
     virtual sp<IAfDirectOutputThread> asIAfDirectOutputThread() { return nullptr; }
     virtual sp<IAfDuplicatingThread> asIAfDuplicatingThread() { return nullptr; }
@@ -455,7 +471,8 @@ public:
             audio_port_handle_t portId,
             const sp<media::IAudioTrackCallback>& callback,
             bool isSpatialized,
-            bool isBitPerfect)
+            bool isBitPerfect,
+            audio_output_flags_t* afTrackFlags)
             REQUIRES(audio_utils::AudioFlinger_Mutex) = 0;
 
     virtual status_t addTrack_l(const sp<IAfTrack>& track) REQUIRES(mutex()) = 0;

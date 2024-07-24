@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_android_media_audio_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -22,8 +23,8 @@ cc_defaults {
     ],
     sanitize: {
         misc_undefined: [
-            "unsigned-integer-overflow",
             "signed-integer-overflow",
+            "unsigned-integer-overflow",
         ],
     },
 }
@@ -31,8 +32,8 @@ cc_defaults {
 cc_defaults {
     name: "audio_aidl_conversion_test_defaults",
     defaults: [
-        "libaudioclient_tests_defaults",
         "latest_android_media_audio_common_types_cpp_static",
+        "libaudioclient_tests_defaults",
     ],
     static_libs: [
         "audioclient-types-aidl-cpp",
@@ -104,13 +105,14 @@ cc_defaults {
     shared_libs: [
         "capture_state_listener-aidl-cpp",
         "framework-permission-aidl-cpp",
+        "libaudioutils",
         "libbase",
         "libcgrouprc",
         "libdl",
         "libmedia",
+        "libmedia_helper",
         "libmediametrics",
         "libmediautils",
-        "libmedia_helper",
         "libnblog",
         "libprocessgroup",
         "libshmemcompat",
@@ -130,7 +132,9 @@ cc_defaults {
         "libaudiofoundation",
         "libaudiomanager",
         "libaudiopolicy",
-        "libaudioutils",
+    ],
+    cflags: [
+        "-Wthread-safety",
     ],
     data: ["bbb*.raw"],
     srcs: [

@@ -593,8 +593,6 @@ status_t ConvertRGBToPlanarYUV(
         uint8_t *dstY, size_t dstStride, size_t dstVStride, size_t bufferSize,
         const C2GraphicView &src, C2Color::matrix_t colorMatrix, C2Color::range_t colorRange) {
     CHECK(dstY != nullptr);
-    CHECK((src.width() & 1) == 0);
-    CHECK((src.height() & 1) == 0);
 
     if (dstStride * dstVStride * 3 / 2 > bufferSize) {
         ALOGD("conversion buffer is too small for converting from RGB to YUV");
@@ -621,8 +619,8 @@ status_t ConvertRGBToPlanarYUV(
     uint8_t maxLvlChroma =  colorRange == C2Color::RANGE_FULL ? 255 : 240;
 
 #define CLIP3(min,v,max) (((v) < (min)) ? (min) : (((max) > (v)) ? (v) : (max)))
-    for (size_t y = 0; y < src.height(); ++y) {
-        for (size_t x = 0; x < src.width(); ++x) {
+    for (size_t y = 0; y < src.crop().height; ++y) {
+        for (size_t x = 0; x < src.crop().width; ++x) {
             uint8_t r = *pRed;
             uint8_t g = *pGreen;
             uint8_t b = *pBlue;

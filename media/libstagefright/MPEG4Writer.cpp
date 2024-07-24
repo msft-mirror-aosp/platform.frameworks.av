@@ -72,6 +72,9 @@ static const int64_t kInitialDelayTimeUs     = 700000LL;
 static const int64_t kMaxMetadataSize = 0x4000000LL;   // 64MB max per-frame metadata size
 static const int64_t kMaxCttsOffsetTimeUs = 30 * 60 * 1000000LL;  // 30 minutes
 static const size_t kESDSScratchBufferSize = 10;  // kMaxAtomSize in Mpeg4Extractor 64MB
+// Allow up to 100 milli second, which is safely above the maximum delay observed in manual testing
+// between posting from setNextFd and handling it
+static const int64_t kFdCondWaitTimeoutNs = 100000000;
 
 static const char kMetaKey_Version[]    = "com.android.version";
 static const char kMetaKey_Manufacturer[]      = "com.android.manufacturer";
@@ -1262,9 +1265,13 @@ status_t MPEG4Writer::switchFd() {
         return OK;
     }
 
+    // Wait for the signal only if the new file is not available.
     if (mNextFd == -1) {
-        ALOGW("No FileDescriptor for next recording");
-        return INVALID_OPERATION;
+        status_t res = mFdCond.waitRelative(mLock, kFdCondWaitTimeoutNs);
+        if (res != OK) {
+            ALOGW("No FileDescriptor for next recording");
+            return INVALID_OPERATION;
+        }
     }
 
     mSwitchPending = true;
@@ -2433,48 +2440,8 @@ status_t MPEG4Writer::setNextFd(int fd) {
         return INVALID_OPERATION;
     }
     mNextFd = dup(fd);
+    mFdCond.signal();
     return OK;
-}
-
-bool MPEG4Writer::isSampleMetadataValid(size_t trackIndex, int64_t timeUs) {
-    // Track Index starts from zero, so it should be at least 1 less than size.
-    if (trackIndex >= mTracks.size()) {
-        ALOGE("Incorrect trackIndex %zu, mTracks->size() %zu", trackIndex, mTracks.size());
-        return false;
-    }
-
-    List<Track *>::iterator it = mTracks.begin();
-
-    // (*it) is already pointing to trackIndex 0.
-    for (int i = 1; i <= trackIndex; i++) {
-        it++;
-    }
-
-    return (*it)->isTimestampValid(timeUs);
-}
-
-bool MPEG4Writer::Track::isTimestampValid(int64_t timeUs) {
-    // No timescale if HEIF
-    if (mIsHeif) {
-        return true;
-    }
-
-    // Make sure abs(timeUs) does not overflow
-    if (timeUs == INT64_MIN) {
-       return false;
-    }
-
-    // Ensure that the timeUs value does not have extremely low or high values
-    // that would cause an underflow or overflow, like in the calculation -
-    // mdhdDuration = (trakDurationUs * mTimeScale + 5E5) / 1E6
-    if (abs(timeUs) >= (INT64_MAX - 5E5) / mTimeScale) {
-        return false;
-    }
-    // Limit check for calculations in ctts box
-    if (abs(timeUs) + kMaxCttsOffsetTimeUs >= INT64_MAX / mTimeScale) {
-        return false;
-    }
-    return true;
 }
 
 bool MPEG4Writer::Track::isExifData(
@@ -4927,8 +4894,15 @@ void MPEG4Writer::Track::writeEdtsBox() {
             int32_t mediaTime = (mFirstSampleStartOffsetUs * mTimeScale + 5E5) / 1E6;
             int32_t firstSampleOffsetTicks =
                     (mFirstSampleStartOffsetUs * mvhdTimeScale + 5E5) / 1E6;
-            // samples before 0 don't count in for duration, hence subtract firstSampleOffsetTicks.
-            addOneElstTableEntry(tkhdDurationTicks - firstSampleOffsetTicks, mediaTime, 1, 0);
+            if (tkhdDurationTicks >= firstSampleOffsetTicks) {
+                // samples before 0 don't count in for duration, hence subtract
+                // firstSampleOffsetTicks.
+                addOneElstTableEntry(tkhdDurationTicks - firstSampleOffsetTicks, mediaTime, 1, 0);
+            } else {
+                ALOGW("The track header duration %" PRId64
+                      " is smaller than the first sample offset %" PRId64,
+                      mTrackDurationUs, mFirstSampleStartOffsetUs);
+            }
         } else {
             // Track starting at zero.
             ALOGV("No edit list entry required for this track");

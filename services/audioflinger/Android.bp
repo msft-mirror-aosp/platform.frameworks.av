@@ -66,12 +66,12 @@ audioflinger_base_tidy_errors = [
 
     // Remove some pedantic stylistic requirements.
     "-google-readability-casting", // C++ casts not always necessary and may be verbose
-    "-google-readability-todo",    // do not require TODO(info)
+    "-google-readability-todo", // do not require TODO(info)
 
-    "-bugprone-unhandled-self-assignment",
-    "-bugprone-suspicious-string-compare",
-    "-cert-oop54-cpp", // found in TransactionLog.h
     "-bugprone-narrowing-conversions", // b/182410845
+    "-bugprone-suspicious-string-compare",
+    "-bugprone-unhandled-self-assignment",
+    "-cert-oop54-cpp", // found in TransactionLog.h
 ]
 
 // TODO(b/275642749) Reenable these warnings
@@ -101,9 +101,9 @@ audioflinger_base_cflags = [
     "-Wall",
     "-Wdeprecated",
     "-Werror",
+    "-Werror=conditional-uninitialized",
     "-Werror=implicit-fallthrough",
     "-Werror=sometimes-uninitialized",
-    "-Werror=conditional-uninitialized",
     "-Wextra",
 
     // suppress some warning chatter.
@@ -113,7 +113,6 @@ audioflinger_base_cflags = [
     "-Wredundant-decls",
     "-Wshadow",
     "-Wstrict-aliasing",
-    "-fstrict-aliasing",
     "-Wthread-safety",
     //"-Wthread-safety-negative", // experimental - looks broken in R.
     "-Wunreachable-code",
@@ -121,6 +120,7 @@ audioflinger_base_cflags = [
     "-Wunreachable-code-return",
     "-Wunused",
     "-Wused-but-marked-unused",
+    "-fstrict-aliasing",
 ]
 
 // Eventually use common tidy defaults
@@ -134,11 +134,57 @@ cc_defaults {
     tidy_checks: audioflinger_tidy_errors,
     tidy_checks_as_errors: audioflinger_tidy_errors,
     tidy_flags: [
-      "-format-style=file",
+        "-format-style=file",
     ],
 }
 
-cc_library_shared {
+cc_defaults {
+    name: "libaudioflinger_dependencies",
+
+    shared_libs: [
+        "audioclient-types-aidl-cpp",
+        "audioflinger-aidl-cpp",
+        "av-types-aidl-cpp",
+        "com.android.media.audio-aconfig-cc",
+        "effect-aidl-cpp",
+        "libactivitymanager_aidl",
+        "libaudioclient",
+        "libaudioclient_aidl_conversion",
+        "libaudioflinger_datapath",
+        "libaudioflinger_fastpath",
+        "libaudioflinger_timing",
+        "libaudioflinger_utils",
+        "libaudiofoundation",
+        "libaudiohal",
+        "libaudiomanager",
+        "libaudioprocessing",
+        "libaudioutils",
+        "libbinder",
+        "libbinder_ndk",
+        "libcutils",
+        "liblog",
+        "libmedia_helper",
+        "libmediametrics",
+        "libmediautils",
+        "libmemunreachable",
+        "libnbaio",
+        "libnblog",
+        "libpermission",
+        "libpowermanager",
+        "libshmemcompat",
+        "libsounddose",
+        "libutils",
+        "libvibrator",
+        "packagemanager_aidl-cpp",
+    ],
+
+    static_libs: [
+        "libaudiospdif",
+        "libmedialogservice",
+    ],
+}
+
+cc_library {
     name: "libaudioflinger",
 
     defaults: [
@@ -146,6 +192,7 @@ cc_library_shared {
         "latest_android_hardware_audio_core_sounddose_ndk_export_shared_lib_header",
         "latest_android_hardware_audio_core_sounddose_ndk_shared",
         "latest_android_media_audio_common_types_cpp_shared",
+        "libaudioflinger_dependencies",
     ],
 
     srcs: [
@@ -163,44 +210,6 @@ cc_library_shared {
     include_dirs: [
         "frameworks/av/services/audiopolicy",
         "frameworks/av/services/medialog",
-    ],
-
-    shared_libs: [
-        "audioflinger-aidl-cpp",
-        "audioclient-types-aidl-cpp",
-        "av-types-aidl-cpp",
-        "effect-aidl-cpp",
-        "libaudioclient_aidl_conversion",
-        "libactivitymanager_aidl",
-        "libaudioflinger_datapath",
-        "libaudioflinger_fastpath",
-        "libaudioflinger_timing",
-        "libaudioflinger_utils",
-        "libaudiofoundation",
-        "libaudiohal",
-        "libaudioprocessing",
-        "libaudiospdif",
-        "libaudioutils",
-        "libcutils",
-        "libutils",
-        "liblog",
-        "libbinder",
-        "libbinder_ndk",
-        "libaudioclient",
-        "libaudiomanager",
-        "libmedialogservice",
-        "libmediametrics",
-        "libmediautils",
-        "libnbaio",
-        "libnblog",
-        "libpermission",
-        "libpowermanager",
-        "libmemunreachable",
-        "libmedia_helper",
-        "libshmemcompat",
-        "libsounddose",
-        "libvibrator",
-        "packagemanager_aidl-cpp",
     ],
 
     static_libs: [
@@ -221,9 +230,9 @@ cc_library_shared {
     ],
 
     cflags: [
-        "-fvisibility=hidden",
-        "-Werror",
         "-Wall",
+        "-Werror",
+        "-fvisibility=hidden",
     ],
     sanitize: {
         integer_overflow: true,
