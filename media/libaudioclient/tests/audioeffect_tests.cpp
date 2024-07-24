@@ -556,8 +556,9 @@ TEST(AudioEffectTest, TestHapticEffect) {
     ASSERT_EQ(NO_ERROR, playback->loadResource("/data/local/tmp/bbb_2ch_24kHz_s16le.raw"));
     EXPECT_EQ(NO_ERROR, playback->create());
     EXPECT_EQ(NO_ERROR, playback->start());
-    EXPECT_TRUE(isEffectExistsOnAudioSession(selectedEffectType, selectedEffectUuid,
-                                             kDefaultOutputEffectPriority - 1, sessionId))
+    ASSERT_EQ(ALREADY_EXISTS,
+              isEffectExistsOnAudioSession(selectedEffectType, selectedEffectUuid,
+                                           kDefaultOutputEffectPriority - 1, sessionId))
             << "Effect should have been added. " << type;
     EXPECT_EQ(NO_ERROR, playback->waitForConsumption());
     playback->stop();
