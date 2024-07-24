@@ -233,25 +233,9 @@ status_t AudioTrack::getMetrics(mediametrics::Item * &item)
     return NO_ERROR;
 }
 
-AudioTrack::AudioTrack() : AudioTrack(AttributionSourceState())
-{
-}
-
 AudioTrack::AudioTrack(const AttributionSourceState& attributionSource)
-    : mStatus(NO_INIT),
-      mState(STATE_STOPPED),
-      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT),
-      mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mRoutedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mClientAttributionSource(attributionSource),
-      mAudioTrackCallback(new AudioTrackCallback())
+    : mClientAttributionSource(attributionSource)
 {
-    mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
-    mAttributes.usage = AUDIO_USAGE_UNKNOWN;
-    mAttributes.flags = AUDIO_FLAG_NONE;
-    strcpy(mAttributes.tags, "");
 }
 
 AudioTrack::AudioTrack(
@@ -271,21 +255,12 @@ AudioTrack::AudioTrack(
         bool doNotReconnect,
         float maxRequiredSpeed,
         audio_port_handle_t selectedDeviceId)
-    : mStatus(NO_INIT),
-      mState(STATE_STOPPED),
-      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT),
-      mPausedPosition(0),
-      mAudioTrackCallback(new AudioTrackCallback())
 {
-    mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
-
-    // make_unique does not aggregate init until c++20
-    mSetParams = std::unique_ptr<SetParams>{
-            new SetParams{streamType, sampleRate, format, channelMask, frameCount, flags, callback,
-                          notificationFrames, 0 /*sharedBuffer*/, false /*threadCanCallJava*/,
-                          sessionId, transferType, offloadInfo, attributionSource, pAttributes,
-                          doNotReconnect, maxRequiredSpeed, selectedDeviceId}};
+    mSetParams = std::make_unique<SetParams>(
+        streamType, sampleRate, format, channelMask, frameCount, flags, callback,
+        notificationFrames, nullptr /*sharedBuffer*/, false /*threadCanCallJava*/,
+        sessionId, transferType, offloadInfo, attributionSource, pAttributes,
+        doNotReconnect, maxRequiredSpeed, selectedDeviceId);
 }
 
 namespace {
@@ -344,13 +319,6 @@ AudioTrack::AudioTrack(
         const audio_attributes_t* pAttributes,
         bool doNotReconnect,
         float maxRequiredSpeed)
-    : mStatus(NO_INIT),
-      mState(STATE_STOPPED),
-      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT),
-      mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
 
@@ -400,9 +368,6 @@ AudioTrack::~AudioTrack()
 }
 
 void AudioTrack::stopAndJoinCallbacks() {
-    // Prevent nullptr crash if it did not open properly.
-    if (mStatus != NO_ERROR) return;
-
     // Make sure that callback function exits in the case where
     // it is looping on buffer full condition in obtainBuffer().
     // Otherwise the callback thread will never exit.
@@ -812,7 +777,7 @@ status_t AudioTrack::start()
     (void) updateAndGetPosition_l();
 
     // save start timestamp
-    if (isOffloadedOrDirect_l()) {
+    if (isAfTrackOffloadedOrDirect_l()) {
         if (getTimestamp_l(mStartTs) != OK) {
             mStartTs.mPosition = 0;
         }
@@ -833,7 +798,7 @@ status_t AudioTrack::start()
         mTimestampStaleTimeReported = false;
         mPreviousLocation = ExtendedTimestamp::LOCATION_INVALID;
 
-        if (!isOffloadedOrDirect_l()
+        if (!isAfTrackOffloadedOrDirect_l()
                 && mStartEts.mTimeNs[ExtendedTimestamp::LOCATION_SERVER] > 0) {
             // Server side has consumed something, but is it finished consuming?
             // It is possible since flush and stop are asynchronous that the server
@@ -919,6 +884,7 @@ void AudioTrack::stop()
     const int64_t beginNs = systemTime();
 
     AutoMutex lock(mLock);
+    if (mProxy == nullptr) return;  // not successfully initialized.
     mediametrics::Defer defer([&]() {
         mediametrics::LogItem(mMetricsId)
             .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_STOP)
@@ -1707,14 +1673,14 @@ status_t AudioTrack::setOutputDevice(audio_port_handle_t deviceId) {
         mSelectedDeviceId = deviceId;
         if (mStatus == NO_ERROR) {
             if (isOffloadedOrDirect_l()) {
-                if (mState == STATE_STOPPED || mState == STATE_FLUSHED) {
-                    ALOGD("%s(%d): creating a new AudioTrack", __func__, mPortId);
-                    result = restoreTrack_l("setOutputDevice", true /* forceRestore */);
-                } else {
+                if (isPlaying_l()) {
                     ALOGW("%s(%d). Offloaded or Direct track is not STOPPED or FLUSHED. "
                           "State: %s.",
                             __func__, mPortId, stateToString(mState));
                     result = INVALID_OPERATION;
+                } else {
+                    ALOGD("%s(%d): creating a new AudioTrack", __func__, mPortId);
+                    result = restoreTrack_l("setOutputDevice", true /* forceRestore */);
                 }
             } else {
                 // allow track invalidation when track is not playing to propagate
@@ -1929,6 +1895,7 @@ status_t AudioTrack::createTrack_l()
     mAfChannelCount = audio_channel_count_from_out_mask(output.afChannelMask);
     mAfFormat = output.afFormat;
     mAfLatency = output.afLatencyMs;
+    mAfTrackFlags = output.afTrackFlags;
 
     mLatency = mAfLatency + (1000LL * mFrameCount) / mSampleRate;
 
@@ -2872,7 +2839,9 @@ status_t AudioTrack::restoreTrack_l(const char *from, bool forceRestore)
     if (!forceRestore &&
         (isOffloadedOrDirect_l() || mDoNotReconnect)) {
         // FIXME re-creation of offloaded and direct tracks is not yet implemented;
-        // reconsider enabling for linear PCM encodings when position can be preserved.
+        // Disabled since (1) timestamp correction is not implemented for non-PCM and
+        // (2) We pre-empt existing direct tracks on resource constraint, so these tracks
+        // shouldn't reconnect.
         result = DEAD_OBJECT;
         return result;
     }
@@ -3195,7 +3164,7 @@ status_t AudioTrack::getTimestamp_l(AudioTimestamp& timestamp)
     // To avoid a race, read the presented frames first.  This ensures that presented <= consumed.
 
     status_t status;
-    if (isOffloadedOrDirect_l()) {
+    if (isAfTrackOffloadedOrDirect_l()) {
         // use Binder to get timestamp
         media::AudioTimestampInternal ts;
         mAudioTrack->getTimestamp(&ts, &status);
@@ -3307,7 +3276,7 @@ status_t AudioTrack::getTimestamp_l(AudioTimestamp& timestamp)
         ALOGV_IF(status != WOULD_BLOCK, "%s(%d): getTimestamp error:%#x", __func__, mPortId, status);
         return status;
     }
-    if (isOffloadedOrDirect_l()) {
+    if (isAfTrackOffloadedOrDirect_l()) {
         if (isOffloaded_l() && (mState == STATE_PAUSED || mState == STATE_PAUSED_STOPPING)) {
             // use cached paused position in case another offloaded track is running.
             timestamp.mPosition = mPausedPosition;
@@ -3753,7 +3722,7 @@ bool AudioTrack::hasStarted()
     // This is conservatively figured - if we encounter an unexpected error
     // then we will not wait.
     bool wait = false;
-    if (isOffloadedOrDirect_l()) {
+    if (isAfTrackOffloadedOrDirect_l()) {
         AudioTimestamp ts;
         status_t status = getTimestamp_l(ts);
         if (status == WOULD_BLOCK) {

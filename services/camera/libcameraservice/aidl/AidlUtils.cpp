@@ -17,12 +17,13 @@
 #define LOG_TAG "AidlUtils"
 
 #include <aidl/AidlUtils.h>
+#include <aidl/ExtensionMetadataTags.h>
 #include <aidl/VndkVersionMetadataTags.h>
 #include <aidlcommonsupport/NativeHandle.h>
+#include <camera/StringUtils.h>
 #include <device3/Camera3StreamInterface.h>
 #include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
 #include <mediautils/AImageReaderUtils.h>
-#include <camera/StringUtils.h>
 
 namespace android::hardware::cameraservice::utils::conversion::aidl {
 
@@ -73,24 +74,49 @@ int32_t convertFromAidl(SStreamConfigurationMode streamConfigurationMode) {
 
 UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
     std::vector<sp<IGraphicBufferProducer>> iGBPs;
-    auto &windowHandles = src.windowHandles;
-    iGBPs.reserve(windowHandles.size());
+    if (!src.surfaces.empty()) {
+        auto& surfaces = src.surfaces;
+        iGBPs.reserve(surfaces.size());
 
-    for (auto &handle : windowHandles) {
-        native_handle_t* nh = makeFromAidl(handle);
-        auto igbp = AImageReader_getHGBPFromHandle(nh);
-        if (igbp == nullptr) {
-            ALOGE("%s: Could not get HGBP from NativeHandle: %s. Skipping.",
-                    __FUNCTION__, handle.toString().c_str());
-            continue;
+        for (auto& sSurface : surfaces) {
+            sp<IGraphicBufferProducer> igbp =
+                    Surface::getIGraphicBufferProducer(sSurface.get());
+            if (igbp == nullptr) {
+                ALOGE("%s: ANativeWindow (%p) not backed by a Surface.",
+                      __FUNCTION__, sSurface.get());
+                continue;
+            }
+            iGBPs.push_back(igbp);
         }
-        iGBPs.push_back(new H2BGraphicBufferProducer(igbp));
-        native_handle_delete(nh);
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        // HIDL token manager (and consequently 'windowHandles') is deprecated and will be removed
+        // in the future. However, cameraservice must still support old NativeHandle pathway until
+        // all vendors have moved away from using NativeHandles
+        auto &windowHandles = src.windowHandles;
+#pragma clang diagnostic pop
+
+        iGBPs.reserve(windowHandles.size());
+
+        for (auto &handle : windowHandles) {
+            native_handle_t* nh = makeFromAidl(handle);
+            auto igbp = AImageReader_getHGBPFromHandle(nh);
+            if (igbp == nullptr) {
+                ALOGE("%s: Could not get HGBP from NativeHandle: %s. Skipping.",
+                        __FUNCTION__, handle.toString().c_str());
+                continue;
+            }
+
+            iGBPs.push_back(new H2BGraphicBufferProducer(igbp));
+            native_handle_delete(nh);
+        }
     }
+
     UOutputConfiguration outputConfiguration(
         iGBPs, convertFromAidl(src.rotation), src.physicalCameraId,
         src.windowGroupId, OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0,
-        (windowHandles.size() > 1));
+        (iGBPs.size() > 1));
     return outputConfiguration;
 }
 
@@ -285,8 +311,8 @@ bool areBindersEqual(const ndk::SpAIBinder& b1, const ndk::SpAIBinder& b2) {
 
 status_t filterVndkKeys(int vndkVersion, CameraMetadata &metadata, bool isStatic) {
     if (vndkVersion == __ANDROID_API_FUTURE__) {
-        // VNDK version in ro.vndk.version is a version code-name that
-        // corresponds to the current version.
+        // VNDK version derived from ro.board.api_level is a version code-name that
+        // corresponds to the current SDK version.
         return OK;
     }
     const auto &apiLevelToKeys =
@@ -304,6 +330,49 @@ status_t filterVndkKeys(int vndkVersion, CameraMetadata &metadata, bool isStatic
             }
         }
         it++;
+    }
+    return OK;
+}
+
+bool areExtensionKeysSupported(const CameraMetadata& metadata) {
+    auto requestKeys = metadata.find(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS);
+    if (requestKeys.count == 0) {
+        ALOGE("%s: No ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS entries!", __FUNCTION__);
+        return false;
+    }
+
+    auto resultKeys = metadata.find(ANDROID_REQUEST_AVAILABLE_RESULT_KEYS);
+    if (resultKeys.count == 0) {
+        ALOGE("%s: No ANDROID_REQUEST_AVAILABLE_RESULT_KEYS entries!", __FUNCTION__);
+        return false;
+    }
+
+    for (const auto& extensionKey : extension_metadata_keys) {
+        if (std::find(requestKeys.data.i32, requestKeys.data.i32 + requestKeys.count, extensionKey)
+                != requestKeys.data.i32 + requestKeys.count) {
+            return true;
+        }
+
+        if (std::find(resultKeys.data.i32, resultKeys.data.i32 + resultKeys.count, extensionKey)
+                != resultKeys.data.i32 + resultKeys.count) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+status_t filterExtensionKeys(CameraMetadata* metadata /*out*/) {
+    if (metadata == nullptr) {
+        return BAD_VALUE;
+    }
+
+    for (const auto& key : extension_metadata_keys) {
+        status_t res = metadata->erase(key);
+        if (res != OK) {
+            ALOGE("%s metadata key %d could not be erased", __FUNCTION__, key);
+            return res;
+        }
     }
     return OK;
 }

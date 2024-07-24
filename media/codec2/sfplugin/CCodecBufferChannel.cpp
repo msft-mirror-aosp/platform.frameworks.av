@@ -28,6 +28,8 @@
 #include <thread>
 #include <chrono>
 
+#include <android_media_codec.h>
+
 #include <C2AllocatorGralloc.h>
 #include <C2PlatformSupport.h>
 #include <C2BlockInternal.h>
@@ -370,7 +372,17 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
         }
     } else {
         work->input.flags = (C2FrameData::flags_t)flags;
+
         // TODO: fill info's
+        if (android::media::codec::provider_->region_of_interest()
+                && android::media::codec::provider_->region_of_interest_support()) {
+            if (mInfoBuffers.size()) {
+                for (auto infoBuffer : mInfoBuffers) {
+                    work->input.infoBuffers.emplace_back(*infoBuffer);
+                }
+                mInfoBuffers.clear();
+            }
+        }
 
         work->input.configUpdate = std::move(mParamsToBeSet);
         if (tunnelFirstFrame) {
@@ -552,8 +564,7 @@ status_t CCodecBufferChannel::attachEncryptedBuffers(
     }
 
     ssize_t result = -1;
-    ssize_t codecDataOffset = 0;
-    size_t inBufferOffset = 0;
+    size_t srcOffset = offset;
     size_t outBufferSize = 0;
     uint32_t cryptoInfoIdx = 0;
     int32_t heapSeqNum = getHeapSeqNum(memory);
@@ -565,18 +576,20 @@ status_t CCodecBufferChannel::attachEncryptedBuffers(
     for (int i = 0; i < bufferInfos->value.size(); i++) {
         if (bufferInfos->value[i].mSize > 0) {
             std::unique_ptr<CodecCryptoInfo> info = std::move(cryptoInfos->value[cryptoInfoIdx++]);
+            src.offset = srcOffset;
+            src.size = bufferInfos->value[i].mSize;
             result = mCrypto->decrypt(
                     (uint8_t*)info->mKey,
                     (uint8_t*)info->mIv,
                     info->mMode,
                     info->mPattern,
                     src,
-                    inBufferOffset,
+                    0,
                     info->mSubSamples,
                     info->mNumSubSamples,
                     dst,
                     errorDetailMsg);
-            inBufferOffset += bufferInfos->value[i].mSize;
+            srcOffset += bufferInfos->value[i].mSize;
             if (result < 0) {
                 ALOGI("[%s] attachEncryptedBuffers: decrypt failed: result = %zd",
                         mName, result);
@@ -599,7 +612,7 @@ status_t CCodecBufferChannel::attachEncryptedBuffers(
         wView.setOffset(0);
     }
     std::shared_ptr<C2Buffer> c2Buffer{C2Buffer::CreateLinearBuffer(
-            block->share(codecDataOffset, outBufferSize - codecDataOffset, C2Fence{}))};
+            block->share(0, outBufferSize, C2Fence{}))};
     if (!buffer->copy(c2Buffer)) {
         ALOGI("[%s] attachEncryptedBuffers: buffer copy failed", mName);
         return -ENOSYS;
@@ -980,8 +993,7 @@ status_t CCodecBufferChannel::queueSecureInputBuffers(
     }
     // size of cryptoInfo and accessUnitInfo should be the same?
     ssize_t result = -1;
-    ssize_t codecDataOffset = 0;
-    size_t inBufferOffset = 0;
+    size_t srcOffset = 0;
     size_t outBufferSize = 0;
     uint32_t cryptoInfoIdx = 0;
     {
@@ -994,6 +1006,7 @@ status_t CCodecBufferChannel::queueSecureInputBuffers(
         encryptedBuffer->getMappedBlock(&mappedBlock);
         hardware::drm::V1_0::SharedBuffer source;
         encryptedBuffer->fillSourceBuffer(&source);
+        srcOffset = source.offset;
         for (int i = 0 ; i < bufferInfos->value.size(); i++) {
             if (bufferInfos->value[i].mSize > 0) {
                 std::unique_ptr<CodecCryptoInfo> info =
@@ -1004,18 +1017,20 @@ status_t CCodecBufferChannel::queueSecureInputBuffers(
                     // no data so we only populate the bufferInfo
                     result = 0;
                 } else {
+                    source.offset = srcOffset;
+                    source.size = bufferInfos->value[i].mSize;
                     result = mCrypto->decrypt(
                             (uint8_t*)info->mKey,
                             (uint8_t*)info->mIv,
                             info->mMode,
                             info->mPattern,
                             source,
-                            inBufferOffset,
+                            buffer->offset(),
                             info->mSubSamples,
                             info->mNumSubSamples,
                             destination,
                             errorDetailMsg);
-                    inBufferOffset += bufferInfos->value[i].mSize;
+                    srcOffset += bufferInfos->value[i].mSize;
                     if (result < 0) {
                         ALOGI("[%s] decrypt failed: result=%zd", mName, result);
                         return result;
@@ -1028,7 +1043,7 @@ status_t CCodecBufferChannel::queueSecureInputBuffers(
                 }
             }
         }
-        buffer->setRange(codecDataOffset, outBufferSize - codecDataOffset);
+        buffer->setRange(0, outBufferSize);
     }
     return queueInputBufferInternal(buffer, block, bufferSize);
 }
@@ -1053,6 +1068,10 @@ void CCodecBufferChannel::feedInputBufferIfAvailableInternal() {
                 (!output->bounded && output->buffers->numActiveSlots() >= output->numSlots)) {
             return;
         }
+    }
+    if (android::media::codec::provider_->input_surface_throttle()
+            && mInputSurface != nullptr) {
+        mInputSurface->onInputBufferEmptied();
     }
     size_t numActiveSlots = 0;
     while (!mPipelineWatcher.lock()->pipelineFull()) {
@@ -2055,6 +2074,7 @@ status_t CCodecBufferChannel::requestInitialInputBuffers(
 void CCodecBufferChannel::stop() {
     mSync.stop();
     mFirstValidFrameIndex = mFrameIndex.load(std::memory_order_relaxed);
+    mInfoBuffers.clear();
 }
 
 void CCodecBufferChannel::stopUseOutputSurface(bool pushBlankBuffer) {
@@ -2096,6 +2116,7 @@ void CCodecBufferChannel::reset() {
 }
 
 void CCodecBufferChannel::release() {
+    mInfoBuffers.clear();
     mComponent.reset();
     mInputAllocator.reset();
     mOutputSurface.lock()->surface.clear();
@@ -2161,6 +2182,7 @@ void CCodecBufferChannel::flush(const std::list<std::unique_ptr<C2Work>> &flushe
             output->buffers->flushStash();
         }
     }
+    mInfoBuffers.clear();
 }
 
 void CCodecBufferChannel::onWorkDone(
@@ -2762,6 +2784,19 @@ void CCodecBufferChannel::resetBuffersPixelFormat(bool isEncoder) {
             return;
         }
         output->buffers->resetPixelFormatIfApplicable();
+    }
+}
+
+void CCodecBufferChannel::setInfoBuffer(const std::shared_ptr<C2InfoBuffer> &buffer) {
+    if (mInputSurface == nullptr) {
+        mInfoBuffers.push_back(buffer);
+    } else {
+        std::list<std::unique_ptr<C2Work>> items;
+        std::unique_ptr<C2Work> work(new C2Work);
+        work->input.infoBuffers.emplace_back(*buffer);
+        work->worklets.emplace_back(new C2Worklet);
+        items.push_back(std::move(work));
+        c2_status_t err = mComponent->queue(&items);
     }
 }
 

@@ -314,6 +314,17 @@ status_t TrackBase::setSyncEvent(
     return NO_ERROR;
 }
 
+void TrackBase::deferRestartIfDisabled()
+{
+    const auto thread = mThread.promote();
+    if (thread == nullptr) return;
+    thread->getThreadloopExecutor().defer(
+            [track = wp<TrackBase>::fromExisting(this)] {
+            const auto actual = track.promote();
+            if (actual) actual->restartIfDisabled();
+        });
+}
+
 PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,
         IAfThreadBase* thread, const Timeout& timeout)
     : mProxy(proxy)
@@ -389,6 +400,7 @@ TrackHandle::TrackHandle(const sp<IAfTrack>& track)
       mTrack(track)
 {
     setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    setInheritRt(true);
 }
 
 TrackHandle::~TrackHandle() {
@@ -571,9 +583,7 @@ sp<OpPlayAudioMonitor> OpPlayAudioMonitor::createIfNeeded(
     getPackagesForUid(uid, packages);
     if (isServiceUid(uid)) {
         if (packages.isEmpty()) {
-            ALOGD("OpPlayAudio: not muting track:%d usage:%d for service UID %d",
-                  id,
-                  attr.usage,
+            ALOGW("OpPlayAudio: not muting track:%d usage:%d for service UID %d", id, attr.usage,
                   uid);
             return nullptr;
         }
@@ -597,7 +607,6 @@ OpPlayAudioMonitor::OpPlayAudioMonitor(IAfThreadBase* thread,
                                        audio_usage_t usage, int id, uid_t uid)
     : mThread(wp<IAfThreadBase>::fromExisting(thread)),
       mHasOpPlayAudio(true),
-      mAttributionSource(attributionSource),
       mUsage((int32_t)usage),
       mId(id),
       mUid(uid),
@@ -617,10 +626,11 @@ void OpPlayAudioMonitor::onFirstRef()
     // make sure not to broadcast the initial state since it is not needed and could
     // cause a deadlock since this method can be called with the mThread->mLock held
     checkPlayAudioForUsage(/*doBroadcast=*/false);
-    if (mAttributionSource.packageName.has_value()) {
+    if (mPackageName.size()) {
         mOpCallback = new PlayAudioOpCallback(this);
-        mAppOpsManager.startWatchingMode(AppOpsManager::OP_PLAY_AUDIO,
-                mPackageName, mOpCallback);
+        mAppOpsManager.startWatchingMode(AppOpsManager::OP_PLAY_AUDIO, mPackageName, mOpCallback);
+    } else {
+        ALOGW("Skipping OpPlayAudioMonitor due to null package name");
     }
 }
 
@@ -631,16 +641,16 @@ bool OpPlayAudioMonitor::hasOpPlayAudio() const {
 // Note this method is never called (and never to be) for audio server / patch record track
 // - not called from constructor due to check on UID,
 // - not called from PlayAudioOpCallback because the callback is not installed in this case
-void OpPlayAudioMonitor::checkPlayAudioForUsage(bool doBroadcast)
-{
-    const bool hasAppOps = mAttributionSource.packageName.has_value()
-        && mAppOpsManager.checkAudioOpNoThrow(
-                AppOpsManager::OP_PLAY_AUDIO, mUsage, mUid, mPackageName) ==
-                        AppOpsManager::MODE_ALLOWED;
+void OpPlayAudioMonitor::checkPlayAudioForUsage(bool doBroadcast) {
+    const bool hasAppOps =
+            mPackageName.size() &&
+            mAppOpsManager.checkAudioOpNoThrow(AppOpsManager::OP_PLAY_AUDIO, mUsage, mUid,
+                                               mPackageName) == AppOpsManager::MODE_ALLOWED;
 
     bool shouldChange = !hasAppOps;  // check if we need to update.
     if (mHasOpPlayAudio.compare_exchange_strong(shouldChange, hasAppOps)) {
-        ALOGD("OpPlayAudio: track:%d usage:%d %smuted", mId, mUsage, hasAppOps ? "not " : "");
+        ALOGI("OpPlayAudio: track:%d package:%s usage:%d %smuted", mId,
+              String8(mPackageName).c_str(), mUsage, hasAppOps ? "not " : "");
         if (doBroadcast) {
             auto thread = mThread.promote();
             if (thread != nullptr && thread->type() == IAfThreadBase::OFFLOAD) {
@@ -658,11 +668,11 @@ OpPlayAudioMonitor::PlayAudioOpCallback::PlayAudioOpCallback(
 
 void OpPlayAudioMonitor::PlayAudioOpCallback::opChanged(int32_t op,
             const String16& packageName) {
-    // we only have uid, so we need to check all package names anyway
-    UNUSED(packageName);
     if (op != AppOpsManager::OP_PLAY_AUDIO) {
         return;
     }
+
+    ALOGI("%s OP_PLAY_AUDIO callback received for %s", __func__, String8(packageName).c_str());
     sp<OpPlayAudioMonitor> monitor = mMonitor.promote();
     if (monitor != NULL) {
         monitor->checkPlayAudioForUsage(/*doBroadcast=*/true);
@@ -892,12 +902,17 @@ void Track::destroy()
         bool wasActive = false;
         const sp<IAfThreadBase> thread = mThread.promote();
         if (thread != 0) {
-            audio_utils::lock_guard _l(thread->mutex());
+            audio_utils::unique_lock ul(thread->mutex());
+            thread->waitWhileThreadBusy_l(ul);
+
             auto* const playbackThread = thread->asIAfPlaybackThread().get();
             wasActive = playbackThread->destroyTrack_l(this);
             forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->destroy(); });
         }
         if (isExternalTrack() && !wasActive) {
+            // If the track is not active, the TrackHandle is responsible for
+            // releasing the port id, not the ThreadBase::threadLoop().
+            // At this point, there is no concurrency issue as the track is going away.
             AudioSystem::releaseOutput(mPortId);
         }
     }
@@ -1189,7 +1204,9 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
                 return PERMISSION_DENIED;
             }
         }
-        audio_utils::lock_guard _lth(thread->mutex());
+        audio_utils::unique_lock ul(thread->mutex());
+        thread->waitWhileThreadBusy_l(ul);
+
         track_state state = mState;
         // here the track could be either new, or restarted
         // in both cases "unstop" the track
@@ -1228,7 +1245,7 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
                 && (state == IDLE || state == STOPPED || state == FLUSHED)) {
             mFrameMap.reset();
 
-            if (!isFastTrack() && (isDirect() || isOffloaded())) {
+            if (!isFastTrack()) {
                 // Start point of track -> sink frame map. If the HAL returns a
                 // frame position smaller than the first written frame in
                 // updateTrackFrameInfo, the timestamp can be interpolated
@@ -1314,7 +1331,9 @@ void Track::stop()
     ALOGV("%s(%d): calling pid %d", __func__, mId, IPCThreadState::self()->getCallingPid());
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
-        audio_utils::lock_guard _l(thread->mutex());
+        audio_utils::unique_lock ul(thread->mutex());
+        thread->waitWhileThreadBusy_l(ul);
+
         track_state state = mState;
         if (state == RESUMING || state == ACTIVE || state == PAUSING || state == PAUSED) {
             // If the track is not active (PAUSED and buffers full), flush buffers
@@ -1322,7 +1341,9 @@ void Track::stop()
             if (!playbackThread->isTrackActive(this)) {
                 reset();
                 mState = STOPPED;
-            } else if (!isFastTrack() && !isOffloaded() && !isDirect()) {
+            } else if (isPatchTrack() || (!isFastTrack() && !isOffloaded() && !isDirect())) {
+                // for a PatchTrack (whatever fast ot not), do not drain but move directly
+                // to STOPPED to avoid closing while active.
                 mState = STOPPED;
             } else {
                 // For fast tracks prepareTracks_l() will set state to STOPPING_2
@@ -1347,7 +1368,9 @@ void Track::pause()
     ALOGV("%s(%d): calling pid %d", __func__, mId, IPCThreadState::self()->getCallingPid());
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
-        audio_utils::lock_guard _l(thread->mutex());
+        audio_utils::unique_lock ul(thread->mutex());
+        thread->waitWhileThreadBusy_l(ul);
+
         auto* const playbackThread = thread->asIAfPlaybackThread().get();
         switch (mState) {
         case STOPPING_1:
@@ -1384,7 +1407,9 @@ void Track::flush()
     ALOGV("%s(%d)", __func__, mId);
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
-        audio_utils::lock_guard _l(thread->mutex());
+        audio_utils::unique_lock ul(thread->mutex());
+        thread->waitWhileThreadBusy_l(ul);
+
         auto* const playbackThread = thread->asIAfPlaybackThread().get();
 
         // Flush the ring buffer now if the track is not active in the PlaybackThread.
@@ -1654,22 +1679,18 @@ void Track::processMuteEvent_l(const sp<
         if (mMuteEventExtras == nullptr) {
             mMuteEventExtras = std::make_unique<os::PersistableBundle>();
         }
-        mMuteEventExtras->putInt(String16(kExtraPlayerEventMuteKey),
-                                 static_cast<int>(muteState));
+        mMuteEventExtras->putInt(String16(kExtraPlayerEventMuteKey), static_cast<int>(muteState));
 
-        result = audioManager->portEvent(mPortId,
-                                         PLAYER_UPDATE_MUTED,
-                                         mMuteEventExtras);
+        result = audioManager->portEvent(mPortId, PLAYER_UPDATE_MUTED, mMuteEventExtras);
     }
 
     if (result == OK) {
+        ALOGI("%s(%d): processed mute state for port ID %d from %d to %d", __func__, id(), mPortId,
+                static_cast<int>(mMuteState), static_cast<int>(muteState));
         mMuteState = muteState;
     } else {
-        ALOGW("%s(%d): cannot process mute state for port ID %d, status error %d",
-              __func__,
-              id(),
-              mPortId,
-              result);
+        ALOGW("%s(%d): cannot process mute state for port ID %d, status error %d", __func__, id(),
+              mPortId, result);
     }
 }
 
@@ -2293,7 +2314,7 @@ ssize_t OutputTrack::write(void* data, uint32_t frames)
                 waitTimeLeftMs = 0;
             }
             if (status == NOT_ENOUGH_DATA) {
-                restartIfDisabled();
+                deferRestartIfDisabled();
                 continue;
             }
         }
@@ -2305,7 +2326,7 @@ ssize_t OutputTrack::write(void* data, uint32_t frames)
         buf.mFrameCount = outFrames;
         buf.mRaw = NULL;
         mClientProxy->releaseBuffer(&buf);
-        restartIfDisabled();
+        deferRestartIfDisabled();
         pInBuffer->frameCount -= outFrames;
         pInBuffer->raw = (int8_t *)pInBuffer->raw + outFrames * mFrameSize;
         mOutBuffer.frameCount -= outFrames;
@@ -2432,10 +2453,11 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
         size_t bufferSize,
         audio_output_flags_t flags,
         const Timeout& timeout,
-        size_t frameCountToBeReady /** Default behaviour is to start
+        size_t frameCountToBeReady, /** Default behaviour is to start
                                          *  as soon as possible to have
                                          *  the lowest possible latency
-                                         *  even if it might glitch. */)
+                                         *  even if it might glitch. */
+        float speed)
 {
     return sp<PatchTrack>::make(
             playbackThread,
@@ -2448,7 +2470,8 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
             bufferSize,
             flags,
             timeout,
-            frameCountToBeReady);
+            frameCountToBeReady,
+            speed);
 }
 
 PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
@@ -2461,17 +2484,26 @@ PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
                                                      size_t bufferSize,
                                                      audio_output_flags_t flags,
                                                      const Timeout& timeout,
-                                                     size_t frameCountToBeReady)
+                                                     size_t frameCountToBeReady,
+                                                     float speed)
     :   Track(playbackThread, NULL, streamType,
               audio_attributes_t{} /* currently unused for patch track */,
               sampleRate, format, channelMask, frameCount,
               buffer, bufferSize, nullptr /* sharedBuffer */,
               AUDIO_SESSION_NONE, getpid(), audioServerAttributionSource(getpid()), flags,
-              TYPE_PATCH, AUDIO_PORT_HANDLE_NONE, frameCountToBeReady),
-        PatchTrackBase(mCblk ? new ClientProxy(mCblk, mBuffer, frameCount, mFrameSize, true, true)
-                        : nullptr,
+              TYPE_PATCH, AUDIO_PORT_HANDLE_NONE, frameCountToBeReady, speed),
+        PatchTrackBase(mCblk ? new AudioTrackClientProxy(mCblk, mBuffer, frameCount, mFrameSize,
+                        true /*clientInServer*/) : nullptr,
                        playbackThread, timeout)
 {
+    if (mProxy != nullptr) {
+        sp<AudioTrackClientProxy>::cast(mProxy)->setPlaybackRate({
+                /* .mSpeed = */ speed,
+                /* .mPitch = */ AUDIO_TIMESTRETCH_PITCH_NORMAL,
+                /* .mStretchMode = */ AUDIO_TIMESTRETCH_STRETCH_DEFAULT,
+                /* .mFallbackMode = */ AUDIO_TIMESTRETCH_FALLBACK_FAIL
+        });
+    }
     ALOGV("%s(%d): sampleRate %d mPeerTimeout %d.%03d sec",
                                       __func__, mId, sampleRate,
                                       (int)mPeerTimeout.tv_sec,
@@ -2549,7 +2581,7 @@ status_t PatchTrack::obtainBuffer(Proxy::Buffer* buffer,
     const size_t originalFrameCount = buffer->mFrameCount;
     do {
         if (status == NOT_ENOUGH_DATA) {
-            restartIfDisabled();
+            deferRestartIfDisabled();
             buffer->mFrameCount = originalFrameCount; // cleared on error, must be restored.
         }
         status = mProxy->obtainBuffer(buffer, timeOut);
@@ -2560,7 +2592,7 @@ status_t PatchTrack::obtainBuffer(Proxy::Buffer* buffer,
 void PatchTrack::releaseBuffer(Proxy::Buffer* buffer)
 {
     mProxy->releaseBuffer(buffer);
-    restartIfDisabled();
+    deferRestartIfDisabled();
 
     // Check if the PatchTrack has enough data to write once in releaseBuffer().
     // If not, prevent an underrun from occurring by moving the track into FS_FILLING;
@@ -2632,6 +2664,7 @@ RecordHandle::RecordHandle(
     mRecordTrack(recordTrack)
 {
     setMinSchedulerPolicy(SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    setInheritRt(true);
 }
 
 RecordHandle::~RecordHandle() {
@@ -3545,6 +3578,8 @@ void MmapTrack::processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_s
     }
 
     if (result == OK) {
+        ALOGI("%s(%d): processed mute state for port ID %d from %d to %d", __func__, id(), mPortId,
+                static_cast<int>(mMuteState), static_cast<int>(muteState));
         mMuteState = muteState;
     } else {
         ALOGW("%s(%d): cannot process mute state for port ID %d, status error %d",

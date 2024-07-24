@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_android_media_audio_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -7,28 +8,19 @@ package {
     default_applicable_licenses: ["frameworks_av_license"],
 }
 
-cc_library_shared {
-    name: "libaudiopolicyservice",
-
-    defaults: [
-        "latest_android_media_audio_common_types_cpp_shared",
-    ],
-
-    srcs: [
-        "AudioPolicyClientImpl.cpp",
-        "AudioPolicyEffects.cpp",
-        "AudioPolicyInterfaceImpl.cpp",
-        "AudioPolicyService.cpp",
-        "CaptureStateNotifier.cpp",
-        "Spatializer.cpp",
-        "SpatializerPoseController.cpp",
-    ],
-
-    include_dirs: [
-        "frameworks/av/services/audioflinger"
-    ],
+cc_defaults {
+    name: "libaudiopolicyservice_dependencies",
 
     shared_libs: [
+        "android.media.audiopolicy-aconfig-cc",
+        "audioclient-types-aidl-cpp",
+        "audioflinger-aidl-cpp",
+        "audiopolicy-aidl-cpp",
+        "audiopolicy-types-aidl-cpp",
+        "capture_state_listener-aidl-cpp",
+        "com.android.media.audio-aconfig-cc",
+        "framework-permission-aidl-cpp",
+        "libPlatformProperties",
         "libactivitymanager_aidl",
         "libaudioclient",
         "libaudioclient_aidl_conversion",
@@ -41,7 +33,6 @@ cc_library_shared {
         "libaudioutils",
         "libbinder",
         "libcutils",
-        "libeffectsconfig",
         "libhardware_legacy",
         "libheadtracking",
         "libheadtracking-binding",
@@ -56,14 +47,37 @@ cc_library_shared {
         "libstagefright_foundation",
         "libutils",
         "libxml2",
-        "audioclient-types-aidl-cpp",
-        "audioflinger-aidl-cpp",
-        "audiopolicy-aidl-cpp",
-        "audiopolicy-types-aidl-cpp",
-        "capture_state_listener-aidl-cpp",
-        "framework-permission-aidl-cpp",
         "packagemanager_aidl-cpp",
         "spatializer-aidl-cpp",
+    ],
+
+    static_libs: [
+        "libaudiopolicycomponents",
+        "libeffectsconfig",
+    ],
+}
+
+cc_library {
+    name: "libaudiopolicyservice",
+
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_shared",
+        "libaudiopolicyservice_dependencies",
+    ],
+
+    srcs: [
+        "AudioPolicyClientImpl.cpp",
+        "AudioPolicyEffects.cpp",
+        "AudioPolicyInterfaceImpl.cpp",
+        "AudioPolicyService.cpp",
+        "AudioRecordClient.cpp",
+        "CaptureStateNotifier.cpp",
+        "Spatializer.cpp",
+        "SpatializerPoseController.cpp",
+    ],
+
+    include_dirs: [
+        "frameworks/av/services/audioflinger",
     ],
 
     static_libs: [
@@ -79,18 +93,24 @@ cc_library_shared {
     ],
 
     cflags: [
-        "-fvisibility=hidden",
-        "-Werror",
         "-Wall",
+        "-Werror",
         "-Wthread-safety",
+        "-fvisibility=hidden",
     ],
 
     export_shared_lib_headers: [
+        "framework-permission-aidl-cpp",
         "libactivitymanager_aidl",
         "libaudiousecasevalidation",
         "libheadtracking",
         "libheadtracking-binding",
         "libsensorprivacy",
-        "framework-permission-aidl-cpp",
     ],
+}
+
+cc_library_headers {
+    name: "libaudiopolicyservice_headers",
+    host_supported: true,
+    export_include_dirs: ["."],
 }

@@ -37,7 +37,6 @@ extern "C" binder_exception_t createEffect(const AudioUuid* in_impl_uuid,
     }
     if (instanceSpp) {
         *instanceSpp = ndk::SharedRefBase::make<VisualizerImpl>();
-        LOG(DEBUG) << __func__ << " instance " << instanceSpp->get() << " created";
         return EX_NONE;
     } else {
         LOG(ERROR) << __func__ << " invalid input parameter!";
@@ -59,7 +58,8 @@ namespace aidl::android::hardware::audio::effect {
 const std::string VisualizerImpl::kEffectName = "Visualizer";
 const std::vector<Range::VisualizerRange> VisualizerImpl::kRanges = {
         MAKE_RANGE(Visualizer, latencyMs, 0, VisualizerContext::kMaxLatencyMs),
-        MAKE_RANGE(Visualizer, captureSamples, 0, VisualizerContext::kMaxCaptureBufSize),
+        MAKE_RANGE(Visualizer, captureSamples, VisualizerContext::kMinCaptureBufSize,
+                   VisualizerContext::kMaxCaptureBufSize),
         /* get only parameters, set invalid range (min > max) to indicate not support set */
         MAKE_RANGE(Visualizer, measurement, Visualizer::Measurement({.rms = 1, .peak = 1}),
                    Visualizer::Measurement({.rms = 0, .peak = 0})),
@@ -72,7 +72,7 @@ const Descriptor VisualizerImpl::kDescriptor = {
                           .uuid = getEffectImplUuidVisualizer(),
                           .proxy = std::nullopt},
                    .flags = {.type = Flags::Type::INSERT,
-                             .insert = Flags::Insert::LAST,
+                             .insert = Flags::Insert::FIRST,
                              .volume = Flags::Volume::NONE},
                    .name = VisualizerImpl::kEffectName,
                    .implementor = "The Android Open Source Project"},

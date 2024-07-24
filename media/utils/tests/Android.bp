@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_media_framework_audio",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -200,7 +201,10 @@ cc_test {
     name: "timerthread_tests",
 
     defaults: ["libmediautils_tests_defaults"],
-
+    // TODO(b/270180838)
+    test_options: {
+        unit_test: false,
+    },
     srcs: [
         "TimerThread-test.cpp",
     ],

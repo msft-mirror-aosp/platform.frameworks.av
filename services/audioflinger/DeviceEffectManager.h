@@ -75,6 +75,9 @@ public:
             EXCLUDES_DeviceEffectManager_Mutex;
     void onReleaseAudioPatch(audio_patch_handle_t handle) final
             EXCLUDES_DeviceEffectManager_Mutex;
+    void onUpdateAudioPatch(audio_patch_handle_t oldHandle,
+            audio_patch_handle_t newHandle, const IAfPatchPanel::Patch& patch) final
+            EXCLUDES_DeviceEffectManager_Mutex;
 
 private:
     static status_t checkEffectCompatibility(const effect_descriptor_t *desc);
@@ -82,10 +85,11 @@ private:
     audio_utils::mutex& mutex() const RETURN_CAPABILITY(audio_utils::DeviceEffectManager_Mutex) {
        return mMutex;
    }
-    mutable audio_utils::mutex mMutex;
+    mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kDeviceEffectManager_Mutex};
     const sp<IAfDeviceEffectManagerCallback> mAfDeviceEffectManagerCallback;
     const sp<DeviceEffectManagerCallback> mMyCallback;
-    std::map<AudioDeviceTypeAddr, sp<IAfDeviceEffectProxy>> mDeviceEffects GUARDED_BY(mutex());
+    std::map<AudioDeviceTypeAddr, std::vector<sp<IAfDeviceEffectProxy>>>
+            mDeviceEffects GUARDED_BY(mutex());
 };
 
 class DeviceEffectManagerCallback : public EffectCallbackInterface {
@@ -135,7 +139,7 @@ public:
     // check if effects should be suspended or restored when a given effect is enable or disabled
     void checkSuspendOnEffectEnabled(const sp<IAfEffectBase>& effect __unused,
                           bool enabled __unused, bool threadLocked __unused) final {}
-    void resetVolume() final {}
+    void resetVolume_l() final REQUIRES(audio_utils::EffectChain_Mutex) {}
     product_strategy_t strategy() const final { return static_cast<product_strategy_t>(0); }
     int32_t activeTrackCnt() const final { return 0; }
     void onEffectEnable(const sp<IAfEffectBase>& effect __unused) final {}

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 package {
+    default_team: "trendy_team_android_media_audio_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -31,10 +32,10 @@ cc_library_static {
     name: "libaudiopolicyengine_common",
     srcs: [
         "src/EngineBase.cpp",
+        "src/LastRemovableMediaDevices.cpp",
         "src/ProductStrategy.cpp",
         "src/VolumeCurve.cpp",
         "src/VolumeGroup.cpp",
-        "src/LastRemovableMediaDevices.cpp",
     ],
     cflags: [
         "-Wall",
@@ -42,10 +43,10 @@ cc_library_static {
         "-Wextra",
     ],
     header_libs: [
-        "libbase_headers",
         "libaudiopolicycommon",
         "libaudiopolicyengine_common_headers",
         "libaudiopolicyengine_interface_headers",
+        "libbase_headers",
     ],
     export_header_lib_headers: [
         "libaudiopolicyengine_common_headers",
@@ -56,5 +57,12 @@ cc_library_static {
     shared_libs: [
         "libaudiofoundation",
         "libaudiopolicycomponents",
+    ],
+    whole_static_libs: [
+        "com.android.media.audio-aconfig-cc",
+        "server_configurable_flags",
+    ],
+    defaults: [
+        "aconfig_lib_cc_static_link.defaults",
     ],
 }

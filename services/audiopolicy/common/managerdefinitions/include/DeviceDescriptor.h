@@ -93,6 +93,8 @@ public:
 
     void setEncapsulationInfoFromHal(AudioPolicyClientInterface *clientInterface);
 
+    void setPreferredConfig(const audio_config_base_t * preferredConfig);
+
     void dump(String8 *dst, int spaces, bool verbose = true) const;
 
 private:
@@ -107,6 +109,7 @@ private:
     audio_format_t      mCurrentEncodedFormat;
     bool                mIsDynamic = false;
     std::string         mDeclaredAddress; // Original device address
+    std::optional<audio_config_base_t> mPreferredConfig;
 };
 
 class DeviceVector : public SortedVector<sp<DeviceDescriptor> >
@@ -279,6 +282,11 @@ public:
 
     const AudioProfileVector& getSupportedProfiles() { return mSupportedProfiles; }
 
+    /**
+     * @brief checks if all devices in device vector are attached to the HwModule or not
+     * @return true if all the devices in device vector are attached, otherwise false
+     */
+    bool areAllDevicesAttached() const;
     // Return a string to describe the DeviceVector. The sensitive information will only be
     // added to the string if `includeSensitiveInfo` is true.
     std::string toString(bool includeSensitiveInfo = false) const;

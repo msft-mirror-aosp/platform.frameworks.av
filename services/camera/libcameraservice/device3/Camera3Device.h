@@ -97,6 +97,10 @@ class Camera3Device :
         return mInterface->getTransportType();
     }
 
+    bool isHalBufferManagedStream(int32_t streamId) const {
+        return mInterface->isHalBufferManagedStream(streamId);
+    };
+
     /**
      * CameraDeviceBase interface
      */
@@ -125,12 +129,12 @@ class Camera3Device :
     // idle state
     status_t capture(CameraMetadata &request, int64_t *lastFrameNumber = NULL) override;
     status_t captureList(const List<const PhysicalCameraSettingsList> &requestsList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             int64_t *lastFrameNumber = NULL) override;
     status_t setStreamingRequest(const CameraMetadata &request,
             int64_t *lastFrameNumber = NULL) override;
     status_t setStreamingRequestList(const List<const PhysicalCameraSettingsList> &requestsList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             int64_t *lastFrameNumber = NULL) override;
     status_t clearStreamingRequest(int64_t *lastFrameNumber = NULL) override;
 
@@ -301,6 +305,15 @@ class Camera3Device :
     status_t setCameraMute(bool enabled);
 
     /**
+     * Mute the camera.
+     *
+     * When muted, black image data is output on all output streams.
+     * This method assumes the caller already acquired the 'mInterfaceLock'
+     * and 'mLock' locks.
+     */
+    status_t setCameraMuteLocked(bool enabled);
+
+    /**
      * Enables/disables camera service watchdog
      */
     status_t setCameraServiceWatchdog(bool enabled);
@@ -337,6 +350,11 @@ class Camera3Device :
      * Stop the injection camera and restore to internal camera session.
      */
     status_t stopInjection();
+
+    /**
+     * Inject session params into the current client.
+     */
+    status_t injectSessionParams(const CameraMetadata& sessionParams);
 
   protected:
     status_t disconnectImpl();
@@ -385,7 +403,6 @@ class Camera3Device :
     int                        mOperatingMode;
     // Current session wide parameters
     hardware::camera2::impl::CameraMetadataNative mSessionParams;
-
     // Constant to use for no set operating mode
     static const int           NO_MODE = -1;
 
@@ -472,6 +489,9 @@ class Camera3Device :
 
         /////////////////////////////////////////////////////////////////////
 
+        //Check if a stream is hal buffer managed
+        bool isHalBufferManagedStream(int32_t streamId) const;
+
         // Get a vector of (frameNumber, streamId) pair of currently inflight
         // buffers
         void getInflightBufferKeys(std::vector<std::pair<int32_t, int32_t>>* out);
@@ -543,7 +563,9 @@ class Camera3Device :
 
         uint32_t mNextStreamConfigCounter = 1;
 
-        const bool mUseHalBufManager;
+        // TODO: This can be removed after flags::session_hal_buf_manager is removed
+        bool mUseHalBufManager = false;
+        std::set<int32_t > mHalBufManagedStreamIds;
         bool mIsReconfigurationQuerySupported;
 
         const bool mSupportOfflineProcessing;
@@ -680,17 +702,17 @@ class Camera3Device :
 
     status_t convertMetadataListToRequestListLocked(
             const List<const PhysicalCameraSettingsList> &metadataList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             bool repeating, nsecs_t requestTimeNs,
             /*out*/
             RequestList *requestList);
 
     void convertToRequestList(List<const PhysicalCameraSettingsList>& requestsList,
-            std::list<const SurfaceMap>& surfaceMaps,
+            std::list<SurfaceMap>& surfaceMaps,
             const CameraMetadata& request);
 
     status_t submitRequestsHelper(const List<const PhysicalCameraSettingsList> &requestsList,
-                                  const std::list<const SurfaceMap> &surfaceMaps,
+                                  const std::list<SurfaceMap> &surfaceMaps,
                                   bool repeating,
                                   int64_t *lastFrameNumber = NULL);
 
@@ -943,8 +965,12 @@ class Camera3Device :
          */
         void     setPaused(bool paused);
 
-        // set mRequestClearing - no new requests are expected to be queued to RequestThread
-        void setRequestClearing();
+        /**
+         * Set Hal buffer managed streams
+         * @param halBufferManagedStreams The streams for which hal buffer manager is enabled
+         *
+         */
+        void setHalBufferManagedStreams(const std::set<int32_t> &halBufferManagedStreams);
 
         /**
          * Wait until thread processes the capture request with settings'
@@ -1003,6 +1029,17 @@ class Camera3Device :
 
         status_t setHalInterface(sp<HalInterface> newHalInterface);
 
+        status_t setInjectedSessionParams(const CameraMetadata& sessionParams);
+
+        void injectSessionParams(
+            const sp<CaptureRequest> &request,
+            const CameraMetadata& injectedSessionParams);
+
+        /**
+         * signal mLatestRequestmutex
+         **/
+        void wakeupLatestRequest(bool latestRequestFailed, int32_t latestRequestId);
+
       protected:
 
         virtual bool threadLoop();
@@ -1037,7 +1074,7 @@ class Camera3Device :
         static const nsecs_t kRequestTimeout = 50e6; // 50 ms
 
         // TODO: does this need to be adjusted for long exposure requests?
-        static const nsecs_t kRequestSubmitTimeout = 200e6; // 200 ms
+        static const nsecs_t kRequestSubmitTimeout = 500e6; // 500 ms
 
         // Used to prepare a batch of requests.
         struct NextRequest {
@@ -1183,10 +1220,13 @@ class Camera3Device :
 
         Vector<int32_t>    mSessionParamKeys;
         CameraMetadata     mLatestSessionParams;
+        CameraMetadata     mInjectedSessionParams;
+        bool               mForceNewRequestAfterReconfigure;
 
         std::map<int32_t, std::set<std::string>> mGroupIdPhysicalCameraMap;
 
-        const bool         mUseHalBufManager;
+        bool               mUseHalBufManager = false;
+        std::set<int32_t > mHalBufManagedStreamIds;
         const bool         mSupportCameraMute;
         const bool         mOverrideToPortrait;
         const bool         mSupportSettingsOverride;
@@ -1377,7 +1417,8 @@ class Camera3Device :
 
     // Whether HAL request buffers through requestStreamBuffers API
     bool mUseHalBufManager = false;
-
+    std::set<int32_t > mHalBufManagedStreamIds;
+    bool mSessionHalBufManager = false;
     // Lock to ensure requestStreamBuffers() callbacks are serialized
     std::mutex mRequestBufferInterfaceLock;
 
@@ -1412,6 +1453,8 @@ class Camera3Device :
     class RequestBufferStateMachine {
       public:
         status_t initialize(sp<camera3::StatusTracker> statusTracker);
+
+        status_t deInit();
 
         // Return if the state machine currently allows for requestBuffers
         // If the state allows for it, mRequestBufferOngoing will be set to true
@@ -1481,6 +1524,10 @@ class Camera3Device :
     // Auto framing override value
     camera_metadata_enum_android_control_autoframing mAutoframingOverride;
 
+    // Initial camera mute state stored before the request thread
+    // is active.
+    bool mCameraMuteInitial = false;
+
     // Settings override value
     int32_t mSettingsOverride; // -1 = use original, otherwise
                                // the settings override to use.
@@ -1493,6 +1540,9 @@ class Camera3Device :
     // Whether the camera device runs at fixed frame rate based on AE_MODE and
     // AE_TARGET_FPS_RANGE
     bool mIsFixedFps = false;
+
+    // Flag to indicate that we shouldn't forward extension related metadata
+    bool mSupportsExtensionKeys = false;
 
     // Injection camera related methods.
     class Camera3DeviceInjectionMethods : public virtual RefBase {

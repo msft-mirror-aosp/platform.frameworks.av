@@ -61,6 +61,8 @@ class AudioFlinger
 public:
     static void instantiate() ANDROID_API;
 
+    status_t resetReferencesForTest();
+
 private:
 
     // ---- begin IAudioFlinger interface
@@ -373,7 +375,8 @@ private:
             EXCLUDES_AudioFlinger_Mutex;
 
     status_t moveEffectChain_ll(audio_session_t sessionId,
-            IAfPlaybackThread* srcThread, IAfPlaybackThread* dstThread) final
+            IAfPlaybackThread* srcThread, IAfPlaybackThread* dstThread,
+            IAfEffectChain* srcChain = nullptr) final
             REQUIRES(mutex(), audio_utils::ThreadBase_Mutex);
 
     // This is a helper that is called during incoming binder calls.
@@ -395,6 +398,8 @@ private:
     void onNonOffloadableGlobalEffectEnable() final EXCLUDES_AudioFlinger_Mutex;
     void onSupportedLatencyModesChanged(
             audio_io_handle_t output, const std::vector<audio_latency_mode_t>& modes) final
+            EXCLUDES_AudioFlinger_ClientMutex;
+    void onHardError(std::set<audio_port_handle_t>& trackPortIds) final
             EXCLUDES_AudioFlinger_ClientMutex;
 
     // ---- end of IAfThreadCallback interface
@@ -427,7 +432,8 @@ private:
     // for as long as possible.  The memory is only freed when it is needed for another log writer.
     Vector< sp<NBLog::Writer> > mUnregisteredWriters;
     audio_utils::mutex& unregisteredWritersMutex() const { return mUnregisteredWritersMutex; }
-    mutable audio_utils::mutex mUnregisteredWritersMutex;
+    mutable audio_utils::mutex mUnregisteredWritersMutex{
+            audio_utils::MutexOrder::kAudioFlinger_UnregisteredWritersMutex};
 
                             AudioFlinger() ANDROID_API;
     ~AudioFlinger() override;
@@ -499,7 +505,7 @@ private:
         bool mPendingRequests;
 
         // Mutex and condition variable around mPendingRequests' value
-        audio_utils::mutex mMutex;
+        audio_utils::mutex mMutex{audio_utils::MutexOrder::kMediaLogNotifier_Mutex};
         audio_utils::condition_variable mCondition;
 
         // Duration of the sleep period after a processed request
@@ -553,6 +559,10 @@ private:
     // used by IAfDeviceEffectManagerCallback, IAfPatchPanelCallback, IAfThreadCallback
     audio_unique_id_t nextUniqueId(audio_unique_id_use_t use) final;
 
+    status_t moveEffectChain_ll(audio_session_t sessionId,
+            IAfRecordThread* srcThread, IAfRecordThread* dstThread)
+            REQUIRES(mutex(), audio_utils::ThreadBase_Mutex);
+
               // return thread associated with primary hardware device, or NULL
     DeviceTypeSet primaryOutputDevice_l() const REQUIRES(mutex());
 
@@ -585,6 +595,9 @@ private:
 
     std::vector< sp<IAfEffectModule> > purgeStaleEffects_l() REQUIRES(mutex());
 
+    std::vector< sp<IAfEffectModule> > purgeOrphanEffectChains_l() REQUIRES(mutex());
+    bool updateOrphanEffectChains_l(const sp<IAfEffectModule>& effect) REQUIRES(mutex());
+
     void broadcastParametersToRecordThreads_l(const String8& keyValuePairs) REQUIRES(mutex());
     void forwardParametersToDownstreamPatches_l(
                         audio_io_handle_t upStream, const String8& keyValuePairs,
@@ -601,24 +614,29 @@ private:
         int         mCnt;
     };
 
-    mutable audio_utils::mutex mMutex;
+    mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kAudioFlinger_Mutex};
                 // protects mClients and mNotificationClients.
                 // must be locked after mutex() and ThreadBase::mutex() if both must be locked
                 // avoids acquiring AudioFlinger::mutex() from inside thread loop.
 
-    mutable audio_utils::mutex mClientMutex;
+    mutable audio_utils::mutex mClientMutex{audio_utils::MutexOrder::kAudioFlinger_ClientMutex};
 
     DefaultKeyedVector<pid_t, wp<Client>> mClients GUARDED_BY(clientMutex());   // see ~Client()
 
     audio_utils::mutex& hardwareMutex() const { return mHardwareMutex; }
 
-    mutable audio_utils::mutex mHardwareMutex;
+    mutable audio_utils::mutex mHardwareMutex{
+            audio_utils::MutexOrder::kAudioFlinger_HardwareMutex};
     // NOTE: If both mMutex and mHardwareMutex mutexes must be held,
     // always take mMutex before mHardwareMutex
 
     std::atomic<AudioHwDevice*> mPrimaryHardwareDev = nullptr;
     DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*> mAudioHwDevs
             GUARDED_BY(hardwareMutex()) {nullptr /* defValue */};
+
+    static bool inputBufferSizeDevsCmp(const AudioHwDevice* lhs, const AudioHwDevice* rhs);
+    std::set<AudioHwDevice*, decltype(&inputBufferSizeDevsCmp)>
+            mInputBufferSizeOrderedDevs GUARDED_BY(hardwareMutex()) {inputBufferSizeDevsCmp};
 
      const sp<DevicesFactoryHalInterface> mDevicesFactoryHal =
              DevicesFactoryHalInterface::create();
@@ -692,6 +710,16 @@ private:
     DefaultKeyedVector<audio_io_handle_t, sp<IAfMmapThread>> mMmapThreads GUARDED_BY(mutex());
 
     sp<Client> registerPid(pid_t pid) EXCLUDES_AudioFlinger_ClientMutex; // always returns non-0
+
+    sp<IAfEffectHandle> createOrphanEffect_l(const sp<Client>& client,
+                                          const sp<media::IEffectClient>& effectClient,
+                                          int32_t priority,
+                                          audio_session_t sessionId,
+                                          effect_descriptor_t *desc,
+                                          int *enabled,
+                                          status_t *status /*non-NULL*/,
+                                          bool pinned,
+                                          bool notifyFramesProcessed) REQUIRES(mutex());
 
     // for use from destructor
     status_t closeOutput_nonvirtual(audio_io_handle_t output) EXCLUDES_AudioFlinger_Mutex;

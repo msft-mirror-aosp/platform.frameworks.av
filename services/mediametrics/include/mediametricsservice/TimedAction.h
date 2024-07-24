@@ -25,6 +25,12 @@
 namespace android::mediametrics {
 
 class TimedAction {
+    // Use system_clock instead of steady_clock to include suspend time.
+    using TimerClock = class std::chrono::system_clock;
+
+    // Define granularity of wakeup to prevent delayed events if
+    // device is suspended.
+    static constexpr auto kWakeupInterval = std::chrono::minutes(3);
 public:
     TimedAction() : mThread{[this](){threadLoop();}} {}
 
@@ -35,7 +41,7 @@ public:
     // TODO: return a handle for cancelling the action?
     template <typename T> // T is in units of std::chrono::duration.
     void postIn(const T& time, std::function<void()> f) {
-        postAt(std::chrono::steady_clock::now() + time, f);
+        postAt(TimerClock::now() + time, f);
     }
 
     template <typename T> // T is in units of std::chrono::time_point
@@ -75,25 +81,38 @@ private:
     void threadLoop() NO_THREAD_SAFETY_ANALYSIS { // thread safety doesn't cover unique_lock
         std::unique_lock l(mLock);
         while (!mQuit) {
-            auto sleepUntilTime = std::chrono::time_point<std::chrono::steady_clock>::max();
             if (!mMap.empty()) {
-                sleepUntilTime = mMap.begin()->first;
-                if (sleepUntilTime <= std::chrono::steady_clock::now()) {
+                auto sleepUntilTime = mMap.begin()->first;
+                const auto now = TimerClock::now();
+                if (sleepUntilTime <= now) {
                     auto node = mMap.extract(mMap.begin()); // removes from mMap.
                     l.unlock();
                     node.mapped()();
                     l.lock();
                     continue;
                 }
+                // Bionic uses CLOCK_MONOTONIC for its pthread_mutex regardless
+                // of REALTIME specification, use kWakeupInterval to ensure minimum
+                // granularity if suspended.
+                sleepUntilTime = std::min(sleepUntilTime, now + kWakeupInterval);
+                mCondition.wait_until(l, sleepUntilTime);
+            } else {
+                // As TimerClock is system_clock (which is not monotonic), libcxx's
+                // implementation of condition_variable::wait_until(l, std::chrono::time_point)
+                // recalculates the 'until' time into the wait duration and then goes back to the
+                // absolute timestamp when calling pthread_cond_timedwait(); this back-and-forth
+                // calculation sometimes loses the 'max' value because enough time passes in
+                // between, and instead passes incorrect timestamp into the syscall, causing a
+                // crash. Mitigating it by explicitly calling the non-timed wait here.
+                mCondition.wait(l);
             }
-            mCondition.wait_until(l, sleepUntilTime);
         }
     }
 
     mutable std::mutex mLock;
     std::condition_variable mCondition GUARDED_BY(mLock);
     bool mQuit GUARDED_BY(mLock) = false;
-    std::multimap<std::chrono::time_point<std::chrono::steady_clock>, std::function<void()>>
+    std::multimap<std::chrono::time_point<TimerClock>, std::function<void()>>
             mMap GUARDED_BY(mLock); // multiple functions could execute at the same time.
 
     // needs to be initialized after the variables above, done in constructor initializer list.

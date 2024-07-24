@@ -48,6 +48,9 @@ namespace android {
 static const int64_t kBufferTimeOutUs = 10000LL; // 10 msec
 static const size_t kRetryCount = 100; // must be >0
 static const int64_t kDefaultSampleDurationUs = 33333LL; // 33ms
+// For codec, 0 is the highest importance; higher the number lesser important.
+// To make codec for thumbnail less important, give it a value more than 0.
+static const int kThumbnailImportance = 1;
 
 sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
         int32_t width, int32_t height, int32_t tileWidth, int32_t tileHeight,
@@ -86,6 +89,22 @@ sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
         displayWidth = width;
         displayHeight = height;
     }
+    int32_t displayLeft = 0;
+    int32_t displayTop = 0;
+    int32_t displayRight;
+    int32_t displayBottom;
+    if (trackMeta->findRect(kKeyCropRect, &displayLeft, &displayTop, &displayRight,
+                            &displayBottom)) {
+        if (displayLeft >= 0 && displayTop >= 0 && displayRight < width && displayBottom < height &&
+            displayLeft <= displayRight && displayTop <= displayBottom) {
+            displayWidth = displayRight - displayLeft + 1;
+            displayHeight = displayBottom - displayTop + 1;
+        } else {
+            // Crop rectangle is invalid, use the whole frame.
+            displayLeft = 0;
+            displayTop = 0;
+        }
+    }
 
     if (allocRotated) {
         if (rotationAngle == 90 || rotationAngle == 270) {
@@ -108,8 +127,8 @@ sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
         }
     }
 
-    VideoFrame frame(width, height, displayWidth, displayHeight,
-            tileWidth, tileHeight, rotationAngle, dstBpp, bitDepth, !metaOnly, iccSize);
+    VideoFrame frame(width, height, displayWidth, displayHeight, displayLeft, displayTop, tileWidth,
+                     tileHeight, rotationAngle, dstBpp, bitDepth, !metaOnly, iccSize);
 
     size_t size = frame.getFlattenedSize();
     sp<MemoryHeapBase> heap = new MemoryHeapBase(size, 0, "MetadataRetrieverClient");
@@ -569,6 +588,9 @@ sp<AMessage> VideoFrameDecoder::onGetFormatAndSeekOptions(
         }
     }
 
+    // Set the importance for thumbnail.
+    videoFormat->setInt32(KEY_IMPORTANCE, kThumbnailImportance);
+
     int32_t frameRate;
     if (trackMeta()->findInt32(kKeyFrameRate, &frameRate) && frameRate > 0) {
         mDefaultSampleDurationUs = 1000000LL / frameRate;
@@ -886,6 +908,10 @@ sp<AMessage> MediaImageDecoder::onGetFormatAndSeekOptions(
         videoFormat->setInt32("android._num-input-buffers", 1);
         videoFormat->setInt32("android._num-output-buffers", 1);
     }
+
+    /// Set the importance for thumbnail.
+    videoFormat->setInt32(KEY_IMPORTANCE, kThumbnailImportance);
+
     return videoFormat;
 }
 

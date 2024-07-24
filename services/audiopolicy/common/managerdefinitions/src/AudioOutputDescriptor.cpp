@@ -561,6 +561,7 @@ bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool muted,
             audio_port_config config = {};
             devicePort->toAudioPortConfig(&config);
             config.config_mask = AUDIO_PORT_CONFIG_GAIN;
+            config.gain.mode = gains[0]->getMode();
             config.gain.values[0] = gainValueMb;
             return mClientInterface->setAudioPortConfig(&config, 0) == NO_ERROR;
         }
@@ -776,6 +777,19 @@ void SwAudioOutputDescriptor::setTracksInvalidatedStatusByStrategy(product_strat
             client->setIsInvalid();
         }
     }
+}
+
+void SwAudioOutputDescriptor::setDevices(const android::DeviceVector &devices) {
+    if ((mFlags & AUDIO_OUTPUT_FLAG_BIT_PERFECT) == AUDIO_OUTPUT_FLAG_BIT_PERFECT) {
+        for (auto device : mDevices) {
+            device->setPreferredConfig(nullptr);
+        }
+        auto config = getConfig();
+        for (auto device : devices) {
+            device->setPreferredConfig(&config);
+        }
+    }
+    mDevices = devices;
 }
 
 // HwAudioOutputDescriptor implementation
@@ -1001,6 +1015,18 @@ PortHandleVector SwAudioOutputDescriptor::getClientsForStream(
         }
     }
     return clientsForStream;
+}
+
+std::string SwAudioOutputDescriptor::info() const {
+    std::string result;
+    result.append("[" );
+    result.append(AudioOutputDescriptor::info());
+    result.append("[io:" );
+    result.append(android::internal::ToString(mIoHandle));
+    result.append(", " );
+    result.append(isDuplicated() ? "duplicating" : mProfile->getTagName());
+    result.append("]]");
+    return result;
 }
 
 void SwAudioOutputCollection::dump(String8 *dst) const

@@ -27,8 +27,6 @@
 
 namespace android {
 
-constexpr static int kMaxTimestampDeltaInSec = 120;
-
 class IAfMelReporterCallback : public virtual RefBase {
 public:
     virtual audio_utils::mutex& mutex() const
@@ -45,8 +43,10 @@ public:
 class MelReporter : public PatchCommandThread::PatchCommandListener,
                     public IMelReporterCallback {
 public:
-    explicit MelReporter(const sp<IAfMelReporterCallback>& afMelReporterCallback)
-        : mAfMelReporterCallback(afMelReporterCallback) {}
+    MelReporter(const sp<IAfMelReporterCallback>& afMelReporterCallback,
+                const sp<IAfPatchPanel>& afPatchPanel)
+        : mAfMelReporterCallback(afMelReporterCallback),
+          mAfPatchPanel(afPatchPanel) {}
 
     void onFirstRef() override;
 
@@ -80,15 +80,19 @@ public:
 
     // IMelReporterCallback methods
     void stopMelComputationForDeviceId(audio_port_handle_t deviceId) final
-            EXCLUDES_MelReporter_Mutex;
+            EXCLUDES_AudioFlinger_Mutex EXCLUDES_MelReporter_Mutex;
     void startMelComputationForDeviceId(audio_port_handle_t deviceId) final
-            EXCLUDES_MelReporter_Mutex;
+            EXCLUDES_AudioFlinger_Mutex EXCLUDES_MelReporter_Mutex;
+    void applyAllAudioPatches() final EXCLUDES_AudioFlinger_Mutex EXCLUDES_MelReporter_Mutex;
 
     // PatchCommandListener methods
     void onCreateAudioPatch(audio_patch_handle_t handle,
             const IAfPatchPanel::Patch& patch) final
             EXCLUDES_AudioFlinger_Mutex;
     void onReleaseAudioPatch(audio_patch_handle_t handle) final EXCLUDES_AudioFlinger_Mutex;
+    void onUpdateAudioPatch(audio_patch_handle_t oldHandle,
+                            audio_patch_handle_t newHandle,
+            const IAfPatchPanel::Patch& patch) final EXCLUDES_AudioFlinger_Mutex;
 
     /**
      * The new metadata can determine whether we should compute MEL for the given thread.
@@ -98,6 +102,8 @@ public:
     void updateMetadataForCsd(audio_io_handle_t streamHandle,
             const std::vector<playback_track_metadata_v7_t>& metadataVec)
             EXCLUDES_AudioFlinger_Mutex;
+
+    void resetReferencesForTest();
 
 private:
     struct ActiveMelPatch {
@@ -127,7 +133,8 @@ private:
 
     bool useHalSoundDoseInterface_l() REQUIRES(mutex());
 
-    const sp<IAfMelReporterCallback> mAfMelReporterCallback;
+    sp<IAfMelReporterCallback> mAfMelReporterCallback;
+    const sp<IAfPatchPanel> mAfPatchPanel;
 
     /* const */ sp<SoundDoseManager> mSoundDoseManager;  // set onFirstRef
 
@@ -135,7 +142,7 @@ private:
      * Lock for protecting the active mel patches. Do not mix with the AudioFlinger lock.
      * Locking order AudioFlinger::mutex() -> PatchCommandThread::mutex() -> MelReporter::mutex().
      */
-    mutable audio_utils::mutex mMutex;
+    mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kMelReporter_Mutex};
     std::unordered_map<audio_patch_handle_t, ActiveMelPatch> mActiveMelPatches
             GUARDED_BY(mutex());
     std::unordered_map<audio_port_handle_t, int> mActiveDevices GUARDED_BY(mutex());

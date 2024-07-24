@@ -269,6 +269,11 @@ public:
 
     virtual status_t registerPolicyMixes(const Vector<AudioMix>& mixes) = 0;
     virtual status_t unregisterPolicyMixes(Vector<AudioMix> mixes) = 0;
+    virtual status_t getRegisteredPolicyMixes(std::vector<AudioMix>& mixes) = 0;
+
+    virtual status_t updatePolicyMix(
+        const AudioMix& mix,
+        const std::vector<AudioMixMatchCriterion>& updatedCriteria) = 0;
 
     virtual status_t setUidDeviceAffinities(uid_t uid, const AudioDeviceTypeAddrVector& devices)
             = 0;
@@ -281,7 +286,8 @@ public:
     virtual status_t startAudioSource(const struct audio_port_config *source,
                                       const audio_attributes_t *attributes,
                                       audio_port_handle_t *portId,
-                                      uid_t uid) = 0;
+                                      uid_t uid,
+                                      bool internal = false) = 0;
     virtual status_t stopAudioSource(audio_port_handle_t portId) = 0;
 
     virtual status_t setMasterMono(bool mono) = 0;

@@ -77,9 +77,6 @@ public:
     virtual void setStartTimeOffsetMs(int ms) { mStartTimeOffsetMs = ms; }
     virtual int32_t getStartTimeOffsetMs() const { return mStartTimeOffsetMs; }
     virtual status_t setNextFd(int fd);
-    // Returns true if the timestamp is valid which is compatible with the Mpeg4.
-    // Note that this overloads that method in the base class.
-    bool isSampleMetadataValid(size_t trackIndex, int64_t timeUs) override;
 
 protected:
     virtual ~MPEG4Writer();
@@ -147,6 +144,7 @@ private:
     std::mutex mFallocMutex;
     bool mPreAllocFirstTime; // Pre-allocate space for file and track headers only once per file.
     uint64_t mPrevAllTracksTotalMetaDataSizeEstimate;
+    Condition mFdCond;
 
     List<Track *> mTracks;
 
