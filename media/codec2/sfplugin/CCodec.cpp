@@ -2627,7 +2627,7 @@ void CCodec::signalSetParameters(const sp<AMessage> &msg) {
                         mChannel->setInfoBuffer(std::make_shared<C2InfoBuffer>(info));
                     }
                 } else {
-                    ALOGE("Ignoring param key %s as buffer size %d is less than expected "
+                    ALOGE("Ignoring param key %s as buffer size %zu is less than expected "
                           "buffer size %d",
                           PARAMETER_KEY_QP_OFFSET_MAP, mapSize, expectedMapSize);
                 }
