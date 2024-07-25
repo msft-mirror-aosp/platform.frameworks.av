@@ -524,6 +524,14 @@ bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool muted,
     StreamTypeVector streams = streamTypes;
     if (!AudioOutputDescriptor::setVolume(
             volumeDb, muted, vs, streamTypes, deviceTypes, delayMs, force, isVoiceVolSrc)) {
+        if (hasStream(streamTypes, AUDIO_STREAM_BLUETOOTH_SCO)) {
+            VolumeSource callVolSrc = getVoiceSource();
+            if (callVolSrc != VOLUME_SOURCE_NONE && volumeDb != getCurVolume(callVolSrc)) {
+                setCurVolume(callVolSrc, volumeDb, true);
+                mClientInterface->setStreamVolume(
+                        AUDIO_STREAM_VOICE_CALL, Volume::DbToAmpl(volumeDb), mIoHandle, delayMs);
+            }
+        }
         return false;
     }
     if (streams.empty()) {
