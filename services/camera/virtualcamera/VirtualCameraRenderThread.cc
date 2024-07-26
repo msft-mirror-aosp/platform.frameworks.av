@@ -29,6 +29,7 @@
 
 #include "Exif.h"
 #include "GLES/gl.h"
+#include "VirtualCameraCaptureResult.h"
 #include "VirtualCameraDevice.h"
 #include "VirtualCameraSessionContext.h"
 #include "aidl/android/hardware/camera/common/Status.h"
@@ -92,94 +93,9 @@ using namespace std::chrono_literals;
 
 static constexpr std::chrono::milliseconds kAcquireFenceTimeout = 500ms;
 
-// See REQUEST_PIPELINE_DEPTH in CaptureResult.java.
-// This roughly corresponds to frame latency, we set to
-// documented minimum of 2.
-static constexpr uint8_t kPipelineDepth = 2;
-
 static constexpr size_t kJpegThumbnailBufferSize = 32 * 1024;  // 32 KiB
 
 static constexpr UpdateTextureTask kUpdateTextureTask;
-
-CameraMetadata createCaptureResultMetadata(
-    const std::chrono::nanoseconds timestamp,
-    const RequestSettings& requestSettings,
-    const Resolution reportedSensorSize) {
-  // All of the keys used in the response needs to be referenced in
-  // availableResultKeys in CameraCharacteristics (see initCameraCharacteristics
-  // in VirtualCameraDevice.cc).
-  MetadataBuilder builder =
-      MetadataBuilder()
-          .setAberrationCorrectionMode(
-              ANDROID_COLOR_CORRECTION_ABERRATION_MODE_OFF)
-          .setControlAeAvailableAntibandingModes(
-              {ANDROID_CONTROL_AE_ANTIBANDING_MODE_OFF})
-          .setControlAeAntibandingMode(ANDROID_CONTROL_AE_ANTIBANDING_MODE_OFF)
-          .setControlAeExposureCompensation(0)
-          .setControlAeLockAvailable(false)
-          .setControlAeLock(ANDROID_CONTROL_AE_LOCK_OFF)
-          .setControlAeMode(ANDROID_CONTROL_AE_MODE_ON)
-          .setControlAePrecaptureTrigger(
-              // Limited devices are expected to have precapture ae enabled and
-              // respond to cancellation request. Since we don't actuall support
-              // AE at all, let's just respect the cancellation expectation in
-              // case it's requested
-              requestSettings.aePrecaptureTrigger ==
-                      ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL
-                  ? ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL
-                  : ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
-          .setControlAeState(ANDROID_CONTROL_AE_STATE_INACTIVE)
-          .setControlAfMode(ANDROID_CONTROL_AF_MODE_OFF)
-          .setControlAfTrigger(ANDROID_CONTROL_AF_TRIGGER_IDLE)
-          .setControlAfState(ANDROID_CONTROL_AF_STATE_INACTIVE)
-          .setControlAwbMode(ANDROID_CONTROL_AWB_MODE_AUTO)
-          .setControlAwbLock(ANDROID_CONTROL_AWB_LOCK_OFF)
-          .setControlAwbState(ANDROID_CONTROL_AWB_STATE_INACTIVE)
-          .setControlCaptureIntent(requestSettings.captureIntent)
-          .setControlEffectMode(ANDROID_CONTROL_EFFECT_MODE_OFF)
-          .setControlMode(ANDROID_CONTROL_MODE_AUTO)
-          .setControlSceneMode(ANDROID_CONTROL_SCENE_MODE_DISABLED)
-          .setControlVideoStabilizationMode(
-              ANDROID_CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-          .setCropRegion(0, 0, reportedSensorSize.width,
-                         reportedSensorSize.height)
-          .setFaceDetectMode(ANDROID_STATISTICS_FACE_DETECT_MODE_OFF)
-          .setFlashState(ANDROID_FLASH_STATE_UNAVAILABLE)
-          .setFlashMode(ANDROID_FLASH_MODE_OFF)
-          .setFocalLength(VirtualCameraDevice::kFocalLength)
-          .setJpegQuality(requestSettings.jpegQuality)
-          .setJpegOrientation(requestSettings.jpegOrientation)
-          .setJpegThumbnailSize(requestSettings.thumbnailResolution.width,
-                                requestSettings.thumbnailResolution.height)
-          .setJpegThumbnailQuality(requestSettings.thumbnailJpegQuality)
-          .setLensOpticalStabilizationMode(
-              ANDROID_LENS_OPTICAL_STABILIZATION_MODE_OFF)
-          .setNoiseReductionMode(ANDROID_NOISE_REDUCTION_MODE_OFF)
-          .setPipelineDepth(kPipelineDepth)
-          .setSensorTimestamp(timestamp)
-          .setStatisticsHotPixelMapMode(
-              ANDROID_STATISTICS_HOT_PIXEL_MAP_MODE_OFF)
-          .setStatisticsLensShadingMapMode(
-              ANDROID_STATISTICS_LENS_SHADING_MAP_MODE_OFF)
-          .setStatisticsSceneFlicker(ANDROID_STATISTICS_SCENE_FLICKER_NONE);
-
-  if (requestSettings.fpsRange.has_value()) {
-    builder.setControlAeTargetFpsRange(requestSettings.fpsRange.value());
-  }
-
-  if (requestSettings.gpsCoordinates.has_value()) {
-    const GpsCoordinates& coordinates = requestSettings.gpsCoordinates.value();
-    builder.setJpegGpsCoordinates(coordinates);
-  }
-
-  std::unique_ptr<CameraMetadata> metadata = builder.build();
-
-  if (metadata == nullptr) {
-    ALOGE("%s: Failed to build capture result metadata", __func__);
-    return CameraMetadata();
-  }
-  return std::move(*metadata);
-}
 
 NotifyMsg createShutterNotifyMsg(int frameNumber,
                                  std::chrono::nanoseconds timestamp) {
