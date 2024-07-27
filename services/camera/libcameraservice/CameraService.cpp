@@ -1687,17 +1687,14 @@ Status CameraService::getLegacyParametersLazy(int cameraId,
 }
 
 Status CameraService::validateConnectLocked(const std::string& cameraId,
-        const std::string& clientName8, /*inout*/int& clientUid, /*inout*/int& clientPid,
-        /*out*/int& originalClientPid) const {
+        const std::string& clientName8, /*inout*/int& clientUid, /*inout*/int& clientPid) const {
 
 #ifdef __BRILLO__
     UNUSED(clientName8);
     UNUSED(clientUid);
     UNUSED(clientPid);
-    UNUSED(originalClientPid);
 #else
-    Status allowed = validateClientPermissionsLocked(cameraId, clientName8, clientUid, clientPid,
-            originalClientPid);
+    Status allowed = validateClientPermissionsLocked(cameraId, clientName8, clientUid, clientPid);
     if (!allowed.isOk()) {
         return allowed;
     }
@@ -1735,8 +1732,7 @@ Status CameraService::validateConnectLocked(const std::string& cameraId,
 }
 
 Status CameraService::validateClientPermissionsLocked(const std::string& cameraId,
-        const std::string& clientName, int& clientUid, int& clientPid,
-        /*out*/int& originalClientPid) const {
+        const std::string& clientName, int& clientUid, int& clientPid) const {
     int callingPid = getCallingPid();
     int callingUid = getCallingUid();
 
@@ -1819,12 +1815,10 @@ Status CameraService::validateClientPermissionsLocked(const std::string& cameraI
                 "is enabled", clientName.c_str(), clientPid, clientUid, cameraId.c_str());
     }
 
+    userid_t clientUserId = multiuser_get_user_id(clientUid);
+
     // Only use passed in clientPid to check permission. Use calling PID as the client PID that's
     // connected to camera service directly.
-    originalClientPid = clientPid;
-    clientPid = callingPid;
-
-    userid_t clientUserId = multiuser_get_user_id(clientUid);
 
     // For non-system clients : Only allow clients who are being used by the current foreground
     // device user, unless calling from our own process.
@@ -1845,11 +1839,11 @@ Status CameraService::validateClientPermissionsLocked(const std::string& cameraI
         if (isHeadlessSystemUserMode()
                 && (clientUserId == USER_SYSTEM)
                 && !hasPermissionsForCameraHeadlessSystemUser(cameraId, callingPid, callingUid)) {
-            ALOGE("Permission Denial: can't use the camera pid=%d, uid=%d", clientPid, clientUid);
+            ALOGE("Permission Denial: can't use the camera pid=%d, uid=%d", callingPid, clientUid);
             return STATUS_ERROR_FMT(ERROR_PERMISSION_DENIED,
                     "Caller \"%s\" (PID %d, UID %d) cannot open camera \"%s\" as Headless System \
                     User without camera headless system user permission",
-                    clientName.c_str(), clientPid, clientUid, cameraId.c_str());
+                    clientName.c_str(), callingPid, clientUid, cameraId.c_str());
         }
     }
 
@@ -2427,6 +2421,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
     std::string clientPackageName;
     int packageUid = (clientUid == USE_CALLING_UID) ?
             getCallingUid() : clientUid;
+    int callingPid = getCallingPid();
     if (clientPackageNameMaybe.size() <= 0) {
         // NDK calls don't come with package names, but we need one for various cases.
         // Generally, there's a 1:1 mapping between UID and package name, but shared UIDs
@@ -2439,10 +2434,8 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
         clientPackageName = clientPackageNameMaybe;
     }
 
-    int originalClientPid = 0;
-
     int packagePid = (clientPid == USE_CALLING_PID) ?
-        getCallingPid() : clientPid;
+        callingPid : clientPid;
     ALOGI("CameraService::connect call (PID %d \"%s\", camera ID %s) and "
             "Camera API version %d", packagePid, clientPackageName.c_str(), cameraId.c_str(),
             static_cast<int>(effectiveApiLevel));
@@ -2468,7 +2461,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
 
         // Enforce client permissions and do basic validity checks
         if (!(ret = validateConnectLocked(cameraId, clientPackageName,
-                /*inout*/clientUid, /*inout*/clientPid, /*out*/originalClientPid)).isOk()) {
+                /*inout*/clientUid, /*inout*/clientPid)).isOk()) {
             return ret;
         }
 
@@ -2485,7 +2478,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
 
         sp<BasicClient> clientTmp = nullptr;
         std::shared_ptr<resource_policy::ClientDescriptor<std::string, sp<BasicClient>>> partial;
-        if ((err = handleEvictionsLocked(cameraId, originalClientPid, effectiveApiLevel,
+        if ((err = handleEvictionsLocked(cameraId, clientPid, effectiveApiLevel,
                 IInterface::asBinder(cameraCb), clientPackageName, oomScoreOffset,
                 systemNativeClient, /*out*/&clientTmp, /*out*/&partial)) != NO_ERROR) {
             switch (err) {
@@ -2531,9 +2524,11 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
         bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
                 mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
 
+        // Only use passed in clientPid to check permission. Use calling PID as the client PID
+        // that's connected to camera service directly.
         if(!(ret = makeClient(this, cameraCb, clientPackageName, systemNativeClient,
                 clientFeatureId, cameraId, api1CameraId, facing,
-                orientation, clientPid, clientUid, getpid(),
+                orientation, callingPid, clientUid, getpid(),
                 deviceVersionAndTransport, effectiveApiLevel, overrideForPerfClass,
                 rotationOverride, forceSlowJpegMode, originalCameraId,
                 /*out*/&tmp)).isOk()) {
