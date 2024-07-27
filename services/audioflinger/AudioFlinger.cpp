@@ -187,8 +187,6 @@ BINDER_METHOD_ENTRY(masterVolume) \
 BINDER_METHOD_ENTRY(masterMute) \
 BINDER_METHOD_ENTRY(setStreamVolume) \
 BINDER_METHOD_ENTRY(setStreamMute) \
-BINDER_METHOD_ENTRY(streamVolume) \
-BINDER_METHOD_ENTRY(streamMute) \
 BINDER_METHOD_ENTRY(setMode) \
 BINDER_METHOD_ENTRY(setMicMute) \
 BINDER_METHOD_ENTRY(getMicMute) \
@@ -1747,37 +1745,6 @@ status_t AudioFlinger::setStreamMute(audio_stream_type_t stream, bool muted)
 
     return NO_ERROR;
 }
-
-float AudioFlinger::streamVolume(audio_stream_type_t stream, audio_io_handle_t output) const
-{
-    status_t status = checkStreamType(stream);
-    if (status != NO_ERROR) {
-        return 0.0f;
-    }
-    if (output == AUDIO_IO_HANDLE_NONE) {
-        return 0.0f;
-    }
-
-    audio_utils::lock_guard lock(mutex());
-    sp<VolumeInterface> volumeInterface = getVolumeInterface_l(output);
-    if (volumeInterface == NULL) {
-        return 0.0f;
-    }
-
-    return volumeInterface->streamVolume(stream);
-}
-
-bool AudioFlinger::streamMute(audio_stream_type_t stream) const
-{
-    status_t status = checkStreamType(stream);
-    if (status != NO_ERROR) {
-        return true;
-    }
-
-    audio_utils::lock_guard lock(mutex());
-    return streamMute_l(stream);
-}
-
 
 void AudioFlinger::broadcastParametersToRecordThreads_l(const String8& keyValuePairs)
 {
