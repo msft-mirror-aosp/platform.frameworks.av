@@ -96,10 +96,6 @@ private:
     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
             EXCLUDES_AudioFlinger_Mutex;
 
-    float streamVolume(audio_stream_type_t stream,
-            audio_io_handle_t output) const final EXCLUDES_AudioFlinger_Mutex;
-    bool streamMute(audio_stream_type_t stream) const final EXCLUDES_AudioFlinger_Mutex;
-
     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setMicMute(bool state) final EXCLUDES_AudioFlinger_Mutex;
