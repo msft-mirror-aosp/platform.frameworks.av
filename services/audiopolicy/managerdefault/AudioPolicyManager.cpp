@@ -8473,11 +8473,19 @@ bool AudioPolicyManager::isVolumeConsistentForCalls(VolumeSource volumeSource,
                                                    bool& isBtScoVolSrc,
                                                    const char* caller) {
     const VolumeSource callVolSrc = toVolumeSource(AUDIO_STREAM_VOICE_CALL, false);
-    const VolumeSource btScoVolSrc = toVolumeSource(AUDIO_STREAM_BLUETOOTH_SCO, false);
+    isVoiceVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource);
+
     const bool isScoRequested = isScoRequestedForComm();
     const bool isHAUsed = isHearingAidUsedForComm();
 
-    isVoiceVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource);
+    if (com_android_media_audio_replace_stream_bt_sco()) {
+        ALOGV("%s stream bt sco is replaced, no volume consistency check for calls", __func__);
+        isBtScoVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource) &&
+                        (isScoRequested || isHAUsed);
+        return true;
+    }
+
+    const VolumeSource btScoVolSrc = toVolumeSource(AUDIO_STREAM_BLUETOOTH_SCO, false);
     isBtScoVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (btScoVolSrc == volumeSource);
 
     if ((callVolSrc != btScoVolSrc) &&

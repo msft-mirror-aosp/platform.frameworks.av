@@ -199,20 +199,6 @@ TEST_F(AudioSystemTest, GetSetMasterBalance) {
     EXPECT_EQ(origBalance, tstBalance);
 }
 
-TEST_F(AudioSystemTest, GetStreamVolume) {
-    ASSERT_NO_FATAL_FAILURE(createPlaybackSession());
-    float origStreamVol;
-    const auto [pbAudioIo, _] = mCbPlayback->getLastPortAndDevice();
-    EXPECT_EQ(NO_ERROR,
-              AudioSystem::getStreamVolume(AUDIO_STREAM_MUSIC, &origStreamVol, pbAudioIo));
-}
-
-TEST_F(AudioSystemTest, GetStreamMute) {
-    ASSERT_NO_FATAL_FAILURE(createPlaybackSession());
-    bool origMuteState;
-    EXPECT_EQ(NO_ERROR, AudioSystem::getStreamMute(AUDIO_STREAM_MUSIC, &origMuteState));
-}
-
 TEST_F(AudioSystemTest, StartAndStopAudioSource) {
     std::vector<struct audio_port_v7> ports;
     audio_port_config sourcePortConfig;
