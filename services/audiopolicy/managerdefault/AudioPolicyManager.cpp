@@ -6518,7 +6518,7 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
             status_t status = inputDesc->open(nullptr,
                                               availProfileDevices.itemAt(0),
                                               AUDIO_SOURCE_MIC,
-                                              AUDIO_INPUT_FLAG_NONE,
+                                              (audio_input_flags_t) inProfile->getFlags(),
                                               &input);
             if (status != NO_ERROR) {
                 ALOGW("%s: Cannot open input stream for device %s for profile %s on hw module %s",
@@ -6833,7 +6833,8 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
             desc = new AudioInputDescriptor(profile, mpClientInterface);
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
             ALOGV("%s opening input for profile %s", __func__, profile->getTagName().c_str());
-            status = desc->open(nullptr, device, AUDIO_SOURCE_MIC, AUDIO_INPUT_FLAG_NONE, &input);
+            status = desc->open(nullptr, device, AUDIO_SOURCE_MIC,
+                                (audio_input_flags_t) profile->getFlags(), &input);
 
             if (status == NO_ERROR) {
                 const String8& address = String8(device->address().c_str());
