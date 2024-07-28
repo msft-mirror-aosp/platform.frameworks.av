@@ -350,34 +350,6 @@ status_t AudioFlingerClientAdapter::setStreamMute(audio_stream_type_t stream, bo
     return statusTFromBinderStatus(mDelegate->setStreamMute(streamAidl, muted));
 }
 
-float AudioFlingerClientAdapter::streamVolume(audio_stream_type_t stream,
-                                              audio_io_handle_t output) const {
-    auto result = [&]() -> ConversionResult<float> {
-        AudioStreamType streamAidl = VALUE_OR_RETURN_STATUS(
-                legacy2aidl_audio_stream_type_t_AudioStreamType(stream));
-        int32_t outputAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
-        float aidlRet;
-        RETURN_IF_ERROR(statusTFromBinderStatus(
-                mDelegate->streamVolume(streamAidl, outputAidl, &aidlRet)));
-        return aidlRet;
-    }();
-    // Failure is ignored.
-    return result.value_or(0.f);
-}
-
-bool AudioFlingerClientAdapter::streamMute(audio_stream_type_t stream) const {
-    auto result = [&]() -> ConversionResult<bool> {
-        AudioStreamType streamAidl = VALUE_OR_RETURN_STATUS(
-                legacy2aidl_audio_stream_type_t_AudioStreamType(stream));
-        bool aidlRet;
-        RETURN_IF_ERROR(statusTFromBinderStatus(
-                mDelegate->streamMute(streamAidl, &aidlRet)));
-        return aidlRet;
-    }();
-    // Failure is ignored.
-    return result.value_or(false);
-}
-
 status_t AudioFlingerClientAdapter::setMode(audio_mode_t mode) {
     AudioMode modeAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_mode_t_AudioMode(mode));
     return statusTFromBinderStatus(mDelegate->setMode(modeAidl));
@@ -1038,23 +1010,6 @@ Status AudioFlingerServerAdapter::setStreamMute(AudioStreamType stream, bool mut
     audio_stream_type_t streamLegacy = VALUE_OR_RETURN_BINDER(
             aidl2legacy_AudioStreamType_audio_stream_type_t(stream));
     return Status::fromStatusT(mDelegate->setStreamMute(streamLegacy, muted));
-}
-
-Status AudioFlingerServerAdapter::streamVolume(AudioStreamType stream, int32_t output,
-                                               float* _aidl_return) {
-    audio_stream_type_t streamLegacy = VALUE_OR_RETURN_BINDER(
-            aidl2legacy_AudioStreamType_audio_stream_type_t(stream));
-    audio_io_handle_t outputLegacy = VALUE_OR_RETURN_BINDER(
-            aidl2legacy_int32_t_audio_io_handle_t(output));
-    *_aidl_return = mDelegate->streamVolume(streamLegacy, outputLegacy);
-    return Status::ok();
-}
-
-Status AudioFlingerServerAdapter::streamMute(AudioStreamType stream, bool* _aidl_return) {
-    audio_stream_type_t streamLegacy = VALUE_OR_RETURN_BINDER(
-            aidl2legacy_AudioStreamType_audio_stream_type_t(stream));
-    *_aidl_return = mDelegate->streamMute(streamLegacy);
-    return Status::ok();
 }
 
 Status AudioFlingerServerAdapter::setMode(AudioMode mode) {
