@@ -54,7 +54,7 @@ JpegRCompositeStream::JpegRCompositeStream(sp<CameraDeviceBase> device,
         mOutputColorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED),
         mOutputStreamUseCase(0),
         mFirstRequestLatency(-1),
-        mProducerListener(new ProducerListener()),
+        mStreamSurfaceListener(new StreamSurfaceListener()),
         mMaxJpegBufferSize(-1),
         mUHRMaxJpegBufferSize(-1),
         mStaticInfo(device->info()) {
@@ -653,7 +653,7 @@ status_t JpegRCompositeStream::configureStream() {
         return NO_INIT;
     }
 
-    auto res = mOutputSurface->connect(NATIVE_WINDOW_API_CAMERA, mProducerListener);
+    auto res = mOutputSurface->connect(NATIVE_WINDOW_API_CAMERA, mStreamSurfaceListener);
     if (res != OK) {
         ALOGE("%s: Unable to connect to native window for stream %d",
                 __FUNCTION__, mP010StreamId);
