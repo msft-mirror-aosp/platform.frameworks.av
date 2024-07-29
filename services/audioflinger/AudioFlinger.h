@@ -96,9 +96,8 @@ private:
     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
             EXCLUDES_AudioFlinger_Mutex;
 
-    float streamVolume(audio_stream_type_t stream,
-            audio_io_handle_t output) const final EXCLUDES_AudioFlinger_Mutex;
-    bool streamMute(audio_stream_type_t stream) const final EXCLUDES_AudioFlinger_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
 
@@ -553,6 +552,9 @@ private:
     IAfPlaybackThread* checkMixerThread_l(audio_io_handle_t output) const REQUIRES(mutex());
 
     sp<VolumeInterface> getVolumeInterface_l(audio_io_handle_t output) const REQUIRES(mutex());
+
+    sp<VolumePortInterface> getVolumePortInterface_l(
+            audio_io_handle_t output, audio_port_handle_t port) const REQUIRES(mutex());
     std::vector<sp<VolumeInterface>> getAllVolumeInterfaces_l() const REQUIRES(mutex());
 
 
@@ -757,6 +759,7 @@ private:
     bool mIsDeviceTypeKnown GUARDED_BY(mutex()) = false;
     int64_t mTotalMemory GUARDED_BY(mutex()) = 0;
     std::atomic<size_t> mClientSharedHeapSize = kMinimumClientSharedHeapSizeBytes;
+
     static constexpr size_t kMinimumClientSharedHeapSizeBytes = 1024 * 1024; // 1MB
 
     // when a global effect was last enabled

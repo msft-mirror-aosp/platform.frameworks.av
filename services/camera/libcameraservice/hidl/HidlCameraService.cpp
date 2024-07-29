@@ -130,8 +130,10 @@ Return<void> HidlCameraService::connectDevice(const sp<HCameraDeviceCallback>& h
                     hardware::ICameraService::USE_CALLING_PID,
                     hardware::ICameraService::USE_CALLING_UID,
                     kDefaultDeviceId);
+    clientAttribution.packageName = "";
+    clientAttribution.attributionTag = std::nullopt;
     binder::Status serviceRet = mAidlICameraService->connectDevice(
-            callbacks, cameraId, std::string(), {}, 0/*oomScoreOffset*/,
+            callbacks, cameraId, 0/*oomScoreOffset*/,
             /*targetSdkVersion*/__ANDROID_API_FUTURE__, ROTATION_OVERRIDE_NONE,
             clientAttribution, /*devicePolicy*/0, /*out*/&deviceRemote);
     HStatus status = HStatus::NO_ERROR;

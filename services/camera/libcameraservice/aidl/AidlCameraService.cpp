@@ -154,11 +154,11 @@ ndk::ScopedAStatus AidlCameraService::connectDevice(
                     hardware::ICameraService::USE_CALLING_PID,
                     hardware::ICameraService::USE_CALLING_UID,
                     kDefaultDeviceId);
+    clientAttribution.packageName = "";
+    clientAttribution.attributionTag = std::nullopt;
     binder::Status serviceRet = mCameraService->connectDevice(
             callbacks,
             in_cameraId,
-            std::string(),
-            /* clientFeatureId= */{},
             /* scoreOffset= */ 0,
             /* targetSdkVersion= */ __ANDROID_API_FUTURE__,
             ROTATION_OVERRIDE_NONE,

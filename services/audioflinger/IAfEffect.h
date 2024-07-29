@@ -46,7 +46,6 @@ class EffectCallbackInterface : public RefBase {
 public:
     // Trivial methods usually implemented with help from ThreadBase
     virtual audio_io_handle_t io() const = 0;
-    virtual bool shouldDispatchAddRemoveToHal(bool isAdded) const = 0;
     virtual bool isOutput() const = 0;
     virtual bool isOffload() const = 0;
     virtual bool isOffloadOrDirect() const = 0;
@@ -154,7 +153,7 @@ class IAfEffectModule : public virtual IAfEffectBase {
 
 public:
     static sp<IAfEffectModule> create(
-            const sp<EffectCallbackInterface>& callabck,
+            const sp<EffectCallbackInterface>& callback,
             effect_descriptor_t *desc,
             int id,
             audio_session_t sessionId,
@@ -190,11 +189,13 @@ public:
     virtual status_t sendMetadata_ll(const std::vector<playback_track_metadata_v7_t>& metadata)
             REQUIRES(audio_utils::ThreadBase_Mutex,
                      audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex = 0;
+    // return true if there was a state change from STARTING to ACTIVE, or STOPPED to IDLE, effect
+    // chain will do a volume reset in these two cases
+    virtual bool updateState_l()
+            REQUIRES(audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex = 0;
 
 private:
     virtual void process() = 0;
-    virtual bool updateState_l()
-            REQUIRES(audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex = 0;
     virtual void reset_l() REQUIRES(audio_utils::EffectChain_Mutex) = 0;
     virtual status_t configure_l() REQUIRES(audio_utils::EffectChain_Mutex) = 0;
     virtual status_t init_l()
@@ -213,6 +214,7 @@ private:
 
     virtual status_t stop_l() = 0;
     virtual void addEffectToHal_l() = 0;
+    virtual status_t removeEffectFromHal_l() = 0;
     virtual void release_l(const std::string& from) = 0;
 };
 
@@ -398,7 +400,14 @@ public:
     virtual status_t onUpdatePatch(audio_patch_handle_t oldPatchHandle,
             audio_patch_handle_t newPatchHandle,
             const IAfPatchPanel::Patch& patch) = 0;
-    virtual void onReleasePatch(audio_patch_handle_t patchHandle) = 0;
+    /**
+     * Checks (and release) of the effect handle is linked with the given release patch handle.
+     *
+     * @param patchHandle handle of the released patch
+     * @return a reference on the effect handle released if any, nullptr otherwise.
+     * It allows to delay the destruction of the handle.
+     */
+    virtual sp<IAfEffectHandle> onReleasePatch(audio_patch_handle_t patchHandle) = 0;
 
     virtual void dump2(int fd, int spaces) const = 0; // TODO(b/291319101) naming?
 
