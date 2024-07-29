@@ -73,6 +73,14 @@ flag {
 }
 
 flag {
+    name: "power_stats"
+    namespace: "media_audio"
+    description:
+        "Add power stats tracking and management."
+    bug: "350114693"
+}
+
+flag {
     name: "use_bt_sco_for_media"
     namespace: "media_audio"
     description:
