@@ -49,6 +49,7 @@
 #include <binder/IServiceManager.h>
 #include <binder/PersistableBundle.h>
 #include <com_android_media_audio.h>
+#include <com_android_media_audioserver.h>
 #include <cutils/bitops.h>
 #include <cutils/properties.h>
 #include <fastpath/AutoPark.h>
@@ -122,6 +123,7 @@ static inline T min(const T& a, const T& b)
 }
 
 using com::android::media::permission::ValidatedAttributionSourceState;
+namespace audioserver_flags = com::android::media::audioserver;
 
 namespace android {
 
@@ -2212,17 +2214,18 @@ PlaybackThread::PlaybackThread(const sp<IAfThreadCallback>& afThreadCallback,
                 (int64_t)(mIsMsdDevice ? AUDIO_DEVICE_OUT_BUS // turn on by default for MSD
                                        : AUDIO_DEVICE_NONE));
     }
-
-    for (int i = AUDIO_STREAM_MIN; i < AUDIO_STREAM_FOR_POLICY_CNT; ++i) {
-        const audio_stream_type_t stream{static_cast<audio_stream_type_t>(i)};
-        mStreamTypes[stream].volume = 0.0f;
-        mStreamTypes[stream].mute = mAfThreadCallback->streamMute_l(stream);
+    if (!audioserver_flags::portid_volume_management()) {
+        for (int i = AUDIO_STREAM_MIN; i < AUDIO_STREAM_FOR_POLICY_CNT; ++i) {
+            const audio_stream_type_t stream{static_cast<audio_stream_type_t>(i)};
+            mStreamTypes[stream].volume = 0.0f;
+            mStreamTypes[stream].mute = mAfThreadCallback->streamMute_l(stream);
+        }
+        // Audio patch and call assistant volume are always max
+        mStreamTypes[AUDIO_STREAM_PATCH].volume = 1.0f;
+        mStreamTypes[AUDIO_STREAM_PATCH].mute = false;
+        mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].volume = 1.0f;
+        mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].mute = false;
     }
-    // Audio patch and call assistant volume are always max
-    mStreamTypes[AUDIO_STREAM_PATCH].volume = 1.0f;
-    mStreamTypes[AUDIO_STREAM_PATCH].mute = false;
-    mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].volume = 1.0f;
-    mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].mute = false;
 }
 
 PlaybackThread::~PlaybackThread()
@@ -2273,16 +2276,17 @@ void PlaybackThread::preExit()
 void PlaybackThread::dumpTracks_l(int fd, const Vector<String16>& /* args */)
 {
     String8 result;
-
-    result.appendFormat("  Stream volumes in dB: ");
-    for (int i = 0; i < AUDIO_STREAM_CNT; ++i) {
-        const stream_type_t *st = &mStreamTypes[i];
-        if (i > 0) {
-            result.appendFormat(", ");
-        }
-        result.appendFormat("%d:%.2g", i, 20.0 * log10(st->volume));
-        if (st->mute) {
-            result.append("M");
+    if (!audioserver_flags::portid_volume_management()) {
+        result.appendFormat("  Stream volumes in dB: ");
+        for (int i = 0; i < AUDIO_STREAM_CNT; ++i) {
+            const stream_type_t *st = &mStreamTypes[i];
+            if (i > 0) {
+                result.appendFormat(", ");
+            }
+            result.appendFormat("%d:%.2g", i, 20.0 * log10(st->volume));
+            if (st->mute) {
+                result.append("M");
+            }
         }
     }
     result.append("\n");
@@ -2390,7 +2394,8 @@ sp<IAfTrack> PlaybackThread::createTrack_l(
         const sp<media::IAudioTrackCallback>& callback,
         bool isSpatialized,
         bool isBitPerfect,
-        audio_output_flags_t *afTrackFlags)
+        audio_output_flags_t *afTrackFlags,
+        float volume)
 {
     size_t frameCount = *pFrameCount;
     size_t notificationFrameCount = *pNotificationFrameCount;
@@ -2719,7 +2724,7 @@ sp<IAfTrack> PlaybackThread::createTrack_l(
                           nullptr /* buffer */, (size_t)0 /* bufferSize */, sharedBuffer,
                           sessionId, creatorPid, attributionSource, trackFlags,
                           IAfTrackBase::TYPE_DEFAULT, portId, SIZE_MAX /*frameCountToBeReady*/,
-                          speed, isSpatialized, isBitPerfect);
+                          speed, isSpatialized, isBitPerfect, volume);
 
         lStatus = track != 0 ? track->initCheck() : (status_t) NO_MEMORY;
         if (lStatus != NO_ERROR) {
@@ -2845,6 +2850,21 @@ float PlaybackThread::streamVolume(audio_stream_type_t stream) const
 {
     audio_utils::lock_guard _l(mutex());
     return mStreamTypes[stream].volume;
+}
+
+sp<VolumePortInterface> PlaybackThread::getVolumePortInterface(audio_port_handle_t port) const
+{
+    audio_utils::lock_guard _l(mutex());
+    if (port == AUDIO_PORT_HANDLE_NONE) {
+        return nullptr;
+    }
+    for (size_t i = 0; i < mTracks.size(); i++) {
+        sp<IAfTrack> track = mTracks[i].get();
+        if (port == track->portId()) {
+            return track;
+        }
+    }
+    return nullptr;
 }
 
 void PlaybackThread::setVolumeForOutput_l(float left, float right) const
@@ -5778,12 +5798,19 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 }
                 sp<AudioTrackServerProxy> proxy = track->audioTrackServerProxy();
                 float volume;
-                if (track->isPlaybackRestricted() || mStreamTypes[track->streamType()].mute) {
-                    volume = 0.f;
+                if (!audioserver_flags::portid_volume_management()) {
+                    if (track->isPlaybackRestricted() || mStreamTypes[track->streamType()].mute) {
+                        volume = 0.f;
+                    } else {
+                        volume = masterVolume * mStreamTypes[track->streamType()].volume;
+                    }
                 } else {
-                    volume = masterVolume * mStreamTypes[track->streamType()].volume;
+                    if (track->isPlaybackRestricted()) {
+                        volume = 0.f;
+                    } else {
+                        volume = masterVolume * track->getPortVolume();
+                    }
                 }
-
                 handleVoipVolume_l(&volume);
 
                 // cache the combined master volume and stream type volume for fast mixer; this
@@ -5795,15 +5822,23 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 gain_minifloat_packed_t vlr = proxy->getVolumeLR();
                 float vlf = float_from_gain(gain_minifloat_unpack_left(vlr));
                 float vrf = float_from_gain(gain_minifloat_unpack_right(vlr));
-
-                track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                    /*muteState=*/{masterVolume == 0.f,
-                                   mStreamTypes[track->streamType()].volume == 0.f,
-                                   mStreamTypes[track->streamType()].mute,
-                                   track->isPlaybackRestricted(),
-                                   vlf == 0.f && vrf == 0.f,
-                                   vh == 0.f});
-
+                if (!audioserver_flags::portid_volume_management()) {
+                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                            /*muteState=*/{masterVolume == 0.f,
+                                           mStreamTypes[track->streamType()].volume == 0.f,
+                                           mStreamTypes[track->streamType()].mute,
+                                           track->isPlaybackRestricted(),
+                                           vlf == 0.f && vrf == 0.f,
+                                           vh == 0.f});
+                } else {
+                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                            /*muteState=*/{masterVolume == 0.f,
+                                           track->getPortVolume() == 0.f,
+                                           /* muteFromStreamMuted= */ false,
+                                           track->isPlaybackRestricted(),
+                                           vlf == 0.f && vrf == 0.f,
+                                           vh == 0.f});
+                }
                 vlf *= volume;
                 vrf *= volume;
 
@@ -5954,16 +5989,22 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
             uint32_t vl, vr;       // in U8.24 integer format
             float vlf, vrf, vaf;   // in [0.0, 1.0] float format
             // read original volumes with volume control
-            float v = masterVolume * mStreamTypes[track->streamType()].volume;
             // Always fetch volumeshaper volume to ensure state is updated.
             const sp<AudioTrackServerProxy> proxy = track->audioTrackServerProxy();
             const float vh = track->getVolumeHandler()->getVolume(
                     track->audioTrackServerProxy()->framesReleased()).first;
-
-            if (mStreamTypes[track->streamType()].mute || track->isPlaybackRestricted()) {
-                v = 0;
+            float v;
+            if (!audioserver_flags::portid_volume_management()) {
+                v = masterVolume * mStreamTypes[track->streamType()].volume;
+                if (mStreamTypes[track->streamType()].mute || track->isPlaybackRestricted()) {
+                    v = 0;
+                }
+            } else {
+                v = masterVolume * track->getPortVolume();
+                if (track->isPlaybackRestricted()) {
+                    v = 0;
+                }
             }
-
             handleVoipVolume_l(&v);
 
             if (track->isPausing()) {
@@ -5983,15 +6024,23 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                     ALOGV("Track right volume out of range: %.3g", vrf);
                     vrf = GAIN_FLOAT_UNITY;
                 }
-
-                track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                    /*muteState=*/{masterVolume == 0.f,
-                                   mStreamTypes[track->streamType()].volume == 0.f,
-                                   mStreamTypes[track->streamType()].mute,
-                                   track->isPlaybackRestricted(),
-                                   vlf == 0.f && vrf == 0.f,
-                                   vh == 0.f});
-
+                if (!audioserver_flags::portid_volume_management()) {
+                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                            /*muteState=*/{masterVolume == 0.f,
+                                           mStreamTypes[track->streamType()].volume == 0.f,
+                                           mStreamTypes[track->streamType()].mute,
+                                           track->isPlaybackRestricted(),
+                                           vlf == 0.f && vrf == 0.f,
+                                           vh == 0.f});
+                } else {
+                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                            /*muteState=*/{masterVolume == 0.f,
+                                           track->getPortVolume() == 0.f,
+                                           /* muteFromStreamMuted= */ false,
+                                           track->isPlaybackRestricted(),
+                                           vlf == 0.f && vrf == 0.f,
+                                           vh == 0.f});
+                }
                 // now apply the master volume and stream type volume and shaper volume
                 vlf *= v * vh;
                 vrf *= v * vh;
@@ -6717,34 +6766,64 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
 
     const bool clientVolumeMute = (left == 0.f && right == 0.f);
 
-    if (mMasterMute || mStreamTypes[track->streamType()].mute || track->isPlaybackRestricted()) {
-        left = right = 0;
-    } else {
-        float typeVolume = mStreamTypes[track->streamType()].volume;
-        const float v = mMasterVolume * typeVolume * shaperVolume;
+    if (!audioserver_flags::portid_volume_management()) {
+        if (mMasterMute || mStreamTypes[track->streamType()].mute ||
+            track->isPlaybackRestricted()) {
+            left = right = 0;
+        } else {
+            float typeVolume = mStreamTypes[track->streamType()].volume;
+            const float v = mMasterVolume * typeVolume * shaperVolume;
 
-        if (left > GAIN_FLOAT_UNITY) {
-            left = GAIN_FLOAT_UNITY;
-        }
-        if (right > GAIN_FLOAT_UNITY) {
-            right = GAIN_FLOAT_UNITY;
-        }
-        left *= v;
-        right *= v;
-        if (mAfThreadCallback->getMode() != AUDIO_MODE_IN_COMMUNICATION
+            if (left > GAIN_FLOAT_UNITY) {
+                left = GAIN_FLOAT_UNITY;
+            }
+            if (right > GAIN_FLOAT_UNITY) {
+                right = GAIN_FLOAT_UNITY;
+            }
+            left *= v;
+            right *= v;
+            if (mAfThreadCallback->getMode() != AUDIO_MODE_IN_COMMUNICATION
                 || audio_channel_count_from_out_mask(mChannelMask) > 1) {
-            left *= mMasterBalanceLeft; // DirectOutputThread balance applied as track volume
-            right *= mMasterBalanceRight;
+                left *= mMasterBalanceLeft; // DirectOutputThread balance applied as track volume
+                right *= mMasterBalanceRight;
+            }
         }
-    }
+        track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                /*muteState=*/{mMasterMute,
+                               mStreamTypes[track->streamType()].volume == 0.f,
+                               mStreamTypes[track->streamType()].mute,
+                               track->isPlaybackRestricted(),
+                               clientVolumeMute,
+                               shaperVolume == 0.f});
+    } else {
+        if (mMasterMute || track->isPlaybackRestricted()) {
+            left = right = 0;
+        } else {
+            float typeVolume = track->getPortVolume();
+            const float v = mMasterVolume * typeVolume * shaperVolume;
 
-    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-        /*muteState=*/{mMasterMute,
-                       mStreamTypes[track->streamType()].volume == 0.f,
-                       mStreamTypes[track->streamType()].mute,
-                       track->isPlaybackRestricted(),
-                       clientVolumeMute,
-                       shaperVolume == 0.f});
+            if (left > GAIN_FLOAT_UNITY) {
+                left = GAIN_FLOAT_UNITY;
+            }
+            if (right > GAIN_FLOAT_UNITY) {
+                right = GAIN_FLOAT_UNITY;
+            }
+            left *= v;
+            right *= v;
+            if (mAfThreadCallback->getMode() != AUDIO_MODE_IN_COMMUNICATION
+                || audio_channel_count_from_out_mask(mChannelMask) > 1) {
+                left *= mMasterBalanceLeft; // DirectOutputThread balance applied as track volume
+                right *= mMasterBalanceRight;
+            }
+        }
+        track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                /*muteState=*/{mMasterMute,
+                               track->getPortVolume() == 0.f,
+                               /* muteFromStreamMuted= */ false,
+                               track->isPlaybackRestricted(),
+                               clientVolumeMute,
+                               shaperVolume == 0.f});
+    }
 
     if (lastTrack) {
         track->setFinalVolume(left, right);
@@ -7838,7 +7917,9 @@ void DuplicatingThread::addOutputTrack(IAfPlaybackThread* thread)
         ALOGE("addOutputTrack() initCheck failed %d", status);
         return;
     }
-    thread->setStreamVolume(AUDIO_STREAM_PATCH, 1.0f);
+    if (!audioserver_flags::portid_volume_management()) {
+        thread->setStreamVolume(AUDIO_STREAM_PATCH, 1.0f);
+    }
     mOutputTracks.add(outputTrack);
     ALOGV("addOutputTrack() track %p, on thread %p", outputTrack.get(), thread);
     updateWaitTime_l();
@@ -10325,6 +10406,7 @@ status_t MmapThread::start(const AudioClient& client,
 
     const auto localSessionId = mSessionId;
     auto localAttr = mAttr;
+    float volume = 0.0f;
     if (isOutput()) {
         audio_config_t config = AUDIO_CONFIG_INITIALIZER;
         config.sample_rate = mSampleRate;
@@ -10348,7 +10430,8 @@ status_t MmapThread::start(const AudioClient& client,
                                             &portId,
                                             &secondaryOutputs,
                                             &isSpatialized,
-                                            &isBitPerfect);
+                                            &isBitPerfect,
+                                            &volume);
         mutex().lock();
         mAttr = localAttr;
         ALOGD_IF(!secondaryOutputs.empty(),
@@ -10417,7 +10500,8 @@ status_t MmapThread::start(const AudioClient& client,
             this, attr == nullptr ? mAttr : *attr, mSampleRate, mFormat,
                                         mChannelMask, mSessionId, isOutput(),
                                         client.attributionSource,
-                                        IPCThreadState::self()->getCallingPid(), portId);
+                                        IPCThreadState::self()->getCallingPid(), portId,
+                                        volume);
     if (!isOutput()) {
         track->setSilenced_l(isClientSilenced_l(portId));
     }
@@ -11002,18 +11086,18 @@ MmapPlaybackThread::MmapPlaybackThread(
     mChannelCount = audio_channel_count_from_out_mask(mChannelMask);
     mMasterVolume = afThreadCallback->masterVolume_l();
     mMasterMute = afThreadCallback->masterMute_l();
-
-    for (int i = AUDIO_STREAM_MIN; i < AUDIO_STREAM_FOR_POLICY_CNT; ++i) {
-        const audio_stream_type_t stream{static_cast<audio_stream_type_t>(i)};
-        mStreamTypes[stream].volume = 0.0f;
-        mStreamTypes[stream].mute = mAfThreadCallback->streamMute_l(stream);
+    if (!audioserver_flags::portid_volume_management()) {
+        for (int i = AUDIO_STREAM_MIN; i < AUDIO_STREAM_FOR_POLICY_CNT; ++i) {
+            const audio_stream_type_t stream{static_cast<audio_stream_type_t>(i)};
+            mStreamTypes[stream].volume = 0.0f;
+            mStreamTypes[stream].mute = mAfThreadCallback->streamMute_l(stream);
+        }
+        // Audio patch and call assistant volume are always max
+        mStreamTypes[AUDIO_STREAM_PATCH].volume = 1.0f;
+        mStreamTypes[AUDIO_STREAM_PATCH].mute = false;
+        mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].volume = 1.0f;
+        mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].mute = false;
     }
-    // Audio patch and call assistant volume are always max
-    mStreamTypes[AUDIO_STREAM_PATCH].volume = 1.0f;
-    mStreamTypes[AUDIO_STREAM_PATCH].mute = false;
-    mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].volume = 1.0f;
-    mStreamTypes[AUDIO_STREAM_CALL_ASSISTANT].mute = false;
-
     if (mAudioHwDev) {
         if (mAudioHwDev->canSetMasterVolume()) {
             mMasterVolume = 1.0;
@@ -11092,6 +11176,20 @@ void MmapPlaybackThread::setStreamMute(audio_stream_type_t stream, bool muted)
     }
 }
 
+sp<VolumePortInterface> MmapPlaybackThread::getVolumePortInterface(audio_port_handle_t port) const
+{
+    audio_utils::lock_guard _l(mutex());
+    if (port == AUDIO_PORT_HANDLE_NONE) {
+        return nullptr;
+    }
+    for (const sp<IAfMmapTrack>& track : mActiveTracks) {
+        if (port == track->portId()) {
+            return track;
+        }
+    }
+    return nullptr;
+}
+
 void MmapPlaybackThread::invalidateTracks(audio_stream_type_t streamType)
 {
     audio_utils::lock_guard _l(mutex());
@@ -11125,14 +11223,26 @@ void MmapPlaybackThread::invalidateTracks(std::set<audio_port_handle_t>& portIds
 void MmapPlaybackThread::processVolume_l()
 NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
 {
-    float volume;
-
-    if (mMasterMute || streamMuted_l()) {
-        volume = 0;
+    float volume = 0;
+    if (!audioserver_flags::portid_volume_management()) {
+        if (mMasterMute || streamMuted_l()) {
+            volume = 0;
+        } else {
+            volume = mMasterVolume * streamVolume_l();
+        }
     } else {
-        volume = mMasterVolume * streamVolume_l();
+        if (mMasterMute) {
+            volume = 0;
+        } else {
+            // All mmap tracks are declared with the same audio attributes to the audio policy
+            // manager. Hence, they follow the same routing / volume group. Any change of volume
+            // will be broadcasted to all tracks. Thus, take arbitrarily first track volume.
+            size_t numtracks = mActiveTracks.size();
+            if (numtracks) {
+                volume = mMasterVolume * mActiveTracks[0]->getPortVolume();
+            }
+        }
     }
-
     if (volume != mHalVolFloat) {
         // Convert volumes from float to 8.24
         uint32_t vol = (uint32_t)(volume * (1 << 24));
@@ -11165,14 +11275,25 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
         }
         for (const sp<IAfMmapTrack>& track : mActiveTracks) {
             track->setMetadataHasChanged();
-            track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                /*muteState=*/{mMasterMute,
-                               streamVolume_l() == 0.f,
-                               streamMuted_l(),
-                               // TODO(b/241533526): adjust logic to include mute from AppOps
-                               false /*muteFromPlaybackRestricted*/,
-                               false /*muteFromClientVolume*/,
-                               false /*muteFromVolumeShaper*/});
+            if (!audioserver_flags::portid_volume_management()) {
+                track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                        /*muteState=*/{mMasterMute,
+                        streamVolume_l() == 0.f,
+                        streamMuted_l(),
+                        // TODO(b/241533526): adjust logic to include mute from AppOps
+                        false /*muteFromPlaybackRestricted*/,
+                        false /*muteFromClientVolume*/,
+                        false /*muteFromVolumeShaper*/});
+            } else {
+                track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                    /*muteState=*/{mMasterMute,
+                                   track->getPortVolume() == 0.f,
+                                   /* muteFromStreamMuted= */ false,
+                                   // TODO(b/241533526): adjust logic to include mute from AppOps
+                                   false /*muteFromPlaybackRestricted*/,
+                                   false /*muteFromClientVolume*/,
+                                   false /*muteFromVolumeShaper*/});
+                }
         }
     }
 }
@@ -11279,9 +11400,13 @@ void MmapPlaybackThread::stopMelComputation_l()
 void MmapPlaybackThread::dumpInternals_l(int fd, const Vector<String16>& args)
 {
     MmapThread::dumpInternals_l(fd, args);
-
-    dprintf(fd, "  Stream type: %d Stream volume: %f HAL volume: %f Stream mute %d\n",
-            mStreamType, streamVolume_l(), mHalVolFloat, streamMuted_l());
+    if (!audioserver_flags::portid_volume_management()) {
+        dprintf(fd, "  Stream type: %d Stream volume: %f HAL volume: %f Stream mute %d",
+                mStreamType, streamVolume_l(), mHalVolFloat, streamMuted_l());
+    } else {
+        dprintf(fd, "  HAL volume: %f", mHalVolFloat);
+    }
+    dprintf(fd, "\n");
     dprintf(fd, "  Master volume: %f Master mute %d\n", mMasterVolume, mMasterMute);
 }
 

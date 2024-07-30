@@ -299,11 +299,12 @@ void AudioPolicyManagerTest::getOutputForAttr(
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized;
     bool isBitPerfectInternal;
+    float volume;
     AttributionSourceState attributionSource = createAttributionSourceState(uid);
     ASSERT_EQ(OK, mManager->getOutputForAttr(
                     &attr, output, session, &stream, attributionSource, &config, &flags,
                     selectedDeviceId, portId, {}, &outputType, &isSpatialized,
-                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect));
+                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect, &volume));
     ASSERT_NE(AUDIO_PORT_HANDLE_NONE, *portId);
     ASSERT_NE(AUDIO_IO_HANDLE_NONE, *output);
 }
@@ -2065,6 +2066,7 @@ class AudioPolicyManagerTestMMapPlaybackRerouting
     audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
     bool mIsSpatialized;
     bool mIsBitPerfect;
+    float mVolume;
 };
 
 TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLoopbackDapMixFails) {
@@ -2083,7 +2085,7 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLo
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
 }
 
 TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
@@ -2102,7 +2104,7 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
 }
 
 TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
@@ -2133,7 +2135,7 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
     auto outputDesc = mManager->getOutputs().valueFor(mOutput);
     ASSERT_NE(nullptr, outputDesc);
@@ -2149,7 +2151,7 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
     outputDesc = mManager->getOutputs().valueFor(mOutput);
     ASSERT_NE(nullptr, outputDesc);
@@ -2178,7 +2180,7 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -3632,11 +3634,12 @@ void AudioPolicyManagerTestBitPerfectBase::getBitPerfectOutput(status_t expected
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized;
     bool isBitPerfect;
+    float volume;
     EXPECT_EQ(expected,
               mManager->getOutputForAttr(&sMediaAttr, &mBitPerfectOutput, AUDIO_SESSION_NONE,
                                          &stream, attributionSource, &config, &flags,
                                          &mSelectedDeviceId, &mBitPerfectPortId, {}, &outputType,
-                                         &isSpatialized, &isBitPerfect));
+                                         &isSpatialized, &isBitPerfect, &volume));
 }
 
 class AudioPolicyManagerTestBitPerfect : public AudioPolicyManagerTestBitPerfectBase {
