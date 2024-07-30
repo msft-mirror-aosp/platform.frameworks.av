@@ -26,6 +26,7 @@
 #include <datapath/AudioStreamIn.h>
 #include <datapath/AudioStreamOut.h>
 #include <datapath/VolumeInterface.h>
+#include <datapath/VolumePortInterface.h>
 #include <fastpath/FastMixerDumpState.h>
 #include <media/DeviceDescriptorBase.h>
 #include <media/MmapStreamInterface.h>
@@ -479,7 +480,8 @@ public:
             const sp<media::IAudioTrackCallback>& callback,
             bool isSpatialized,
             bool isBitPerfect,
-            audio_output_flags_t* afTrackFlags)
+            audio_output_flags_t* afTrackFlags,
+            float volume)
             REQUIRES(audio_utils::AudioFlinger_Mutex) = 0;
 
     virtual status_t addTrack_l(const sp<IAfTrack>& track) REQUIRES(mutex()) = 0;
@@ -555,6 +557,8 @@ public:
 
     virtual void setTracksInternalMute(std::map<audio_port_handle_t, bool>* tracksInternalMute)
             EXCLUDES_ThreadBase_Mutex = 0;
+
+    virtual sp<VolumePortInterface> getVolumePortInterface(audio_port_handle_t port) const = 0;
 };
 
 class IAfDirectOutputThread : public virtual IAfPlaybackThread {
@@ -694,6 +698,8 @@ public:
             AudioHwDevice* hwDev, AudioStreamOut* output, bool systemReady);
 
     virtual AudioStreamOut* clearOutput() EXCLUDES_ThreadBase_Mutex = 0;
+
+    virtual sp<VolumePortInterface> getVolumePortInterface(audio_port_handle_t port) const = 0;
 };
 
 class IAfMmapCaptureThread : public virtual IAfMmapThread {

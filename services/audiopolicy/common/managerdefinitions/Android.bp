@@ -36,7 +36,6 @@ cc_library {
         "src/TypeConverter.cpp",
     ],
     shared_libs: [
-        "android.media.audiopolicy-aconfig-cc",
         "audioclient-types-aidl-cpp",
         "audiopolicy-types-aidl-cpp",
         "libaudioclient_aidl_conversion",
@@ -50,6 +49,7 @@ cc_library {
         "libmedia_helper",
         "libutils",
         "libxml2",
+        "server_configurable_flags",
     ],
     export_shared_lib_headers: [
         "libaudiofoundation",
@@ -58,6 +58,12 @@ cc_library {
     ],
     static_libs: [
         "libaudioutils",
+    ],
+    whole_static_libs: [
+        "android.media.audiopolicy-aconfig-cc",
+        "com.android.media.audioserver-aconfig-cc",
+        "libaconfig_storage_read_api_cc",
+        "server_configurable_flags",
     ],
     header_libs: [
         "libaudiopolicycommon",

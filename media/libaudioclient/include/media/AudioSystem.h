@@ -131,6 +131,16 @@ public:
     // mute/unmute stream
     static status_t setStreamMute(audio_stream_type_t stream, bool mute);
 
+    /**
+     * Set volume for given AudioTrack port ids on specified output
+     * @param portIds to consider
+     * @param volume to set
+     * @param output to consider
+     * @return NO_ERROR if successful
+     */
+    static status_t setPortsVolume(
+            const std::vector<audio_port_handle_t>& portIds, float volume, audio_io_handle_t output);
+
     // set audio mode in audio hardware
     static status_t setMode(audio_mode_t mode);
 
@@ -334,7 +344,8 @@ public:
                                      audio_port_handle_t *portId,
                                      std::vector<audio_io_handle_t> *secondaryOutputs,
                                      bool *isSpatialized,
-                                     bool *isBitPerfect);
+                                     bool *isBitPerfect,
+                                     float *volume);
     static status_t startOutput(audio_port_handle_t portId);
     static status_t stopOutput(audio_port_handle_t portId);
     static void releaseOutput(audio_port_handle_t portId);

@@ -715,7 +715,8 @@ sp<IAfTrack> IAfTrack::create(
         size_t frameCountToBeReady,
         float speed,
         bool isSpatialized,
-        bool isBitPerfect) {
+        bool isBitPerfect,
+        float volume) {
     return sp<Track>::make(thread,
             client,
             streamType,
@@ -736,7 +737,8 @@ sp<IAfTrack> IAfTrack::create(
             frameCountToBeReady,
             speed,
             isSpatialized,
-            isBitPerfect);
+            isBitPerfect,
+            volume);
 }
 
 // Track constructor must be called with AudioFlinger::mLock and ThreadBase::mLock held
@@ -761,7 +763,8 @@ Track::Track(
             size_t frameCountToBeReady,
             float speed,
             bool isSpatialized,
-            bool isBitPerfect)
+            bool isBitPerfect,
+            float volume)
     :   TrackBase(thread, client, attr, sampleRate, format, channelMask, frameCount,
                   // TODO: Using unsecurePointer() has some associated security pitfalls
                   //       (see declaration for details).
@@ -797,7 +800,8 @@ Track::Track(
     mFlags(flags),
     mSpeed(speed),
     mIsSpatialized(isSpatialized),
-    mIsBitPerfect(isBitPerfect)
+    mIsBitPerfect(isBitPerfect),
+    mVolume(volume)
 {
     // client == 0 implies sharedBuffer == 0
     ALOG_ASSERT(!(client == 0 && sharedBuffer != 0));
@@ -841,6 +845,10 @@ Track::Track(
         //       being created.  It would be better to allocate the index dynamically.
         mFastIndex = i;
         thread->fastTrackAvailMask_l() &= ~(1 << i);
+    }
+    if (attr.usage == AUDIO_USAGE_CALL_ASSISTANT || attr.usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+        // Audio patch and call assistant volume are always max
+        mVolume = 1.0f;
     }
 
     mServerLatencySupported = checkServerLatencySupported(format, flags);
@@ -923,7 +931,7 @@ void Track::appendDumpHeader(String8& result) const
     result.appendFormat("Type     Id Active Client Session Port Id S  Flags "
                         "  Format Chn mask  SRate "
                         "ST Usg CT "
-                        " G db  L dB  R dB  VS dB "
+                        " G db  L dB  R dB  VS dB  PortVol dB "
                         "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
                         "%s\n",
                         isServerLatencySupported() ? "   Latency" : "");
@@ -1009,7 +1017,7 @@ void Track::appendDump(String8& result, bool active) const
     result.appendFormat("%7s %6u %7u %7u %2s 0x%03X "
                         "%08X %08X %6u "
                         "%2u %3x %2x "
-                        "%5.2g %5.2g %5.2g %5.2g%c "
+                        "%5.2g %5.2g %5.2g %5.2g%c %11.2g "
                         "%08X %6zu%c %6zu %c %9u%c %7u %10s %12s",
             active ? "yes" : "no",
             (mClient == 0) ? getpid() : mClient->pid(),
@@ -1031,6 +1039,7 @@ void Track::appendDump(String8& result, bool active) const
             20.0 * log10(float_from_gain(gain_minifloat_unpack_right(vlr))),
             20.0 * log10(vsVolume.first), // VolumeShaper(s) total volume
             vsVolume.second ? 'A' : ' ',  // if any VolumeShapers active
+            20.0 * log10(mVolume),
 
             mCblk->mServer,
             bufferSizeInFrames,
@@ -2191,14 +2200,13 @@ OutputTrack::OutputTrack(
             size_t frameCount,
             const AttributionSourceState& attributionSource)
     :   Track(playbackThread, NULL, AUDIO_STREAM_PATCH,
-              audio_attributes_t{} /* currently unused for output track */,
+              audio_attributes_t{ .usage = AUDIO_USAGE_VIRTUAL_SOURCE } /* for volume init only */,
               sampleRate, format, channelMask, frameCount,
               nullptr /* buffer */, (size_t)0 /* bufferSize */, nullptr /* sharedBuffer */,
               AUDIO_SESSION_NONE, getpid(), attributionSource, AUDIO_OUTPUT_FLAG_NONE,
               TYPE_OUTPUT),
     mActive(false), mSourceThread(sourceThread)
 {
-
     if (mCblk != NULL) {
         mOutBuffer.frameCount = 0;
         playbackThread->addOutputTrack_l(this);
@@ -3482,7 +3490,8 @@ sp<IAfMmapTrack> IAfMmapTrack::create(IAfThreadBase* thread,
           bool isOut,
           const android::content::AttributionSourceState& attributionSource,
           pid_t creatorPid,
-          audio_port_handle_t portId)
+          audio_port_handle_t portId,
+          float volume)
 {
     return sp<MmapTrack>::make(
             thread,
@@ -3494,7 +3503,8 @@ sp<IAfMmapTrack> IAfMmapTrack::create(IAfThreadBase* thread,
             isOut,
             attributionSource,
             creatorPid,
-            portId);
+            portId,
+            volume);
 }
 
 MmapTrack::MmapTrack(IAfThreadBase* thread,
@@ -3506,7 +3516,8 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
         bool isOut,
         const AttributionSourceState& attributionSource,
         pid_t creatorPid,
-        audio_port_handle_t portId)
+        audio_port_handle_t portId,
+        float volume)
     :   TrackBase(thread, NULL, attr, sampleRate, format,
                   channelMask, (size_t)0 /* frameCount */,
                   nullptr /* buffer */, (size_t)0 /* bufferSize */,
@@ -3517,10 +3528,15 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
                   TYPE_DEFAULT, portId,
                   std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_MMAP) + std::to_string(portId)),
         mPid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.pid))),
-            mSilenced(false), mSilencedNotified(false)
+            mSilenced(false), mSilencedNotified(false), mVolume(volume)
 {
     // Once this item is logged by the server, the client can add properties.
     mTrackMetrics.logConstructor(creatorPid, uid(), id());
+    if (isOut && (attr.usage == AUDIO_USAGE_CALL_ASSISTANT
+            || attr.usage == AUDIO_USAGE_VIRTUAL_SOURCE)) {
+        // Audio patch and call assistant volume are always max
+        mVolume = 1.0f;
+    }
 }
 
 MmapTrack::~MmapTrack()
@@ -3599,8 +3615,8 @@ void MmapTrack::processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_s
 
 void MmapTrack::appendDumpHeader(String8& result) const
 {
-    result.appendFormat("Client Session Port Id  Format Chn mask  SRate Flags %s\n",
-                        isOut() ? "Usg CT": "Source");
+    result.appendFormat("Client Session Port Id  Format Chn mask  SRate Flags %s  %s\n",
+                        isOut() ? "Usg CT": "Source", isOut() ? "PortVol dB" : "");
 }
 
 void MmapTrack::appendDump(String8& result, bool active __unused) const
@@ -3615,6 +3631,7 @@ void MmapTrack::appendDump(String8& result, bool active __unused) const
             mAttr.flags);
     if (isOut()) {
         result.appendFormat("%3x %2x", mAttr.usage, mAttr.content_type);
+        result.appendFormat("%11.2g", 20.0 * log10(mVolume));
     } else {
         result.appendFormat("%6x", mAttr.source);
     }
