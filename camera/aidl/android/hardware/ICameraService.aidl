@@ -120,7 +120,6 @@ interface ICameraService
      * Open a camera device through the old camera API.
      *
      * @param cameraId The ID of the camera to open.
-     * @param opPackageName The package name to report for the app-ops.
      * @param targetSdkVersion the target sdk level of the application calling this function.
      * @param rotationOverride Whether to override the sensor orientation information to
      *        correspond to portrait: {@link ICameraService#ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT}
@@ -136,7 +135,6 @@ interface ICameraService
      */
     ICamera connect(ICameraClient client,
             int cameraId,
-            @utf8InCpp String opPackageName,
             int targetSdkVersion,
             int rotationOverride,
             boolean forceSlowJpegMode,
@@ -148,7 +146,6 @@ interface ICameraService
      * Only supported for device HAL versions >= 3.2.
      *
      * @param cameraId The ID of the camera to open.
-     * @param opPackageName The package name to report for the app-ops.
      * @param targetSdkVersion the target sdk level of the application calling this function.
      * @param rotationOverride Whether to override the sensor orientation information to
      *        correspond to portrait: {@link ICameraService#ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT}
@@ -163,8 +160,6 @@ interface ICameraService
      */
     ICameraDeviceUser connectDevice(ICameraDeviceCallbacks callbacks,
             @utf8InCpp String cameraId,
-            @utf8InCpp String opPackageName,
-            @nullable @utf8InCpp String featureId,
             int oomScoreOffset,
             int targetSdkVersion,
             int rotationOverride,

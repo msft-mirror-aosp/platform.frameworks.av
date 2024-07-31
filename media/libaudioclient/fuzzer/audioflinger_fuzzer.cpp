@@ -519,12 +519,6 @@ void AudioFlingerFuzzer::invokeAudioSystem() {
     stream = getValue(&mFdp, kStreamtypes);
     AudioSystem::getOutputLatency(&latency, stream);
 
-    stream = getValue(&mFdp, kStreamtypes);
-    AudioSystem::getStreamVolume(stream, &volume, mFdp.ConsumeIntegral<int32_t>());
-
-    stream = getValue(&mFdp, kStreamtypes);
-    AudioSystem::getStreamMute(stream, &state);
-
     uint32_t samplingRate;
     AudioSystem::getSamplingRate(mFdp.ConsumeIntegral<int32_t>(), &samplingRate);
 

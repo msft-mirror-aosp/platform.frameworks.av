@@ -542,6 +542,11 @@ void OutputBufferQueue::onBufferReleased(uint32_t generation) {
     }
 }
 
+void OutputBufferQueue::onBufferAttached(uint32_t generation) {
+    // TODO
+    (void) generation;
+}
+
 void OutputBufferQueue::pollForRenderedFrames(FrameEventHistoryDelta* delta) {
     if (mIgbp) {
         mIgbp->getFrameTimestamps(delta);
