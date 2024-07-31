@@ -36,4 +36,5 @@ enum AudioPolicyForcedConfig {
     ENCODED_SURROUND_NEVER = 13,
     ENCODED_SURROUND_ALWAYS = 14,
     ENCODED_SURROUND_MANUAL = 15,
+    BT_BLE = 16,
 }

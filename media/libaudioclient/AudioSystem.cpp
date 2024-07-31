@@ -322,23 +322,6 @@ status_t AudioSystem::setStreamMute(audio_stream_type_t stream, bool mute) {
     return NO_ERROR;
 }
 
-status_t AudioSystem::getStreamVolume(audio_stream_type_t stream, float* volume,
-                                      audio_io_handle_t output) {
-    if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
-    const sp<IAudioFlinger> af = get_audio_flinger();
-    if (af == 0) return PERMISSION_DENIED;
-    *volume = af->streamVolume(stream, output);
-    return NO_ERROR;
-}
-
-status_t AudioSystem::getStreamMute(audio_stream_type_t stream, bool* mute) {
-    if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
-    const sp<IAudioFlinger> af = get_audio_flinger();
-    if (af == 0) return PERMISSION_DENIED;
-    *mute = af->streamMute(stream);
-    return NO_ERROR;
-}
-
 status_t AudioSystem::setMode(audio_mode_t mode) {
     if (uint32_t(mode) >= AUDIO_MODE_CNT) return BAD_VALUE;
     const sp<IAudioFlinger> af = get_audio_flinger();

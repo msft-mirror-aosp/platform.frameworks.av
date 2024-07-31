@@ -125,7 +125,6 @@ public:
     typedef typename TCamTraits::TCamConnectService TCamConnectService;
 
     static sp<TCam>      connect(int cameraId,
-                                 const std::string& clientPackageName,
                                  int targetSdkVersion, int rotationOverride, bool forceSlowJpegMode,
                                  const AttributionSourceState &clientAttribution,
                                  int32_t devicePolicy);
