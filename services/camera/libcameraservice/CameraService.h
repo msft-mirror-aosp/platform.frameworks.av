@@ -173,17 +173,15 @@ public:
             hardware::camera2::params::VendorTagDescriptorCache* cache);
 
     virtual binder::Status     connect(const sp<hardware::ICameraClient>& cameraClient,
-            int32_t cameraId, const std::string& clientPackageName,
-            int targetSdkVersion, int rotationOverride, bool forceSlowJpegMode,
+            int32_t cameraId, int targetSdkVersion, int rotationOverride, bool forceSlowJpegMode,
             const AttributionSourceState& clientAttribution,
             int32_t devicePolicy, /*out*/ sp<hardware::ICamera>* device) override;
 
     virtual binder::Status     connectDevice(
             const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
-            const std::string& cameraId,
-            const std::string& clientPackageName, const std::optional<std::string>& clientFeatureId,
-            int scoreOffset, int targetSdkVersion, int rotationOverride,
-            const AttributionSourceState& clientAttribution, int32_t devicePolicy,
+            const std::string& cameraId, int scoreOffset, int targetSdkVersion,
+            int rotationOverride, const AttributionSourceState& clientAttribution,
+            int32_t devicePolicy,
             /*out*/
             sp<hardware::camera2::ICameraDeviceUser>* device);
 
@@ -949,17 +947,12 @@ private:
     void removeStates(const std::string& id);
 
     // Check if we can connect, before we acquire the service lock.
-    // The returned originalClientPid is the PID of the original process that wants to connect to
-    // camera.
-    // The returned clientPid is the PID of the client that directly connects to camera.
-    // originalClientPid and clientPid are usually the same except when the application uses
-    // mediaserver to connect to camera (using MediaRecorder to connect to camera). In that case,
-    // clientPid is the PID of mediaserver and originalClientPid is the PID of the application.
+    // If clientPid/clientUid are USE_CALLING_PID/USE_CALLING_UID, they will be overwritten with
+    // the calling pid/uid.
     binder::Status validateConnectLocked(const std::string& cameraId, const std::string& clientName,
-            /*inout*/int& clientUid, /*inout*/int& clientPid, /*out*/int& originalClientPid) const;
+            /*inout*/int& clientUid, /*inout*/int& clientPid) const;
     binder::Status validateClientPermissionsLocked(const std::string& cameraId,
-            const std::string& clientName, /*inout*/int& clientUid, /*inout*/int& clientPid,
-            /*out*/int& originalClientPid) const;
+            const std::string& clientName, /*inout*/int& clientUid, /*inout*/int& clientPid) const;
 
     bool isCameraPrivacyEnabled(const String16& packageName,const std::string& cameraId,
            int clientPid, int ClientUid);
