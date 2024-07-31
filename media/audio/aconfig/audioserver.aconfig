@@ -65,6 +65,22 @@ flag {
 }
 
 flag {
+    name: "portid_volume_management"
+    namespace: "media_audio"
+    description:
+        "Allows to manage volume by port id within audio flinger instead of legacy stream type."
+    bug: "317212590"
+}
+
+flag {
+    name: "power_stats"
+    namespace: "media_audio"
+    description:
+        "Add power stats tracking and management."
+    bug: "350114693"
+}
+
+flag {
     name: "use_bt_sco_for_media"
     namespace: "media_audio"
     description:
