@@ -165,6 +165,9 @@ static const int kRecordThreadSleepUs = 5000;
 
 // maximum time to wait in sendConfigEvent_l() for a status to be received
 static const nsecs_t kConfigEventTimeoutNs = seconds(2);
+// longer timeout for create audio patch to account for specific scenarii
+// with Bluetooth devices
+static const nsecs_t kCreatePatchEventTimeoutNs = seconds(4);
 
 // minimum sleep time for the mixer thread loop when tracks are active but in underrun
 static const uint32_t kMinThreadSleepTimeUs = 5000;
@@ -731,9 +734,11 @@ NO_THREAD_SAFETY_ANALYSIS  // condition variable
     mutex().unlock();
     {
         audio_utils::unique_lock _l(event->mutex());
+        nsecs_t timeoutNs = event->mType == CFG_EVENT_CREATE_AUDIO_PATCH ?
+              kCreatePatchEventTimeoutNs : kConfigEventTimeoutNs;
         while (event->mWaitStatus) {
             if (event->mCondition.wait_for(
-                    _l, std::chrono::nanoseconds(kConfigEventTimeoutNs), getTid())
+                    _l, std::chrono::nanoseconds(timeoutNs), getTid())
                             == std::cv_status::timeout) {
                 event->mStatus = TIMED_OUT;
                 event->mWaitStatus = false;
