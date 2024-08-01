@@ -1815,16 +1815,6 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                                                                     data->mIO);
                     ul.lock();
                     }break;
-                case SET_PORTS_VOLUME: {
-                    VolumePortsData *data = (VolumePortsData *)command->mParam.get();
-                    ALOGV("AudioCommandThread() processing set volume Ports %s volume %f, \
-                            output %d", data->dumpPorts().c_str(), data->mVolume, data->mIO);
-                    ul.unlock();
-                    command->mStatus = AudioSystem::setPortsVolume(data->mPorts,
-                                                                   data->mVolume,
-                                                                   data->mIO);
-                    ul.lock();
-                    }break;
                 case SET_PARAMETERS: {
                     ParametersData *data = (ParametersData *)command->mParam.get();
                     ALOGV("AudioCommandThread() processing set parameters string %s, io %d",
@@ -2134,23 +2124,6 @@ status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type
     command->mWaitStatus = true;
     ALOGV("AudioCommandThread() adding set volume stream %d, volume %f, output %d",
             stream, volume, output);
-    return sendCommand(command, delayMs);
-}
-
-status_t AudioPolicyService::AudioCommandThread::volumePortsCommand(
-        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output,
-        int delayMs)
-{
-    sp<AudioCommand> command = new AudioCommand();
-    command->mCommand = SET_PORTS_VOLUME;
-    sp<VolumePortsData> data = new VolumePortsData();
-    data->mPorts = ports;
-    data->mVolume = volume;
-    data->mIO = output;
-    command->mParam = data;
-    command->mWaitStatus = true;
-    ALOGV("AudioCommandThread() adding set volume ports %s, volume %f, output %d",
-            data->dumpPorts().c_str(), volume, output);
     return sendCommand(command, delayMs);
 }
 
@@ -2484,31 +2457,6 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(sp<AudioCommand>& c
             delayMs = 1;
         } break;
 
-        case SET_PORTS_VOLUME: {
-            VolumePortsData *data = (VolumePortsData *)command->mParam.get();
-            VolumePortsData *data2 = (VolumePortsData *)command2->mParam.get();
-            if (data->mIO != data2->mIO) break;
-            // Can remove command only if port ids list is the same, otherwise, remove from
-            // command 2 all port whose volume will be replaced with command 1 volume.
-            std::vector<audio_port_handle_t> portsOnlyInCommand2{};
-            std::copy_if(data2->mPorts.begin(), data2->mPorts.end(),
-                    std::back_inserter(portsOnlyInCommand2), [&](const auto &portId) {
-                return std::find(data->mPorts.begin(), data->mPorts.end(), portId) ==
-                        data->mPorts.end();
-            });
-            if (!portsOnlyInCommand2.empty()) {
-                data2->mPorts = portsOnlyInCommand2;
-                break;
-            }
-            ALOGV("Filtering out volume command on output %d for ports %s",
-                    data->mIO, data->dumpPorts().c_str());
-            removedCommands.add(command2);
-            command->mTime = command2->mTime;
-            // force delayMs to non 0 so that code below does not request to wait for
-            // command status as the command is now delayed
-            delayMs = 1;
-        } break;
-
         case SET_VOICE_VOLUME: {
             VoiceVolumeData *data = (VoiceVolumeData *)command->mParam.get();
             VoiceVolumeData *data2 = (VoiceVolumeData *)command2->mParam.get();
@@ -2653,12 +2601,6 @@ int AudioPolicyService::setStreamVolume(audio_stream_type_t stream,
 {
     return (int)mAudioCommandThread->volumeCommand(stream, volume,
                                                    output, delayMs);
-}
-
-int AudioPolicyService::setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
-                                       audio_io_handle_t output, int delayMs)
-{
-    return (int)mAudioCommandThread->volumePortsCommand(ports, volume, output, delayMs);
 }
 
 int AudioPolicyService::setVoiceVolume(float volume, int delayMs)

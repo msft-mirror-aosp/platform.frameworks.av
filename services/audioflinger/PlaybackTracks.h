@@ -96,8 +96,7 @@ public:
                                 size_t frameCountToBeReady = SIZE_MAX,
                                 float speed = 1.0f,
                                 bool isSpatialized = false,
-                                bool isBitPerfect = false,
-                                float volume = 0.0f);
+                                bool isBitPerfect = false);
     ~Track() override;
     status_t initCheck() const final;
     void appendDumpHeader(String8& result) const final;
@@ -223,14 +222,6 @@ public:
 
     bool getInternalMute() const final { return mInternalMute; }
     void setInternalMute(bool muted) final { mInternalMute = muted; }
-
-    // VolumePortInterface implementation
-    void setPortVolume(float volume) override {
-        mVolume = volume;
-        signal();
-    }
-    float getPortVolume() const override { return mVolume; }
-
 protected:
 
     DISALLOW_COPY_AND_ASSIGN(Track);
@@ -412,8 +403,8 @@ private:
     // access these two variables only when holding player thread lock.
     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
     mute_state_t        mMuteState;
+
     bool                mInternalMute = false;
-    float mVolume = 0.0f;
 };  // end of Track
 
 

@@ -187,7 +187,6 @@ BINDER_METHOD_ENTRY(masterVolume) \
 BINDER_METHOD_ENTRY(masterMute) \
 BINDER_METHOD_ENTRY(setStreamVolume) \
 BINDER_METHOD_ENTRY(setStreamMute) \
-BINDER_METHOD_ENTRY(setPortsVolume) \
 BINDER_METHOD_ENTRY(setMode) \
 BINDER_METHOD_ENTRY(setMicMute) \
 BINDER_METHOD_ENTRY(getMicMute) \
@@ -618,7 +617,6 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         std::vector<audio_io_handle_t> secondaryOutputs;
         bool isSpatialized;
         bool isBitPerfect;
-        float volume;
         ret = AudioSystem::getOutputForAttr(&localAttr, &io,
                                             actualSessionId,
                                             &streamType, adjAttributionSource,
@@ -626,8 +624,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
                                             (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ |
                                                     AUDIO_OUTPUT_FLAG_DIRECT),
                                             deviceId, &portId, &secondaryOutputs, &isSpatialized,
-                                            &isBitPerfect,
-                                            &volume);
+                                            &isBitPerfect);
         if (ret != NO_ERROR) {
             config->sample_rate = fullConfig.sample_rate;
             config->channel_mask = fullConfig.channel_mask;
@@ -1064,7 +1061,6 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
     std::vector<audio_io_handle_t> secondaryOutputs;
     bool isSpatialized = false;
     bool isBitPerfect = false;
-    float volume;
 
     audio_io_handle_t effectThreadId = AUDIO_IO_HANDLE_NONE;
     std::vector<int> effectIds;
@@ -1125,7 +1121,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
     lStatus = AudioSystem::getOutputForAttr(&localAttr, &output.outputId, sessionId, &streamType,
                                             adjAttributionSource, &input.config, input.flags,
                                             &output.selectedDeviceId, &portId, &secondaryOutputs,
-                                            &isSpatialized, &isBitPerfect, &volume);
+                                            &isSpatialized, &isBitPerfect);
 
     if (lStatus != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
         ALOGE("createTrack() getOutputForAttr() return error %d or invalid output handle", lStatus);
@@ -1182,7 +1178,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
         if (effectThread == nullptr) {
             effectChain = getOrphanEffectChain_l(sessionId);
         }
-        ALOGV("createTrack() sessionId: %d volume: %f", sessionId, volume);
+        ALOGV("createTrack() sessionId: %d", sessionId);
 
         output.sampleRate = input.config.sample_rate;
         output.frameCount = input.frameCount;
@@ -1197,7 +1193,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
                                       input.sharedBuffer, sessionId, &output.flags,
                                       callingPid, adjAttributionSource, input.clientInfo.clientTid,
                                       &lStatus, portId, input.audioTrackCallback, isSpatialized,
-                                      isBitPerfect, &output.afTrackFlags, volume);
+                                      isBitPerfect, &output.afTrackFlags);
         LOG_ALWAYS_FATAL_IF((lStatus == NO_ERROR) && (track == 0));
         // we don't abort yet if lStatus != NO_ERROR; there is still work to be done regardless
 
@@ -1645,37 +1641,6 @@ status_t AudioFlinger::setStreamVolume(audio_stream_type_t stream, float value,
     }
     volumeInterface->setStreamVolume(stream, value);
 
-    return NO_ERROR;
-}
-
-status_t AudioFlinger::setPortsVolume(
-        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output)
-{
-    for (const auto& port : ports) {
-        if (port == AUDIO_PORT_HANDLE_NONE) {
-            return BAD_VALUE;
-        }
-    }
-    if (isnan(volume) || volume > 1.0f || volume < 0.0f) {
-        return BAD_VALUE;
-    }
-    if (output == AUDIO_IO_HANDLE_NONE) {
-        return BAD_VALUE;
-    }
-    audio_utils::lock_guard lock(mutex());
-    for (const auto& port : ports) {
-        sp<VolumePortInterface> volumePortInterface = getVolumePortInterface_l(output, port);
-        if (volumePortInterface == nullptr) {
-            return BAD_VALUE;
-        }
-        volumePortInterface->setPortVolume(volume);
-    }
-    const sp<IAfMmapThread> mmapThread = checkMmapThread_l(output);
-    if (mmapThread) {
-        // send broadcast event only when all tracks volume is updated
-        audio_utils::lock_guard _l(mmapThread->mutex());
-        mmapThread->broadcast_l();
-    }
     return NO_ERROR;
 }
 
@@ -3859,7 +3824,8 @@ IAfMmapThread* AudioFlinger::checkMmapThread_l(audio_io_handle_t io) const
 
 
 // checkPlaybackThread_l() must be called with AudioFlinger::mutex() held
-sp<VolumeInterface> AudioFlinger::getVolumeInterface_l(audio_io_handle_t output) const {
+sp<VolumeInterface> AudioFlinger::getVolumeInterface_l(audio_io_handle_t output) const
+{
     sp<VolumeInterface> volumeInterface = mPlaybackThreads.valueFor(output).get();
     if (volumeInterface == nullptr) {
         IAfMmapThread* const mmapThread = mMmapThreads.valueFor(output).get();
@@ -3872,21 +3838,6 @@ sp<VolumeInterface> AudioFlinger::getVolumeInterface_l(audio_io_handle_t output)
         }
     }
     return volumeInterface;
-}
-
-sp<VolumePortInterface> AudioFlinger::getVolumePortInterface_l(audio_io_handle_t output,
-        audio_port_handle_t port) const
-{
-    IAfPlaybackThread *thread = checkPlaybackThread_l(output);
-    if (thread != nullptr) {
-        return thread->getVolumePortInterface(port);
-    }
-    const sp<IAfMmapThread> mmapThread = checkMmapThread_l(output);
-    if (mmapThread != nullptr && mmapThread->isOutput()) {
-        IAfMmapPlaybackThread *mmapPlaybackThread = mmapThread->asIAfMmapPlaybackThread().get();
-        return mmapPlaybackThread->getVolumePortInterface(port);
-    }
-    return nullptr;
 }
 
 std::vector<sp<VolumeInterface>> AudioFlinger::getAllVolumeInterfaces_l() const
@@ -5168,7 +5119,6 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         case TransactionCode::GET_AUDIO_MIX_PORT:
         case TransactionCode::SET_TRACKS_INTERNAL_MUTE:
         case TransactionCode::RESET_REFERENCES_FOR_TEST:
-        case TransactionCode::SET_PORTS_VOLUME:
             ALOGW("%s: transaction %d received from PID %d",
                   __func__, static_cast<int>(code), IPCThreadState::self()->getCallingPid());
             // return status only for non void methods
