@@ -555,8 +555,8 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
     // Configure consumer-side ANativeWindow interface. The listener may be used
     // to notify buffer manager (if it is used) of the returned buffers.
     res = mConsumer->connect(NATIVE_WINDOW_API_CAMERA,
-            /*reportBufferRemoval*/true,
-            /*listener*/mBufferProducerListener);
+            /*listener*/mBufferProducerListener,
+            /*reportBufferRemoval*/true);
     if (res != OK) {
         ALOGE("%s: Unable to connect to native window for stream %d",
                 __FUNCTION__, mId);
