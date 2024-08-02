@@ -481,6 +481,10 @@ struct Codec2Client::Component : public Codec2Client::Configurable {
     void onBufferReleasedFromOutputSurface(
             uint32_t generation);
 
+    // Notify a buffer is attached to output surface.
+    void onBufferAttachedToOutputSurface(
+            uint32_t generation);
+
     // When the client received \p workList and the blocks inside
     // \p workList are IGBA based graphic blocks, specify the owner
     // as the current IGBA for the future operations.
