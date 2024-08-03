@@ -141,9 +141,15 @@ cc_defaults {
 cc_defaults {
     name: "libaudioflinger_dependencies",
 
+    header_libs: [
+        "libaudiohal_headers", // required for AudioFlinger
+    ],
+
     shared_libs: [
+        "audio-permission-aidl-cpp",
         "audioclient-types-aidl-cpp",
         "audioflinger-aidl-cpp",
+        "audiopermissioncontroller",
         "av-types-aidl-cpp",
         "com.android.media.audio-aconfig-cc",
         "effect-aidl-cpp",
@@ -229,6 +235,8 @@ cc_library {
     ],
 
     export_header_lib_headers: ["audiopolicyservicelocal_headers"],
+
+    export_include_dirs: ["."],
 
     export_shared_lib_headers: [
         "libpermission",
