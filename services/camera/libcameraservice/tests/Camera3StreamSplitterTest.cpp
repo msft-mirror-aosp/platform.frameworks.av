@@ -102,7 +102,7 @@ TEST_F(Camera3StreamSplitterTest, TestWithoutSurfaces_NoBuffersConsumed) {
                                      kHeight, kFormat, &consumer, kDynamicRangeProfile));
 
     sp<TestSurfaceListener> surfaceListener = sp<TestSurfaceListener>::make();
-    EXPECT_EQ(OK, consumer->connect(NATIVE_WINDOW_API_CAMERA, false, surfaceListener));
+    EXPECT_EQ(OK, consumer->connect(NATIVE_WINDOW_API_CAMERA, surfaceListener, false));
 
     sp<GraphicBuffer> buffer = new GraphicBuffer(kWidth, kHeight, kFormat, kProducerUsage);
     EXPECT_EQ(OK, consumer->attachBuffer(buffer->getNativeBuffer()));
@@ -137,7 +137,7 @@ TEST_F(Camera3StreamSplitterTest, TestProcessSingleBuffer) {
                                      kConsumerUsage, kProducerUsage, kHalMaxBuffers, kWidth,
                                      kHeight, kFormat, &inputSurface, kDynamicRangeProfile));
     sp<TestSurfaceListener> surfaceListener = sp<TestSurfaceListener>::make();
-    EXPECT_EQ(OK, inputSurface->connect(NATIVE_WINDOW_API_CAMERA, false, surfaceListener));
+    EXPECT_EQ(OK, inputSurface->connect(NATIVE_WINDOW_API_CAMERA, surfaceListener, false));
     // TODO: Do this with the surface itself once the API is available.
     EXPECT_EQ(OK, inputSurface->getIGraphicBufferProducer()->allowAllocation(false));
 

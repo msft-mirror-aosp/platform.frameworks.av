@@ -1,4 +1,5 @@
 package {
+    default_team: "trendy_team_media_framework_audio",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_av_license"
@@ -7,32 +8,19 @@ package {
     default_applicable_licenses: ["frameworks_av_license"],
 }
 
-cc_library {
-    name: "libmedialogservice",
-
+cc_test {
+    name: "powerstats_collector_tests",
     srcs: [
-        "IMediaLogService.cpp",
-        "MediaLogService.cpp",
+        "powerstats_collector_tests.cpp",
     ],
-
-    header_libs: [
-        "libmedia_headers",
-    ],
-
     shared_libs: [
-        "libaudioutils",
-        "libbinder",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
         "liblog",
-        "libmediautils",
-        "libnblog",
         "libutils",
-        "packagemanager_aidl-cpp",
     ],
-
-    export_include_dirs: ["."],
-
-    cflags: [
-        "-Wall",
-        "-Werror",
+    static_libs: [
+        "libpshutils",
     ],
 }
