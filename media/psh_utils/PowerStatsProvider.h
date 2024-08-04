@@ -16,14 +16,19 @@
 
 #pragma once
 
-#include <system/audio.h>
+#include <psh_utils/PowerStatsCollector.h>
+#include <iostream>
 
-namespace android {
+namespace android::media::psh_utils {
 
-class VolumePortInterface : public virtual RefBase {
+class RailEnergyDataProvider : public PowerStatsProvider {
 public:
-    virtual void setPortVolume(float volume) = 0;
-    virtual float getPortVolume() const = 0;
+    int fill(PowerStats* stat) const override;
 };
 
-}  // namespace android
+class PowerEntityResidencyDataProvider : public PowerStatsProvider {
+public:
+    int fill(PowerStats* stat) const override;
+};
+
+} // namespace android::media::psh_utils

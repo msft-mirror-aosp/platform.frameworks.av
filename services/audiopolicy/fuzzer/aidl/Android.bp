@@ -23,20 +23,11 @@ package {
 cc_defaults {
     name: "audiopolicy_aidl_fuzzer_defaults",
     shared_libs: [
-        "audiopolicy-aidl-cpp",
-        "audiopolicy-types-aidl-cpp",
-        "framework-permission-aidl-cpp",
-        "libactivitymanager_aidl",
-        "libaudioclient",
         "libaudioflinger",
-        "libaudiohal",
-        "libaudiopolicy",
-        "libaudiopolicymanagerdefault",
         "libaudiopolicyservice",
         "libaudioprocessing",
         "libhidlbase",
-        "liblog",
-        "libmediautils",
+        "libmediaplayerservice",
         "libnbaio",
         "libnblog",
         "libpowermanager",
@@ -44,16 +35,10 @@ cc_defaults {
         "packagemanager_aidl-cpp",
     ],
     static_libs: [
-        "audiopermissioncontroller",
         "libaudiomockhal",
         "libfakeservicemanager",
-        "libmediaplayerservice",
     ],
     header_libs: [
-        "libaudioflinger_headers",
-        "libaudiohal_headers",
-        "libaudiopolicymanager_interface_headers",
-        "libbinder_headers",
         "libmedia_headers",
     ],
     fuzz_config: {
@@ -78,6 +63,7 @@ cc_fuzz {
         "latest_android_hardware_audio_core_ndk_shared",
         "latest_android_hardware_audio_core_sounddose_ndk_shared",
         "latest_android_hardware_audio_effect_ndk_shared",
+        "libaudiopolicyservice_dependencies",
         "service_fuzzer_defaults",
     ],
 }
