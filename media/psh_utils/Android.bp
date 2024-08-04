@@ -1,0 +1,44 @@
+package {
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_av_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_av_license"],
+}
+
+// libraries that are included whole_static for test apps
+ndk_libs = [
+    "android.hardware.power.stats-V1-ndk",
+]
+
+// Power, System, Health utils
+cc_library {
+    name: "libpshutils",
+    local_include_dirs: ["include"],
+    export_include_dirs: ["include"],
+    srcs: [
+        "PowerStats.cpp",
+        "PowerStatsCollector.cpp",
+        "PowerStatsProvider.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "liblog",
+        "libutils",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wthread-safety",
+    ],
+    shared: {
+        shared_libs: ndk_libs,
+    },
+    static: {
+        whole_static_libs: ndk_libs,
+    },
+}
