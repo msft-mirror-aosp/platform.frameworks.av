@@ -44,11 +44,6 @@ static std::optional<std::string> getFixedPackageName(uid_t uid) {
             return "audioserver";
         case AID_CAMERASERVER:
             return "cameraserver";
-        // These packages are not handled by AppOps, but labeling may be useful for us
-        case AID_RADIO:
-            return "telephony";
-        case AID_BLUETOOTH:
-            return "bluetooth";
         default:
             return std::nullopt;
     }
