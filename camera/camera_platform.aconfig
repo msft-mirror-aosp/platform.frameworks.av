@@ -257,3 +257,13 @@ flag {
         purpose: PURPOSE_BUGFIX
     }
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "bump_preview_frame_space_priority"
+    description: "Increase the PreviewFrameSpacer thread priority"
+    bug: "355665306"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
