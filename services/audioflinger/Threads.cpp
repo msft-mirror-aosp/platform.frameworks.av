@@ -10423,8 +10423,11 @@ void MmapThread::disconnect()
             activeTracks.add(t);
         }
         localPortId = mPortId;
+        ALOGD("%s: localPortId = %d", __func__, localPortId);
+        mPortId = AUDIO_PORT_HANDLE_NONE;
     }
     for (const sp<IAfMmapTrack>& t : activeTracks) {
+        ALOGD("%s: t->portId() = %d", __func__, t->portId());
         stop(t->portId());
     }
     // This will decrement references and may cause the destruction of this thread.
