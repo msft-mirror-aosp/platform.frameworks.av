@@ -41,11 +41,12 @@ static auto getPowerStatsService() {
     return powerStats;
 }
 
-int RailEnergyDataProvider::fill(PowerStats *stat) const {
+status_t RailEnergyDataProvider::fill(PowerStats *stat) const {
+    if (stat == nullptr) return BAD_VALUE;
     auto powerStatsService = getPowerStatsService();
     if (powerStatsService == nullptr) {
         LOG(ERROR) << "unable to get power.stats AIDL service";
-        return 1;
+        return NO_INIT;
     }
 
     std::unordered_map<int32_t, ::aidl::android::hardware::power::stats::Channel> channelMap;
@@ -53,7 +54,7 @@ int RailEnergyDataProvider::fill(PowerStats *stat) const {
         std::vector<::aidl::android::hardware::power::stats::Channel> channels;
         if (!powerStatsService->getEnergyMeterInfo(&channels).isOk()) {
             LOG(ERROR) << "unable to get energy meter info";
-            return 1;
+            return INVALID_OPERATION;
         }
         for (auto& channel : channels) {
           channelMap.emplace(channel.id, std::move(channel));
@@ -63,7 +64,7 @@ int RailEnergyDataProvider::fill(PowerStats *stat) const {
     std::vector<::aidl::android::hardware::power::stats::EnergyMeasurement> measurements;
     if (!powerStatsService->readEnergyMeter({}, &measurements).isOk()) {
         LOG(ERROR) << "unable to get energy measurements";
-        return 1;
+        return INVALID_OPERATION;
     }
 
     for (const auto& measurement : measurements) {
@@ -83,14 +84,15 @@ int RailEnergyDataProvider::fill(PowerStats *stat) const {
                   return a.rail_name < b.rail_name;
               });
 
-    return 0;
+    return NO_ERROR;
 }
 
-int PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
+status_t PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
+    if (stat == nullptr) return BAD_VALUE;
     auto powerStatsService = getPowerStatsService();
     if (powerStatsService == nullptr) {
         LOG(ERROR) << "unable to get power.stats AIDL service";
-        return 1;
+        return NO_INIT;
     }
 
     // these are based on entityId
@@ -102,7 +104,7 @@ int PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
         std::vector<::aidl::android::hardware::power::stats::PowerEntity> entities;
         if (!powerStatsService->getPowerEntityInfo(&entities).isOk()) {
             LOG(ERROR) << __func__ << ": unable to get entity info";
-            return 1;
+            return INVALID_OPERATION;
         }
 
         std::vector<std::string> powerEntityNames;
@@ -124,7 +126,7 @@ int PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
     std::vector<::aidl::android::hardware::power::stats::StateResidencyResult> results;
     if (!powerStatsService->getStateResidency(powerEntityIds, &results).isOk()) {
         LOG(ERROR) << __func__ << ": Unable to get state residency";
-        return 1;
+        return INVALID_OPERATION;
     }
 
     for (const auto& result : results) {
@@ -147,7 +149,7 @@ int PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
                   }
                   return a.state_name < b.state_name;
               });
-    return 0;
+    return NO_ERROR;
 }
 
 } // namespace android::media::psh_utils
