@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "HealthStats.h"
+
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -82,6 +84,8 @@ struct PowerStats {
         RailEnergy operator-(const RailEnergy& other) const;
         bool operator==(const RailEnergy& other) const = default;
     };
+
+    HealthStats health_stats;
 
     std::string normalizedEnergy() const;
 
