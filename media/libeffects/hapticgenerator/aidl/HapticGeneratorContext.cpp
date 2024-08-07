@@ -71,7 +71,7 @@ RetCode HapticGeneratorContext::disable() {
     return RetCode::SUCCESS;
 }
 
-void HapticGeneratorContext::reset() {
+RetCode HapticGeneratorContext::reset() {
     for (auto& filter : mProcessorsRecord.filters) {
         filter->clear();
     }
@@ -81,6 +81,7 @@ void HapticGeneratorContext::reset() {
     for (auto& distortion : mProcessorsRecord.distortions) {
         distortion->clear();
     }
+    return RetCode::SUCCESS;
 }
 
 RetCode HapticGeneratorContext::setHgHapticScales(

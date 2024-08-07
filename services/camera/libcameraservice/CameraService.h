@@ -954,6 +954,11 @@ private:
     binder::Status validateClientPermissionsLocked(const std::string& cameraId,
             const std::string& clientName, /*inout*/int& clientUid, /*inout*/int& clientPid) const;
 
+    // If clientPackageNameMaybe is empty, attempts to resolve the package name.
+    std::string resolvePackageName(int clientUid, const std::string& clientPackageNameMaybe) const;
+    void logConnectionAttempt(int clientPid, const std::string& clientPackageName,
+        const std::string& cameraId, apiLevel effectiveApiLevel) const;
+
     bool isCameraPrivacyEnabled(const String16& packageName,const std::string& cameraId,
            int clientPid, int ClientUid);
 
@@ -997,16 +1002,16 @@ private:
     // as for legacy apps we will toggle the app op for all packages in the UID.
     // The caveat is that the operation may be attributed to the wrong package and
     // stats based on app ops may be slightly off.
-    std::string getPackageNameFromUid(int clientUid);
+    std::string getPackageNameFromUid(int clientUid) const;
 
     // Single implementation shared between the various connect calls
     template<class CALLBACK, class CLIENT>
     binder::Status connectHelper(const sp<CALLBACK>& cameraCb, const std::string& cameraId,
-            int api1CameraId, const std::string& clientPackageNameMaybe, bool systemNativeClient,
+            int api1CameraId, const std::string& clientPackageName, bool systemNativeClient,
             const std::optional<std::string>& clientFeatureId, int clientUid, int clientPid,
             apiLevel effectiveApiLevel, bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
             int rotationOverride, bool forceSlowJpegMode,
-            const std::string& originalCameraId,
+            const std::string& originalCameraId, bool isNonSystemNdk,
             /*out*/sp<CLIENT>& device);
 
     // Lock guarding camera service state

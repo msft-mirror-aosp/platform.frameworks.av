@@ -23,6 +23,7 @@ namespace android::media::psh_utils {
 PowerStatsCollector::PowerStatsCollector() {
     addProvider(std::make_unique<PowerEntityResidencyDataProvider>());
     addProvider(std::make_unique<RailEnergyDataProvider>());
+    addProvider(std::make_unique<HealthStatsDataProvider>());
 }
 
 /* static */
