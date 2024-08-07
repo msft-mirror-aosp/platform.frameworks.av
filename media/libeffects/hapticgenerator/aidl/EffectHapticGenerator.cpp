@@ -70,26 +70,6 @@ ndk::ScopedAStatus HapticGeneratorImpl::getDescriptor(Descriptor* _aidl_return) 
     return ndk::ScopedAStatus::ok();
 }
 
-ndk::ScopedAStatus HapticGeneratorImpl::commandImpl(CommandId command) {
-    RETURN_IF(!mContext, EX_NULL_POINTER, "nullContext");
-    switch (command) {
-        case CommandId::START:
-            mContext->enable();
-            break;
-        case CommandId::STOP:
-            mContext->disable();
-            break;
-        case CommandId::RESET:
-            mContext->reset();
-            break;
-        default:
-            LOG(ERROR) << __func__ << " commandId " << toString(command) << " not supported";
-            return ndk::ScopedAStatus::fromExceptionCodeWithMessage(EX_ILLEGAL_ARGUMENT,
-                                                                    "commandIdNotSupported");
-    }
-    return ndk::ScopedAStatus::ok();
-}
-
 ndk::ScopedAStatus HapticGeneratorImpl::setParameterSpecific(const Parameter::Specific& specific) {
     RETURN_IF(Parameter::Specific::hapticGenerator != specific.getTag(), EX_ILLEGAL_ARGUMENT,
               "EffectNotSupported");

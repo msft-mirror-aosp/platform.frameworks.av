@@ -9,6 +9,7 @@ package {
 
 // libraries that are included whole_static for test apps
 ndk_libs = [
+    "android.hardware.health-V3-ndk",
     "android.hardware.power.stats-V1-ndk",
 ]
 
@@ -18,6 +19,8 @@ cc_library {
     local_include_dirs: ["include"],
     export_include_dirs: ["include"],
     srcs: [
+        "HealthStats.cpp",
+        "HealthStatsProvider.cpp",
         "PowerStats.cpp",
         "PowerStatsCollector.cpp",
         "PowerStatsProvider.cpp",
