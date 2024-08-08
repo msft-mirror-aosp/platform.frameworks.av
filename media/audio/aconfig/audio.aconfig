@@ -83,6 +83,14 @@ flag {
 }
 
 flag {
+    name: "ring_my_car"
+    namespace: "media_audio"
+    description:
+        "Incoming ringtones will not be muted based on ringer mode when connected to a car"
+    bug: "319515324"
+}
+
+flag {
     name: "ringer_mode_affects_alarm"
     namespace: "media_audio"
     description:

@@ -5204,8 +5204,8 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         } else {
             getIAudioFlingerStatistics().event(code, elapsedMs);
         }
-    }, mediautils::TimeCheck::kDefaultTimeoutDuration,
-    mediautils::TimeCheck::kDefaultSecondChanceDuration,
+    }, mediautils::TimeCheck::getDefaultTimeoutDuration(),
+    mediautils::TimeCheck::getDefaultSecondChanceDuration(),
     true /* crashOnTimeout */);
 
     return delegate();
