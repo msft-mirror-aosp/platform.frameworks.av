@@ -177,7 +177,9 @@ IEffect::Status HapticGeneratorContext::process(float* in, float* out, int sampl
             runProcessingChain(mInputBuffer.data(), mOutputBuffer.data(), mFrameCount);
     ::android::os::scaleHapticData(
             hapticOutBuffer, hapticSampleCount,
-            {static_cast<::android::os::HapticLevel>(mParams.mMaxVibratorScale)} /* scale */,
+            // TODO(b/356406686): add the new HapticScale fields to the AIDL interface.
+            ::android::os::HapticScale(
+                    static_cast<::android::os::HapticLevel>(mParams.mMaxVibratorScale)),
             mParams.mVibratorInfo.maxAmplitude /* limit */);
 
     // For haptic data, the haptic playback thread will copy the data from effect input
