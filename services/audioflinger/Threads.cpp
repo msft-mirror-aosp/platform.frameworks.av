@@ -5209,7 +5209,7 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
                                                     // audio to FastMixer
         fastTrack->mFormat = mFormat; // mPipeSink format for audio to FastMixer
         fastTrack->mHapticPlaybackEnabled = mHapticChannelMask != AUDIO_CHANNEL_NONE;
-        fastTrack->mHapticScale = {/*level=*/os::HapticLevel::NONE };
+        fastTrack->mHapticScale = os::HapticScale::none();
         fastTrack->mHapticMaxAmplitude = NAN;
         fastTrack->mGeneration++;
         state->mFastTracksGen++;
