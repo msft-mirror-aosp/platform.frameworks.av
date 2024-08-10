@@ -23,12 +23,17 @@ namespace android::media::psh_utils {
 
 class RailEnergyDataProvider : public PowerStatsProvider {
 public:
-    int fill(PowerStats* stat) const override;
+    status_t fill(PowerStats* stat) const override;
 };
 
 class PowerEntityResidencyDataProvider : public PowerStatsProvider {
 public:
-    int fill(PowerStats* stat) const override;
+    status_t fill(PowerStats* stat) const override;
+};
+
+class HealthStatsDataProvider : public PowerStatsProvider {
+public:
+    status_t fill(PowerStats* stat) const override;
 };
 
 } // namespace android::media::psh_utils

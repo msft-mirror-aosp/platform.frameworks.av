@@ -18,6 +18,7 @@
 
 #include "PowerStats.h"
 #include <memory>
+#include <utils/Errors.h> // status_t
 
 namespace android::media::psh_utils {
 
@@ -25,7 +26,7 @@ namespace android::media::psh_utils {
 class PowerStatsProvider {
 public:
     virtual ~PowerStatsProvider() = default;
-    virtual int fill(PowerStats* stat) const = 0;
+    virtual status_t fill(PowerStats* stat) const = 0;
 };
 
 class PowerStatsCollector {

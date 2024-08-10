@@ -177,14 +177,11 @@ sp<hardware::ICameraService> CameraManagerGlobal::getCameraServiceLocked() {
 
         sp<IServiceManager> sm = defaultServiceManager();
         sp<IBinder> binder;
-        do {
-            binder = sm->getService(toString16(kCameraServiceName));
-            if (binder != nullptr) {
-                break;
-            }
-            ALOGW("CameraService not published, waiting...");
-            usleep(kCameraServicePollDelay);
-        } while(true);
+        binder = sm->checkService(String16(kCameraServiceName));
+        if (binder == nullptr) {
+            ALOGE("%s: Could not get CameraService instance.", __FUNCTION__);
+            return nullptr;
+        }
         if (mDeathNotifier == nullptr) {
             mDeathNotifier = new DeathNotifier(this);
         }
