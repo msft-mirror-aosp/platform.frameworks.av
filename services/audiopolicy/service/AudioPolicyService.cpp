@@ -1415,8 +1415,8 @@ status_t AudioPolicyService::onTransact(
         } else {
             getIAudioPolicyServiceStatistics().event(code, elapsedMs);
         }
-    }, mediautils::TimeCheck::kDefaultTimeoutDuration,
-    mediautils::TimeCheck::kDefaultSecondChanceDuration,
+    }, mediautils::TimeCheck::getDefaultTimeoutDuration(),
+    mediautils::TimeCheck::getDefaultSecondChanceDuration(),
     true /* crashOnTimeout */);
 
     switch (code) {
