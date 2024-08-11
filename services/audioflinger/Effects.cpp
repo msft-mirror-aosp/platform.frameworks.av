@@ -39,6 +39,7 @@
 #include <mediautils/MethodStatistics.h>
 #include <mediautils/ServiceUtilities.h>
 #include <mediautils/TimeCheck.h>
+#include <system/audio_effects/audio_effects_utils.h>
 #include <system/audio_effects/effect_aec.h>
 #include <system/audio_effects/effect_downmix.h>
 #include <system/audio_effects/effect_dynamicsprocessing.h>
@@ -70,6 +71,7 @@
 namespace android {
 
 using aidl_utils::statusTFromBinderStatus;
+using android::effect::utils::EffectParamWriter;
 using audioflinger::EffectConfiguration;
 using binder::Status;
 
@@ -1585,16 +1587,20 @@ status_t EffectModule::setHapticScale_l(int id, os::HapticScale hapticScale) {
         return INVALID_OPERATION;
     }
 
-    std::vector<uint8_t> request(sizeof(effect_param_t) + 3 * sizeof(uint32_t) + sizeof(float));
-    effect_param_t *param = (effect_param_t*) request.data();
-    param->psize = sizeof(int32_t);
-    param->vsize = sizeof(int32_t) * 2 + sizeof(float);
-    *(int32_t*)param->data = HG_PARAM_HAPTIC_INTENSITY;
-    int32_t* hapticScalePtr = reinterpret_cast<int32_t*>(param->data + sizeof(int32_t));
-    hapticScalePtr[0] = id;
-    hapticScalePtr[1] = static_cast<int32_t>(hapticScale.getLevel());
-    float* adaptiveScaleFactorPtr = reinterpret_cast<float*>(param->data + 3 * sizeof(int32_t));
-    *adaptiveScaleFactorPtr = hapticScale.getAdaptiveScaleFactor();
+    size_t psize = sizeof(int32_t); // HG_PARAM_HAPTIC_INTENSITY
+    size_t vsize = sizeof(int32_t) + sizeof(os::HapticScale); // id + hapticScale
+    std::vector<uint8_t> request(sizeof(effect_param_t) + psize + vsize);
+    effect_param_t *effectParam = (effect_param_t*) request.data();
+    effectParam->psize = psize;
+    effectParam->vsize = vsize;
+
+    int32_t intensityParam = static_cast<int32_t>(HG_PARAM_HAPTIC_INTENSITY);
+    EffectParamWriter writer(*effectParam);
+    writer.writeToParameter(&intensityParam);
+    writer.writeToValue(&id);
+    writer.writeToValue(&hapticScale);
+    writer.finishValueWrite();
+
     std::vector<uint8_t> response;
     status_t status = command(EFFECT_CMD_SET_PARAM, request, sizeof(int32_t), &response);
     if (status == NO_ERROR) {
@@ -1613,17 +1619,21 @@ status_t EffectModule::setVibratorInfo_l(const media::AudioVibratorInfo& vibrato
         return INVALID_OPERATION;
     }
 
-    const size_t paramCount = 3;
-    std::vector<uint8_t> request(
-            sizeof(effect_param_t) + sizeof(int32_t) + paramCount * sizeof(float));
-    effect_param_t *param = (effect_param_t*) request.data();
-    param->psize = sizeof(int32_t);
-    param->vsize = paramCount * sizeof(float);
-    *(int32_t*)param->data = HG_PARAM_VIBRATOR_INFO;
-    float* vibratorInfoPtr = reinterpret_cast<float*>(param->data + sizeof(int32_t));
-    vibratorInfoPtr[0] = vibratorInfo.resonantFrequency;
-    vibratorInfoPtr[1] = vibratorInfo.qFactor;
-    vibratorInfoPtr[2] = vibratorInfo.maxAmplitude;
+    size_t psize = sizeof(int32_t); // HG_PARAM_VIBRATOR_INFO
+    size_t vsize = 3 * sizeof(float); // resonantFrequency + qFactor + maxAmplitude
+    std::vector<uint8_t> request(sizeof(effect_param_t) + psize + vsize);
+    effect_param_t *effectParam = (effect_param_t*) request.data();
+    effectParam->psize = psize;
+    effectParam->vsize = vsize;
+
+    int32_t infoParam = static_cast<int32_t>(HG_PARAM_VIBRATOR_INFO);
+    EffectParamWriter writer(*effectParam);
+    writer.writeToParameter(&infoParam);
+    writer.writeToValue(&vibratorInfo.resonantFrequency);
+    writer.writeToValue(&vibratorInfo.qFactor);
+    writer.writeToValue(&vibratorInfo.maxAmplitude);
+    writer.finishValueWrite();
+
     std::vector<uint8_t> response;
     status_t status = command(EFFECT_CMD_SET_PARAM, request, sizeof(int32_t), &response);
     if (status == NO_ERROR) {
