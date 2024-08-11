@@ -31,4 +31,9 @@ public:
     status_t fill(PowerStats* stat) const override;
 };
 
+class HealthStatsDataProvider : public PowerStatsProvider {
+public:
+    status_t fill(PowerStats* stat) const override;
+};
+
 } // namespace android::media::psh_utils

@@ -163,6 +163,7 @@ PowerStats::RailEnergy PowerStats::RailEnergy::operator-(const RailEnergy& other
 std::string PowerStats::toString() const {
     std::string result;
     result.append(metadata.toString()).append("\n");
+    result.append(health_stats.toString()).append("\n");
     for (const auto &residency: power_entity_state_residency) {
         result.append(residency.toString()).append("\n");
     }
@@ -182,6 +183,8 @@ std::string PowerStats::normalizedEnergy() const {
             .append(" duration_monotonic: ")
             .append(std::to_string(metadata.duration_monotonic_ms * 1e-3f))
             .append("\n");
+    result.append(health_stats.normalizedEnergy(metadata.duration_ms * 1e-3f)).append("\n");
+
     // energy_uws is converted to ave W using recip time in us.
     const float recipTime = 1e-3 / metadata.duration_ms;
     int64_t total_energy = 0;
@@ -221,6 +224,7 @@ std::tuple<float, float, float> PowerStats::energyFrom(const std::string& railMa
 
 PowerStats PowerStats::operator+=(const PowerStats& other) {
     metadata += other.metadata;
+    health_stats += other.health_stats;
     if (power_entity_state_residency.empty()) {
         power_entity_state_residency = other.power_entity_state_residency;
     } else {
@@ -240,6 +244,7 @@ PowerStats PowerStats::operator+=(const PowerStats& other) {
 
 PowerStats PowerStats::operator-=(const PowerStats& other) {
     metadata -= other.metadata;
+    health_stats -= other.health_stats;
     if (power_entity_state_residency.empty()) {
         power_entity_state_residency = other.power_entity_state_residency;
     } else {

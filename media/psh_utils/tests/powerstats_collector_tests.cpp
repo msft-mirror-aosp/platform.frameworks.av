@@ -140,3 +140,42 @@ TEST(powerstat_collector_tests, rail_energy) {
     EXPECT_EQ(kEnergyUws2 - kEnergyUws1,
             ps5.rail_energy[0].energy_uws);
 }
+
+TEST(powerstat_collector_tests, health_stats) {
+    PowerStats ps1, ps2;
+
+    constexpr double kBatteryChargeCounterUah1 = 21;
+    constexpr double kBatteryChargeCounterUah2 = 25;
+    ps1.health_stats.batteryChargeCounterUah = kBatteryChargeCounterUah1;
+    ps2.health_stats.batteryChargeCounterUah = kBatteryChargeCounterUah2;
+
+    constexpr double kBatteryFullChargeUah1 = 32;
+    constexpr double kBatteryFullChargeUah2 = 33;
+    ps1.health_stats.batteryFullChargeUah = kBatteryFullChargeUah1;
+    ps2.health_stats.batteryFullChargeUah = kBatteryFullChargeUah2;
+
+    constexpr double kBatteryVoltageMillivolts1 = 42;
+    constexpr double kBatteryVoltageMillivolts2 = 43;
+    ps1.health_stats.batteryVoltageMillivolts = kBatteryVoltageMillivolts1;
+    ps2.health_stats.batteryVoltageMillivolts = kBatteryVoltageMillivolts2;
+
+    PowerStats ps3 = ps1 + ps2;
+    PowerStats ps4 = ps2 + ps1;
+    EXPECT_EQ(ps3, ps4);
+    EXPECT_EQ(kBatteryChargeCounterUah1 + kBatteryChargeCounterUah2,
+              ps3.health_stats.batteryChargeCounterUah);
+
+    EXPECT_NO_FATAL_FAILURE(inRange(ps3.health_stats.batteryFullChargeUah,
+             kBatteryFullChargeUah1, kBatteryFullChargeUah2));
+    EXPECT_NO_FATAL_FAILURE(inRange(ps3.health_stats.batteryVoltageMillivolts,
+             kBatteryVoltageMillivolts1, kBatteryVoltageMillivolts2));
+
+    PowerStats ps5 = ps2 - ps1;
+    EXPECT_EQ(kBatteryChargeCounterUah2 - kBatteryChargeCounterUah1,
+              ps5.health_stats.batteryChargeCounterUah);
+
+    EXPECT_NO_FATAL_FAILURE(inRange(ps5.health_stats.batteryFullChargeUah,
+            kBatteryFullChargeUah1, kBatteryFullChargeUah2));
+    EXPECT_NO_FATAL_FAILURE(inRange(ps5.health_stats.batteryVoltageMillivolts,
+            kBatteryVoltageMillivolts1, kBatteryVoltageMillivolts2));
+}
