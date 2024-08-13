@@ -11,6 +11,10 @@ package {
 cc_defaults {
     name: "libaudiopolicyservice_dependencies",
 
+    include_dirs: [
+        "frameworks/av/services/audiopolicy", // include path outside of libaudiopolicyservice
+    ],
+
     shared_libs: [
         "android.media.audiopolicy-aconfig-cc",
         "audioclient-types-aidl-cpp",
@@ -33,6 +37,7 @@ cc_defaults {
         "libaudioutils",
         "libbinder",
         "libcutils",
+        "libeffectsconfig",
         "libhardware_legacy",
         "libheadtracking",
         "libheadtracking-binding",
@@ -49,11 +54,6 @@ cc_defaults {
         "libxml2",
         "packagemanager_aidl-cpp",
         "spatializer-aidl-cpp",
-    ],
-
-    static_libs: [
-        "libaudiopolicycomponents",
-        "libeffectsconfig",
     ],
 }
 
@@ -80,10 +80,6 @@ cc_library {
         "frameworks/av/services/audioflinger",
     ],
 
-    static_libs: [
-        "framework-permission-aidl-cpp",
-    ],
-
     header_libs: [
         "libaudiohal_headers",
         "libaudiopolicycommon",
@@ -92,20 +88,13 @@ cc_library {
         "libaudioutils_headers",
     ],
 
+    export_include_dirs: ["."],
+
     cflags: [
         "-Wall",
         "-Werror",
         "-Wthread-safety",
         "-fvisibility=hidden",
-    ],
-
-    export_shared_lib_headers: [
-        "framework-permission-aidl-cpp",
-        "libactivitymanager_aidl",
-        "libaudiousecasevalidation",
-        "libheadtracking",
-        "libheadtracking-binding",
-        "libsensorprivacy",
     ],
 }
 
