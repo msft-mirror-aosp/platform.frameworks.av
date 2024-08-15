@@ -24,6 +24,7 @@
 #include <aidl/android/hardware/audio/core/StreamDescriptor.h>
 #include <error/expected_utils.h>
 #include <media/AidlConversionCppNdk.h>
+#include <media/AidlConversionNdk.h>
 #include <media/AidlConversionNdkCpp.h>
 #include <media/AidlConversionUtil.h>
 #include <mediautils/TimeCheck.h>
@@ -60,6 +61,8 @@ using aidl::android::hardware::audio::common::getFrameSizeInBytes;
 using aidl::android::hardware::audio::common::isBitPositionFlagSet;
 using aidl::android::hardware::audio::common::kDumpFromAudioServerArgument;
 using aidl::android::hardware::audio::common::RecordTrackMetadata;
+using aidl::android::hardware::audio::common::PlaybackTrackMetadata;
+using aidl::android::hardware::audio::common::SourceMetadata;
 using aidl::android::hardware::audio::core::sounddose::ISoundDose;
 using aidl::android::hardware::audio::core::AudioPatch;
 using aidl::android::hardware::audio::core::AudioRoute;
@@ -427,7 +430,8 @@ status_t DeviceHalAidl::openOutputStream(
         audio_io_handle_t handle, audio_devices_t devices,
         audio_output_flags_t flags, struct audio_config* config,
         const char* address,
-        sp<StreamOutHalInterface>* outStream) {
+        sp<StreamOutHalInterface>* outStream,
+        const std::vector<playback_track_metadata_v7_t>& sourceMetadata) {
     ALOGD("%p %s::%s", this, getClassName().c_str(), __func__);
     TIME_CHECK();
     if (mModule == nullptr) return NO_INIT;
@@ -443,9 +447,12 @@ status_t DeviceHalAidl::openOutputStream(
             ::aidl::android::legacy2aidl_audio_device_AudioDevice(devices, address));
     int32_t aidlOutputFlags = VALUE_OR_RETURN_STATUS(
             ::aidl::android::legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
+    SourceMetadata aidlMetadata = VALUE_OR_RETURN_STATUS(
+            ::aidl::android::legacy2aidl_SourceMetadata(sourceMetadata));
     AudioIoFlags aidlFlags = AudioIoFlags::make<AudioIoFlags::Tag::output>(aidlOutputFlags);
     AudioPortConfig mixPortConfig;
     AudioPatch aidlPatch;
+
     Hal2AidlMapper::Cleanups cleanups(mMapperAccessor);
     {
         std::lock_guard l(mLock);
@@ -475,6 +482,7 @@ status_t DeviceHalAidl::openOutputStream(
     }
     args.bufferSizeFrames = aidlConfig.frameCount;
     args.eventCallback = eventCb;
+    args.sourceMetadata = aidlMetadata;
     ::aidl::android::hardware::audio::core::IModule::OpenOutputStreamReturn ret;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->openOutputStream(args, &ret)));
     StreamContextAidl context(ret.desc, isOffload);
