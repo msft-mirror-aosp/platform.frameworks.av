@@ -574,7 +574,7 @@ enum {
      * For privacy, the following usages can not be recorded: AAUDIO_VOICE_COMMUNICATION*,
      * AAUDIO_USAGE_NOTIFICATION*, AAUDIO_USAGE_ASSISTANCE* and {@link #AAUDIO_USAGE_ASSISTANT}.
      *
-     * On <a href="/reference/android/os/Build.VERSION_CODES#Q">Build.VERSION_CODES</a>,
+     * On <a href="/reference/android/os/Build.VERSION_CODES#Q">Q</a>,
      * this means only {@link #AAUDIO_USAGE_MEDIA} and {@link #AAUDIO_USAGE_GAME} may be captured.
      *
      * See <a href="/reference/android/media/AudioAttributes.html#ALLOW_CAPTURE_BY_ALL">
@@ -1115,6 +1115,17 @@ AAUDIO_API void AAudioStreamBuilder_setPerformanceMode(AAudioStreamBuilder* _Non
  *
  * The default, if you do not call this function, is {@link #AAUDIO_USAGE_MEDIA}.
  *
+ * If you set Usage then you will need to associate the volume keys with the resulting stream.
+ * Otherwise the volume keys may not work correctly.
+ * This is done in Java with the following code block.
+ *
+ * <pre><code>if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+ *     AudioAttributes attributes = new AudioAttributes.Builder().setUsage(usage)
+ *             .setContentType(contentType).build();
+ *     setVolumeControlStream(attributes.getVolumeControlStream());
+ * }
+ * </code></pre>
+ *
  * Available since API level 28.
  *
  * @param builder reference provided by AAudio_createStreamBuilder()
@@ -1131,6 +1142,17 @@ AAUDIO_API void AAudioStreamBuilder_setUsage(AAudioStreamBuilder* _Nonnull build
  * This could, for example, affect whether a stream is paused when a notification occurs.
  *
  * The default, if you do not call this function, is {@link #AAUDIO_CONTENT_TYPE_MUSIC}.
+ *
+ * If you set ContentType then you will need to associate the volume keys with the resulting stream.
+ * Otherwise the volume keys may not work correctly.
+ * This is done in Java with the following code block.
+ *
+ * <pre><code>if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+ *     AudioAttributes attributes = new AudioAttributes.Builder().setUsage(usage)
+ *             .setContentType(contentType).build();
+ *     setVolumeControlStream(attributes.getVolumeControlStream());
+ * }
+ * </code></pre>
  *
  * Available since API level 28.
  *

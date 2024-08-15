@@ -322,23 +322,6 @@ status_t AudioSystem::setStreamMute(audio_stream_type_t stream, bool mute) {
     return NO_ERROR;
 }
 
-status_t AudioSystem::getStreamVolume(audio_stream_type_t stream, float* volume,
-                                      audio_io_handle_t output) {
-    if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
-    const sp<IAudioFlinger> af = get_audio_flinger();
-    if (af == 0) return PERMISSION_DENIED;
-    *volume = af->streamVolume(stream, output);
-    return NO_ERROR;
-}
-
-status_t AudioSystem::getStreamMute(audio_stream_type_t stream, bool* mute) {
-    if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
-    const sp<IAudioFlinger> af = get_audio_flinger();
-    if (af == 0) return PERMISSION_DENIED;
-    *mute = af->streamMute(stream);
-    return NO_ERROR;
-}
-
 status_t AudioSystem::setMode(audio_mode_t mode) {
     if (uint32_t(mode) >= AUDIO_MODE_CNT) return BAD_VALUE;
     const sp<IAudioFlinger> af = get_audio_flinger();
@@ -1287,6 +1270,21 @@ void AudioSystem::releaseInput(audio_port_handle_t portId) {
 
     // Ignore status.
     (void) status;
+}
+
+status_t AudioSystem::setDeviceAbsoluteVolumeEnabled(audio_devices_t deviceType,
+                                                     const char *address,
+                                                     bool enabled,
+                                                     audio_stream_type_t streamToDriveAbs) {
+    const sp<IAudioPolicyService> aps = get_audio_policy_service();
+    if (aps == nullptr) return PERMISSION_DENIED;
+
+    AudioDevice deviceAidl = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_device_AudioDevice(deviceType, address));
+    AudioStreamType streamToDriveAbsAidl = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_stream_type_t_AudioStreamType(streamToDriveAbs));
+    return statusTFromBinderStatus(
+            aps->setDeviceAbsoluteVolumeEnabled(deviceAidl, enabled, streamToDriveAbsAidl));
 }
 
 status_t AudioSystem::initStreamVolume(audio_stream_type_t stream,

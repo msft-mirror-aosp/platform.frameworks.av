@@ -96,6 +96,7 @@ constexpr char kExternalYuvTextureFragmentShader[] = R"(#version 300 es
       fragColor = texture(uTexture, vTextureCoord);
     })";
 
+// Shader to render a RGBA texture into a YUV buffer.
 constexpr char kExternalRgbaTextureFragmentShader[] = R"(#version 300 es
     #extension GL_OES_EGL_image_external_essl3 : require
     #extension GL_EXT_YUV_target : require
@@ -229,13 +230,21 @@ EglTestPatternProgram::EglTestPatternProgram() {
                         kTextureCoords.size(), kTextureCoords.data());
 }
 
-bool EglTestPatternProgram::draw(int frameNumber) {
+EglTestPatternProgram::~EglTestPatternProgram() {
+  if (mPositionHandle != -1) {
+    glDisableVertexAttribArray(mPositionHandle);
+  }
+  if (mTextureCoordHandle != -1) {
+    glDisableVertexAttribArray(mTextureCoordHandle);
+  }
+}
+
+bool EglTestPatternProgram::draw(const std::chrono::nanoseconds timestamp) {
   // Load compiled shader.
   glUseProgram(mProgram);
   checkEglError("glUseProgram");
 
-  // Compute point in complex plane corresponding to fractal for this frame number.
-  float time = float(frameNumber) / 120.0f;
+  float time = float(timestamp.count() / 1e9) / 10;
   const std::complex<float> c(std::sin(time) * 0.78f, std::cos(time) * 0.78f);
 
   // Pass "C" constant value determining the Julia set to the shader.

@@ -30,7 +30,7 @@
                     <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
                              samplingRates="48000" channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
                 </mixPort>
-                <mixPort name="primary input" role="sink">
+                <mixPort name="primary input" role="sink"  maxActiveCount="1" maxOpenCount="1">
                     <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
                              samplingRates="48000"
                              channelMasks="AUDIO_CHANNEL_IN_STEREO"/>
@@ -99,7 +99,7 @@
                 <route type="mix" sink="primary input"
                        sources="Built-In Mic,Hdmi-In Mic,USB Device In"/>
                 <route type="mix" sink="voip_tx"
-                       sources="Built-In Mic"/>
+                       sources="Built-In Mic,USB Device In"/>
                 <route type="mix" sink="Hdmi"
                        sources="primary output"/>
                 <route type="mix" sink="BT SCO"

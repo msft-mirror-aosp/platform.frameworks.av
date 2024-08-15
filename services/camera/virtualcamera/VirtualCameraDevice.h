@@ -37,7 +37,7 @@ class VirtualCameraDevice
     : public ::aidl::android::hardware::camera::device::BnCameraDevice {
  public:
   explicit VirtualCameraDevice(
-      uint32_t cameraId,
+      const std::string& cameraId,
       const aidl::android::companion::virtualcamera::VirtualCameraConfiguration&
           configuration,
       int32_t deviceId);
@@ -92,10 +92,12 @@ class VirtualCameraDevice
   binder_status_t dump(int fd, const char** args, uint32_t numArgs) override;
 
   // Returns unique virtual camera name in form
-  // "device@{major}.{minor}/virtual/{numerical_id}"
+  // "device@{major}.{minor}/virtual/{camera_id}"
   std::string getCameraName() const;
 
-  uint32_t getCameraId() const { return mCameraId; }
+  const std::string& getCameraId() const {
+    return mCameraId;
+  }
 
   const std::vector<
       aidl::android::companion::virtualcamera::SupportedStreamConfiguration>&
@@ -103,6 +105,9 @@ class VirtualCameraDevice
 
   // Returns largest supported input resolution.
   Resolution getMaxInputResolution() const;
+
+  // Allocate and return next id for input stream (input surface).
+  int allocateInputStreamId();
 
   // Maximal number of RAW streams - virtual camera doesn't support RAW streams.
   static constexpr int32_t kMaxNumberOfRawStreams = 0;
@@ -138,7 +143,7 @@ class VirtualCameraDevice
  private:
   std::shared_ptr<VirtualCameraDevice> sharedFromThis();
 
-  const uint32_t mCameraId;
+  const std::string mCameraId;
   const std::shared_ptr<
       ::aidl::android::companion::virtualcamera::IVirtualCameraCallback>
       mVirtualCameraClientCallback;
@@ -148,6 +153,8 @@ class VirtualCameraDevice
   const std::vector<
       aidl::android::companion::virtualcamera::SupportedStreamConfiguration>
       mSupportedInputConfigurations;
+
+  std::atomic_int mNextInputStreamId;
 };
 
 }  // namespace virtualcamera

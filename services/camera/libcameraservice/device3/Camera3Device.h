@@ -132,12 +132,12 @@ class Camera3Device :
     // idle state
     status_t capture(CameraMetadata &request, int64_t *lastFrameNumber = NULL) override;
     status_t captureList(const List<const PhysicalCameraSettingsList> &requestsList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             int64_t *lastFrameNumber = NULL) override;
     status_t setStreamingRequest(const CameraMetadata &request,
             int64_t *lastFrameNumber = NULL) override;
     status_t setStreamingRequestList(const List<const PhysicalCameraSettingsList> &requestsList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             int64_t *lastFrameNumber = NULL) override;
     status_t clearStreamingRequest(int64_t *lastFrameNumber = NULL) override;
 
@@ -703,17 +703,17 @@ class Camera3Device :
 
     status_t convertMetadataListToRequestListLocked(
             const List<const PhysicalCameraSettingsList> &metadataList,
-            const std::list<const SurfaceMap> &surfaceMaps,
+            const std::list<SurfaceMap> &surfaceMaps,
             bool repeating, nsecs_t requestTimeNs,
             /*out*/
             RequestList *requestList);
 
     void convertToRequestList(List<const PhysicalCameraSettingsList>& requestsList,
-            std::list<const SurfaceMap>& surfaceMaps,
+            std::list<SurfaceMap>& surfaceMaps,
             const CameraMetadata& request);
 
     status_t submitRequestsHelper(const List<const PhysicalCameraSettingsList> &requestsList,
-                                  const std::list<const SurfaceMap> &surfaceMaps,
+                                  const std::list<SurfaceMap> &surfaceMaps,
                                   bool repeating,
                                   int64_t *lastFrameNumber = NULL);
 
@@ -736,12 +736,19 @@ class Camera3Device :
     virtual void applyMaxBatchSizeLocked(
             RequestList* requestList, const sp<camera3::Camera3OutputStreamInterface>& stream) = 0;
 
+    struct LatestRequestInfo {
+        CameraMetadata requestSettings;
+        std::unordered_map<std::string, CameraMetadata> physicalRequestSettings;
+        int32_t inputStreamId = -1;
+        std::set<int32_t> outputStreamIds;
+    };
+
     /**
      * Get the last request submitted to the hal by the request thread.
      *
      * Must be called with mLock held.
      */
-    virtual CameraMetadata getLatestRequestLocked();
+    virtual LatestRequestInfo getLatestRequestInfoLocked();
 
     virtual status_t injectionCameraInitialize(const std::string &injectCamId,
             sp<CameraProviderManager> manager) = 0;
@@ -992,7 +999,7 @@ class Camera3Device :
          * Get the latest request that was sent to the HAL
          * with process_capture_request.
          */
-        CameraMetadata getLatestRequest() const;
+        LatestRequestInfo getLatestRequestInfo() const;
 
         /**
          * Returns true if the stream is a target of any queued or repeating
@@ -1192,8 +1199,7 @@ class Camera3Device :
         // android.request.id for latest process_capture_request
         int32_t            mLatestRequestId;
         int32_t            mLatestFailedRequestId;
-        CameraMetadata     mLatestRequest;
-        std::unordered_map<std::string, CameraMetadata> mLatestPhysicalRequest;
+        LatestRequestInfo mLatestRequestInfo;
 
         typedef KeyedVector<uint32_t/*tag*/, RequestTrigger> TriggerMap;
         Mutex              mTriggerMutex;

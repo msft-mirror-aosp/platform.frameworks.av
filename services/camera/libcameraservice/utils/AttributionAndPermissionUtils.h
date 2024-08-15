@@ -41,6 +41,20 @@ class AttributionAndPermissionUtils {
         mCameraService = cameraService;
     }
 
+    static AttributionSourceState buildAttributionSource(int callingPid, int callingUid) {
+        AttributionSourceState attributionSource{};
+        attributionSource.pid = callingPid;
+        attributionSource.uid = callingUid;
+        return attributionSource;
+    }
+
+    static AttributionSourceState buildAttributionSource(int callingPid, int callingUid,
+            int32_t deviceId) {
+        AttributionSourceState attributionSource = buildAttributionSource(callingPid, callingUid);
+        attributionSource.deviceId = deviceId;
+        return attributionSource;
+    }
+
     // Utilities handling Binder calling identities (previously in CameraThreadState)
     virtual int getCallingUid();
     virtual int getCallingPid();
@@ -123,17 +137,13 @@ public:
             : mAttributionAndPermissionUtils(attributionAndPermissionUtils) { }
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid) {
-        AttributionSourceState attributionSource{};
-        attributionSource.pid = callingPid;
-        attributionSource.uid = callingUid;
-        return attributionSource;
+        return AttributionAndPermissionUtils::buildAttributionSource(callingPid, callingUid);
     }
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid,
             int32_t deviceId) {
-        AttributionSourceState attributionSource = buildAttributionSource(callingPid, callingUid);
-        attributionSource.deviceId = deviceId;
-        return attributionSource;
+        return AttributionAndPermissionUtils::buildAttributionSource(
+                callingPid, callingUid, deviceId);
     }
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid,

@@ -1204,6 +1204,35 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, PreferExactConfigForInput) {
                                                            "", "", AUDIO_FORMAT_DEFAULT));
 }
 
+TEST_F(AudioPolicyManagerTestWithConfigurationFile, CheckInputsForDeviceClosesStreams) {
+    mClient->addSupportedFormat(AUDIO_FORMAT_PCM_16_BIT);
+    mClient->addSupportedFormat(AUDIO_FORMAT_PCM_24_BIT_PACKED);
+    mClient->addSupportedChannelMask(AUDIO_CHANNEL_IN_MONO);
+    mClient->addSupportedChannelMask(AUDIO_CHANNEL_IN_STEREO);
+    // Since 'checkInputsForDevice' is called as part of the 'setDeviceConnectionState',
+    // call it directly here, as we need to ensure that it does not keep all intermediate
+    // streams opened, as it may cause a rejection from the HAL based on the cap.
+    const size_t streamCountBefore = mClient->getOpenedInputsCount();
+    sp<DeviceDescriptor> device = mManager->getHwModules().getDeviceDescriptor(
+            AUDIO_DEVICE_IN_USB_DEVICE, "", "", AUDIO_FORMAT_DEFAULT, true /*allowToCreate*/);
+    ASSERT_NE(nullptr, device.get());
+    EXPECT_EQ(NO_ERROR,
+            mManager->checkInputsForDevice(device, AUDIO_POLICY_DEVICE_STATE_AVAILABLE));
+    EXPECT_EQ(streamCountBefore, mClient->getOpenedInputsCount());
+}
+
+TEST_F(AudioPolicyManagerTestWithConfigurationFile, SetDeviceConnectionStateClosesStreams) {
+    mClient->addSupportedFormat(AUDIO_FORMAT_PCM_16_BIT);
+    mClient->addSupportedFormat(AUDIO_FORMAT_PCM_24_BIT_PACKED);
+    mClient->addSupportedChannelMask(AUDIO_CHANNEL_IN_MONO);
+    mClient->addSupportedChannelMask(AUDIO_CHANNEL_IN_STEREO);
+    const size_t streamCountBefore = mClient->getOpenedInputsCount();
+    EXPECT_EQ(NO_ERROR, mManager->setDeviceConnectionState(AUDIO_DEVICE_IN_USB_DEVICE,
+                                                           AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+                                                           "", "", AUDIO_FORMAT_DEFAULT));
+    EXPECT_EQ(streamCountBefore, mClient->getOpenedInputsCount());
+}
+
 class AudioPolicyManagerTestDynamicPolicy : public AudioPolicyManagerTestWithConfigurationFile {
 protected:
     void TearDown() override;
@@ -3801,3 +3830,92 @@ INSTANTIATE_TEST_CASE_P(
         testing::Values(AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
                         AUDIO_USAGE_ALARM)
 );
+
+class AudioPolicyManagerInputPreemptionTest : public AudioPolicyManagerTestWithConfigurationFile {
+};
+
+TEST_F_WITH_FLAGS(
+        AudioPolicyManagerInputPreemptionTest,
+        SameSessionReusesInput,
+        REQUIRES_FLAGS_ENABLED(
+                ACONFIG_FLAG(com::android::media::audioserver, fix_input_sharing_logic))
+) {
+    mClient->resetInputApiCallsCounters();
+
+    audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
+    attr.source = AUDIO_SOURCE_MIC;
+    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t input1 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input1, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                            AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                            48000));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+
+    audio_io_handle_t input2 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input2, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                        AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                        48000));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+    EXPECT_EQ(0, mClient->getCloseInputCallsCount());
+    EXPECT_EQ(input1, input2);
+}
+
+TEST_F_WITH_FLAGS(
+        AudioPolicyManagerInputPreemptionTest,
+        LesserPriorityReusesInput,
+        REQUIRES_FLAGS_ENABLED(
+                ACONFIG_FLAG(com::android::media::audioserver, fix_input_sharing_logic))
+) {
+    mClient->resetInputApiCallsCounters();
+
+    audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
+    attr.source = AUDIO_SOURCE_MIC;
+    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t input1 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input1, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                            AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                            48000));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+
+    audio_io_handle_t input2 = AUDIO_PORT_HANDLE_NONE;
+    attr.source = AUDIO_SOURCE_VOICE_RECOGNITION;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input2, OTHER_SESSION_ID, 1, &selectedDeviceId,
+                                        AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                        48000));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+    EXPECT_EQ(0, mClient->getCloseInputCallsCount());
+    EXPECT_EQ(input1, input2);
+}
+
+TEST_F_WITH_FLAGS(
+        AudioPolicyManagerInputPreemptionTest,
+        HigherPriorityPreemptsInput,
+        REQUIRES_FLAGS_ENABLED(
+                ACONFIG_FLAG(com::android::media::audioserver, fix_input_sharing_logic))
+) {
+    mClient->resetInputApiCallsCounters();
+
+    audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
+    attr.source = AUDIO_SOURCE_MIC;
+    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t input1 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input1, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                            AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                            48000));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+
+    audio_io_handle_t input2 = AUDIO_PORT_HANDLE_NONE;
+    attr.source = AUDIO_SOURCE_CAMCORDER;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input2, OTHER_SESSION_ID, 1, &selectedDeviceId,
+                                        AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                        48000));
+
+    EXPECT_EQ(2, mClient->getOpenInputCallsCount());
+    EXPECT_EQ(1, mClient->getCloseInputCallsCount());
+    EXPECT_NE(input1, input2);
+}

@@ -150,10 +150,15 @@ status_t CameraSource::isCameraAvailable(
     int32_t cameraId, const std::string& clientName, uid_t clientUid, pid_t clientPid) {
 
     if (camera == 0) {
-        mCamera = Camera::connect(cameraId, clientName, clientUid, clientPid,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+        AttributionSourceState clientAttribution;
+        clientAttribution.pid = clientPid;
+        clientAttribution.uid = clientUid;
+        clientAttribution.deviceId = kDefaultDeviceId;
+        clientAttribution.packageName = clientName;
+
+        mCamera = Camera::connect(cameraId, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                /*forceSlowJpegMode*/false);
+                /*forceSlowJpegMode*/false, clientAttribution);
         if (mCamera == 0) return -EBUSY;
         mCameraFlags &= ~FLAGS_HOT_CAMERA;
     } else {

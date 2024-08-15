@@ -70,6 +70,24 @@ public:
             return BAD_VALUE;
         }
         *input = mNextIoHandle++;
+        mOpenedInputs.insert(*input);
+        ALOGD("%s: opened input %d", __func__, *input);
+        mOpenInputCallsCount++;
+        return NO_ERROR;
+    }
+
+    status_t closeInput(audio_io_handle_t input) override {
+        if (mOpenedInputs.erase(input) != 1) {
+            if (input >= mNextIoHandle) {
+                ALOGE("%s: I/O handle %d has not been allocated yet (next is %d)",
+                      __func__, input, mNextIoHandle);
+            } else {
+                ALOGE("%s: Attempt to close input %d twice", __func__, input);
+            }
+            return BAD_VALUE;
+        }
+        ALOGD("%s: closed input %d", __func__, input);
+        mCloseInputCallsCount++;
         return NO_ERROR;
     }
 
@@ -123,6 +141,8 @@ public:
         auto it = --mActivePatches.end();
         return &it->second;
     };
+
+    size_t getOpenedInputsCount() const { return mOpenedInputs.size(); }
 
     audio_module_handle_t peekNextModuleHandle() const { return mNextModuleHandle; }
 
@@ -242,6 +262,18 @@ public:
         auto it = mTracksInternalMute.find(portId);
         return it == mTracksInternalMute.end() ? false : it->second;
     }
+    void resetInputApiCallsCounters() {
+        mOpenInputCallsCount = 0;
+        mCloseInputCallsCount = 0;
+    }
+
+    size_t getCloseInputCallsCount() const {
+        return mCloseInputCallsCount;
+    }
+
+    size_t getOpenInputCallsCount() const {
+        return mOpenInputCallsCount;
+    }
 
 private:
     audio_module_handle_t mNextModuleHandle = AUDIO_MODULE_HANDLE_NONE + 1;
@@ -256,6 +288,9 @@ private:
     std::set<audio_format_t> mSupportedFormats;
     std::set<audio_channel_mask_t> mSupportedChannelMasks;
     std::map<audio_port_handle_t, bool> mTracksInternalMute;
+    std::set<audio_io_handle_t> mOpenedInputs;
+    size_t mOpenInputCallsCount = 0;
+    size_t mCloseInputCallsCount = 0;
 };
 
 } // namespace android

@@ -124,15 +124,12 @@ public:
     static status_t setMasterMute(bool mute);
     static status_t getMasterMute(bool* mute);
 
-    // set/get stream volume on specified output
+    // set stream volume on specified output
     static status_t setStreamVolume(audio_stream_type_t stream, float value,
-                                    audio_io_handle_t output);
-    static status_t getStreamVolume(audio_stream_type_t stream, float* volume,
                                     audio_io_handle_t output);
 
     // mute/unmute stream
     static status_t setStreamMute(audio_stream_type_t stream, bool mute);
-    static status_t getStreamMute(audio_stream_type_t stream, bool* mute);
 
     // set audio mode in audio hardware
     static status_t setMode(audio_mode_t mode);
@@ -374,9 +371,13 @@ public:
     static status_t startInput(audio_port_handle_t portId);
     static status_t stopInput(audio_port_handle_t portId);
     static void releaseInput(audio_port_handle_t portId);
+    static status_t setDeviceAbsoluteVolumeEnabled(audio_devices_t deviceType,
+                                                   const char *address,
+                                                   bool enabled,
+                                                   audio_stream_type_t streamToDriveAbs);
     static status_t initStreamVolume(audio_stream_type_t stream,
-                                      int indexMin,
-                                      int indexMax);
+                                     int indexMin,
+                                     int indexMax);
     static status_t setStreamVolumeIndex(audio_stream_type_t stream,
                                          int index,
                                          audio_devices_t device);

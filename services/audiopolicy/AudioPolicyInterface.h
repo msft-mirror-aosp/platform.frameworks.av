@@ -180,10 +180,16 @@ public:
     // volume control functions
     //
 
+    // notifies the audio policy manager that the absolute volume mode is enabled/disabled on
+    // the passed device. Also specifies the stream that is controlling the absolute volume.
+    virtual status_t setDeviceAbsoluteVolumeEnabled(audio_devices_t device,
+                                                    const char *address,
+                                                    bool enabled,
+                                                    audio_stream_type_t streamToDriveAbs) = 0;
     // initialises stream volume conversion parameters by specifying volume index range.
     virtual void initStreamVolume(audio_stream_type_t stream,
-                                      int indexMin,
-                                      int indexMax) = 0;
+                                  int indexMin,
+                                  int indexMax) = 0;
 
     // sets the new stream volume at a level corresponding to the supplied index for the
     // supplied device. By convention, specifying AUDIO_DEVICE_OUT_DEFAULT_FOR_VOLUME means
@@ -288,8 +294,7 @@ public:
     virtual status_t startAudioSource(const struct audio_port_config *source,
                                       const audio_attributes_t *attributes,
                                       audio_port_handle_t *portId,
-                                      uid_t uid,
-                                      bool internal = false) = 0;
+                                      uid_t uid) = 0;
     virtual status_t stopAudioSource(audio_port_handle_t portId) = 0;
 
     virtual status_t setMasterMono(bool mono) = 0;

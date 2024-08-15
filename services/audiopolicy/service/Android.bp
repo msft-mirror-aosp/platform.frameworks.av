@@ -11,10 +11,16 @@ package {
 cc_defaults {
     name: "libaudiopolicyservice_dependencies",
 
+    include_dirs: [
+        "frameworks/av/services/audiopolicy", // include path outside of libaudiopolicyservice
+    ],
+
     shared_libs: [
         "android.media.audiopolicy-aconfig-cc",
+        "audio-permission-aidl-cpp",
         "audioclient-types-aidl-cpp",
         "audioflinger-aidl-cpp",
+        "audiopermissioncontroller",
         "audiopolicy-aidl-cpp",
         "audiopolicy-types-aidl-cpp",
         "capture_state_listener-aidl-cpp",
@@ -33,6 +39,7 @@ cc_defaults {
         "libaudioutils",
         "libbinder",
         "libcutils",
+        "libeffectsconfig",
         "libhardware_legacy",
         "libheadtracking",
         "libheadtracking-binding",
@@ -49,11 +56,6 @@ cc_defaults {
         "libxml2",
         "packagemanager_aidl-cpp",
         "spatializer-aidl-cpp",
-    ],
-
-    static_libs: [
-        "libaudiopolicycomponents",
-        "libeffectsconfig",
     ],
 }
 
@@ -80,11 +82,8 @@ cc_library {
         "frameworks/av/services/audioflinger",
     ],
 
-    static_libs: [
-        "framework-permission-aidl-cpp",
-    ],
-
     header_libs: [
+        "audiopolicyservicelocal_headers",
         "libaudiohal_headers",
         "libaudiopolicycommon",
         "libaudiopolicyengine_interface_headers",
@@ -92,25 +91,29 @@ cc_library {
         "libaudioutils_headers",
     ],
 
+    export_include_dirs: ["."],
+
     cflags: [
         "-Wall",
         "-Werror",
         "-Wthread-safety",
         "-fvisibility=hidden",
     ],
-
-    export_shared_lib_headers: [
-        "framework-permission-aidl-cpp",
-        "libactivitymanager_aidl",
-        "libaudiousecasevalidation",
-        "libheadtracking",
-        "libheadtracking-binding",
-        "libsensorprivacy",
-    ],
 }
 
 cc_library_headers {
     name: "libaudiopolicyservice_headers",
     host_supported: true,
-    export_include_dirs: ["."],
+    export_include_dirs: [
+        ".",
+        "include",
+    ],
+}
+
+cc_library_headers {
+    name: "audiopolicyservicelocal_headers",
+    host_supported: true,
+    export_include_dirs: ["include"],
+    header_libs: ["audiopermissioncontroller_headers"],
+    export_header_lib_headers: ["audiopermissioncontroller_headers"],
 }
