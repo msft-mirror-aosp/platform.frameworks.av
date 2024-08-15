@@ -2605,18 +2605,31 @@ void CCodec::signalSetParameters(const sp<AMessage> &msg) {
             c2_status_t status = GetCodec2BlockPool(C2BlockPool::BASIC_LINEAR, nullptr, &pool);
 
             if (status == C2_OK) {
+                int width, height;
+                config->mInputFormat->findInt32("width", &width);
+                config->mInputFormat->findInt32("height", &height);
+                // The length of the qp-map corresponds to the number of 16x16 blocks in one frame
+                int expectedMapSize = ((width + 15) / 16) * ((height + 15) / 16);
                 size_t mapSize = qpOffsetMap->size();
-                std::shared_ptr<C2LinearBlock> block;
-                status = pool->fetchLinearBlock(mapSize,
-                        C2MemoryUsage{C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE}, &block);
-                if (status == C2_OK && !block->map().get().error()) {
-                    C2WriteView wView = block->map().get();
-                    uint8_t* outData = wView.data();
-                    memcpy(outData, qpOffsetMap->data(), mapSize);
-                    C2InfoBuffer info = C2InfoBuffer::CreateLinearBuffer(
-                            kParamIndexQpOffsetMapBuffer,
-                            block->share(0, mapSize, C2Fence()));
-                    mChannel->setInfoBuffer(std::make_shared<C2InfoBuffer>(info));
+                if (mapSize >= expectedMapSize) {
+                    std::shared_ptr<C2LinearBlock> block;
+                    status = pool->fetchLinearBlock(
+                            expectedMapSize,
+                            C2MemoryUsage{C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE},
+                            &block);
+                    if (status == C2_OK && !block->map().get().error()) {
+                        C2WriteView wView = block->map().get();
+                        uint8_t* outData = wView.data();
+                        memcpy(outData, qpOffsetMap->data(), expectedMapSize);
+                        C2InfoBuffer info = C2InfoBuffer::CreateLinearBuffer(
+                                kParamIndexQpOffsetMapBuffer,
+                                block->share(0, expectedMapSize, C2Fence()));
+                        mChannel->setInfoBuffer(std::make_shared<C2InfoBuffer>(info));
+                    }
+                } else {
+                    ALOGE("Ignoring param key %s as buffer size %zu is less than expected "
+                          "buffer size %d",
+                          PARAMETER_KEY_QP_OFFSET_MAP, mapSize, expectedMapSize);
                 }
             }
             params->removeEntryByName(PARAMETER_KEY_QP_OFFSET_MAP);
@@ -2633,6 +2646,15 @@ void CCodec::signalSetParameters(const sp<AMessage> &msg) {
     if (config->mInputSurface == nullptr
             && (property_get_bool("debug.stagefright.ccodec_delayed_params", false)
                     || comp->getName().find("c2.android.") == 0)) {
+        std::vector<std::unique_ptr<C2Param>> localConfigUpdate;
+        for (const std::unique_ptr<C2Param> &param : configUpdate) {
+            if (param && param->coreIndex().coreIndex() == C2StreamSurfaceScalingInfo::CORE_INDEX) {
+                localConfigUpdate.push_back(C2Param::Copy(*param));
+            }
+        }
+        if (!localConfigUpdate.empty()) {
+            (void)config->setParameters(comp, localConfigUpdate, C2_MAY_BLOCK);
+        }
         mChannel->setParameters(configUpdate);
     } else {
         sp<AMessage> outputFormat = config->mOutputFormat;

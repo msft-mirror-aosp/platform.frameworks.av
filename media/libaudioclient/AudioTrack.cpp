@@ -319,13 +319,6 @@ AudioTrack::AudioTrack(
         const audio_attributes_t* pAttributes,
         bool doNotReconnect,
         float maxRequiredSpeed)
-    : mStatus(NO_INIT),
-      mState(STATE_STOPPED),
-      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT),
-      mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
 
@@ -1173,6 +1166,13 @@ status_t AudioTrack::setSampleRate(uint32_t rate)
 
     mSampleRate = rate;
     mProxy->setSampleRate(effectiveSampleRate);
+
+    mediametrics::LogItem(mMetricsId)
+            .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_SETSAMPLERATE)
+            .set(AMEDIAMETRICS_PROP_PREFIX_EFFECTIVE AMEDIAMETRICS_PROP_SAMPLERATE,
+                    static_cast<int32_t>(effectiveSampleRate))
+            .set(AMEDIAMETRICS_PROP_SAMPLERATE, static_cast<int32_t>(rate))
+            .record();
 
     return NO_ERROR;
 }
@@ -2401,12 +2401,14 @@ nsecs_t AudioTrack::processAudioBuffer()
     int32_t flags = android_atomic_and(
         ~(CBLK_UNDERRUN | CBLK_LOOP_CYCLE | CBLK_LOOP_FINAL | CBLK_BUFFER_END), &mCblk->mFlags);
 
+    const bool isOffloaded = isOffloaded_l();
+    const bool isOffloadedOrDirect = isOffloadedOrDirect_l();
     // Check for track invalidation
     if (flags & CBLK_INVALID) {
         // for offloaded tracks restoreTrack_l() will just update the sequence and clear
         // AudioSystem cache. We should not exit here but after calling the callback so
         // that the upper layers can recreate the track
-        if (!isOffloadedOrDirect_l() || (mSequence == mObservedSequence)) {
+        if (!isOffloadedOrDirect || (mSequence == mObservedSequence)) {
             status_t status __unused = restoreTrack_l("processAudioBuffer");
             // FIXME unused status
             // after restoration, continue below to make sure that the loop and buffer events
@@ -2576,7 +2578,7 @@ nsecs_t AudioTrack::processAudioBuffer()
         mObservedSequence = sequence;
         callback->onNewIAudioTrack();
         // for offloaded tracks, just wait for the upper layers to recreate the track
-        if (isOffloadedOrDirect()) {
+        if (isOffloadedOrDirect) {
             return NS_INACTIVE;
         }
     }
@@ -2664,7 +2666,7 @@ nsecs_t AudioTrack::processAudioBuffer()
                 __func__, mPortId, mRemainingFrames, avail, audioBuffer.frameCount, nonContig, err);
         if (err != NO_ERROR) {
             if (err == TIMED_OUT || err == WOULD_BLOCK || err == -EINTR ||
-                    (isOffloaded() && (err == DEAD_OBJECT))) {
+                    (isOffloaded && (err == DEAD_OBJECT))) {
                 // FIXME bug 25195759
                 return 1000000;
             }
@@ -2750,7 +2752,7 @@ nsecs_t AudioTrack::processAudioBuffer()
             // buffer size and skip the loop entirely.
 
             nsecs_t myns;
-            if (audio_has_proportional_frames(mFormat)) {
+            if (!isOffloaded && audio_has_proportional_frames(mFormat)) {
                 // time to wait based on buffer occupancy
                 const nsecs_t datans = mRemainingFrames <= avail ? 0 :
                         framesToNanoseconds(mRemainingFrames - avail, sampleRate, speed);
@@ -3035,6 +3037,7 @@ VolumeShaper::Status AudioTrack::applyVolumeShaper(
         const sp<VolumeShaper::Configuration>& configuration,
         const sp<VolumeShaper::Operation>& operation)
 {
+    const int64_t beginNs = systemTime();
     AutoMutex lock(mLock);
     mVolumeHandler->setIdIfNecessary(configuration);
     media::VolumeShaperConfiguration config;
@@ -3042,6 +3045,18 @@ VolumeShaper::Status AudioTrack::applyVolumeShaper(
     media::VolumeShaperOperation op;
     operation->writeToParcelable(&op);
     VolumeShaper::Status status;
+
+    mediametrics::Defer defer([&] {
+        mediametrics::LogItem(mMetricsId)
+                .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_APPLYVOLUMESHAPER)
+                .set(AMEDIAMETRICS_PROP_EXECUTIONTIMENS, (int64_t)(systemTime() - beginNs))
+                .set(AMEDIAMETRICS_PROP_STATE, stateToString(mState))
+                .set(AMEDIAMETRICS_PROP_STATUS, (int32_t)status)
+                .set(AMEDIAMETRICS_PROP_TOSTRING, configuration->toString()
+                                 .append(" ")
+                                 .append(operation->toString()))
+                .record(); });
+
     mAudioTrack->applyVolumeShaper(config, op, &status);
 
     if (status == DEAD_OBJECT) {

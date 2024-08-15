@@ -65,9 +65,9 @@ class HapticGeneratorContext final : public EffectContext {
   public:
     HapticGeneratorContext(int statusDepth, const Parameter::Common& common);
     ~HapticGeneratorContext();
-    RetCode enable();
-    RetCode disable();
-    void reset();
+    RetCode enable() override;
+    RetCode disable() override;
+    RetCode reset() override;
 
     RetCode setHgHapticScales(const std::vector<HapticGenerator::HapticScale>& hapticScales);
     std::vector<HapticGenerator::HapticScale> getHgHapticScales() const;
