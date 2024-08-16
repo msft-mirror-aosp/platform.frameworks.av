@@ -68,7 +68,7 @@ HeicCompositeStream::HeicCompositeStream(sp<CameraDeviceBase> device,
         mMainImageStreamId(-1),
         mMainImageSurfaceId(-1),
         mYuvBufferAcquired(false),
-        mProducerListener(new ProducerListener()),
+        mStreamSurfaceListener(new StreamSurfaceListener()),
         mDequeuedOutputBufferCnt(0),
         mCodecOutputCounter(0),
         mQuality(-1),
@@ -513,7 +513,7 @@ status_t HeicCompositeStream::configureStream() {
         return NO_INIT;
     }
 
-    auto res = mOutputSurface->connect(NATIVE_WINDOW_API_CAMERA, mProducerListener);
+    auto res = mOutputSurface->connect(NATIVE_WINDOW_API_CAMERA, mStreamSurfaceListener);
     if (res != OK) {
         ALOGE("%s: Unable to connect to native window for stream %d",
                 __FUNCTION__, mMainImageStreamId);

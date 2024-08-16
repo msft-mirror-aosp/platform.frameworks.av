@@ -947,17 +947,17 @@ private:
     void removeStates(const std::string& id);
 
     // Check if we can connect, before we acquire the service lock.
-    // The returned originalClientPid is the PID of the original process that wants to connect to
-    // camera.
-    // The returned clientPid is the PID of the client that directly connects to camera.
-    // originalClientPid and clientPid are usually the same except when the application uses
-    // mediaserver to connect to camera (using MediaRecorder to connect to camera). In that case,
-    // clientPid is the PID of mediaserver and originalClientPid is the PID of the application.
+    // If clientPid/clientUid are USE_CALLING_PID/USE_CALLING_UID, they will be overwritten with
+    // the calling pid/uid.
     binder::Status validateConnectLocked(const std::string& cameraId, const std::string& clientName,
-            /*inout*/int& clientUid, /*inout*/int& clientPid, /*out*/int& originalClientPid) const;
+            /*inout*/int& clientUid, /*inout*/int& clientPid) const;
     binder::Status validateClientPermissionsLocked(const std::string& cameraId,
-            const std::string& clientName, /*inout*/int& clientUid, /*inout*/int& clientPid,
-            /*out*/int& originalClientPid) const;
+            const std::string& clientName, /*inout*/int& clientUid, /*inout*/int& clientPid) const;
+
+    // If clientPackageNameMaybe is empty, attempts to resolve the package name.
+    std::string resolvePackageName(int clientUid, const std::string& clientPackageNameMaybe) const;
+    void logConnectionAttempt(int clientPid, const std::string& clientPackageName,
+        const std::string& cameraId, apiLevel effectiveApiLevel) const;
 
     bool isCameraPrivacyEnabled(const String16& packageName,const std::string& cameraId,
            int clientPid, int ClientUid);
@@ -1002,16 +1002,16 @@ private:
     // as for legacy apps we will toggle the app op for all packages in the UID.
     // The caveat is that the operation may be attributed to the wrong package and
     // stats based on app ops may be slightly off.
-    std::string getPackageNameFromUid(int clientUid);
+    std::string getPackageNameFromUid(int clientUid) const;
 
     // Single implementation shared between the various connect calls
     template<class CALLBACK, class CLIENT>
     binder::Status connectHelper(const sp<CALLBACK>& cameraCb, const std::string& cameraId,
-            int api1CameraId, const std::string& clientPackageNameMaybe, bool systemNativeClient,
+            int api1CameraId, const std::string& clientPackageName, bool systemNativeClient,
             const std::optional<std::string>& clientFeatureId, int clientUid, int clientPid,
             apiLevel effectiveApiLevel, bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
             int rotationOverride, bool forceSlowJpegMode,
-            const std::string& originalCameraId,
+            const std::string& originalCameraId, bool isNonSystemNdk,
             /*out*/sp<CLIENT>& device);
 
     // Lock guarding camera service state

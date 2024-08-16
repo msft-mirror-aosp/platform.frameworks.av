@@ -141,9 +141,15 @@ cc_defaults {
 cc_defaults {
     name: "libaudioflinger_dependencies",
 
+    header_libs: [
+        "libaudiohal_headers", // required for AudioFlinger
+    ],
+
     shared_libs: [
+        "audio-permission-aidl-cpp",
         "audioclient-types-aidl-cpp",
         "audioflinger-aidl-cpp",
+        "audiopermissioncontroller",
         "av-types-aidl-cpp",
         "com.android.media.audio-aconfig-cc",
         "effect-aidl-cpp",
@@ -177,11 +183,6 @@ cc_defaults {
         "libvibrator",
         "packagemanager_aidl-cpp",
     ],
-
-    static_libs: [
-        "libaudiospdif",
-        "libmedialogservice",
-    ],
 }
 
 cc_library {
@@ -213,22 +214,20 @@ cc_library {
     ],
 
     static_libs: [
-        "audiopermissioncontroller",
+        "libaudiospdif",
         "libcpustats",
-        "libpermission",
+        "libmedialogservice",
     ],
 
     header_libs: [
-        "audiopermissioncontroller_headers",
         "audiopolicyservicelocal_headers",
         "libaaudio_headers",
-        "libaudioclient_headers",
-        "libaudiohal_headers",
-        "libaudioutils_headers",
         "libmedia_headers",
     ],
 
     export_header_lib_headers: ["audiopolicyservicelocal_headers"],
+
+    export_include_dirs: ["."],
 
     export_shared_lib_headers: [
         "libpermission",

@@ -2186,8 +2186,7 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
     // matching criteria values in priority order for best matching output so far
     std::vector<uint32_t> bestMatchCriteria(8, 0);
 
-    const bool hasOrphanHaptic =
-            mEffects.hasOrphanEffectsForSessionAndType(sessionId, FX_IID_HAPTICGENERATOR);
+    const bool hasOrphanHaptic = mEffects.hasOrphansForSession(sessionId, FX_IID_HAPTICGENERATOR);
     const uint32_t channelCount = audio_channel_count_from_out_mask(channelMask);
     const uint32_t hapticChannelCount = audio_channel_count_from_out_mask(
         channelMask & AUDIO_CHANNEL_HAPTIC_ALL);
@@ -3508,6 +3507,11 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
                                                             bool enabled,
                                                             audio_stream_type_t streamToDriveAbs)
 {
+    if (!enabled) {
+        mAbsoluteVolumeDrivingStreams.erase(deviceType);
+        return NO_ERROR;
+    }
+
     audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
     if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
         ALOGW("%s: no attributes for stream %s, bailing out", __func__,
@@ -3515,12 +3519,7 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
         return BAD_VALUE;
     }
 
-    if (enabled) {
-        mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
-    } else {
-        mAbsoluteVolumeDrivingStreams.erase(deviceType);
-    }
-
+    mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
     return NO_ERROR;
 }
 
@@ -6410,7 +6409,7 @@ bool AudioPolicyManager::checkHapticCompatibilityOnSpatializerOutput(
         // means haptic use cases (either the client channelmask includes haptic bits, or created a
         // HapticGenerator effect for this session) are not supported.
         return clientHapticChannel == 0 &&
-               !mEffects.hasOrphanEffectsForSessionAndType(sessionId, FX_IID_HAPTICGENERATOR);
+               !mEffects.hasOrphansForSession(sessionId, FX_IID_HAPTICGENERATOR);
     }
 }
 
@@ -8474,11 +8473,19 @@ bool AudioPolicyManager::isVolumeConsistentForCalls(VolumeSource volumeSource,
                                                    bool& isBtScoVolSrc,
                                                    const char* caller) {
     const VolumeSource callVolSrc = toVolumeSource(AUDIO_STREAM_VOICE_CALL, false);
-    const VolumeSource btScoVolSrc = toVolumeSource(AUDIO_STREAM_BLUETOOTH_SCO, false);
+    isVoiceVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource);
+
     const bool isScoRequested = isScoRequestedForComm();
     const bool isHAUsed = isHearingAidUsedForComm();
 
-    isVoiceVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource);
+    if (com_android_media_audio_replace_stream_bt_sco()) {
+        ALOGV("%s stream bt sco is replaced, no volume consistency check for calls", __func__);
+        isBtScoVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource) &&
+                        (isScoRequested || isHAUsed);
+        return true;
+    }
+
+    const VolumeSource btScoVolSrc = toVolumeSource(AUDIO_STREAM_BLUETOOTH_SCO, false);
     isBtScoVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (btScoVolSrc == volumeSource);
 
     if ((callVolSrc != btScoVolSrc) &&

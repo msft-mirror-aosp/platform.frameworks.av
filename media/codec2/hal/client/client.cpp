@@ -2556,6 +2556,19 @@ void Codec2Client::Component::onBufferReleasedFromOutputSurface(
     mOutputBufferQueue->onBufferReleased(generation);
 }
 
+void Codec2Client::Component::onBufferAttachedToOutputSurface(
+        uint32_t generation) {
+    if (mAidlBase) {
+        std::shared_ptr<AidlGraphicBufferAllocator> gba =
+                mGraphicBufferAllocators->current();
+        if (gba) {
+            gba->onBufferAttached(generation);
+        }
+        return;
+    }
+    mOutputBufferQueue->onBufferAttached(generation);
+}
+
 void Codec2Client::Component::holdIgbaBlocks(
         const std::list<std::unique_ptr<C2Work>>& workList) {
     if (!mAidlBase) {
