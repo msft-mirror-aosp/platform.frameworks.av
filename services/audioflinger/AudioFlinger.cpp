@@ -187,8 +187,6 @@ BINDER_METHOD_ENTRY(masterVolume) \
 BINDER_METHOD_ENTRY(masterMute) \
 BINDER_METHOD_ENTRY(setStreamVolume) \
 BINDER_METHOD_ENTRY(setStreamMute) \
-BINDER_METHOD_ENTRY(streamVolume) \
-BINDER_METHOD_ENTRY(streamMute) \
 BINDER_METHOD_ENTRY(setMode) \
 BINDER_METHOD_ENTRY(setMicMute) \
 BINDER_METHOD_ENTRY(getMicMute) \
@@ -1747,37 +1745,6 @@ status_t AudioFlinger::setStreamMute(audio_stream_type_t stream, bool muted)
 
     return NO_ERROR;
 }
-
-float AudioFlinger::streamVolume(audio_stream_type_t stream, audio_io_handle_t output) const
-{
-    status_t status = checkStreamType(stream);
-    if (status != NO_ERROR) {
-        return 0.0f;
-    }
-    if (output == AUDIO_IO_HANDLE_NONE) {
-        return 0.0f;
-    }
-
-    audio_utils::lock_guard lock(mutex());
-    sp<VolumeInterface> volumeInterface = getVolumeInterface_l(output);
-    if (volumeInterface == NULL) {
-        return 0.0f;
-    }
-
-    return volumeInterface->streamVolume(stream);
-}
-
-bool AudioFlinger::streamMute(audio_stream_type_t stream) const
-{
-    status_t status = checkStreamType(stream);
-    if (status != NO_ERROR) {
-        return true;
-    }
-
-    audio_utils::lock_guard lock(mutex());
-    return streamMute_l(stream);
-}
-
 
 void AudioFlinger::broadcastParametersToRecordThreads_l(const String8& keyValuePairs)
 {
@@ -4602,7 +4569,7 @@ sp<IAfEffectHandle> AudioFlinger::createOrphanEffect_l(
             // TODO(b/184194057): Use the vibrator information from the vibrator that will be used
             // for the HapticGenerator.
             const std::optional<media::AudioVibratorInfo> defaultVibratorInfo =
-                    std::move(getDefaultVibratorInfo_l());
+                    getDefaultVibratorInfo_l();
             if (defaultVibratorInfo) {
                 // Only set the vibrator info when it is a valid one.
                 audio_utils::lock_guard _cl(chain->mutex());
@@ -5237,8 +5204,8 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         } else {
             getIAudioFlingerStatistics().event(code, elapsedMs);
         }
-    }, mediautils::TimeCheck::kDefaultTimeoutDuration,
-    mediautils::TimeCheck::kDefaultSecondChanceDuration,
+    }, mediautils::TimeCheck::getDefaultTimeoutDuration(),
+    mediautils::TimeCheck::getDefaultSecondChanceDuration(),
     true /* crashOnTimeout */);
 
     return delegate();

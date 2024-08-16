@@ -48,7 +48,7 @@ DepthCompositeStream::DepthCompositeStream(sp<CameraDeviceBase> device,
         mBlobHeight(0),
         mDepthBufferAcquired(false),
         mBlobBufferAcquired(false),
-        mProducerListener(new ProducerListener()),
+        mStreamSurfaceListener(new StreamSurfaceListener()),
         mMaxJpegBufferSize(-1),
         mUHRMaxJpegBufferSize(-1),
         mIsLogicalCamera(false) {
@@ -690,7 +690,7 @@ status_t DepthCompositeStream::configureStream() {
         return NO_INIT;
     }
 
-    auto res = mOutputSurface->connect(NATIVE_WINDOW_API_CAMERA, mProducerListener);
+    auto res = mOutputSurface->connect(NATIVE_WINDOW_API_CAMERA, mStreamSurfaceListener);
     if (res != OK) {
         ALOGE("%s: Unable to connect to native window for stream %d",
                 __FUNCTION__, mBlobStreamId);

@@ -379,10 +379,10 @@ public:
         return isOutput() ? outDeviceTypes_l() : DeviceTypeSet({inDeviceType_l()});
     }
 
-    const AudioDeviceTypeAddrVector& outDeviceTypeAddrs() const final {
+    const AudioDeviceTypeAddrVector& outDeviceTypeAddrs() const final REQUIRES(mutex()) {
         return mOutDeviceTypeAddrs;
     }
-    const AudioDeviceTypeAddr& inDeviceTypeAddr() const final {
+    const AudioDeviceTypeAddr& inDeviceTypeAddr() const final REQUIRES(mutex()) {
         return mInDeviceTypeAddr;
     }
 

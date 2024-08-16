@@ -177,14 +177,11 @@ sp<hardware::ICameraService> CameraManagerGlobal::getCameraServiceLocked() {
 
         sp<IServiceManager> sm = defaultServiceManager();
         sp<IBinder> binder;
-        do {
-            binder = sm->getService(toString16(kCameraServiceName));
-            if (binder != nullptr) {
-                break;
-            }
-            ALOGW("CameraService not published, waiting...");
-            usleep(kCameraServicePollDelay);
-        } while(true);
+        binder = sm->checkService(String16(kCameraServiceName));
+        if (binder == nullptr) {
+            ALOGE("%s: Could not get CameraService instance.", __FUNCTION__);
+            return nullptr;
+        }
         if (mDeathNotifier == nullptr) {
             mDeathNotifier = new DeathNotifier(this);
         }
@@ -871,11 +868,13 @@ ACameraManager::openCamera(
     clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
     clientAttribution.pid = hardware::ICameraService::USE_CALLING_PID;
     clientAttribution.deviceId = mDeviceContext.deviceId;
+    clientAttribution.packageName = "";
+    clientAttribution.attributionTag = std::nullopt;
 
     // No way to get package name from native.
     // Send a zero length package name and let camera service figure it out from UID
     binder::Status serviceRet = cs->connectDevice(
-            callbacks, cameraId, "", {}, /*oomScoreOffset*/0,
+            callbacks, cameraId, /*oomScoreOffset*/0,
             targetSdkVersion, /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
             clientAttribution, static_cast<int32_t>(mDeviceContext.policy),
             /*out*/&deviceRemote);
