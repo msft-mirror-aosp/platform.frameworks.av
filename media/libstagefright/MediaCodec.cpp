@@ -487,7 +487,7 @@ private:
                                     .id = getId(mClient),
                                     .name = mCodecName,
                                     .importance = mImportance};
-        return std::move(clientInfo);
+        return clientInfo;
     }
 
 private:
@@ -840,7 +840,7 @@ private:
     const sp<AMessage> mNotify;
 };
 
-class OnBufferReleasedListener : public ::android::BnProducerListener{
+class OnBufferReleasedListener : public ::android::SurfaceListener{
 private:
     uint32_t mGeneration;
     std::weak_ptr<BufferChannelBase> mBufferChannel;
@@ -849,6 +849,13 @@ private:
         auto p = mBufferChannel.lock();
         if (p) {
             p->onBufferReleasedFromOutputSurface(mGeneration);
+        }
+    }
+
+    void notifyBufferAttached() {
+        auto p = mBufferChannel.lock();
+        if (p) {
+            p->onBufferAttachedToOutputSurface(mGeneration);
         }
     }
 
@@ -864,11 +871,22 @@ public:
         notifyBufferReleased();
     }
 
+    void onBuffersDiscarded([[maybe_unused]] const std::vector<sp<GraphicBuffer>>& buffers)
+        override { }
+
     void onBufferDetached([[maybe_unused]] int slot) override {
         notifyBufferReleased();
     }
 
     bool needsReleaseNotify() override { return true; }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+    void onBufferAttached() override {
+        notifyBufferAttached();
+    }
+
+    bool needsAttachNotify() override { return true; }
+#endif
 };
 
 class BufferCallback : public CodecBase::BufferCallback {
@@ -6722,7 +6740,7 @@ status_t MediaCodec::connectToSurface(const sp<Surface> &surface, uint32_t *gene
             // to this surface after disconnect/connect, and those free frames would inherit the new
             // generation number. Disconnecting after setting a unique generation prevents this.
             nativeWindowDisconnect(surface.get(), "connectToSurface(reconnect)");
-            sp<IProducerListener> listener =
+            sp<SurfaceListener> listener =
                     new OnBufferReleasedListener(*generation, mBufferChannel);
             err = surfaceConnectWithListener(
                     surface, listener, "connectToSurface(reconnect-with-listener)");

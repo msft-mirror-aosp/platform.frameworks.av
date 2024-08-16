@@ -72,6 +72,7 @@
 #include <media/nbaio/Pipe.h>
 #include <media/nbaio/PipeReader.h>
 #include <media/nbaio/SourceAudioBufferProvider.h>
+#include <media/ValidatedAttributionSourceState.h>
 #include <mediautils/BatteryNotifier.h>
 #include <mediautils/Process.h>
 #include <mediautils/SchedulingPolicyService.h>
@@ -120,6 +121,8 @@ static inline T min(const T& a, const T& b)
     return a < b ? a : b;
 }
 
+using com::android::media::permission::ValidatedAttributionSourceState;
+
 namespace android {
 
 using audioflinger::SyncEvent;
@@ -162,6 +165,9 @@ static const int kRecordThreadSleepUs = 5000;
 
 // maximum time to wait in sendConfigEvent_l() for a status to be received
 static const nsecs_t kConfigEventTimeoutNs = seconds(2);
+// longer timeout for create audio patch to account for specific scenarii
+// with Bluetooth devices
+static const nsecs_t kCreatePatchEventTimeoutNs = seconds(4);
 
 // minimum sleep time for the mixer thread loop when tracks are active but in underrun
 static const uint32_t kMinThreadSleepTimeUs = 5000;
@@ -728,9 +734,11 @@ NO_THREAD_SAFETY_ANALYSIS  // condition variable
     mutex().unlock();
     {
         audio_utils::unique_lock _l(event->mutex());
+        nsecs_t timeoutNs = event->mType == CFG_EVENT_CREATE_AUDIO_PATCH ?
+              kCreatePatchEventTimeoutNs : kConfigEventTimeoutNs;
         while (event->mWaitStatus) {
             if (event->mCondition.wait_for(
-                    _l, std::chrono::nanoseconds(kConfigEventTimeoutNs), getTid())
+                    _l, std::chrono::nanoseconds(timeoutNs), getTid())
                             == std::cv_status::timeout) {
                 event->mStatus = TIMED_OUT;
                 event->mWaitStatus = false;
@@ -1696,7 +1704,7 @@ sp<IAfEffectHandle> ThreadBase::createEffect_l(
             // TODO(b/184194057): Use the vibrator information from the vibrator that will be used
             // for the HapticGenerator.
             const std::optional<media::AudioVibratorInfo> defaultVibratorInfo =
-                    std::move(mAfThreadCallback->getDefaultVibratorInfo_l());
+                    mAfThreadCallback->getDefaultVibratorInfo_l();
             if (defaultVibratorInfo) {
                 audio_utils::lock_guard _cl(chain->mutex());
                 // Only set the vibrator info when it is a valid one.
@@ -2917,7 +2925,7 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
                 // TODO(b/184194780): Use the vibrator information from the vibrator that will be
                 // used to play this track.
                  audio_utils::lock_guard _l(mAfThreadCallback->mutex());
-                vibratorInfo = std::move(mAfThreadCallback->getDefaultVibratorInfo_l());
+                vibratorInfo = mAfThreadCallback->getDefaultVibratorInfo_l();
             }
             mutex().lock();
             track->setHapticScale(hapticScale);
@@ -4646,7 +4654,11 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
 
         // FIXME Note that the above .clear() is no longer necessary since effectChains
         // is now local to this block, but will keep it for now (at least until merge done).
+
+        mThreadloopExecutor.process();
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     threadLoop_exit();
 
@@ -5089,7 +5101,6 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         // mPipeSink below
         // mNormalSink below
 {
-    setMasterBalance(afThreadCallback->getMasterBalance_l());
     ALOGV("MixerThread() id=%d type=%d", id, type);
     ALOGV("mSampleRate=%u, mChannelMask=%#x, mChannelCount=%u, mFormat=%#x, mFrameSize=%zu, "
             "mFrameCount=%zu, mNormalFrameCount=%zu",
@@ -5101,6 +5112,8 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         // The Duplicating thread uses the AudioMixer and delivers data to OutputTracks
         // (downstream MixerThreads) in DuplicatingThread::threadLoop_write().
         // Do not create or use mFastMixer, mOutputSink, mPipeSink, or mNormalSink.
+        // Balance is *not* set in the DuplicatingThread here (or from AudioFlinger),
+        // as the downstream MixerThreads implement it.
         return;
     }
     // create an NBAIO sink for the HAL output stream, and negotiate
@@ -5196,7 +5209,7 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
                                                     // audio to FastMixer
         fastTrack->mFormat = mFormat; // mPipeSink format for audio to FastMixer
         fastTrack->mHapticPlaybackEnabled = mHapticChannelMask != AUDIO_CHANNEL_NONE;
-        fastTrack->mHapticScale = {/*level=*/os::HapticLevel::NONE };
+        fastTrack->mHapticScale = os::HapticScale::none();
         fastTrack->mHapticMaxAmplitude = NAN;
         fastTrack->mGeneration++;
         state->mFastTracksGen++;
@@ -5260,6 +5273,9 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         mNormalSink = initFastMixer ? mPipeSink : mOutputSink;
         break;
     }
+    // setMasterBalance needs to be called after the FastMixer
+    // (if any) is set up, in order to deliver the balance settings to it.
+    setMasterBalance(afThreadCallback->getMasterBalance_l());
 }
 
 MixerThread::~MixerThread()
@@ -7135,7 +7151,7 @@ bool DirectOutputThread::checkForNewParameter_l(const String8& keyValuePair,
 uint32_t DirectOutputThread::activeSleepTimeUs() const
 {
     uint32_t time;
-    if (audio_has_proportional_frames(mFormat)) {
+    if (audio_has_proportional_frames(mFormat) && mType != OFFLOAD) {
         time = PlaybackThread::activeSleepTimeUs();
     } else {
         time = kDirectMinSleepTimeUs;
@@ -7146,7 +7162,7 @@ uint32_t DirectOutputThread::activeSleepTimeUs() const
 uint32_t DirectOutputThread::idleSleepTimeUs() const
 {
     uint32_t time;
-    if (audio_has_proportional_frames(mFormat)) {
+    if (audio_has_proportional_frames(mFormat) && mType != OFFLOAD) {
         time = (uint32_t)(((mFrameCount * 1000) / mSampleRate) * 1000) / 2;
     } else {
         time = kDirectMinSleepTimeUs;
@@ -7157,7 +7173,7 @@ uint32_t DirectOutputThread::idleSleepTimeUs() const
 uint32_t DirectOutputThread::suspendSleepTimeUs() const
 {
     uint32_t time;
-    if (audio_has_proportional_frames(mFormat)) {
+    if (audio_has_proportional_frames(mFormat) && mType != OFFLOAD) {
         time = (uint32_t)(((mFrameCount * 1000) / mSampleRate) * 1000);
     } else {
         time = kDirectMinSleepTimeUs;
@@ -7174,7 +7190,7 @@ void DirectOutputThread::cacheParameters_l()
     // no delay on outputs with HW A/V sync
     if (usesHwAvSync()) {
         mStandbyDelayNs = 0;
-    } else if ((mType == OFFLOAD) && !audio_has_proportional_frames(mFormat)) {
+    } else if (mType == OFFLOAD) {
         mStandbyDelayNs = kOffloadStandbyDelayNs;
     } else {
         mStandbyDelayNs = microseconds(mActiveSleepTimeUs*2);
@@ -7185,14 +7201,11 @@ void DirectOutputThread::flushHw_l()
 {
     PlaybackThread::flushHw_l();
     mOutput->flush();
+    mHwPaused = false;
     mFlushPending = false;
     mTimestampVerifier.discontinuity(discontinuityForStandbyOrFlush());
     mTimestamp.clear();
     mMonotonicFrameCounter.onFlush();
-    // We do not reset mHwPaused which is hidden from the Track client.
-    // Note: the client track in Tracks.cpp and AudioTrack.cpp
-    // has a FLUSHED state but the DirectOutputThread does not;
-    // those tracks will continue to show isStopped().
 }
 
 int64_t DirectOutputThread::computeWaitTimeNs_l() const {
@@ -8670,6 +8683,9 @@ reacquire_wakelock:
 
         // loop over each active track
         for (size_t i = 0; i < size; i++) {
+            if (activeTrack) {  // ensure track release is outside lock.
+                oldActiveTracks.emplace_back(std::move(activeTrack));
+            }
             activeTrack = activeTracks[i];
 
             // skip fast tracks, as those are handled directly by FastCapture
@@ -8813,11 +8829,14 @@ unlock:
             mIoJitterMs.add(jitterMs);
             mProcessTimeMs.add(processMs);
         }
+       mThreadloopExecutor.process();
         // update timing info.
         mLastIoBeginNs = lastIoBeginNs;
         mLastIoEndNs = lastIoEndNs;
         lastLoopCountRead = loopCount;
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     standbyIfNotAlreadyInStandby();
 
@@ -10291,8 +10310,23 @@ status_t MmapThread::start(const AudioClient& client,
     audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE;
 
     audio_io_handle_t io = mId;
-    const AttributionSourceState adjAttributionSource = afutils::checkAttributionSourcePackage(
-            client.attributionSource);
+    AttributionSourceState adjAttributionSource;
+    if (!com::android::media::audio::audioserver_permissions()) {
+        adjAttributionSource = afutils::checkAttributionSourcePackage(
+                client.attributionSource);
+    } else {
+        // TODO(b/342475009) validate in oboeservice, and plumb downwards
+        auto validatedRes = ValidatedAttributionSourceState::createFromTrustedUidNoPackage(
+                    client.attributionSource,
+                    mAfThreadCallback->getPermissionProvider()
+                );
+        if (!validatedRes.has_value()) {
+            ALOGE("MMAP client package validation fail: %s",
+                    validatedRes.error().toString8().c_str());
+            return aidl_utils::statusTFromBinderStatus(validatedRes.error());
+        }
+        adjAttributionSource = std::move(validatedRes.value()).unwrapInto();
+    }
 
     const auto localSessionId = mSessionId;
     auto localAttr = mAttr;
@@ -10603,7 +10637,10 @@ bool MmapThread::threadLoop()
         unlockEffectChains(effectChains);
         // Effect chains will be actually deleted here if they were removed from
         // mEffectChains list during mixing or effects processing
+        mThreadloopExecutor.process();
     }
+    mThreadloopExecutor.process(); // process any remaining deferred actions.
+    // deferred actions after this point are ignored.
 
     threadLoop_exit();
 
