@@ -32,10 +32,41 @@ PowerStatsCollector& PowerStatsCollector::getCollector() {
     return psc;
 }
 
-std::shared_ptr<PowerStats> PowerStatsCollector::getStats() const {
+std::shared_ptr<const PowerStats> PowerStatsCollector::getStats(int64_t toleranceNs) {
+    // Check if there is a cached PowerStats result available.
+    // As toleranceNs may be different between callers, it may be that some callers
+    // are blocked on mMutexExclusiveFill for a new stats result, while other callers
+    // may find the current cached result acceptable (within toleranceNs).
+    if (toleranceNs > 0) {
+        auto result = checkLastStats(toleranceNs);
+        if (result) return result;
+    }
+
+    // Take the mMutexExclusiveFill to ensure only one thread is filling.
+    std::lock_guard lg1(mMutexExclusiveFill);
+    // As obtaining a new PowerStats snapshot might take some time,
+    // check again to see if another waiting thread filled the cached result for us.
+    if (toleranceNs > 0) {
+        auto result = checkLastStats(toleranceNs);
+        if (result) return result;
+    }
     auto result = std::make_shared<PowerStats>();
     (void)fill(result.get());
+    std::lock_guard lg2(mMutex);
+    mLastFetchNs = systemTime(SYSTEM_TIME_BOOTTIME);
+    mLastFetchStats = result;
     return result;
+}
+
+std::shared_ptr<const PowerStats> PowerStatsCollector::checkLastStats(int64_t toleranceNs) const {
+    if (toleranceNs > 0) {
+        // see if we can return an old result.
+        std::lock_guard lg(mMutex);
+        if (mLastFetchStats && systemTime(SYSTEM_TIME_BOOTTIME) - mLastFetchNs < toleranceNs) {
+            return mLastFetchStats;
+        }
+    }
+    return {};
 }
 
 void PowerStatsCollector::addProvider(std::unique_ptr<PowerStatsProvider>&& powerStatsProvider) {
