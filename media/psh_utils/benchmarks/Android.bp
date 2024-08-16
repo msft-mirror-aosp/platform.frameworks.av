@@ -28,3 +28,24 @@ cc_benchmark {
         "libutils",
     ],
 }
+
+cc_benchmark {
+    name: "audio_powerstatscollector_benchmark",
+
+    srcs: ["audio_powerstatscollector_benchmark.cpp"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+    static_libs: [
+        "libaudioutils",
+        "libpshutils",
+    ],
+    shared_libs: [
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "liblog",
+        "libutils",
+    ],
+}
