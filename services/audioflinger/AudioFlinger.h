@@ -335,7 +335,9 @@ private:
             const String8& address,
             audio_output_flags_t flags) final REQUIRES(mutex());
     const DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>&
-            getAudioHwDevs_l() const final REQUIRES(mutex()) { return mAudioHwDevs; }
+            getAudioHwDevs_l() const final REQUIRES(mutex(), hardwareMutex()) {
+              return mAudioHwDevs;
+            }
     void updateDownStreamPatches_l(const struct audio_patch* patch,
             const std::set<audio_io_handle_t>& streams) final REQUIRES(mutex());
     void updateOutDevicesForRecordThreads_l(const DeviceDescriptorBaseVector& devices) final
