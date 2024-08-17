@@ -259,7 +259,8 @@ status_t DeviceHalHidl::openOutputStream(
         audio_output_flags_t flags,
         struct audio_config *config,
         const char *address,
-        sp<StreamOutHalInterface> *outStream) {
+        sp<StreamOutHalInterface> *outStream,
+        const std::vector<playback_track_metadata_v7_t>& sourceMetadata) {
     TIME_CHECK();
     if (mDevice == 0) return NO_INIT;
     DeviceAddress hidlDevice;
@@ -269,6 +270,18 @@ status_t DeviceHalHidl::openOutputStream(
     }
     AudioConfig hidlConfig;
     if (status_t status = HidlUtils::audioConfigFromHal(*config, false /*isInput*/, &hidlConfig);
+            status != OK) {
+        return status;
+    }
+
+#if MAJOR_VERSION == 4
+    ::android::hardware::audio::CORE_TYPES_CPP_VERSION::SourceMetadata hidlMetadata;
+#else
+    ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION::SourceMetadata hidlMetadata;
+#endif
+
+    if (status_t status = CoreUtils::sourceMetadataFromHalV7(
+                sourceMetadata, true /*ignoreNonVendorTags*/, &hidlMetadata);
             status != OK) {
         return status;
     }
@@ -294,7 +307,7 @@ status_t DeviceHalHidl::openOutputStream(
 #endif
             handle, hidlDevice, hidlConfig, hidlFlags,
 #if MAJOR_VERSION >= 4
-            {} /* metadata */,
+            hidlMetadata /* metadata */,
 #endif
             [&](Result r, const sp<::android::hardware::audio::CPP_VERSION::IStreamOut>& result,
                     const AudioConfig& suggestedConfig) {

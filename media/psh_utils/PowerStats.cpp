@@ -160,37 +160,41 @@ PowerStats::RailEnergy PowerStats::RailEnergy::operator-(const RailEnergy& other
     return result;
 }
 
-std::string PowerStats::toString() const {
+std::string PowerStats::toString(const std::string& prefix) const {
     std::string result;
-    result.append(metadata.toString()).append("\n");
-    result.append(health_stats.toString()).append("\n");
+    result.append(prefix).append(metadata.toString()).append("\n");
+    result.append(prefix).append(health_stats.toString()).append("\n");
     for (const auto &residency: power_entity_state_residency) {
-        result.append(residency.toString()).append("\n");
+        result.append(prefix).append(residency.toString()).append("\n");
     }
     for (const auto &energy: rail_energy) {
-        result.append(energy.toString()).append("\n");
+        result.append(prefix).append(energy.toString()).append("\n");
     }
     return result;
 }
 
-std::string PowerStats::normalizedEnergy() const {
+std::string PowerStats::normalizedEnergy(const std::string& prefix) const {
     if (metadata.duration_ms == 0) return {};
 
-    std::string result(audio_utils_time_string_from_ns(
+    std::string result(prefix);
+    result.append(audio_utils_time_string_from_ns(
             metadata.start_time_epoch_ms * 1'000'000).time);
     result.append(" duration_boottime: ")
             .append(std::to_string(metadata.duration_ms * 1e-3f))
             .append(" duration_monotonic: ")
             .append(std::to_string(metadata.duration_monotonic_ms * 1e-3f))
             .append("\n");
-    result.append(health_stats.normalizedEnergy(metadata.duration_ms * 1e-3f)).append("\n");
+    if (health_stats.isValid()) {
+        result.append(prefix)
+                .append(health_stats.normalizedEnergy(metadata.duration_ms * 1e-3f)).append("\n");
+    }
 
     // energy_uws is converted to ave W using recip time in us.
     const float recipTime = 1e-3 / metadata.duration_ms;
     int64_t total_energy = 0;
     for (const auto& energy: rail_energy) {
         total_energy += energy.energy_uws;
-        result.append(energy.subsystem_name)
+        result.append(prefix).append(energy.subsystem_name)
                 .append(energy.rail_name)
                 .append(" ")
                 .append(std::to_string(energy.energy_uws * 1e-6))
@@ -198,11 +202,13 @@ std::string PowerStats::normalizedEnergy() const {
                 .append(std::to_string(energy.energy_uws * recipTime))
                 .append("\n");
     }
-    result.append("total J and ave W: ")
-            .append(std::to_string(total_energy * 1e-6))
-            .append(" ")
-            .append(std::to_string(total_energy * recipTime))
-            .append("\n");
+    if (total_energy != 0) {
+        result.append(prefix).append("total J and ave W: ")
+                .append(std::to_string(total_energy * 1e-6))
+                .append(" ")
+                .append(std::to_string(total_energy * recipTime))
+                .append("\n");
+    }
     return result;
 }
 

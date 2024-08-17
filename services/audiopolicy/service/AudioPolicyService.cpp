@@ -590,12 +590,13 @@ void AudioPolicyService::doOnCheckSpatializer()
             if (status == NO_ERROR && currentOutput == newOutput) {
                 return;
             }
-            size_t numActiveTracks = countActiveClientsOnOutput_l(newOutput);
+            std::vector<audio_channel_mask_t> activeTracksMasks =
+                    getActiveTracksMasks_l(newOutput);
             mMutex.unlock();
             // It is OK to call detachOutput() is none is already attached.
             mSpatializer->detachOutput();
             if (status == NO_ERROR && newOutput != AUDIO_IO_HANDLE_NONE) {
-                status = mSpatializer->attachOutput(newOutput, numActiveTracks);
+                status = mSpatializer->attachOutput(newOutput, activeTracksMasks);
             }
             mMutex.lock();
             if (status != NO_ERROR) {
@@ -613,17 +614,17 @@ void AudioPolicyService::doOnCheckSpatializer()
     }
 }
 
-size_t AudioPolicyService::countActiveClientsOnOutput_l(
+std::vector<audio_channel_mask_t> AudioPolicyService::getActiveTracksMasks_l(
         audio_io_handle_t output, bool spatializedOnly) {
-    size_t count = 0;
+    std::vector<audio_channel_mask_t> activeTrackMasks;
     for (size_t i = 0; i < mAudioPlaybackClients.size(); i++) {
         auto client = mAudioPlaybackClients.valueAt(i);
         if (client->io == output && client->active
                 && (!spatializedOnly || client->isSpatialized)) {
-            count++;
+            activeTrackMasks.push_back(client->channelMask);
         }
     }
-    return count;
+    return activeTrackMasks;
 }
 
 void AudioPolicyService::onUpdateActiveSpatializerTracks_l() {
@@ -639,12 +640,12 @@ void AudioPolicyService::doOnUpdateActiveSpatializerTracks()
         return;
     }
     audio_io_handle_t output = mSpatializer->getOutput();
-    size_t activeClients;
+    std::vector<audio_channel_mask_t> activeTracksMasks;
     {
         audio_utils::lock_guard _l(mMutex);
-        activeClients = countActiveClientsOnOutput_l(output);
+        activeTracksMasks = getActiveTracksMasks_l(output);
     }
-    mSpatializer->updateActiveTracks(activeClients);
+    mSpatializer->updateActiveTracks(activeTracksMasks);
 }
 
 status_t AudioPolicyService::clientCreateAudioPatch(const struct audio_patch *patch,
