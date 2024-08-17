@@ -477,7 +477,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
 
         sp<AudioPlaybackClient> client =
                 new AudioPlaybackClient(attr, output, attributionSource, session,
-                    portId, selectedDeviceId, stream, isSpatialized);
+                    portId, selectedDeviceId, stream, isSpatialized, config.channel_mask);
         mAudioPlaybackClients.add(portId, client);
 
         _aidl_return->output = VALUE_OR_RETURN_BINDER_STATUS(
