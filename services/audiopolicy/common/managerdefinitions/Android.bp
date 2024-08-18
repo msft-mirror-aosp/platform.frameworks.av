@@ -42,6 +42,7 @@ cc_library {
         "libaudioclient_aidl_conversion",
         "libaudiofoundation",
         "libaudiopolicy",
+        "libaudioutils",
         "libbase",
         "libcutils",
         "libhidlbase",
@@ -55,9 +56,6 @@ cc_library {
         "libaudiofoundation",
         "libmedia",
         "libmedia_helper",
-    ],
-    static_libs: [
-        "libaudioutils",
     ],
     header_libs: [
         "libaudiopolicycommon",
