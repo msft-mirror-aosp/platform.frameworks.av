@@ -59,7 +59,7 @@ public:
         std::array<unsigned, 3> coreSelection{0U, mCores / 2 + 1, mCores - 1};
         mCore = coreSelection[std::min((size_t)coreClass, std::size(coreSelection) - 1)];
 
-        const auto& collector = android::media::psh_utils::PowerStatsCollector::getCollector();
+        auto& collector = android::media::psh_utils::PowerStatsCollector::getCollector();
         mStartStats = collector.getStats();
 
         const pid_t tid = gettid(); // us.
@@ -102,7 +102,7 @@ protected:
     unsigned mCores = 0;
     int mCore = 0;
     CoreClass mCoreClass = CORE_LITTLE;
-    std::shared_ptr<android::media::psh_utils::PowerStats> mStartStats;
+    std::shared_ptr<const android::media::psh_utils::PowerStats> mStartStats;
 };
 
 } // namespace android::media::psh_utils
