@@ -27,10 +27,11 @@ std::string HealthStats::toString() const {
     std::string result;
     const float batteryVoltage = batteryVoltageMillivolts * 1e-3f;  // Volts
     const float charge = batteryChargeCounterUah * (3600 * 1e-6);  // Joules = Amp-Second
-    result.append(" battery_voltage: ")
+    result.append("{Net Battery V: ")
             .append(std::to_string(batteryVoltage))
-            .append(" charge: ")
-            .append(std::to_string(charge));
+            .append(" J: ")
+            .append(std::to_string(charge))
+            .append("}");
     return result;
 }
 
@@ -39,12 +40,13 @@ std::string HealthStats::normalizedEnergy(double timeSec) const {
     const float batteryVoltage = batteryVoltageMillivolts * 1e-3f;   // Volts
     const float charge = -batteryChargeCounterUah * (3600 * 1e-6f);  // Joules = Amp-Second
     const float watts = charge * batteryVoltage / timeSec;
-    result.append(" battery_voltage: ")
+    result.append("{Net Battery V: ")
             .append(std::to_string(batteryVoltage))
             .append(" J: ")
             .append(std::to_string(charge))
             .append(" W: ")
-            .append(std::to_string(watts));
+            .append(std::to_string(watts))
+            .append("}");
     return result;
 }
 

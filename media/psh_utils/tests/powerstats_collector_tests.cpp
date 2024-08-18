@@ -27,7 +27,7 @@ void inRange(const T& a, const T& b, const T& c) {
 }
 
 TEST(powerstat_collector_tests, basic) {
-    const auto& psc = PowerStatsCollector::getCollector();
+    auto& psc = PowerStatsCollector::getCollector();
 
     // This test is used for debugging the string through logcat, we validate a non-empty string.
     auto powerStats = psc.getStats();
