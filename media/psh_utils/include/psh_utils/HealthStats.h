@@ -42,6 +42,8 @@ struct HealthStats {
 
     std::string normalizedEnergy(double time) const;
 
+    bool isValid() const { return batteryVoltageMillivolts > 0; }
+
     // Returns {seconds, joules, watts} from battery counters
     std::tuple<float, float, float> energyFrom(const std::string& s) const;
     std::string toString() const;
