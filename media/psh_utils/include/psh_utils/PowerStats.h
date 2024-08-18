@@ -87,11 +87,11 @@ struct PowerStats {
 
     HealthStats health_stats;
 
-    std::string normalizedEnergy() const;
+    std::string normalizedEnergy(const std::string& prefix = {}) const;
 
     // Returns {seconds, joules, watts} from all rails containing a matching string.
     std::tuple<float, float, float> energyFrom(const std::string& railMatcher) const;
-    std::string toString() const;
+    std::string toString(const std::string& prefix = {}) const;
 
     PowerStats operator+=(const PowerStats& other);
     PowerStats operator-=(const PowerStats& other);
