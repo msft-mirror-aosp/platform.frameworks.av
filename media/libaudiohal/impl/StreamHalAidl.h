@@ -215,6 +215,46 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
 
     ~StreamHalAidl() override;
 
+    ::aidl::android::hardware::audio::core::StreamDescriptor::State getState() {
+        std::lock_guard l(mLock);
+        return mLastReply.state;
+    }
+
+    bool isInDrainedState(
+            const ::aidl::android::hardware::audio::core::StreamDescriptor::State state) {
+        if (state == ::aidl::android::hardware::audio::core::StreamDescriptor::State::IDLE ||
+            state == ::aidl::android::hardware::audio::core::StreamDescriptor::State::STANDBY) {
+            // drain equivalent states
+            return true;
+        }
+        return false;
+    }
+
+    bool isInPlayOrRecordState(
+            const ::aidl::android::hardware::audio::core::StreamDescriptor::State state) {
+        if (state == ::aidl::android::hardware::audio::core::StreamDescriptor::State::ACTIVE ||
+            state ==
+                    ::aidl::android::hardware::audio::core::StreamDescriptor::State::TRANSFERRING ||
+            state == ::aidl::android::hardware::audio::core::StreamDescriptor::State::DRAINING) {
+            // play or record equivalent states
+            return true;
+        }
+        return false;
+    }
+
+    bool isInPausedState(
+            const ::aidl::android::hardware::audio::core::StreamDescriptor::State& state) {
+        if (state == ::aidl::android::hardware::audio::core::StreamDescriptor::State::PAUSED ||
+            state ==
+                    ::aidl::android::hardware::audio::core::StreamDescriptor::State::DRAIN_PAUSED ||
+            state == ::aidl::android::hardware::audio::core::StreamDescriptor::State::
+                             TRANSFER_PAUSED) {
+            // pause equivalent states
+            return true;
+        }
+        return false;
+    }
+
     status_t getLatency(uint32_t *latency);
 
     // Always returns non-negative values.
@@ -267,10 +307,6 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
         result.channel_mask = config.channel_mask;
         result.format = config.format;
         return result;
-    }
-    ::aidl::android::hardware::audio::core::StreamDescriptor::State getState() {
-        std::lock_guard l(mLock);
-        return mLastReply.state;
     }
     // Note: Since `sendCommand` takes mLock while holding mCommandReplyLock, never call
     // it with `mLock` being held.

@@ -524,6 +524,14 @@ bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool muted,
     StreamTypeVector streams = streamTypes;
     if (!AudioOutputDescriptor::setVolume(
             volumeDb, muted, vs, streamTypes, deviceTypes, delayMs, force, isVoiceVolSrc)) {
+        if (hasStream(streamTypes, AUDIO_STREAM_BLUETOOTH_SCO)) {
+            VolumeSource callVolSrc = getVoiceSource();
+            if (callVolSrc != VOLUME_SOURCE_NONE && volumeDb != getCurVolume(callVolSrc)) {
+                setCurVolume(callVolSrc, volumeDb, true);
+                mClientInterface->setStreamVolume(
+                        AUDIO_STREAM_VOICE_CALL, Volume::DbToAmpl(volumeDb), mIoHandle, delayMs);
+            }
+        }
         return false;
     }
     if (streams.empty()) {
@@ -588,7 +596,8 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
                                        const DeviceVector &devices,
                                        audio_stream_type_t stream,
                                        audio_output_flags_t flags,
-                                       audio_io_handle_t *output)
+                                       audio_io_handle_t *output,
+                                       audio_attributes_t attributes)
 {
     mDevices = devices;
     sp<DeviceDescriptor> device = devices.getDeviceForOpening();
@@ -652,7 +661,8 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
                                                    &lMixerConfig,
                                                    device,
                                                    &mLatency,
-                                                   mFlags);
+                                                   mFlags,
+                                                   attributes);
 
     if (status == NO_ERROR) {
         LOG_ALWAYS_FATAL_IF(*output == AUDIO_IO_HANDLE_NONE,

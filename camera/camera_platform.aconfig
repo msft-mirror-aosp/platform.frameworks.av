@@ -247,3 +247,33 @@ flag {
         purpose: PURPOSE_BUGFIX
     }
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "api1_release_binderlock_before_cameraservice_disconnect"
+    description: "Drop mSerializationLock in Camera1 client when calling into CameraService"
+    bug: "351778072"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "bump_preview_frame_space_priority"
+    description: "Increase the PreviewFrameSpacer thread priority"
+    bug: "355665306"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "dumpsys_request_stream_ids"
+    description: "Add stream id information to last request dumpsys"
+    bug: "357913929"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}

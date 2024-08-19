@@ -96,10 +96,6 @@ private:
     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
             EXCLUDES_AudioFlinger_Mutex;
 
-    float streamVolume(audio_stream_type_t stream,
-            audio_io_handle_t output) const final EXCLUDES_AudioFlinger_Mutex;
-    bool streamMute(audio_stream_type_t stream) const final EXCLUDES_AudioFlinger_Mutex;
-
     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setMicMute(bool state) final EXCLUDES_AudioFlinger_Mutex;
@@ -337,9 +333,12 @@ private:
             audio_config_base_t* mixerConfig,
             audio_devices_t deviceType,
             const String8& address,
-            audio_output_flags_t flags) final REQUIRES(mutex());
+            audio_output_flags_t flags,
+            audio_attributes_t attributes) final REQUIRES(mutex());
     const DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>&
-            getAudioHwDevs_l() const final REQUIRES(mutex()) { return mAudioHwDevs; }
+            getAudioHwDevs_l() const final REQUIRES(mutex(), hardwareMutex()) {
+              return mAudioHwDevs;
+            }
     void updateDownStreamPatches_l(const struct audio_patch* patch,
             const std::set<audio_io_handle_t>& streams) final REQUIRES(mutex());
     void updateOutDevicesForRecordThreads_l(const DeviceDescriptorBaseVector& devices) final
@@ -406,6 +405,8 @@ private:
             EXCLUDES_AudioFlinger_ClientMutex;
     void onHardError(std::set<audio_port_handle_t>& trackPortIds) final
             EXCLUDES_AudioFlinger_ClientMutex;
+
+    const ::com::android::media::permission::IPermissionProvider& getPermissionProvider() final;
 
     // ---- end of IAfThreadCallback interface
 

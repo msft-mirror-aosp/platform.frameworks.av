@@ -379,10 +379,10 @@ public:
         return isOutput() ? outDeviceTypes_l() : DeviceTypeSet({inDeviceType_l()});
     }
 
-    const AudioDeviceTypeAddrVector& outDeviceTypeAddrs() const final {
+    const AudioDeviceTypeAddrVector& outDeviceTypeAddrs() const final REQUIRES(mutex()) {
         return mOutDeviceTypeAddrs;
     }
-    const AudioDeviceTypeAddr& inDeviceTypeAddr() const final {
+    const AudioDeviceTypeAddr& inDeviceTypeAddr() const final REQUIRES(mutex()) {
         return mInDeviceTypeAddr;
     }
 
@@ -570,6 +570,10 @@ public:
             REQUIRES(audio_utils::AudioFlinger_Mutex);
     void stopMelComputation_l() override
             REQUIRES(audio_utils::AudioFlinger_Mutex);
+
+    audio_utils::DeferredExecutor& getThreadloopExecutor() override {
+        return mThreadloopExecutor;
+    }
 
 protected:
 
@@ -876,6 +880,14 @@ protected:
                 };
 
                 SimpleLog mLocalLog;  // locked internally
+
+    // mThreadloopExecutor contains deferred functors and object (dtors) to
+    // be executed at the end of the processing period, without any
+    // mutexes held.
+    //
+    // mThreadloopExecutor is locked internally, so its methods are thread-safe
+    // for access.
+    audio_utils::DeferredExecutor mThreadloopExecutor;
 
     private:
     void dumpBase_l(int fd, const Vector<String16>& args) REQUIRES(mutex());

@@ -294,8 +294,7 @@ public:
     virtual status_t startAudioSource(const struct audio_port_config *source,
                                       const audio_attributes_t *attributes,
                                       audio_port_handle_t *portId,
-                                      uid_t uid,
-                                      bool internal = false) = 0;
+                                      uid_t uid) = 0;
     virtual status_t stopAudioSource(audio_port_handle_t portId) = 0;
 
     virtual status_t setMasterMono(bool mono) = 0;
@@ -478,7 +477,8 @@ public:
                                 audio_config_base_t *mixerConfig,
                                 const sp<DeviceDescriptorBase>& device,
                                 uint32_t *latencyMs,
-                                audio_output_flags_t flags) = 0;
+                                audio_output_flags_t flags,
+                                audio_attributes_t audioAttributes) = 0;
     // creates a special output that is duplicated to the two outputs passed as arguments.
     // The duplication is performed by a special mixer thread in the AudioFlinger.
     virtual audio_io_handle_t openDuplicateOutput(audio_io_handle_t output1,
