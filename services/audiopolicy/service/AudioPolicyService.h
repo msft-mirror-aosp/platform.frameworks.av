@@ -790,7 +790,8 @@ private:
                                     audio_config_base_t *mixerConfig,
                                     const sp<DeviceDescriptorBase>& device,
                                     uint32_t *latencyMs,
-                                    audio_output_flags_t flags);
+                                    audio_output_flags_t flags,
+                                    audio_attributes_t attributes);
         // creates a special output that is duplicated to the two outputs passed as arguments. The duplication is performed by
         // a special mixer thread in the AudioFlinger.
         virtual audio_io_handle_t openDuplicateOutput(audio_io_handle_t output1, audio_io_handle_t output2);
