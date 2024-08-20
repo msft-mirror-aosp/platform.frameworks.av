@@ -2807,7 +2807,6 @@ void CCodecBufferChannel::setInfoBuffer(const std::shared_ptr<C2InfoBuffer> &buf
         work->input.infoBuffers.emplace_back(*buffer);
         work->worklets.emplace_back(new C2Worklet);
         items.push_back(std::move(work));
-        c2_status_t err = mComponent->queue(&items);
     }
 }
 
