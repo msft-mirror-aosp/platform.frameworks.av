@@ -18,6 +18,7 @@
 #define LOG_TAG "RingBufferConsumer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <com_android_graphics_libgui_flags.h>
 #include <inttypes.h>
 
 #include <utils/Log.h>
@@ -317,7 +318,9 @@ void RingBufferConsumer::onFrameAvailable(const BufferItem& item) {
 
         mLatestTimestamp = item.mTimestamp;
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_RING_BUFFER)
         item.mGraphicBuffer = mSlots[item.mSlot].mGraphicBuffer;
+#endif
     } // end of mMutex lock
 
     ConsumerBase::onFrameAvailable(item);
