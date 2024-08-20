@@ -37,6 +37,8 @@ ACameraDevice::~ACameraDevice() {
 namespace android {
 namespace acam {
 
+using android::hardware::common::fmq::MQDescriptor;
+
 // Static member definitions
 const char* CameraDevice::kContextKey        = "Context";
 const char* CameraDevice::kDeviceKey         = "Device";
@@ -788,6 +790,27 @@ CameraDevice::setRemoteDevice(sp<hardware::camera2::ICameraDeviceUser> remote) {
     mRemote = remote;
 }
 
+bool CameraDevice::setDeviceMetadataQueues() {
+    if (mRemote == nullptr) {
+        ALOGE("mRemote must not be null while trying to fetch metadata queues");
+        return false;
+    }
+    MQDescriptor<int8_t, SynchronizedReadWrite> resMqDescriptor;
+    binder::Status ret = mRemote->getCaptureResultMetadataQueue(&resMqDescriptor);
+    if (!ret.isOk()) {
+        ALOGE("Transaction error trying to get capture result metadata queue");
+        return false;
+    }
+    mCaptureResultMetadataQueue = std::make_unique<ResultMetadataQueue>(resMqDescriptor);
+    if (!mCaptureResultMetadataQueue->isValid()) {
+        ALOGE("Empty fmq from cameraserver");
+        mCaptureResultMetadataQueue = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
 camera_status_t
 CameraDevice::checkCameraClosedOrErrorLocked() const {
     if (mRemote == nullptr) {
@@ -1247,7 +1270,9 @@ void CameraDevice::CallbackHandler::onMessageReceived(
                         String8 physicalId8 = toString8(physicalResultInfo[i].mPhysicalCameraId);
                         physicalCameraIds.push_back(physicalId8.c_str());
 
-                        CameraMetadata clone = physicalResultInfo[i].mPhysicalCameraMetadata;
+                        CameraMetadata clone =
+                                physicalResultInfo[i].
+                                        mCameraMetadataInfo.get<CameraMetadataInfo::metadata>();
                         clone.update(ANDROID_SYNC_FRAME_NUMBER,
                                 &physicalResult->mFrameNumber, /*data_count*/1);
                         sp<ACameraMetadata> metadata =
@@ -1777,7 +1802,7 @@ CameraDevice::ServiceCallback::onCaptureStarted(
 
 binder::Status
 CameraDevice::ServiceCallback::onResultReceived(
-        const CameraMetadata& metadata,
+        const CameraMetadataInfo &resultMetadata,
         const CaptureResultExtras& resultExtras,
         const std::vector<PhysicalCaptureResultInfo>& physicalResultInfos) {
     binder::Status ret = binder::Status::ok();
@@ -1786,11 +1811,11 @@ CameraDevice::ServiceCallback::onResultReceived(
     if (dev == nullptr) {
         return ret; // device has been closed
     }
+
     int sequenceId = resultExtras.requestId;
     int64_t frameNumber = resultExtras.frameNumber;
     int32_t burstId = resultExtras.burstId;
     bool    isPartialResult = (resultExtras.partialResultCount < dev->mPartialResultCount);
-
     if (!isPartialResult) {
         ALOGV("SeqId %d frame %" PRId64 " result arrive.", sequenceId, frameNumber);
     }
@@ -1808,7 +1833,13 @@ CameraDevice::ServiceCallback::onResultReceived(
         return ret;
     }
 
-    CameraMetadata metadataCopy = metadata;
+    CameraMetadata metadataCopy;
+    camera_status_t status = readOneResultMetadata(resultMetadata,
+            dev->mCaptureResultMetadataQueue.get(), &metadataCopy);
+    if (status != ACAMERA_OK) {
+        ALOGE("%s: result metadata couldn't be converted", __FUNCTION__);
+        return ret;
+    }
     metadataCopy.update(ANDROID_LENS_INFO_SHADING_MAP_SIZE, dev->mShadingMapSize, /*data_count*/2);
     metadataCopy.update(ANDROID_SYNC_FRAME_NUMBER, &frameNumber, /*data_count*/1);
 
@@ -1824,8 +1855,24 @@ CameraDevice::ServiceCallback::onResultReceived(
         sp<CaptureRequest> request = cbh.mRequests[burstId];
         sp<ACameraMetadata> result(new ACameraMetadata(
                 metadataCopy.release(), ACameraMetadata::ACM_RESULT));
+
+        std::vector<PhysicalCaptureResultInfo> localPhysicalResult;
+        localPhysicalResult.resize(physicalResultInfos.size());
+        for (size_t i = 0; i < physicalResultInfos.size(); i++) {
+            CameraMetadata physicalMetadata;
+            localPhysicalResult[i].mPhysicalCameraId = physicalResultInfos[i].mPhysicalCameraId;
+            status = readOneResultMetadata(physicalResultInfos[i].mCameraMetadataInfo,
+                    dev->mCaptureResultMetadataQueue.get(),
+                    &physicalMetadata);
+            if (status != ACAMERA_OK) {
+                ALOGE("%s: physical camera result metadata couldn't be converted", __FUNCTION__);
+                return ret;
+            }
+            localPhysicalResult[i].mCameraMetadataInfo.set<CameraMetadataInfo::metadata>(
+                    std::move(physicalMetadata));
+        }
         sp<ACameraPhysicalCaptureResultInfo> physicalResult(
-                new ACameraPhysicalCaptureResultInfo(physicalResultInfos, frameNumber));
+                new ACameraPhysicalCaptureResultInfo(localPhysicalResult, frameNumber));
 
         sp<AMessage> msg = new AMessage(
                 cbh.mIsLogicalCameraCallback ? kWhatLogicalCaptureResult : kWhatCaptureResult,
@@ -1944,6 +1991,29 @@ CameraDevice::sendCaptureSequenceCompletedLocked(int sequenceId, int64_t lastFra
         // This should not happen because we always register callback (with nullptr inside)
         ALOGW("No callback found for sequenceId %d", sequenceId);
     }
+}
+
+camera_status_t CameraDevice::ServiceCallback::readOneResultMetadata(
+        const CameraMetadataInfo& resultInfo, ResultMetadataQueue* metadataQueue,
+        CameraMetadata* metadata) {
+    if (metadataQueue == nullptr || metadata == nullptr) {
+        return ACAMERA_ERROR_INVALID_PARAMETER;
+    }
+    if (resultInfo.getTag() == CameraMetadataInfo::fmqSize) {
+        int64_t metadataSize = resultInfo.get<CameraMetadataInfo::fmqSize>();
+        auto metadataVec = std::make_unique<int8_t []>(metadataSize);
+        bool read = metadataQueue->read(reinterpret_cast<int8_t*>(metadataVec.get()), metadataSize);
+        if (!read) {
+            ALOGE("%s capture request settings could't be read from fmq", __FUNCTION__);
+            return ACAMERA_ERROR_UNKNOWN;
+        }
+        *metadata = CameraMetadata(reinterpret_cast<camera_metadata_t *>(metadataVec.release()));
+    } else {
+        *metadata =
+                resultInfo.get<CameraMetadataInfo::metadata>();
+    }
+
+    return ACAMERA_OK;
 }
 
 } // namespace acam

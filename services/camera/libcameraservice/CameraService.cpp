@@ -1492,6 +1492,7 @@ Status CameraService::makeClient(
         int servicePid, std::pair<int, IPCTransport> deviceVersionAndTransport,
         apiLevel effectiveApiLevel, bool overrideForPerfClass, int rotationOverride,
         bool forceSlowJpegMode, const std::string& originalCameraId, bool sharedMode,
+        bool isVendorClient,
         /*out*/sp<BasicClient>* client) {
     // For HIDL devices
     if (deviceVersionAndTransport.second == IPCTransport::HIDL) {
@@ -1537,7 +1538,8 @@ Status CameraService::makeClient(
                 cameraService, tmp, cameraService->mCameraServiceProxyWrapper,
                 cameraService->mAttributionAndPermissionUtils, clientAttribution, callingPid,
                 systemNativeClient, cameraId, facing, sensorOrientation, servicePid,
-                overrideForPerfClass, rotationOverride, originalCameraId, sharedMode);
+                overrideForPerfClass, rotationOverride, originalCameraId, sharedMode,
+                isVendorClient);
         ALOGI("%s: Camera2 API, rotationOverride %d", __FUNCTION__, rotationOverride);
     }
     return Status::ok();
@@ -1638,7 +1640,7 @@ Status CameraService::initializeShimMetadata(int cameraId) {
                   /*rotationOverride*/
                   hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
                   /*forceSlowJpegMode*/ false, cameraIdStr, /*isNonSystemNdk*/ false,
-                  /*sharedMode*/false, /*out*/ tmp))
+                  /*sharedMode*/false, /*isVendorClient*/false,/*out*/ tmp))
                  .isOk()) {
         ALOGE("%s: Error initializing shim metadata: %s", __FUNCTION__, ret.toString8().c_str());
     }
@@ -2202,7 +2204,8 @@ Status CameraService::connect(
             cameraClient, cameraIdStr, api1CameraId, resolvedClientAttribution,
             /*systemNativeClient*/ false, API_1,
             /*shimUpdateOnly*/ false, /*oomScoreOffset*/ 0, targetSdkVersion, rotationOverride,
-            forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*sharedMode*/false, /*out*/ client);
+            forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*sharedMode*/false,
+            /*isVendorClient*/ false, /*out*/ client);
 
     if (!ret.isOk()) {
         logRejected(cameraIdStr, getCallingPid(),
@@ -2286,7 +2289,32 @@ Status CameraService::connectDevice(
         const std::string& unresolvedCameraId,
         int oomScoreOffset, int targetSdkVersion,
         int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
-        bool sharedMode, /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
+        bool sharedMode,
+        /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
+    return connectDeviceImpl(cameraCb, unresolvedCameraId, oomScoreOffset, targetSdkVersion,
+            rotationOverride, clientAttribution, devicePolicy, sharedMode,
+            /*isVendorClient*/false, device);
+}
+
+Status CameraService::connectDeviceVendor(
+        const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
+        const std::string& unresolvedCameraId,
+        int oomScoreOffset, int targetSdkVersion,
+        int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
+        bool sharedMode,
+        /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
+            return connectDeviceImpl(cameraCb, unresolvedCameraId, oomScoreOffset, targetSdkVersion,
+                    rotationOverride, clientAttribution, devicePolicy, sharedMode,
+                    /*isVendorClient*/true, device);
+}
+
+Status CameraService::connectDeviceImpl(
+        const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
+        const std::string& unresolvedCameraId,
+        int oomScoreOffset, int targetSdkVersion,
+        int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
+        bool sharedMode, bool isVendorClient,
+        /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
     ATRACE_CALL();
     RunThreadWithRealtimePriority priorityBump;
     Status ret = Status::ok();
@@ -2367,7 +2395,7 @@ Status CameraService::connectDevice(
             cameraCb, cameraId, /*api1CameraId*/ -1, resolvedClientAttribution, systemNativeClient,
             API_2, /*shimUpdateOnly*/ false, oomScoreOffset, targetSdkVersion, rotationOverride,
             /*forceSlowJpegMode*/ false, unresolvedCameraId, isNonSystemNdk, sharedMode,
-            /*out*/ client);
+            isVendorClient, /*out*/ client);
 
     if (!ret.isOk()) {
         logRejected(cameraId, clientPid, clientPackageName, toStdString(ret.toString8()));
@@ -2447,7 +2475,8 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
                                     bool shimUpdateOnly, int oomScoreOffset, int targetSdkVersion,
                                     int rotationOverride, bool forceSlowJpegMode,
                                     const std::string& originalCameraId, bool isNonSystemNdk,
-                                    bool sharedMode, /*out*/ sp<CLIENT>& device) {
+                                    bool sharedMode, bool isVendorClient,
+                                    /*out*/ sp<CLIENT>& device) {
     binder::Status ret = binder::Status::ok();
 
     nsecs_t openTimeNs = systemTime();
@@ -2546,7 +2575,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
                                systemNativeClient, cameraId, api1CameraId, facing, orientation,
                                getpid(), deviceVersionAndTransport, effectiveApiLevel,
                                overrideForPerfClass, rotationOverride, forceSlowJpegMode,
-                               originalCameraId, sharedMode,
+                               originalCameraId, sharedMode, isVendorClient,
                                /*out*/ &tmp))
                      .isOk()) {
             return ret;

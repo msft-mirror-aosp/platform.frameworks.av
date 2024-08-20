@@ -16,6 +16,11 @@
 
 #define LOG_TAG "CameraDeviceClient"
 #define ATRACE_TAG ATRACE_TAG_CAMERA
+#ifdef LOG_NNDEBUG
+#define ALOGVV(...) ALOGV(__VA_ARGS__)
+#else
+#define ALOGVV(...) ((void)0)
+#endif
 //#define LOG_NDEBUG 0
 
 #include <com_android_internal_camera_flags.h>
@@ -40,6 +45,7 @@
 #include "JpegRCompositeStream.h"
 
 // Convenience methods for constructing binder::Status objects for error returns
+constexpr int32_t METADATA_QUEUE_SIZE = 1 << 20;
 
 #define STATUS_ERROR(errorCode, errorString) \
     binder::Status::fromServiceSpecificError(errorCode, \
@@ -80,7 +86,7 @@ CameraDeviceClient::CameraDeviceClient(
         const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
         const std::string& cameraId, int cameraFacing, int sensorOrientation, int servicePid,
         bool overrideForPerfClass, int rotationOverride, const std::string& originalCameraId,
-        bool sharedMode)
+        bool sharedMode, bool isVendorClient)
     : Camera2ClientBase(cameraService, remoteCallback, cameraServiceProxyWrapper,
                         attributionAndPermissionUtils, clientAttribution, callingPid,
                         systemNativeClient, cameraId, /*API1 camera ID*/ -1, cameraFacing,
@@ -90,7 +96,8 @@ CameraDeviceClient::CameraDeviceClient(
       mStreamingRequestId(REQUEST_ID_NONE),
       mRequestIdCounter(0),
       mOverrideForPerfClass(overrideForPerfClass),
-      mOriginalCameraId(originalCameraId) {
+      mOriginalCameraId(originalCameraId),
+      mIsVendorClient(isVendorClient) {
     ATRACE_CALL();
     ALOGI("CameraDeviceClient %s: Opened", cameraId.c_str());
 }
@@ -179,6 +186,14 @@ status_t CameraDeviceClient::initializeImpl(TProviderPtr providerPtr,
         if (supportsUltraHighResolutionCapture(physicalId)) {
             mHighResolutionSensors.insert(physicalId);
         }
+    }
+    int32_t resultMQSize =
+            property_get_int32("ro.vendor.camera.res.fmq.size", /*default*/METADATA_QUEUE_SIZE);
+    res = CreateMetadataQueue(&mResultMetadataQueue, resultMQSize);
+    if (res != OK) {
+        ALOGE("%s: Creating result metadata queue failed: %s(%d)", __FUNCTION__,
+            strerror(-res), res);
+        return res;
     }
     return OK;
 }
@@ -1768,6 +1783,34 @@ binder::Status CameraDeviceClient::setCameraAudioRestriction(int32_t mode) {
     return binder::Status::ok();
 }
 
+status_t CameraDeviceClient::CreateMetadataQueue(
+        std::unique_ptr<MetadataQueue>* metadata_queue, uint32_t default_size_bytes) {
+        if (metadata_queue == nullptr) {
+            ALOGE("%s: metadata_queue is nullptr", __FUNCTION__);
+            return BAD_VALUE;
+        }
+
+        int32_t size = default_size_bytes;
+
+        *metadata_queue =
+                std::make_unique<MetadataQueue>(static_cast<size_t>(size),
+                        /*configureEventFlagWord*/ false);
+        if (!(*metadata_queue)->isValid()) {
+            ALOGE("%s: Creating metadata queue (size %d) failed.", __FUNCTION__, size);
+            return NO_INIT;
+        }
+
+        return OK;
+}
+
+binder::Status CameraDeviceClient::getCaptureResultMetadataQueue(
+          android::hardware::common::fmq::MQDescriptor<
+          int8_t, android::hardware::common::fmq::SynchronizedReadWrite>* aidl_return) {
+
+    *aidl_return = mResultMetadataQueue->dupeDesc();
+    return binder::Status::ok();
+}
+
 binder::Status CameraDeviceClient::getGlobalAudioRestriction(/*out*/ int32_t* outMode) {
     ATRACE_CALL();
     binder::Status res;
@@ -2190,16 +2233,76 @@ void CameraDeviceClient::detachDevice() {
     mCameraServiceProxyWrapper->logClose(mCameraIdStr, closeLatencyMs, hasDeviceError);
 }
 
+size_t CameraDeviceClient::writeResultMetadataIntoResultQueue(
+        const CameraMetadata &resultMetadata) {
+    ATRACE_CALL();
+
+    const camera_metadata_t *resultMetadataP = resultMetadata.getAndLock();
+    size_t resultSize = get_camera_metadata_size(resultMetadataP);
+    if (mResultMetadataQueue != nullptr &&
+        mResultMetadataQueue->write(reinterpret_cast<const int8_t*>(resultMetadataP),
+                resultSize)) {
+        resultMetadata.unlock(resultMetadataP);
+        return resultSize;
+    }
+    resultMetadata.unlock(resultMetadataP);
+    ALOGE(" %s couldn't write metadata into result queue ", __FUNCTION__);
+    return 0;
+}
+
 /** Device-related methods */
+std::vector<PhysicalCaptureResultInfo> CameraDeviceClient::convertToFMQ(
+        const std::vector<PhysicalCaptureResultInfo> &physicalResults) {
+    std::vector<PhysicalCaptureResultInfo> retVal;
+    ALOGVV("%s E", __FUNCTION__);
+    for (const auto &srcPhysicalResult : physicalResults) {
+        size_t fmqSize = 0;
+        if (!mIsVendorClient && flags::fmq_metadata()) {
+            fmqSize = writeResultMetadataIntoResultQueue(
+                    srcPhysicalResult.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>());
+        }
+        ALOGVV("%s physical metadata write size is %d", __FUNCTION__, (int)fmqSize);
+        if (fmqSize != 0) {
+            retVal.emplace_back(srcPhysicalResult.mPhysicalCameraId, fmqSize);
+        } else {
+            // The flag was off / we're serving VNDK shim call or FMQ write failed.
+            retVal.emplace_back(srcPhysicalResult.mPhysicalCameraId,
+                    srcPhysicalResult.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>());
+        }
+    }
+    ALOGVV("%s X", __FUNCTION__);
+    return retVal;
+}
+
 void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
     ATRACE_CALL();
-    ALOGV("%s", __FUNCTION__);
+    ALOGVV("%s E", __FUNCTION__);
 
     // Thread-safe. No lock necessary.
     sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = mRemoteCallback;
     if (remoteCb != NULL) {
-        remoteCb->onResultReceived(result.mMetadata, result.mResultExtras,
-                result.mPhysicalMetadatas);
+        // Write  result metadata into metadataQueue
+        size_t fmqMetadataSize = 0;
+        // Vendor clients need to modify metadata and also this call is in process
+        // before going through FMQ to vendor clients. So don't use FMQ here.
+        if (!mIsVendorClient && flags::fmq_metadata()) {
+            fmqMetadataSize = writeResultMetadataIntoResultQueue(result.mMetadata);
+        }
+        hardware::camera2::impl::CameraMetadataNative resultMetadata;
+        CameraMetadataInfo resultInfo;
+        if (fmqMetadataSize == 0) {
+            // The flag was off / we're serving VNDK shim call or FMQ write failed.
+            resultMetadata = result.mMetadata;
+            resultInfo.set<CameraMetadataInfo::metadata>(resultMetadata);
+        } else {
+            resultInfo.set<CameraMetadataInfo::fmqSize>(fmqMetadataSize);
+        }
+
+        std::vector<PhysicalCaptureResultInfo> physicalMetadatas =
+                convertToFMQ(result.mPhysicalMetadatas);
+
+        remoteCb->onResultReceived(resultInfo, result.mResultExtras,
+                physicalMetadatas);
     }
 
     // Access to the composite stream map must be synchronized
@@ -2207,6 +2310,7 @@ void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
     for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
         mCompositeStreamMap.valueAt(i)->onResultAvailable(result);
     }
+    ALOGVV("%s X", __FUNCTION__);
 }
 
 binder::Status CameraDeviceClient::checkPidStatus(const char* checkLocation) {
