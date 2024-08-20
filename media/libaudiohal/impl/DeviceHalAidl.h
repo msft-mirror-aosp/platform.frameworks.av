@@ -242,8 +242,11 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     const std::shared_ptr<::aidl::android::hardware::audio::core::IBluetoothLe> mBluetoothLe;
     const std::shared_ptr<::aidl::android::hardware::audio::core::sounddose::ISoundDose> mSoundDose;
 
+    std::mutex mCallbacksLock;
+    // Use 'mCallbacksLock' only to implement exclusive access to 'mCallbacks'. Never hold it
+    // while making any calls.
+    std::map<void*, Callbacks> mCallbacks GUARDED_BY(mCallbacksLock);
     std::mutex mLock;
-    std::map<void*, Callbacks> mCallbacks GUARDED_BY(mLock);
     std::set<audio_port_handle_t> mDeviceDisconnectionNotified GUARDED_BY(mLock);
     Hal2AidlMapper mMapper GUARDED_BY(mLock);
     LockedAccessor<Hal2AidlMapper> mMapperAccessor;

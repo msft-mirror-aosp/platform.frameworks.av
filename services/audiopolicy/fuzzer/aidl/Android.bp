@@ -25,14 +25,7 @@ cc_defaults {
     shared_libs: [
         "libaudioflinger",
         "libaudiopolicyservice",
-        "libaudioprocessing",
-        "libhidlbase",
         "libmediaplayerservice",
-        "libnbaio",
-        "libnblog",
-        "libpowermanager",
-        "libvibrator",
-        "packagemanager_aidl-cpp",
     ],
     static_libs: [
         "libaudiomockhal",
@@ -63,6 +56,7 @@ cc_fuzz {
         "latest_android_hardware_audio_core_ndk_shared",
         "latest_android_hardware_audio_core_sounddose_ndk_shared",
         "latest_android_hardware_audio_effect_ndk_shared",
+        "libaudioflinger_dependencies",
         "libaudiopolicyservice_dependencies",
         "service_fuzzer_defaults",
     ],
