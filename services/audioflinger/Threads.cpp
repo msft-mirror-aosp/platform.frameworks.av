@@ -1695,7 +1695,7 @@ sp<IAfEffectHandle> ThreadBase::createEffect_l(
             // TODO(b/184194057): Use the vibrator information from the vibrator that will be used
             // for the HapticGenerator.
             const std::optional<media::AudioVibratorInfo> defaultVibratorInfo =
-                    std::move(mAfThreadCallback->getDefaultVibratorInfo_l());
+                    mAfThreadCallback->getDefaultVibratorInfo_l();
             if (defaultVibratorInfo) {
                 audio_utils::lock_guard _cl(chain->mutex());
                 // Only set the vibrator info when it is a valid one.
@@ -2916,7 +2916,7 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
                 // TODO(b/184194780): Use the vibrator information from the vibrator that will be
                 // used to play this track.
                  audio_utils::lock_guard _l(mAfThreadCallback->mutex());
-                vibratorInfo = std::move(mAfThreadCallback->getDefaultVibratorInfo_l());
+                vibratorInfo = mAfThreadCallback->getDefaultVibratorInfo_l();
             }
             mutex().lock();
             track->setHapticScale(hapticScale);
@@ -5093,7 +5093,6 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         // mPipeSink below
         // mNormalSink below
 {
-    setMasterBalance(afThreadCallback->getMasterBalance_l());
     ALOGV("MixerThread() id=%d type=%d", id, type);
     ALOGV("mSampleRate=%u, mChannelMask=%#x, mChannelCount=%u, mFormat=%#x, mFrameSize=%zu, "
             "mFrameCount=%zu, mNormalFrameCount=%zu",
@@ -5105,6 +5104,8 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         // The Duplicating thread uses the AudioMixer and delivers data to OutputTracks
         // (downstream MixerThreads) in DuplicatingThread::threadLoop_write().
         // Do not create or use mFastMixer, mOutputSink, mPipeSink, or mNormalSink.
+        // Balance is *not* set in the DuplicatingThread here (or from AudioFlinger),
+        // as the downstream MixerThreads implement it.
         return;
     }
     // create an NBAIO sink for the HAL output stream, and negotiate
@@ -5264,6 +5265,9 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         mNormalSink = initFastMixer ? mPipeSink : mOutputSink;
         break;
     }
+    // setMasterBalance needs to be called after the FastMixer
+    // (if any) is set up, in order to deliver the balance settings to it.
+    setMasterBalance(afThreadCallback->getMasterBalance_l());
 }
 
 MixerThread::~MixerThread()

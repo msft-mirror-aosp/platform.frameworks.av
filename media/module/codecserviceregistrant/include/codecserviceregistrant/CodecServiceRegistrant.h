@@ -18,6 +18,13 @@
 
 #define CODEC_SERVICE_REGISTRANT_H_
 
+/**
+ * This function starts the threadpool, calls the registration logic
+ * encapsulated in RegisterCodecServicesWithExistingThreadpool(), and
+ * then stops the threadpool.
+ */
+extern "C" void RegisterCodecServices();
+
 typedef void (*RegisterCodecServicesFunc)();
 
 #endif  // CODEC_SERVICE_REGISTRANT_H_
