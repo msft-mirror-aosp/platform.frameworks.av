@@ -23,6 +23,7 @@
 #include <android-base/logging.h>
 #include <android-base/strings.h>
 #include <audio_utils/clock.h>
+#include <cutils/properties.h>
 #include <mediautils/EventLog.h>
 #include <mediautils/FixedString.h>
 #include <mediautils/MethodStatistics.h>
@@ -36,6 +37,46 @@
 
 
 namespace android::mediautils {
+
+// Note: The sum of kDefaultTimeOutDurationMs and kDefaultSecondChanceDurationMs
+// should be no less than 2 seconds, otherwise spurious timeouts
+// may occur with system suspend.
+static constexpr int kDefaultTimeoutDurationMs = 3000;
+
+// Due to suspend abort not incrementing the monotonic clock,
+// we allow another second chance timeout after the first timeout expires.
+//
+// The total timeout is therefore kDefaultTimeoutDuration + kDefaultSecondChanceDuration,
+// and the result is more stable when the monotonic clock increments during suspend.
+//
+static constexpr int kDefaultSecondChanceDurationMs = 2000;
+
+/* static */
+TimeCheck::Duration TimeCheck::getDefaultTimeoutDuration() {
+    static constinit std::atomic<int> defaultTimeoutDurationMs{};
+    auto defaultMs = defaultTimeoutDurationMs.load(std::memory_order_relaxed);
+    if (defaultMs == 0) {
+        defaultMs = property_get_int32(
+                "audio.timecheck.timeout_duration_ms", kDefaultTimeoutDurationMs);
+        if (defaultMs < 1) defaultMs = kDefaultTimeoutDurationMs;
+        defaultTimeoutDurationMs.store(defaultMs, std::memory_order_relaxed);
+    }
+    return std::chrono::milliseconds(defaultMs);
+}
+
+/* static */
+TimeCheck::Duration TimeCheck::getDefaultSecondChanceDuration() {
+    static constinit std::atomic<int> defaultSecondChanceDurationMs{};
+    auto defaultMs = defaultSecondChanceDurationMs.load(std::memory_order_relaxed);
+    if (defaultMs == 0) {
+        defaultMs = property_get_int32(
+                "audio.timecheck.second_chance_duration_ms", kDefaultSecondChanceDurationMs);
+        if (defaultMs < 1) defaultMs = kDefaultSecondChanceDurationMs;
+        defaultSecondChanceDurationMs.store(defaultMs, std::memory_order_relaxed);
+    }
+    return std::chrono::milliseconds(defaultMs);
+}
+
 // This function appropriately signals a pid to dump a backtrace if we are
 // running on device (and the HAL exists). If we are not running on an Android
 // device, there is no HAL to signal (so we do nothing).
@@ -182,23 +223,25 @@ TimeCheck::~TimeCheck() {
 
 /* static */
 std::string TimeCheck::analyzeTimeouts(
-        float requestedTimeoutMs, float elapsedSteadyMs, float elapsedSystemMs) {
+        float requestedTimeoutMs, float secondChanceMs,
+        float elapsedSteadyMs, float elapsedSystemMs) {
     // Track any OS clock issues with suspend.
     // It is possible that the elapsedSystemMs is much greater than elapsedSteadyMs if
     // a suspend occurs; however, we always expect the timeout ms should always be slightly
     // less than the elapsed steady ms regardless of whether a suspend occurs or not.
 
-    std::string s("Timeout ms ");
-    s.append(std::to_string(requestedTimeoutMs))
-        .append(" elapsed steady ms ").append(std::to_string(elapsedSteadyMs))
-        .append(" elapsed system ms ").append(std::to_string(elapsedSystemMs));
+    const float totalTimeoutMs = requestedTimeoutMs + secondChanceMs;
+    std::string s = std::format(
+            "Timeout ms {:.2f} ({:.2f} + {:.2f})"
+            " elapsed steady ms {:.4f} elapsed system ms {:.4f}",
+            totalTimeoutMs, requestedTimeoutMs, secondChanceMs, elapsedSteadyMs, elapsedSystemMs);
 
     // Is there something unusual?
     static constexpr float TOLERANCE_CONTEXT_SWITCH_MS = 200.f;
 
-    if (requestedTimeoutMs > elapsedSteadyMs || requestedTimeoutMs > elapsedSystemMs) {
+    if (totalTimeoutMs > elapsedSteadyMs || totalTimeoutMs > elapsedSystemMs) {
         s.append("\nError: early expiration - "
-                "requestedTimeoutMs should be less than elapsed time");
+                "totalTimeoutMs should be less than elapsed time");
     }
 
     if (elapsedSteadyMs > elapsedSystemMs + TOLERANCE_CONTEXT_SWITCH_MS) {
@@ -206,13 +249,13 @@ std::string TimeCheck::analyzeTimeouts(
     }
 
     // This has been found in suspend stress testing.
-    if (elapsedSteadyMs > requestedTimeoutMs + TOLERANCE_CONTEXT_SWITCH_MS) {
+    if (elapsedSteadyMs > totalTimeoutMs + TOLERANCE_CONTEXT_SWITCH_MS) {
         s.append("\nWarning: steady time significantly exceeds timeout "
                 "- possible thread stall or aborted suspend");
     }
 
     // This has been found in suspend stress testing.
-    if (elapsedSystemMs > requestedTimeoutMs + TOLERANCE_CONTEXT_SWITCH_MS) {
+    if (elapsedSystemMs > totalTimeoutMs + TOLERANCE_CONTEXT_SWITCH_MS) {
         s.append("\nInformation: system time significantly exceeds timeout "
                 "- possible suspend");
     }
@@ -282,7 +325,7 @@ void TimeCheck::TimeCheckHandler::onTimeout(TimerThread::Handle timerHandle) con
             .append(tag)
             .append(" scheduled ").append(formatTime(startSystemTime))
             .append(" on thread ").append(std::to_string(tid)).append("\n")
-            .append(analyzeTimeouts(requestedTimeoutMs + secondChanceMs,
+            .append(analyzeTimeouts(requestedTimeoutMs, secondChanceMs,
                     elapsedSteadyMs, elapsedSystemMs)).append("\n")
             .append(halPids).append("\n")
             .append(snapshotAnalysis.toString());
