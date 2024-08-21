@@ -18,15 +18,17 @@
 #include "utils/Timers.h"
 #define LOG_TAG "EglSurfaceTexture"
 
+#include <GLES/gl.h>
+#include <com_android_graphics_libgui_flags.h>
+#include <gui/BufferQueue.h>
+#include <gui/GLConsumer.h>
+#include <gui/IGraphicBufferProducer.h>
+#include <hardware/gralloc.h>
+
 #include <cstdint>
 
 #include "EglSurfaceTexture.h"
 #include "EglUtil.h"
-#include "GLES/gl.h"
-#include "gui/BufferQueue.h"
-#include "gui/GLConsumer.h"
-#include "gui/IGraphicBufferProducer.h"
-#include "hardware/gralloc.h"
 
 namespace android {
 namespace companion {
@@ -45,6 +47,18 @@ EglSurfaceTexture::EglSurfaceTexture(const uint32_t width, const uint32_t height
     ALOGE("Failed to generate texture");
     return;
   }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+  mGlConsumer = sp<GLConsumer>::make(mTextureId, GLConsumer::TEXTURE_EXTERNAL,
+                                     false, false);
+  mGlConsumer->setName(String8("VirtualCameraEglSurfaceTexture"));
+  mGlConsumer->setDefaultBufferSize(mWidth, mHeight);
+  mGlConsumer->setConsumerUsageBits(GRALLOC_USAGE_HW_TEXTURE);
+  mGlConsumer->setDefaultBufferFormat(AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420);
+
+  mSurface = mGlConsumer->getSurface();
+  mSurface->setMaxDequeuedBufferCount(kBufferProducerMaxDequeueBufferCount);
+#else
   BufferQueue::createBufferQueue(&mBufferProducer, &mBufferConsumer);
   // Set max dequeue buffer count for producer to maximal value to prevent
   // blocking when dequeuing input buffers.
@@ -58,6 +72,7 @@ EglSurfaceTexture::EglSurfaceTexture(const uint32_t width, const uint32_t height
   mGlConsumer->setDefaultBufferFormat(AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420);
 
   mSurface = sp<Surface>::make(mBufferProducer);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 }
 
 EglSurfaceTexture::~EglSurfaceTexture() {

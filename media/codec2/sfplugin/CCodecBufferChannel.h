@@ -391,7 +391,7 @@ private:
     };
     Mutexed<BlockPools> mBlockPools;
 
-    std::shared_ptr<InputSurfaceWrapper> mInputSurface;
+    Mutexed<std::shared_ptr<InputSurfaceWrapper>> mInputSurface;
 
     MetaMode mMetaMode;
 

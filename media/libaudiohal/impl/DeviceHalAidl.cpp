@@ -496,8 +496,11 @@ status_t DeviceHalAidl::openOutputStream(
     *outStream = stream;
     /* StreamOutHalInterface* */ void* cbCookie = (*outStream).get();
     {
-        std::lock_guard l(mLock);
+        std::lock_guard l(mCallbacksLock);
         mCallbacks.emplace(cbCookie, Callbacks{});
+    }
+    {
+        std::lock_guard l(mLock);
         mMapper.addStream(*outStream, mixPortConfig.id, aidlPatch.id);
     }
     if (streamCb) {
@@ -1339,7 +1342,7 @@ status_t DeviceHalAidl::filterAndUpdateTelephonyParameters(AudioParameter &param
 }
 
 void DeviceHalAidl::clearCallbacks(void* cookie) {
-    std::lock_guard l(mLock);
+    std::lock_guard l(mCallbacksLock);
     mCallbacks.erase(cookie);
 }
 
@@ -1372,18 +1375,21 @@ void DeviceHalAidl::setStreamOutLatencyModeCallback(
     setCallbackImpl(cookie, &Callbacks::latency, cb);
 }
 
-template<class C>
+template <class C>
 sp<C> DeviceHalAidl::getCallbackImpl(void* cookie, wp<C> DeviceHalAidl::Callbacks::* field) {
-    std::lock_guard l(mLock);
-    if (auto it = mCallbacks.find(cookie); it != mCallbacks.end()) {
-        return ((it->second).*field).promote();
+    wp<C> result;
+    {
+        std::lock_guard l(mCallbacksLock);
+        if (auto it = mCallbacks.find(cookie); it != mCallbacks.end()) {
+            result = (it->second).*field;
+        }
     }
-    return nullptr;
+    return result.promote();
 }
 template<class C>
 void DeviceHalAidl::setCallbackImpl(
         void* cookie, wp<C> DeviceHalAidl::Callbacks::* field, const sp<C>& cb) {
-    std::lock_guard l(mLock);
+    std::lock_guard l(mCallbacksLock);
     if (auto it = mCallbacks.find(cookie); it != mCallbacks.end()) {
         (it->second).*field = cb;
     }

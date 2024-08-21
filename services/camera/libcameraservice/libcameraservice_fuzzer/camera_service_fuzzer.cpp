@@ -22,14 +22,15 @@
 //#define LOG_NDEBUG 0
 
 #include <CameraService.h>
-#include <device3/Camera3StreamInterface.h>
 #include <android/content/AttributionSourceState.h>
 #include <android/hardware/BnCameraServiceListener.h>
-#include <android/hardware/camera2/BnCameraDeviceCallbacks.h>
 #include <android/hardware/ICameraServiceListener.h>
+#include <android/hardware/camera2/BnCameraDeviceCallbacks.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
 #include <camera/CameraUtils.h>
 #include <camera/camera2/OutputConfiguration.h>
+#include <com_android_graphics_libgui_flags.h>
+#include <device3/Camera3StreamInterface.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
@@ -613,6 +614,24 @@ void Camera2Fuzzer::process() {
             continue;
         }
         device->beginConfigure();
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        sp<BufferItemConsumer> opaqueConsumer = new BufferItemConsumer(
+                GRALLOC_USAGE_SW_READ_NEVER, /*maxImages*/ 8, /*controlledByApp*/ true);
+        opaqueConsumer->setName(String8("Roger"));
+
+        // Set to VGA dimension for default, as that is guaranteed to be present
+        opaqueConsumer->setDefaultBufferSize(640, 480);
+        opaqueConsumer->setDefaultBufferFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
+
+        sp<Surface> surface = opaqueConsumer->getSurface();
+
+        std::string noPhysicalId;
+        size_t rotations = sizeof(kRotations) / sizeof(int32_t) - 1;
+        sp<IGraphicBufferProducer> igbp = surface->getIGraphicBufferProducer();
+        OutputConfiguration output(
+                igbp, kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
+                noPhysicalId);
+#else
         sp<IGraphicBufferProducer> gbProducer;
         sp<IGraphicBufferConsumer> gbConsumer;
         BufferQueue::createBufferQueue(&gbProducer, &gbConsumer);
@@ -631,6 +650,7 @@ void Camera2Fuzzer::process() {
         OutputConfiguration output(gbProducer,
                 kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
                 noPhysicalId);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
         int streamId;
         device->createStream(output, &streamId);
         CameraMetadata sessionParams;
