@@ -27,10 +27,11 @@
 
 #include <inttypes.h>
 
+#include <camera/StringUtils.h>
+#include <com_android_graphics_libgui_flags.h>
+#include <gui/Surface.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
-#include <gui/Surface.h>
-#include <camera/StringUtils.h>
 
 #include "common/CameraDeviceBase.h"
 #include "api1/Camera2Client.h"
@@ -250,7 +251,11 @@ status_t ZslProcessor::updateStream(const Parameters &params) {
     if (mZslStreamId == NO_STREAM) {
         // Create stream for HAL production
         // TODO: Sort out better way to select resolution for ZSL
-
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        mProducer = new RingBufferConsumer(GRALLOC_USAGE_HW_CAMERA_ZSL, mBufferQueueDepth);
+        mProducer->setName("Camera2-ZslRingBufferConsumer");
+        sp<Surface> outSurface = mProducer->getSurface();
+#else
         sp<IGraphicBufferProducer> producer;
         sp<IGraphicBufferConsumer> consumer;
         BufferQueue::createBufferQueue(&producer, &consumer);
@@ -258,6 +263,7 @@ status_t ZslProcessor::updateStream(const Parameters &params) {
             mBufferQueueDepth);
         mProducer->setName("Camera2-ZslRingBufferConsumer");
         sp<Surface> outSurface = new Surface(producer);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
         res = device->createStream(outSurface, params.fastInfo.usedZslSize.width,
             params.fastInfo.usedZslSize.height, HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,

@@ -325,20 +325,25 @@ int HapticGenerator_SetParameter(struct HapticGeneratorContext *context, effect_
             ALOGE("%s invalid haptic intensity param size %s", __func__, reader.toString().c_str());
             return -EINVAL;
         }
-        int32_t paramId;
-        os::HapticScale hapticScale;
-        if (reader.readFromValue(&paramId) != OK || reader.readFromValue(&hapticScale) != OK) {
+        int32_t id, scaleLevel;
+        float scaleFactor, adaptiveScaleFactor;
+        if (reader.readFromValue(&id) != OK || reader.readFromValue(&scaleLevel) != OK ||
+            reader.readFromValue(&scaleFactor) != OK ||
+            reader.readFromValue(&adaptiveScaleFactor) != OK) {
             ALOGE("%s error reading haptic intensity %s", __func__, reader.toString().c_str());
             return -EINVAL;
         }
+        os::HapticScale hapticScale(static_cast<os::HapticLevel>(scaleLevel), scaleFactor,
+                                    adaptiveScaleFactor);
         ALOGD("Updating haptic scale, %s", hapticScale.toString().c_str());
         if (hapticScale.isScaleMute()) {
-            context->param.id2HapticScale.erase(paramId);
+            context->param.id2HapticScale.erase(id);
         } else {
-            context->param.id2HapticScale.emplace(paramId, hapticScale);
+            context->param.id2HapticScale.emplace(id, hapticScale);
         }
         context->param.maxHapticScale = hapticScale;
-        for (const auto&[id, scale] : context->param.id2HapticScale) {
+        for (const auto&[_, scale] : context->param.id2HapticScale) {
+            // TODO(b/360314386): update to use new scale factors
             if (scale.getLevel() > context->param.maxHapticScale.getLevel()) {
                 context->param.maxHapticScale = scale;
             }
