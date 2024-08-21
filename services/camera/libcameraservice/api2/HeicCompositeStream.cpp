@@ -25,11 +25,12 @@
 
 #include <aidl/android/hardware/camera/device/CameraBlob.h>
 #include <aidl/android/hardware/camera/device/CameraBlobId.h>
-#include <libyuv.h>
+#include <camera/StringUtils.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/Surface.h>
+#include <libyuv.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
-#include <camera/StringUtils.h>
 
 #include <mediadrm/ICrypto.h>
 #include <media/MediaCodecBuffer.h>
@@ -142,6 +143,13 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface
         return NO_INIT;
     }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    mAppSegmentConsumer = new CpuConsumer(kMaxAcquiredAppSegment);
+    mAppSegmentConsumer->setFrameAvailableListener(this);
+    mAppSegmentConsumer->setName(String8("Camera3-HeicComposite-AppSegmentStream"));
+    mAppSegmentSurface = mAppSegmentConsumer->getSurface();
+    sp<IGraphicBufferProducer> producer = mAppSegmentSurface->getIGraphicBufferProducer();
+#else
     sp<IGraphicBufferProducer> producer;
     sp<IGraphicBufferConsumer> consumer;
     BufferQueue::createBufferQueue(&producer, &consumer);
@@ -149,6 +157,7 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface
     mAppSegmentConsumer->setFrameAvailableListener(this);
     mAppSegmentConsumer->setName(String8("Camera3-HeicComposite-AppSegmentStream"));
     mAppSegmentSurface = new Surface(producer);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     mStaticInfo = device->info();
 
@@ -178,8 +187,13 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface
             return res;
         }
     } else {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        mMainImageConsumer = new CpuConsumer(1);
+        producer = mMainImageConsumer->getSurface()->getIGraphicBufferProducer();
+#else
         BufferQueue::createBufferQueue(&producer, &consumer);
         mMainImageConsumer = new CpuConsumer(consumer, 1);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
         mMainImageConsumer->setFrameAvailableListener(this);
         mMainImageConsumer->setName(String8("Camera3-HeicComposite-HevcInputYUVStream"));
     }
