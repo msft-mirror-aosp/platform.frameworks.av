@@ -51,6 +51,11 @@ soong_config_module_type {
     ],
 }
 
+vintf_fragment {
+    name: "manifest_media_c2_software_aidl.xml",
+    src: "manifest_media_c2_software_aidl.xml",
+}
+
 mediaserver_cc_binary {
     name: "mediaserver",
 
@@ -92,7 +97,7 @@ mediaserver_cc_binary {
     vintf_fragments: ["manifest_media_c2_software_hidl.xml"],
     product_variables: {
         release_aidl_use_unfrozen: {
-            vintf_fragments: ["manifest_media_c2_software_aidl.xml"],
+            vintf_fragment_modules: ["manifest_media_c2_software_aidl.xml"],
         },
     },
 
