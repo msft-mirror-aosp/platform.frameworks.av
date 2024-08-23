@@ -479,14 +479,12 @@ private:
                             NotificationClient(const sp<AudioFlinger>& audioFlinger,
                                                 const sp<media::IAudioFlingerClient>& client,
                                                 pid_t pid,
-                uid_t uid,
-                std::string_view packageName);
+                                                uid_t uid);
         virtual             ~NotificationClient();
 
                 sp<media::IAudioFlingerClient> audioFlingerClient() const { return mAudioFlingerClient; }
                 pid_t getPid() const { return mPid; }
                 uid_t getUid() const { return mUid; }
-                const std::string& getPackageName() const { return mPackageName; }
 
                 // IBinder::DeathRecipient
                 virtual     void        binderDied(const wp<IBinder>& who);
@@ -497,7 +495,6 @@ private:
         const sp<AudioFlinger>  mAudioFlinger;
         const pid_t             mPid;
         const uid_t             mUid;
-        const std::string mPackageName;
         const sp<media::IAudioFlingerClient> mAudioFlingerClient;
     };
 
@@ -697,7 +694,8 @@ private:
 
     DefaultKeyedVector<audio_io_handle_t, sp<IAfRecordThread>> mRecordThreads GUARDED_BY(mutex());
 
-    std::map<pid_t, sp<NotificationClient>> mNotificationClients GUARDED_BY(clientMutex());
+    DefaultKeyedVector<pid_t, sp<NotificationClient>> mNotificationClients
+            GUARDED_BY(clientMutex());
 
                 // updated by atomic_fetch_add_explicit
     volatile atomic_uint_fast32_t mNextUniqueIds[AUDIO_UNIQUE_ID_USE_MAX];  // ctor init
