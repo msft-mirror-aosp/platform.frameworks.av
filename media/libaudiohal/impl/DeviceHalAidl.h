@@ -235,7 +235,6 @@ class DeviceHalAidl : public DeviceHalInterface, public ConversionHelperAidl,
     // MicrophoneInfoProvider implementation
     MicrophoneInfoProvider::Info const* getMicrophoneInfo() override;
 
-    const std::string mInstance;
     const std::shared_ptr<::aidl::android::hardware::audio::core::IModule> mModule;
     const std::shared_ptr<::aidl::android::media::audio::IHalAdapterVendorExtension> mVendorExt;
     const std::shared_ptr<::aidl::android::hardware::audio::core::ITelephony> mTelephony;
