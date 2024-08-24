@@ -15,37 +15,23 @@
  */
 
 #include "PowerStatsProvider.h"
-#include <android-base/logging.h>
-#include <android/binder_manager.h>
-#include <unordered_map>
 #include <aidl/android/hardware/power/stats/IPowerStats.h>
+#include <android-base/logging.h>
+#include <psh_utils/ServiceSingleton.h>
+#include <unordered_map>
 
 using ::aidl::android::hardware::power::stats::IPowerStats;
 
 namespace android::media::psh_utils {
 
 static auto getPowerStatsService() {
-    [[clang::no_destroy]] static constinit std::mutex m;
-    [[clang::no_destroy]] static constinit
-            std::shared_ptr<IPowerStats> powerStats;
-
-    std::lock_guard l(m);
-    if (powerStats) {
-        return powerStats;
-    }
-    const auto serviceName =
-            std::string(IPowerStats::descriptor)
-                    .append("/default");
-    powerStats = IPowerStats::fromBinder(
-            ::ndk::SpAIBinder(AServiceManager_checkService(serviceName.c_str())));
-    return powerStats;
+    return getServiceSingleton<IPowerStats>();
 }
 
 status_t RailEnergyDataProvider::fill(PowerStats *stat) const {
     if (stat == nullptr) return BAD_VALUE;
     auto powerStatsService = getPowerStatsService();
     if (powerStatsService == nullptr) {
-        LOG(ERROR) << "unable to get power.stats AIDL service";
         return NO_INIT;
     }
 
@@ -91,7 +77,6 @@ status_t PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
     if (stat == nullptr) return BAD_VALUE;
     auto powerStatsService = getPowerStatsService();
     if (powerStatsService == nullptr) {
-        LOG(ERROR) << "unable to get power.stats AIDL service";
         return NO_INIT;
     }
 

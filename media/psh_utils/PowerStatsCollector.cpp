@@ -80,10 +80,7 @@ int PowerStatsCollector::fill(PowerStats* stats) const {
     }
 
     for (const auto& provider : mPowerStatsProviders) {
-        if (provider->fill(stats) != 0) {
-            LOG(ERROR) << __func__ << ": a data provider failed";
-            continue;
-        }
+        (void) provider->fill(stats); // on error, we continue to proceed.
     }
 
     // boot time follows wall clock time, but starts from boot.

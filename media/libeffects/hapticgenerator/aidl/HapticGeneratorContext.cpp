@@ -36,7 +36,7 @@ HapticGeneratorContext::HapticGeneratorContext(int statusDepth, const Parameter:
     : EffectContext(statusDepth, common) {
     mState = HAPTIC_GENERATOR_STATE_UNINITIALIZED;
 
-    mParams.mMaxVibratorScale = HapticGenerator::VibratorScale::MUTE;
+    mParams.mMaxHapticScale = {.scale = HapticGenerator::VibratorScale::MUTE};
     mParams.mVibratorInfo.resonantFrequencyHz = DEFAULT_RESONANT_FREQUENCY;
     mParams.mVibratorInfo.qFactor = DEFAULT_BSF_ZERO_Q;
     mParams.mVibratorInfo.maxAmplitude = 0.f;
@@ -87,13 +87,17 @@ RetCode HapticGeneratorContext::reset() {
 RetCode HapticGeneratorContext::setHgHapticScales(
         const std::vector<HapticGenerator::HapticScale>& hapticScales) {
     for (auto hapticScale : hapticScales) {
-        mParams.mHapticScales.insert_or_assign(hapticScale.id, hapticScale.scale);
+        mParams.mHapticScales.insert_or_assign(hapticScale.id, hapticScale);
     }
-    mParams.mMaxVibratorScale = HapticGenerator::VibratorScale::MUTE;
+    mParams.mMaxHapticScale = {.scale = HapticGenerator::VibratorScale::MUTE};
     for (const auto& [id, vibratorScale] : mParams.mHapticScales) {
-        mParams.mMaxVibratorScale = std::max(mParams.mMaxVibratorScale, vibratorScale);
+        // TODO(b/360314386): update to use new scale factors
+        if (vibratorScale.scale > mParams.mMaxHapticScale.scale) {
+            mParams.mMaxHapticScale = vibratorScale;
+        }
     }
-    LOG(INFO) << " HapticGenerator VibratorScale set to " << toString(mParams.mMaxVibratorScale);
+    LOG(INFO) << " HapticGenerator VibratorScale set to "
+              << toString(mParams.mMaxHapticScale.scale);
     return RetCode::SUCCESS;
 }
 
@@ -103,8 +107,8 @@ HapticGenerator::VibratorInformation HapticGeneratorContext::getHgVibratorInform
 
 std::vector<HapticGenerator::HapticScale> HapticGeneratorContext::getHgHapticScales() const {
     std::vector<HapticGenerator::HapticScale> result;
-    for (const auto& [id, vibratorScale] : mParams.mHapticScales) {
-        result.push_back({id, vibratorScale});
+    for (const auto& [_, hapticScale] : mParams.mHapticScales) {
+        result.push_back(hapticScale);
     }
     return result;
 }
@@ -150,7 +154,7 @@ IEffect::Status HapticGeneratorContext::process(float* in, float* out, int sampl
         return status;
     }
 
-    if (mParams.mMaxVibratorScale == HapticGenerator::VibratorScale::MUTE) {
+    if (mParams.mMaxHapticScale.scale == HapticGenerator::VibratorScale::MUTE) {
         // Haptic channels are muted, not need to generate haptic data.
         return {STATUS_OK, samples, samples};
     }
@@ -177,9 +181,10 @@ IEffect::Status HapticGeneratorContext::process(float* in, float* out, int sampl
             runProcessingChain(mInputBuffer.data(), mOutputBuffer.data(), mFrameCount);
     ::android::os::scaleHapticData(
             hapticOutBuffer, hapticSampleCount,
-            // TODO(b/356406686): add the new HapticScale fields to the AIDL interface.
             ::android::os::HapticScale(
-                    static_cast<::android::os::HapticLevel>(mParams.mMaxVibratorScale)),
+                    static_cast<::android::os::HapticLevel>(mParams.mMaxHapticScale.scale),
+                    mParams.mMaxHapticScale.scaleFactor,
+                    mParams.mMaxHapticScale.adaptiveScaleFactor),
             mParams.mVibratorInfo.maxAmplitude /* limit */);
 
     // For haptic data, the haptic playback thread will copy the data from effect input
@@ -353,11 +358,12 @@ std::string HapticGeneratorContext::paramToString(const struct HapticGeneratorPa
     ss << "\t\t- mAudioChannelCount: " << param.mAudioChannelCount << '\n';
     ss << "\t\t- mHapticChannelSource: " << param.mHapticChannelSource[0] << ", "
        << param.mHapticChannelSource[1] << '\n';
-    ss << "\t\t- mMaxVibratorScale: " << ::android::internal::ToString(param.mMaxVibratorScale)
-       << '\n';
+    ss << "\t\t- mMaxHapticScale: " << ::android::internal::ToString(param.mMaxHapticScale.scale)
+       << ", scaleFactor=" << param.mMaxHapticScale.scaleFactor
+       << ", adaptiveScaleFactor=" << param.mMaxHapticScale.adaptiveScaleFactor << '\n';
     ss << "\t\t- mVibratorInfo: " << param.mVibratorInfo.toString() << '\n';
     for (const auto& it : param.mHapticScales)
-        ss << "\t\t\t" << it.first << ": " << toString(it.second) << '\n';
+        ss << "\t\t\t" << it.first << ": " << toString(it.second.scale) << '\n';
 
     return ss.str();
 }
