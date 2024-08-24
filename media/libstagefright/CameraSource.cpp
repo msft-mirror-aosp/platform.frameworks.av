@@ -33,6 +33,7 @@
 #include <camera/Camera.h>
 #include <camera/CameraParameters.h>
 #include <camera/StringUtils.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/Surface.h>
 #include <utils/String8.h>
 #include <cutils/properties.h>
@@ -471,11 +472,13 @@ status_t CameraSource::initBufferQueue(uint32_t width, uint32_t height,
         ALOGE("%s: Buffer queue already exists", __FUNCTION__);
         return ALREADY_EXISTS;
     }
-
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     // Create a buffer queue.
     sp<IGraphicBufferProducer> producer;
     sp<IGraphicBufferConsumer> consumer;
     BufferQueue::createBufferQueue(&producer, &consumer);
+#endif // !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
 
     uint32_t usage = GRALLOC_USAGE_SW_READ_OFTEN;
     if (format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
@@ -484,9 +487,15 @@ status_t CameraSource::initBufferQueue(uint32_t width, uint32_t height,
 
     bufferCount += kConsumerBufferCount;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    mVideoBufferConsumer = new BufferItemConsumer(usage, bufferCount);
+    mVideoBufferConsumer->setName(String8::format("StageFright-CameraSource"));
+    mVideoBufferProducer = mVideoBufferConsumer->getSurface()->getIGraphicBufferProducer();
+#else
     mVideoBufferConsumer = new BufferItemConsumer(consumer, usage, bufferCount);
     mVideoBufferConsumer->setName(String8::format("StageFright-CameraSource"));
     mVideoBufferProducer = producer;
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     status_t res = mVideoBufferConsumer->setDefaultBufferSize(width, height);
     if (res != OK) {
