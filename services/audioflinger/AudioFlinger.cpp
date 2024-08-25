@@ -4015,8 +4015,12 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
         // TODO: We could check compatibility of the secondaryThread with the PatchTrack
         // for fast usage: thread has fast mixer, sample rate matches, etc.;
         // for now, we exclude fast tracks by removing the Fast flag.
+        constexpr audio_output_flags_t kIncompatiblePatchTrackFlags =
+                static_cast<audio_output_flags_t>(AUDIO_OUTPUT_FLAG_FAST
+                        | AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD);
+
         const audio_output_flags_t outputFlags =
-                (audio_output_flags_t)(track->getOutputFlags() & ~AUDIO_OUTPUT_FLAG_FAST);
+                (audio_output_flags_t)(track->getOutputFlags() & ~kIncompatiblePatchTrackFlags);
         sp<IAfPatchTrack> patchTrack = IAfPatchTrack::create(secondaryThread,
                                                        track->streamType(),
                                                        track->sampleRate(),

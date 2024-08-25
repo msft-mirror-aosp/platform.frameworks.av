@@ -286,7 +286,7 @@ bool modifyAudioRoutingAllowed() {
 bool modifyAudioRoutingAllowed(const AttributionSourceState& attributionSource) {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
-    if (isAudioServerUid(IPCThreadState::self()->getCallingUid())) return true;
+    if (isAudioServerUid(uid)) return true;
     // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
     bool ok = PermissionCache::checkPermission(sModifyAudioRouting, pid, uid);
     if (!ok) ALOGE("%s(): android.permission.MODIFY_AUDIO_ROUTING denied for uid %d",
@@ -301,7 +301,7 @@ bool modifyDefaultAudioEffectsAllowed() {
 bool modifyDefaultAudioEffectsAllowed(const AttributionSourceState& attributionSource) {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
-    if (isAudioServerUid(IPCThreadState::self()->getCallingUid())) return true;
+    if (isAudioServerUid(uid)) return true;
 
     static const String16 sModifyDefaultAudioEffectsAllowed(
             "android.permission.MODIFY_DEFAULT_AUDIO_EFFECTS");

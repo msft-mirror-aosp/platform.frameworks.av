@@ -467,6 +467,9 @@ struct Codec2Client::Component : public Codec2Client::Configurable {
             const QueueBufferInput& input,
             QueueBufferOutput* output);
 
+    // configure consumer usage.
+    uint64_t configConsumerUsage(const sp<IGraphicBufferProducer>& surface);
+
     // Retrieve frame event history from the output surface.
     void pollForRenderedFrames(FrameEventHistoryDelta* delta);
 

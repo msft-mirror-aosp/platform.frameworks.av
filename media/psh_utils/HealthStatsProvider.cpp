@@ -18,6 +18,7 @@
 #include <aidl/android/hardware/health/IHealth.h>
 #include <android-base/logging.h>
 #include <android/binder_manager.h>
+#include <psh_utils/ServiceSingleton.h>
 
 using ::aidl::android::hardware::health::HealthInfo;
 using ::aidl::android::hardware::health::IHealth;
@@ -25,19 +26,7 @@ using ::aidl::android::hardware::health::IHealth;
 namespace android::media::psh_utils {
 
 static auto getHealthService() {
-    [[clang::no_destroy]] static constinit std::mutex m;
-    [[clang::no_destroy]] static constinit
-            std::shared_ptr<IHealth> healthService;
-
-    std::lock_guard l(m);
-    if (healthService) {
-        return healthService;
-    }
-    const auto serviceName =
-            std::string(IHealth::descriptor).append("/default");
-    healthService = IHealth::fromBinder(
-            ::ndk::SpAIBinder(AServiceManager_checkService(serviceName.c_str())));
-    return healthService;
+    return getServiceSingleton<IHealth>();
 }
 
 status_t HealthStatsDataProvider::fill(PowerStats* stat) const {
@@ -45,7 +34,6 @@ status_t HealthStatsDataProvider::fill(PowerStats* stat) const {
     HealthStats& stats = stat->health_stats;
     auto healthService = getHealthService();
     if (healthService == nullptr) {
-        LOG(ERROR) << "unable to get health AIDL service";
         return NO_INIT;
     }
     HealthInfo healthInfo;

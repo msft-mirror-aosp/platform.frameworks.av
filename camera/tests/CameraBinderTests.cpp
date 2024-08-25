@@ -47,6 +47,7 @@
 #include <camera/CameraUtils.h>
 #include <camera/StringUtils.h>
 
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
@@ -518,6 +519,23 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
 
         // Setup a buffer queue; I'm just using the vendor opaque format here as that is
         // guaranteed to be present
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        sp<BufferItemConsumer> opaqueConsumer = new BufferItemConsumer(
+                GRALLOC_USAGE_SW_READ_NEVER, /*maxImages*/ 2, /*controlledByApp*/ true);
+        EXPECT_TRUE(opaqueConsumer.get() != nullptr);
+        opaqueConsumer->setName(String8("nom nom nom"));
+
+        // Set to VGA dimens for default, as that is guaranteed to be present
+        EXPECT_EQ(OK, opaqueConsumer->setDefaultBufferSize(640, 480));
+        EXPECT_EQ(OK,
+                  opaqueConsumer->setDefaultBufferFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED));
+
+        sp<Surface> surface = opaqueConsumer->getSurface();
+
+        sp<IGraphicBufferProducer> producer = surface->getIGraphicBufferProducer();
+        std::string noPhysicalId;
+        OutputConfiguration output(producer, /*rotation*/ 0, noPhysicalId);
+#else
         sp<IGraphicBufferProducer> gbProducer;
         sp<IGraphicBufferConsumer> gbConsumer;
         BufferQueue::createBufferQueue(&gbProducer, &gbConsumer);
@@ -534,6 +552,7 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
 
         std::string noPhysicalId;
         OutputConfiguration output(gbProducer, /*rotation*/0, noPhysicalId);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
         // Can we configure?
         res = device->beginConfigure();

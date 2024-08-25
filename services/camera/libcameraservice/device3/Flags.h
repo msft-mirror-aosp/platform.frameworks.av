@@ -16,23 +16,12 @@
 
 #pragma once
 
-#include <psh_utils/PowerStatsCollector.h>
+#include <com_android_graphics_libgui_flags.h>
 
-namespace android::media::psh_utils {
+#ifndef USE_NEW_STREAM_SPLITTER
 
-class RailEnergyDataProvider : public PowerStatsProvider {
-public:
-    status_t fill(PowerStats* stat) const override;
-};
+#define USE_NEW_STREAM_SPLITTER                              \
+    COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_STREAM_SPLITTER) && \
+            COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
-class PowerEntityResidencyDataProvider : public PowerStatsProvider {
-public:
-    status_t fill(PowerStats* stat) const override;
-};
-
-class HealthStatsDataProvider : public PowerStatsProvider {
-public:
-    status_t fill(PowerStats* stat) const override;
-};
-
-} // namespace android::media::psh_utils
+#endif  // USE_NEW_STREAM_SPLITTER

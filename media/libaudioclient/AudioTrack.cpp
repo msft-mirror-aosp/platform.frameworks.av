@@ -1676,6 +1676,18 @@ status_t AudioTrack::setOutputDevice(audio_port_handle_t deviceId) {
     AutoMutex lock(mLock);
     ALOGV("%s(%d): deviceId=%d mSelectedDeviceId=%d",
             __func__, mPortId, deviceId, mSelectedDeviceId);
+    const int64_t beginNs = systemTime();
+    mediametrics::Defer defer([&] {
+        mediametrics::LogItem(mMetricsId)
+                .set(AMEDIAMETRICS_PROP_CALLERNAME,
+                     mCallerName.empty()
+                     ? AMEDIAMETRICS_PROP_CALLERNAME_VALUE_UNKNOWN
+                     : mCallerName.c_str())
+                .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_SETPREFERREDDEVICE)
+                .set(AMEDIAMETRICS_PROP_EXECUTIONTIMENS, (int64_t)(systemTime() - beginNs))
+                .set(AMEDIAMETRICS_PROP_SELECTEDDEVICEID, (int32_t)deviceId)
+                .record(); });
+
     if (mSelectedDeviceId != deviceId) {
         mSelectedDeviceId = deviceId;
         if (mStatus == NO_ERROR) {
