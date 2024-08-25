@@ -1587,18 +1587,25 @@ status_t EffectModule::setHapticScale_l(int id, os::HapticScale hapticScale) {
         return INVALID_OPERATION;
     }
 
+    // Scale param fields
+    int32_t intensityParam = static_cast<int32_t>(HG_PARAM_HAPTIC_INTENSITY);
+    int32_t scaleLevel = static_cast<int32_t>(hapticScale.getLevel());
+    float scaleFactor = hapticScale.getScaleFactor();
+    float adaptiveScaleFactor = hapticScale.getAdaptiveScaleFactor();
+
     size_t psize = sizeof(int32_t); // HG_PARAM_HAPTIC_INTENSITY
-    size_t vsize = sizeof(int32_t) + sizeof(os::HapticScale); // id + hapticScale
+    size_t vsize = 2 * sizeof(int32_t) + 2 * sizeof(float); // id + scale fields
     std::vector<uint8_t> request(sizeof(effect_param_t) + psize + vsize);
     effect_param_t *effectParam = (effect_param_t*) request.data();
     effectParam->psize = psize;
     effectParam->vsize = vsize;
 
-    int32_t intensityParam = static_cast<int32_t>(HG_PARAM_HAPTIC_INTENSITY);
     EffectParamWriter writer(*effectParam);
     writer.writeToParameter(&intensityParam);
     writer.writeToValue(&id);
-    writer.writeToValue(&hapticScale);
+    writer.writeToValue(&scaleLevel);
+    writer.writeToValue(&scaleFactor);
+    writer.writeToValue(&adaptiveScaleFactor);
     writer.finishValueWrite();
 
     std::vector<uint8_t> response;

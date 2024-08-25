@@ -31,6 +31,7 @@
 #include <C2Debug.h>
 #include <codec2/common/HalSelection.h>
 #include <codec2/hidl/client.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferQueue.h>
 #include <gui/IConsumerListener.h>
 #include <gui/IProducerListener.h>
@@ -423,7 +424,6 @@ void setOutputSurface(const std::shared_ptr<android::Codec2Client::Component>& c
                       surfaceMode_t surfMode) {
     using namespace android;
     sp<IGraphicBufferProducer> producer = nullptr;
-    sp<IGraphicBufferConsumer> consumer = nullptr;
     sp<GLConsumer> texture = nullptr;
     sp<ANativeWindow> surface = nullptr;
     static std::atomic_uint32_t surfaceGeneration{0};
@@ -442,6 +442,16 @@ void setOutputSurface(const std::shared_ptr<android::Codec2Client::Component>& c
     }
 
     if (surfMode == SURFACE) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        texture = new GLConsumer(0 /* tex */, GLConsumer::TEXTURE_EXTERNAL, true /* useFenceSync */,
+                                 false /* isControlledByApp */);
+        sp<Surface> s = texture->getSurface();
+        surface = s;
+        ASSERT_NE(surface, nullptr) << "failed to create Surface object";
+
+        producer = s->getIGraphicBufferProducer();
+#else
+        sp<IGraphicBufferConsumer> consumer = nullptr;
         BufferQueue::createBufferQueue(&producer, &consumer);
         ASSERT_NE(producer, nullptr) << "createBufferQueue returned invalid producer";
         ASSERT_NE(consumer, nullptr) << "createBufferQueue returned invalid consumer";
@@ -452,6 +462,7 @@ void setOutputSurface(const std::shared_ptr<android::Codec2Client::Component>& c
 
         surface = new Surface(producer);
         ASSERT_NE(surface, nullptr) << "failed to create Surface object";
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
         producer->setGenerationNumber(generation);
     }
