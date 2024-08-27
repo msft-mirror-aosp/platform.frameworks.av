@@ -412,7 +412,8 @@ public:
                       const DeviceVector &devices,
                       audio_stream_type_t stream,
                       audio_output_flags_t flags,
-                      audio_io_handle_t *output);
+                      audio_io_handle_t *output,
+                      audio_attributes_t attributes);
 
         // Called when a stream is about to be started
         // Note: called before setClientActive(true);
