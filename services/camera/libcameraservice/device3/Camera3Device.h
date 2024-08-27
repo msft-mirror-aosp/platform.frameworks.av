@@ -36,6 +36,7 @@
 #include <aidl/android/hardware/camera/device/CameraBlob.h>
 
 #include "common/CameraDeviceBase.h"
+#include "common/DepthPhotoProcessor.h"
 #include "device3/BufferUtils.h"
 #include "device3/StatusTracker.h"
 #include "device3/Camera3BufferManager.h"
@@ -376,8 +377,8 @@ class Camera3Device :
 
     struct                     RequestTrigger;
     // minimal jpeg buffer size: 256KB + blob header
-    static const ssize_t       kMinJpegBufferSize =
-            256 * 1024 + sizeof(aidl::android::hardware::camera::device::CameraBlob);
+    static const ssize_t       kMinJpegBufferSize = camera3::MIN_JPEG_BUFFER_SIZE +
+            sizeof(aidl::android::hardware::camera::device::CameraBlob);
     // Constant to use for stream ID when one doesn't exist
     static const int           NO_STREAM = -1;
 
