@@ -2628,10 +2628,12 @@ class AudioPolicyManagerTestClientOpenFails : public AudioPolicyManagerTestClien
                         audio_config_base_t * mixerConfig,
                         const sp<DeviceDescriptorBase>& device,
                         uint32_t * latencyMs,
-                        audio_output_flags_t flags) override {
+                        audio_output_flags_t flags,
+                        audio_attributes_t attributes) override {
         return mSimulateFailure ? BAD_VALUE :
                 AudioPolicyManagerTestClient::openOutput(
-                        module, output, halConfig, mixerConfig, device, latencyMs, flags);
+                        module, output, halConfig, mixerConfig, device, latencyMs, flags,
+                        attributes);
     }
 
     status_t openInput(audio_module_handle_t module,
