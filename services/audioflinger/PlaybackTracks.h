@@ -96,7 +96,8 @@ public:
                                 size_t frameCountToBeReady = SIZE_MAX,
                                 float speed = 1.0f,
                                 bool isSpatialized = false,
-                                bool isBitPerfect = false);
+                                bool isBitPerfect = false,
+                                float volume = 0.0f);
     ~Track() override;
     status_t initCheck() const final;
     void appendDumpHeader(String8& result) const final;
@@ -222,6 +223,13 @@ public:
 
     bool getInternalMute() const final { return mInternalMute; }
     void setInternalMute(bool muted) final { mInternalMute = muted; }
+
+    // VolumePortInterface implementation
+    void setPortVolume(float volume) override {
+        mVolume = volume;
+    }
+    float getPortVolume() const override { return mVolume; }
+
 protected:
 
     DISALLOW_COPY_AND_ASSIGN(Track);
@@ -362,6 +370,8 @@ private:
         for (auto& tp : mTeePatches) { f(tp.patchTrack); }
     };
 
+    void                populateUsageAndContentTypeFromStreamType();
+
     size_t              mPresentationCompleteFrames = 0; // (Used for Mixed tracks)
                                     // The number of frames written to the
                                     // audio HAL when this track is considered fully rendered.
@@ -403,8 +413,8 @@ private:
     // access these two variables only when holding player thread lock.
     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
     mute_state_t        mMuteState;
-
     bool                mInternalMute = false;
+    float mVolume = 0.0f;
 };  // end of Track
 
 
@@ -501,7 +511,8 @@ public:
                                                                     *  as soon as possible to have
                                                                     *  the lowest possible latency
                                                                     *  even if it might glitch. */
-                                   float speed = 1.0f);
+                                   float speed = 1.0f,
+                                   float volume = 1.0f);
     ~PatchTrack() override;
 
     size_t framesReady() const final;
