@@ -1124,7 +1124,8 @@ private:
                 const audio_config_t *config,
                 audio_output_flags_t flags,
                 const DeviceVector &devices,
-                audio_io_handle_t *output);
+                audio_io_handle_t *output,
+                audio_attributes_t attributes);
 
         /**
          * @brief Queries if some kind of spatialization will be performed if the audio playback
