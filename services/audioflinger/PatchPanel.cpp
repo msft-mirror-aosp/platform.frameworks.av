@@ -649,7 +649,8 @@ status_t PatchPanel::Patch::createConnections_l(const sp<IAfPatchPanel>& panel)
                                            outputFlags,
                                            {} /*timeout*/,
                                            frameCountToBeReady,
-                                           1.0f);
+                                           1.0f /*speed*/,
+                                           1.0f /*volume*/);
     status = mPlayback.checkTrack(tempPatchTrack.get());
     if (status != NO_ERROR) {
         return status;
