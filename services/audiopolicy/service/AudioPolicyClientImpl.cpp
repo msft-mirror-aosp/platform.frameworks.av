@@ -191,16 +191,6 @@ status_t AudioPolicyService::AudioPolicyClient::setStreamVolume(audio_stream_typ
                                                delay_ms);
 }
 
-status_t AudioPolicyService::AudioPolicyClient::setPortsVolume(
-        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output,
-        int delayMs)
-{
-    if (ports.empty()) {
-        return NO_ERROR;
-    }
-    return mAudioPolicyService->setPortsVolume(ports, volume, output, delayMs);
-}
-
 void AudioPolicyService::AudioPolicyClient::setParameters(audio_io_handle_t io_handle,
                    const String8& keyValuePairs,
                    int delay_ms)
