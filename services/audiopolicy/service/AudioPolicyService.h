@@ -47,6 +47,7 @@
 #include <android/hardware/BnSensorPrivacyListener.h>
 #include <android/content/AttributionSourceState.h>
 
+#include <numeric>
 #include <unordered_map>
 
 namespace android {
@@ -354,6 +355,21 @@ public:
                                      float volume,
                                      audio_io_handle_t output,
                                      int delayMs = 0);
+
+    /**
+     * Set a volume on AudioTrack port id(s) for a particular output.
+     * For the same user setting, a volume group (and associated given port of the
+     * client's track) can have different volumes for each output destination device
+     * it is attached to.
+     *
+     * @param ports to consider
+     * @param volume to set
+     * @param output to consider
+     * @param delayMs to use
+     * @return NO_ERROR if successful
+     */
+    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+            audio_io_handle_t output, int delayMs = 0);
     virtual status_t setVoiceVolume(float volume, int delayMs = 0);
 
     void doOnNewAudioModulesAvailable();
@@ -577,6 +593,7 @@ private:
         // commands for tone AudioCommand
         enum {
             SET_VOLUME,
+            SET_PORTS_VOLUME,
             SET_PARAMETERS,
             SET_VOICE_VOLUME,
             STOP_OUTPUT,
@@ -610,6 +627,8 @@ private:
                     void        exit();
                     status_t    volumeCommand(audio_stream_type_t stream, float volume,
                                             audio_io_handle_t output, int delayMs = 0);
+                    status_t    volumePortsCommand(const std::vector<audio_port_handle_t> &ports,
+                            float volume, audio_io_handle_t output, int delayMs = 0);
                     status_t    parametersCommand(audio_io_handle_t ioHandle,
                                             const char *keyValuePairs, int delayMs = 0);
                     status_t    voiceVolumeCommand(float volume, int delayMs = 0);
@@ -682,6 +701,20 @@ private:
             audio_stream_type_t mStream;
             float mVolume;
             audio_io_handle_t mIO;
+        };
+
+        class VolumePortsData : public AudioCommandData {
+        public:
+            std::vector<audio_port_handle_t> mPorts;
+            float mVolume;
+            audio_io_handle_t mIO;
+            std::string dumpPorts() {
+                return std::string("volume ") + std::to_string(mVolume) + " on IO " +
+                        std::to_string(mIO) + " and ports " +
+                        std::accumulate(std::begin(mPorts), std::end(mPorts), std::string{},
+                                       [] (const std::string& ls, int rs) {
+                                return ls + std::to_string(rs) + " "; });
+            }
         };
 
         class ParametersData : public AudioCommandData {
@@ -824,6 +857,19 @@ private:
         // set a stream volume for a particular output. For the same user setting, a given stream type can have different volumes
         // for each output (destination device) it is attached to.
         virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, audio_io_handle_t output, int delayMs = 0);
+        /**
+         * Set a volume on port(s) for a particular output. For the same user setting, a volume
+         * group (and associated given port of the client's track) can have different volumes for
+         * each output (destination device) it is attached to.
+         *
+         * @param ports to consider
+         * @param volume to set
+         * @param output to consider
+         * @param delayMs to use
+         * @return NO_ERROR if successful
+         */
+        status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+                audio_io_handle_t output, int delayMs = 0) override;
 
         // function enabling to send proprietary informations directly from audio policy manager to audio hardware interface.
         virtual void setParameters(audio_io_handle_t ioHandle, const String8& keyValuePairs, int delayMs = 0);
