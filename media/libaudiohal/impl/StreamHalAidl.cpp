@@ -91,7 +91,7 @@ StreamHalAidl::StreamHalAidl(std::string_view className, bool isInput, const aud
                            mContext.getBufferDurationMs(mConfig.sample_rate))
                   * NANOS_PER_MILLISECOND)
 {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     {
         std::lock_guard l(mLock);
         mLastReply.latencyMs = nominalLatency;
@@ -106,7 +106,7 @@ StreamHalAidl::StreamHalAidl(std::string_view className, bool isInput, const aud
 }
 
 StreamHalAidl::~StreamHalAidl() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     if (mStream != nullptr) {
         ndk::ScopedAStatus status = mStream->close();
         AUGMENT_LOG_IF(E, !status.isOk(), "status %s", status.getDescription().c_str());
@@ -114,7 +114,7 @@ StreamHalAidl::~StreamHalAidl() {
 }
 
 status_t StreamHalAidl::getBufferSize(size_t *size) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     if (size == nullptr) {
         return BAD_VALUE;
     }
@@ -128,7 +128,7 @@ status_t StreamHalAidl::getBufferSize(size_t *size) {
 }
 
 status_t StreamHalAidl::getAudioProperties(audio_config_base_t *configBase) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     if (configBase == nullptr) {
         return BAD_VALUE;
     }
@@ -138,7 +138,7 @@ status_t StreamHalAidl::getAudioProperties(audio_config_base_t *configBase) {
 }
 
 status_t StreamHalAidl::setParameters(const String8& kvPairs) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     AudioParameter parameters(kvPairs);
@@ -153,7 +153,7 @@ status_t StreamHalAidl::setParameters(const String8& kvPairs) {
 }
 
 status_t StreamHalAidl::getParameters(const String8& keys __unused, String8 *values) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (values == nullptr) {
@@ -165,7 +165,7 @@ status_t StreamHalAidl::getParameters(const String8& keys __unused, String8 *val
 }
 
 status_t StreamHalAidl::getFrameSize(size_t *size) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     if (size == nullptr) {
         return BAD_VALUE;
     }
@@ -177,7 +177,7 @@ status_t StreamHalAidl::getFrameSize(size_t *size) {
 }
 
 status_t StreamHalAidl::addEffect(sp<EffectHalInterface> effect) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (effect == nullptr) {
@@ -188,7 +188,7 @@ status_t StreamHalAidl::addEffect(sp<EffectHalInterface> effect) {
 }
 
 status_t StreamHalAidl::removeEffect(sp<EffectHalInterface> effect) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (effect == nullptr) {
@@ -199,7 +199,7 @@ status_t StreamHalAidl::removeEffect(sp<EffectHalInterface> effect) {
 }
 
 status_t StreamHalAidl::standby() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     const auto state = getState();
@@ -247,7 +247,7 @@ status_t StreamHalAidl::standby() {
 }
 
 status_t StreamHalAidl::dump(int fd, const Vector<String16>& args) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     Vector<String16> newArgs = args;
@@ -258,7 +258,7 @@ status_t StreamHalAidl::dump(int fd, const Vector<String16>& args) {
 }
 
 status_t StreamHalAidl::start() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (!mContext.isMmapped()) {
@@ -304,7 +304,7 @@ status_t StreamHalAidl::start() {
 }
 
 status_t StreamHalAidl::stop() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (!mContext.isMmapped()) {
@@ -329,7 +329,7 @@ status_t StreamHalAidl::stop() {
 }
 
 status_t StreamHalAidl::getLatency(uint32_t *latency) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
@@ -342,7 +342,7 @@ status_t StreamHalAidl::getLatency(uint32_t *latency) {
 
 status_t StreamHalAidl::getObservablePosition(int64_t* frames, int64_t* timestamp,
         StatePositions* statePositions) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply, statePositions));
@@ -352,7 +352,7 @@ status_t StreamHalAidl::getObservablePosition(int64_t* frames, int64_t* timestam
 }
 
 status_t StreamHalAidl::getHardwarePosition(int64_t *frames, int64_t *timestamp) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
@@ -362,7 +362,7 @@ status_t StreamHalAidl::getHardwarePosition(int64_t *frames, int64_t *timestamp)
 }
 
 status_t StreamHalAidl::getXruns(int32_t *frames) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
@@ -371,7 +371,7 @@ status_t StreamHalAidl::getXruns(int32_t *frames) {
 }
 
 status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!mStream || mContext.getDataMQ() == nullptr) return NO_INIT;
     mWorkerTid.store(gettid(), std::memory_order_release);
@@ -422,7 +422,7 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
 }
 
 status_t StreamHalAidl::pause(StreamDescriptor::Reply* reply) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
 
@@ -438,7 +438,7 @@ status_t StreamHalAidl::pause(StreamDescriptor::Reply* reply) {
 }
 
 status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (mIsInput) {
@@ -475,7 +475,7 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
 }
 
 status_t StreamHalAidl::drain(bool earlyNotify, StreamDescriptor::Reply* reply) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     return sendCommand(makeHalCommand<HalCommand::Tag::drain>(
@@ -486,7 +486,7 @@ status_t StreamHalAidl::drain(bool earlyNotify, StreamDescriptor::Reply* reply) 
 }
 
 status_t StreamHalAidl::flush(StreamDescriptor::Reply* reply) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
 
@@ -505,7 +505,7 @@ status_t StreamHalAidl::flush(StreamDescriptor::Reply* reply) {
 }
 
 status_t StreamHalAidl::exit() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     return statusTFromBinderStatus(mStream->prepareToClose());
@@ -545,7 +545,7 @@ void StreamHalAidl::onAsyncError() {
 
 status_t StreamHalAidl::createMmapBuffer(int32_t minSizeFrames __unused,
                                          struct audio_mmap_buffer_info *info) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (!mContext.isMmapped()) {
@@ -783,7 +783,7 @@ status_t StreamOutHalAidl::getRenderPosition(uint64_t *dspFrames) {
 }
 
 status_t StreamOutHalAidl::setCallback(wp<StreamOutHalInterfaceCallback> callback) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     if (!mContext.isAsynchronous()) {
@@ -859,7 +859,7 @@ status_t StreamOutHalAidl::getPresentationPosition(uint64_t *frames, struct time
 }
 
 status_t StreamOutHalAidl::presentationComplete() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     return OK;
 }
 

@@ -1489,8 +1489,7 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
                                               std::vector<audio_io_handle_t> *secondaryOutputs,
                                               output_type_t *outputType,
                                               bool *isSpatialized,
-                                              bool *isBitPerfect,
-                                              float *volume)
+                                              bool *isBitPerfect)
 {
     // The supplied portId must be AUDIO_PORT_HANDLE_NONE
     if (*portId != AUDIO_PORT_HANDLE_NONE) {
@@ -1545,8 +1544,6 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
                                   std::move(weakSecondaryOutputDescs),
                                   outputDesc->mPolicyMix);
     outputDesc->addClient(clientDesc);
-
-    *volume = Volume::DbToAmpl(outputDesc->getCurVolume(toVolumeSource(resultAttr)));
 
     ALOGV("%s() returns output %d requestedPortId %d selectedDeviceId %d for port ID %d", __func__,
           *output, requestedPortId, *selectedDeviceId, *portId);
@@ -7388,28 +7385,35 @@ void AudioPolicyManager::checkOutputForAttributes(const audio_attributes_t &attr
     std::vector<sp<SwAudioOutputDescriptor>> invalidatedOutputs;
     // take into account dynamic audio policies related changes: if a client is now associated
     // to a different policy mix than at creation time, invalidate corresponding stream
+    // invalidate clients on outputs that do not support all the newly selected devices for the
+    // strategy
     for (size_t i = 0; i < mPreviousOutputs.size(); i++) {
         const sp<SwAudioOutputDescriptor>& desc = mPreviousOutputs.valueAt(i);
-        if (desc->isDuplicated()) {
+        if (desc->isDuplicated() || desc->getClientCount() == 0) {
             continue;
         }
+
         for (const sp<TrackClientDescriptor>& client : desc->getClientIterable()) {
             if (mEngine->getProductStrategyForAttributes(client->attributes()) != psId) {
                 continue;
+            }
+            if (!desc->supportsAllDevices(newDevices)) {
+                invalidatedOutputs.push_back(desc);
+                break;
             }
             sp<AudioPolicyMix> primaryMix;
             status_t status = mPolicyMixes.getOutputForAttr(client->attributes(), client->config(),
                     client->uid(), client->session(), client->flags(), mAvailableOutputDevices,
                     nullptr /* requestedDevice */, primaryMix, nullptr /* secondaryMixes */,
                     unneededUsePrimaryOutputFromPolicyMixes);
-            if (status != OK) {
-                continue;
-            }
-            if (client->getPrimaryMix() != primaryMix || client->hasLostPrimaryMix()) {
-                if (desc->isStrategyActive(psId) && maxLatency < desc->latency()) {
-                    maxLatency = desc->latency();
+            if (status == OK) {
+                if (client->getPrimaryMix() != primaryMix || client->hasLostPrimaryMix()) {
+                    if (desc->isStrategyActive(psId) && maxLatency < desc->latency()) {
+                        maxLatency = desc->latency();
+                    }
+                    invalidatedOutputs.push_back(desc);
+                    break;
                 }
-                invalidatedOutputs.push_back(desc);
             }
         }
     }

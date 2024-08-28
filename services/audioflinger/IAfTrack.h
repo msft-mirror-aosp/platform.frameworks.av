@@ -21,7 +21,6 @@
 #include <audio_utils/mutex.h>
 #include <audiomanager/IAudioManager.h>
 #include <binder/IMemory.h>
-#include <datapath/VolumePortInterface.h>
 #include <fastpath/FastMixerDumpState.h>
 #include <media/AudioSystem.h>
 #include <media/VolumeShaper.h>
@@ -255,7 +254,7 @@ public:
 };
 
 // Common interface for Playback tracks.
-class IAfTrack : public virtual IAfTrackBase, public virtual VolumePortInterface {
+class IAfTrack : public virtual IAfTrackBase {
 public:
     // FillingStatus is used for suppressing volume ramp at begin of playing
     enum FillingStatus { FS_INVALID, FS_FILLING, FS_FILLED, FS_ACTIVE };
@@ -290,8 +289,7 @@ public:
             size_t frameCountToBeReady = SIZE_MAX,
             float speed = 1.0f,
             bool isSpatialized = false,
-            bool isBitPerfect = false,
-            float volume = 0.0f);
+            bool isBitPerfect = false);
 
     virtual void pause() = 0;
     virtual void flush() = 0;
@@ -454,7 +452,7 @@ public:
     virtual ExtendedTimestamp getClientProxyTimestamp() const = 0;
 };
 
-class IAfMmapTrack : public virtual IAfTrackBase, public virtual VolumePortInterface {
+class IAfMmapTrack : public virtual IAfTrackBase {
 public:
     static sp<IAfMmapTrack> create(IAfThreadBase* thread,
             const audio_attributes_t& attr,
@@ -465,8 +463,7 @@ public:
             bool isOut,
             const android::content::AttributionSourceState& attributionSource,
             pid_t creatorPid,
-            audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
-            float volume = 0.0f);
+            audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE);
 
     // protected by MMapThread::mLock
     virtual void setSilenced_l(bool silenced) = 0;
@@ -586,8 +583,7 @@ public:
                                              *  as soon as possible to have
                                              *  the lowest possible latency
                                              *  even if it might glitch. */
-            float speed = 1.0f,
-            float volume = 1.0f);
+            float speed = 1.0f);
 };
 
 class IAfPatchRecord : public virtual IAfRecordTrack, public virtual IAfPatchTrackBase {
