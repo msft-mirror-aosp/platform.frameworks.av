@@ -123,16 +123,17 @@ status_t AudioPolicyManager::setDeviceConnectionState(audio_devices_t device,
     }
 }
 
-status_t AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
+void AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
                                                         media::DeviceConnectedState state)
 {
     audio_port_v7 devicePort;
     device->toAudioPort(&devicePort);
-    status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
-    ALOGE_IF(status != OK, "Error %d while setting connected state %d for device %s", status,
-             static_cast<int>(state), device->getDeviceTypeAddr().toString(false).c_str());
-
-    return status;
+    if (status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
+            status != OK) {
+        ALOGE("Error %d while setting connected state %d for device %s",
+                status, static_cast<int>(state),
+                device->getDeviceTypeAddr().toString(false).c_str());
+    }
 }
 
 status_t AudioPolicyManager::setDeviceConnectionStateInt(
@@ -213,14 +214,7 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking outputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the outputs...)
-            if (broadcastDeviceConnectionState(
-                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
-                mAvailableOutputDevices.remove(device);
-                mHwModules.cleanUpForDevice(device);
-                ALOGE("%s() device %s format %x connection failed", __func__,
-                      device->toString().c_str(), device->getEncodedFormat());
-                return INVALID_OPERATION;
-            }
+            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
 
             if (checkOutputsForDevice(device, state, outputs) != NO_ERROR) {
                 mAvailableOutputDevices.remove(device);
@@ -405,14 +399,7 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking intputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the inputs...)
-            if (broadcastDeviceConnectionState(
-                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
-                mAvailableInputDevices.remove(device);
-                mHwModules.cleanUpForDevice(device);
-                ALOGE("%s() device %s format %x connection failed", __func__,
-                      device->toString().c_str(), device->getEncodedFormat());
-                return INVALID_OPERATION;
-            }
+            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
             // Propagate device availability to Engine
             setEngineDeviceConnectionState(device, state);
 

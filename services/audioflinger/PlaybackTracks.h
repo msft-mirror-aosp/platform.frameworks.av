@@ -225,9 +225,7 @@ public:
     void setInternalMute(bool muted) final { mInternalMute = muted; }
 
     // VolumePortInterface implementation
-    void setPortVolume(float volume) override {
-        mVolume = volume;
-    }
+    void setPortVolume(float volume) override;
     float getPortVolume() const override { return mVolume; }
 
 protected:
@@ -414,7 +412,7 @@ private:
     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
     mute_state_t        mMuteState;
     bool                mInternalMute = false;
-    float mVolume = 0.0f;
+    std::atomic<float> mVolume = 0.0f;
 };  // end of Track
 
 
