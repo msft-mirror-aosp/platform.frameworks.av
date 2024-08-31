@@ -732,7 +732,11 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
         if (res == OK) {
             // Disable buffer allocation for this BufferQueue, buffer manager will take over
             // the buffer allocation responsibility.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+            mConsumer->allowAllocation(false);
+#else
             mConsumer->getIGraphicBufferProducer()->allowAllocation(false);
+#endif
             mUseBufferManager = true;
         } else {
             ALOGE("%s: Unable to register stream %d to camera3 buffer manager, "

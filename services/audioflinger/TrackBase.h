@@ -347,7 +347,7 @@ protected:
     size_t              mBufferSize; // size of mBuffer in bytes
     // we don't really need a lock for these
     MirroredVariable<track_state>  mState;
-    const audio_attributes_t mAttr;
+    audio_attributes_t  mAttr;
     const uint32_t      mSampleRate;    // initial sample rate only; for tracks which
                         // support dynamic rates, the current value is in control block
     const audio_format_t mFormat;

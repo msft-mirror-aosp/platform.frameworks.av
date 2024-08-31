@@ -197,7 +197,8 @@ legacy2aidl_record_track_metadata_v7_RecordTrackMetadata(const record_track_meta
 
 // static
 ConversionResult<SourceMetadata>
-legacy2aidl_SourceMetadata(const std::vector<playback_track_metadata_v7_t>& legacy) {
+legacy2aidl_playback_track_metadata_v7_SourceMetadata(
+        const std::vector<playback_track_metadata_v7_t>& legacy) {
     SourceMetadata aidl;
     aidl.tracks = VALUE_OR_RETURN(
             convertContainer<std::vector<PlaybackTrackMetadata>>(
