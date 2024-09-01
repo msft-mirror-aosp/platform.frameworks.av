@@ -256,6 +256,13 @@ status_t AudioRecord::set(
 
     mTracker.reset(new RecordingActivityTracker());
 
+    sp<IBinder> binder = defaultServiceManager()->checkService(String16("audio"));
+    if (binder != nullptr) {
+        // Barrier to ensure runtime permission update propagates to audioflinger
+        // Must be client-side
+        interface_cast<IAudioManager>(binder)->permissionUpdateBarrier();
+    }
+
     mSelectedDeviceId = selectedDeviceId;
     mSelectedMicDirection = selectedMicDirection;
     mSelectedMicFieldDimension = microphoneFieldDimension;

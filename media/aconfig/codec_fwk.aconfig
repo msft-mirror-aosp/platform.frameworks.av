@@ -133,3 +133,10 @@ flag {
   description: "Feature flag to track teamfood population"
   bug: "328770262"
 }
+
+flag {
+  name: "thumbnail_block_model"
+  namespace: "codec_fwk"
+  description: "Feature flag for using block model decoder in thumbnail generation"
+  bug: "329521645"
+}
