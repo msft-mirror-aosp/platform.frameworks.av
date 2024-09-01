@@ -1258,7 +1258,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
             status = openDirectOutput(
                     *stream, session, config,
                     (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
-                    DeviceVector(policyMixDevice), &newOutput);
+                    DeviceVector(policyMixDevice), &newOutput, *resultAttr);
             if (status == NO_ERROR) {
                 policyDesc = mOutputs.valueFor(newOutput);
                 primaryMix->setOutput(policyDesc);
@@ -1479,7 +1479,8 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
                                               const audio_config_t *config,
                                               audio_output_flags_t flags,
                                               const DeviceVector &devices,
-                                              audio_io_handle_t *output) {
+                                              audio_io_handle_t *output,
+                                              audio_attributes_t attributes) {
 
     *output = AUDIO_IO_HANDLE_NONE;
 
@@ -1567,7 +1568,8 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     releaseMsdOutputPatches(devices);
 
     status_t status =
-            outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, flags, output);
+            outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, flags, output,
+                             attributes);
 
     // only accept an output with the requested parameters
     if (status != NO_ERROR ||
@@ -1668,7 +1670,9 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
 
     audio_config_t directConfig = *config;
     directConfig.channel_mask = channelMask;
-    status_t status = openDirectOutput(stream, session, &directConfig, *flags, devices, &output);
+
+    status_t status = openDirectOutput(stream, session, &directConfig, *flags, devices, &output,
+                                       *attr);
     if (status != NAME_NOT_FOUND) {
         return output;
     }
@@ -6447,10 +6451,11 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
             sp<SwAudioOutputDescriptor> outputDesc = new SwAudioOutputDescriptor(outProfile,
                                                                                  mpClientInterface);
             audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
+            audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
             status_t status = outputDesc->open(nullptr /* halConfig */, nullptr /* mixerConfig */,
                                                DeviceVector(supportedDevice),
                                                AUDIO_STREAM_DEFAULT,
-                                               AUDIO_OUTPUT_FLAG_NONE, &output);
+                                               AUDIO_OUTPUT_FLAG_NONE, &output, attributes);
             if (status != NO_ERROR) {
                 ALOGW("Cannot open output stream for devices %s on hw module %s",
                       supportedDevice->toString().c_str(), hwModule->getName());
@@ -7110,29 +7115,35 @@ void AudioPolicyManager::checkOutputForAttributes(const audio_attributes_t &attr
     std::vector<sp<SwAudioOutputDescriptor>> invalidatedOutputs;
     // take into account dynamic audio policies related changes: if a client is now associated
     // to a different policy mix than at creation time, invalidate corresponding stream
+    // invalidate clients on outputs that do not support all the newly selected devices for the
+    // strategy
     for (size_t i = 0; i < mPreviousOutputs.size(); i++) {
         const sp<SwAudioOutputDescriptor>& desc = mPreviousOutputs.valueAt(i);
-        if (desc->isDuplicated()) {
+        if (desc->isDuplicated() || desc->getClientCount() == 0) {
             continue;
         }
+
         for (const sp<TrackClientDescriptor>& client : desc->getClientIterable()) {
             if (mEngine->getProductStrategyForAttributes(client->attributes()) != psId) {
                 continue;
+            }
+            if (!desc->supportsAllDevices(newDevices)) {
+                invalidatedOutputs.push_back(desc);
+                break;
             }
             sp<AudioPolicyMix> primaryMix;
             status_t status = mPolicyMixes.getOutputForAttr(client->attributes(), client->config(),
                     client->uid(), client->session(), client->flags(), mAvailableOutputDevices,
                     nullptr /* requestedDevice */, primaryMix, nullptr /* secondaryMixes */,
                     unneededUsePrimaryOutputFromPolicyMixes);
-            if (status != OK) {
-                continue;
-            }
-            if ((client->getPrimaryMix() && client->getPrimaryMix() != primaryMix)
-                    || client->hasLostPrimaryMix()) {
-                if (desc->isStrategyActive(psId) && maxLatency < desc->latency()) {
-                    maxLatency = desc->latency();
+            if (status == OK) {
+                if (client->getPrimaryMix() != primaryMix || client->hasLostPrimaryMix()) {
+                    if (desc->isStrategyActive(psId) && maxLatency < desc->latency()) {
+                        maxLatency = desc->latency();
+                    }
+                    invalidatedOutputs.push_back(desc);
+                    break;
                 }
-                invalidatedOutputs.push_back(desc);
             }
         }
     }
@@ -8599,8 +8610,9 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
     }
     sp<SwAudioOutputDescriptor> desc = new SwAudioOutputDescriptor(profile, mpClientInterface);
     audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
+    audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
     status_t status = desc->open(halConfig, mixerConfig, devices,
-            AUDIO_STREAM_DEFAULT, flags, &output);
+            AUDIO_STREAM_DEFAULT, flags, &output, attributes);
     if (status != NO_ERROR) {
         ALOGE("%s failed to open output %d", __func__, status);
         return nullptr;
@@ -8638,7 +8650,8 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
         config.offload_info.channel_mask = config.channel_mask;
         config.offload_info.format = config.format;
 
-        status = desc->open(&config, mixerConfig, devices, AUDIO_STREAM_DEFAULT, flags, &output);
+        status = desc->open(&config, mixerConfig, devices, AUDIO_STREAM_DEFAULT, flags, &output,
+                            attributes);
         if (status != NO_ERROR) {
             return nullptr;
         }
