@@ -1418,7 +1418,7 @@ status_t AudioPolicyService::onTransact(
         }
     }, mediautils::TimeCheck::getDefaultTimeoutDuration(),
     mediautils::TimeCheck::getDefaultSecondChanceDuration(),
-    true /* crashOnTimeout */);
+    !property_get_bool("audio.timecheck.disabled", false) /* crashOnTimeout */);
 
     switch (code) {
         case SHELL_COMMAND_TRANSACTION: {

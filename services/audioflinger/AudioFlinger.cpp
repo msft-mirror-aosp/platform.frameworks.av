@@ -4063,7 +4063,7 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
                                                        0ns /* timeout */,
                                                        frameCountToBeReady,
                                                        track->getSpeed(),
-                                                       track->getPortVolume());
+                                                       1.f /* volume */);
         status = patchTrack->initCheck();
         if (status != NO_ERROR) {
             ALOGE("Secondary output patchTrack init failed: %d", status);
@@ -5250,7 +5250,7 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         }
     }, mediautils::TimeCheck::getDefaultTimeoutDuration(),
     mediautils::TimeCheck::getDefaultSecondChanceDuration(),
-    true /* crashOnTimeout */);
+    !property_get_bool("audio.timecheck.disabled", false) /* crashOnTimeout */);
 
     return delegate();
 }

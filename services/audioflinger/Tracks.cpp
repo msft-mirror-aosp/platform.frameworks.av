@@ -1601,6 +1601,16 @@ status_t Track::selectPresentation(int presentationId,
     return INVALID_OPERATION;
 }
 
+void Track::setPortVolume(float volume) {
+    mVolume = volume;
+    if (mType != TYPE_PATCH) {
+        // Do not recursively propagate a PatchTrack setPortVolume to
+        // downstream PatchTracks.
+        forEachTeePatchTrack_l([volume](const auto& patchTrack) {
+                patchTrack->setPortVolume(volume); });
+    }
+}
+
 VolumeShaper::Status Track::applyVolumeShaper(
         const sp<VolumeShaper::Configuration>& configuration,
         const sp<VolumeShaper::Operation>& operation)

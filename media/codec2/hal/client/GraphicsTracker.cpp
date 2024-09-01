@@ -34,7 +34,7 @@ static constexpr int kMaxDequeueMax = ::android::BufferQueueDefs::NUM_BUFFER_SLO
 
 c2_status_t retrieveAHardwareBufferId(const C2ConstGraphicBlock &blk, uint64_t *bid) {
     std::shared_ptr<const _C2BlockPoolData> bpData = _C2BlockFactory::GetGraphicBlockPoolData(blk);
-    if (bpData->getType() != _C2BlockPoolData::TYPE_AHWBUFFER) {
+    if (!bpData || bpData->getType() != _C2BlockPoolData::TYPE_AHWBUFFER) {
         return C2_BAD_VALUE;
     }
     if (__builtin_available(android __ANDROID_API_T__, *)) {
