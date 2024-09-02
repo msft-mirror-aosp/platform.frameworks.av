@@ -1039,6 +1039,9 @@ void AudioPolicyService::updateUidStates_l()
             current->attributionSource.uid == topSensitiveActive->attributionSource.uid;
         bool isTopOrLatestAssistant = latestActiveAssistant == nullptr ? false :
             current->attributionSource.uid == latestActiveAssistant->attributionSource.uid;
+        bool isActiveAssistant =
+                (useActiveAssistantList && mUidPolicy->isActiveAssistantUid(currentUid))
+                    || mUidPolicy->isAssistantUid(currentUid);
 
         // TODO: b/339112720
         // Refine this logic when we have the correct phone state owner UID. The current issue is
@@ -1067,7 +1070,7 @@ void AudioPolicyService::updateUidStates_l()
         const bool allowSensitiveCapture =
             !isSensitiveActive || isTopOrLatestSensitive || current->canCaptureOutput;
         bool allowCapture = false;
-        if (!isAssistantOnTop) {
+        if (!isAssistantOnTop || isActiveAssistant) {
             allowCapture = (isTopOrLatestActive || isTopOrLatestSensitive) &&
                            allowSensitiveCapture && canCaptureIfInCallOrCommunication;
         } else {
