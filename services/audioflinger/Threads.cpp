@@ -1580,14 +1580,13 @@ status_t PlaybackThread::checkEffectCompatibility_l(
         }
         break;
     case SPATIALIZER:
-        // Global effects (AUDIO_SESSION_OUTPUT_MIX) are not supported on spatializer mixer
-        // as there is no common accumulation buffer for sptialized and non sptialized tracks.
+        // Global effects (AUDIO_SESSION_OUTPUT_MIX) are supported on spatializer mixer, but only
+        // the spatialized track have global effects applied for now.
         // Post processing effects (AUDIO_SESSION_OUTPUT_STAGE or AUDIO_SESSION_DEVICE)
         // are supported and added after the spatializer.
         if (sessionId == AUDIO_SESSION_OUTPUT_MIX) {
-            ALOGW("%s: global effect %s not supported on spatializer thread %s",
-                    __func__, desc->name, mThreadName);
-            return BAD_VALUE;
+            ALOGD("%s: global effect %s on spatializer thread %s", __func__, desc->name,
+                  mThreadName);
         } else if (sessionId == AUDIO_SESSION_OUTPUT_STAGE) {
             // only post processing , downmixer or spatializer effects on output stage session
             if (IAfEffectModule::isSpatializer(&desc->type)
@@ -3824,19 +3823,31 @@ status_t PlaybackThread::addEffectChain_l(const sp<IAfEffectChain>& chain)
             ALOGV("addEffectChain_l() creating new input buffer %p session %d",
                     buffer, session);
         } else {
-            // A global session on a SPATIALIZER thread is either OUTPUT_STAGE or DEVICE
-            // - OUTPUT_STAGE session uses the mEffectBuffer as input buffer and
-            // mPostSpatializerBuffer as output buffer
-            // - DEVICE session uses the mPostSpatializerBuffer as input and output buffer.
-            status_t result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
-                    mEffectBuffer, mEffectBufferSize, &halInBuffer);
-            if (result != OK) return result;
-            result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
-                    mPostSpatializerBuffer, mPostSpatializerBufferSize, &halOutBuffer);
-            if (result != OK) return result;
+            status_t result = INVALID_OPERATION;
+            // Buffer configuration for global sessions on a SPATIALIZER thread:
+            // - AUDIO_SESSION_OUTPUT_MIX session uses the mEffectBuffer as input and output buffer
+            // - AUDIO_SESSION_OUTPUT_STAGE session uses the mEffectBuffer as input buffer and
+            //   mPostSpatializerBuffer as output buffer
+            // - AUDIO_SESSION_DEVICE session uses the mPostSpatializerBuffer as input and output
+            //   buffer
+            if (session == AUDIO_SESSION_OUTPUT_MIX || session == AUDIO_SESSION_OUTPUT_STAGE) {
+                result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
+                        mEffectBuffer, mEffectBufferSize, &halInBuffer);
+                if (result != OK) return result;
 
-            if (session == AUDIO_SESSION_DEVICE) {
-                halInBuffer = halOutBuffer;
+                if (session == AUDIO_SESSION_OUTPUT_MIX) {
+                    halOutBuffer = halInBuffer;
+                }
+            }
+
+            if (session == AUDIO_SESSION_OUTPUT_STAGE || session == AUDIO_SESSION_DEVICE) {
+                result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
+                        mPostSpatializerBuffer, mPostSpatializerBufferSize, &halOutBuffer);
+                if (result != OK) return result;
+
+                if (session == AUDIO_SESSION_DEVICE) {
+                    halInBuffer = halOutBuffer;
+                }
             }
         }
     } else {
