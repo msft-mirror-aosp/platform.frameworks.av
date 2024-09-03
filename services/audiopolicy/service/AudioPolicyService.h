@@ -823,7 +823,8 @@ private:
                                     audio_config_base_t *mixerConfig,
                                     const sp<DeviceDescriptorBase>& device,
                                     uint32_t *latencyMs,
-                                    audio_output_flags_t flags);
+                                    audio_output_flags_t flags,
+                                    audio_attributes_t attributes);
         // creates a special output that is duplicated to the two outputs passed as arguments. The duplication is performed by
         // a special mixer thread in the AudioFlinger.
         virtual audio_io_handle_t openDuplicateOutput(audio_io_handle_t output1, audio_io_handle_t output2);
@@ -1022,13 +1023,15 @@ private:
                       const audio_io_handle_t io, AttributionSourceState attributionSource,
                             const audio_session_t session, audio_port_handle_t portId,
                             audio_port_handle_t deviceId, audio_stream_type_t stream,
-                            bool isSpatialized) :
+                            bool isSpatialized, audio_channel_mask_t channelMask) :
                     AudioClient(attributes, io, attributionSource, session, portId,
-                        deviceId), stream(stream), isSpatialized(isSpatialized)  {}
+                        deviceId), stream(stream), isSpatialized(isSpatialized),
+                        channelMask(channelMask) {}
                 ~AudioPlaybackClient() override = default;
 
         const audio_stream_type_t stream;
         const bool isSpatialized;
+        const audio_channel_mask_t channelMask;
     };
 
     void getPlaybackClientAndEffects(audio_port_handle_t portId,
@@ -1059,14 +1062,14 @@ private:
     void unloadAudioPolicyManager();
 
     /**
-     * Returns the number of active audio tracks on the specified output mixer.
+     * Returns the channel masks for active audio tracks on the specified output mixer.
      * The query can be specified to only include spatialized audio tracks or consider
      * all tracks.
      * @param output the I/O handle of the output mixer to consider
      * @param spatializedOnly true if only spatialized tracks should be considered
-     * @return the number of active tracks.
+     * @return a list of channel masks for all active tracks matching the condition.
      */
-    size_t countActiveClientsOnOutput_l(
+    std::vector<audio_channel_mask_t> getActiveTracksMasks_l(
             audio_io_handle_t output, bool spatializedOnly = true) REQUIRES(mMutex);
 
     mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kAudioPolicyService_Mutex};

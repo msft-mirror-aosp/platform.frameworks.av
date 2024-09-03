@@ -478,7 +478,8 @@ public:
                                 audio_config_base_t *mixerConfig,
                                 const sp<DeviceDescriptorBase>& device,
                                 uint32_t *latencyMs,
-                                audio_output_flags_t flags) = 0;
+                                audio_output_flags_t flags,
+                                audio_attributes_t audioAttributes) = 0;
     // creates a special output that is duplicated to the two outputs passed as arguments.
     // The duplication is performed by a special mixer thread in the AudioFlinger.
     virtual audio_io_handle_t openDuplicateOutput(audio_io_handle_t output1,
@@ -525,7 +526,7 @@ public:
      * @param delayMs to use
      * @return NO_ERROR if successful
      */
-    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& ports, float volume,
             audio_io_handle_t output, int delayMs = 0) = 0;
 
     // function enabling to send proprietary informations directly from audio policy manager to

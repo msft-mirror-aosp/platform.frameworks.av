@@ -487,7 +487,7 @@ private:
                                     .id = getId(mClient),
                                     .name = mCodecName,
                                     .importance = mImportance};
-        return std::move(clientInfo);
+        return clientInfo;
     }
 
 private:
@@ -852,6 +852,13 @@ private:
         }
     }
 
+    void notifyBufferAttached() {
+        auto p = mBufferChannel.lock();
+        if (p) {
+            p->onBufferAttachedToOutputSurface(mGeneration);
+        }
+    }
+
 public:
     explicit OnBufferReleasedListener(
             uint32_t generation,
@@ -872,6 +879,14 @@ public:
     }
 
     bool needsReleaseNotify() override { return true; }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+    void onBufferAttached() override {
+        notifyBufferAttached();
+    }
+
+    bool needsAttachNotify() override { return true; }
+#endif
 };
 
 class BufferCallback : public CodecBase::BufferCallback {
@@ -6684,8 +6699,8 @@ sp<Surface> MediaCodec::getOrCreateDetachedSurface() {
     if (!mDetachedSurface) {
         uint64_t usage = 0;
         if (!mSurface || mSurface->getConsumerUsage(&usage) != OK) {
-            // TODO: should we use a/the default consumer usage?
-            usage = 0;
+            // By default prepare buffer to be displayed on any of the common surfaces
+            usage = (GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_HW_COMPOSER);
         }
         mDetachedSurface.reset(new ReleaseSurface(usage));
     }

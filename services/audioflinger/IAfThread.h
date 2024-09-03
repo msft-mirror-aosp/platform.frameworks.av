@@ -558,7 +558,8 @@ public:
     virtual void setTracksInternalMute(std::map<audio_port_handle_t, bool>* tracksInternalMute)
             EXCLUDES_ThreadBase_Mutex = 0;
 
-    virtual sp<VolumePortInterface> getVolumePortInterface(audio_port_handle_t port) const = 0;
+    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            EXCLUDES_ThreadBase_Mutex = 0;
 };
 
 class IAfDirectOutputThread : public virtual IAfPlaybackThread {
@@ -699,7 +700,8 @@ public:
 
     virtual AudioStreamOut* clearOutput() EXCLUDES_ThreadBase_Mutex = 0;
 
-    virtual sp<VolumePortInterface> getVolumePortInterface(audio_port_handle_t port) const = 0;
+    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            EXCLUDES_ThreadBase_Mutex = 0;
 };
 
 class IAfMmapCaptureThread : public virtual IAfMmapThread {

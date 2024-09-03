@@ -78,6 +78,7 @@ void AudioCapabilities::init(std::string mediaType, std::vector<ProfileLevel> pr
         const sp<AMessage> &format) {
     mMediaType = mediaType;
     mProfileLevels = profLevs;
+    mError = 0;
 
     initWithPlatformLimits();
     applyLevelLimits();

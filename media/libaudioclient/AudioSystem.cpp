@@ -324,14 +324,6 @@ status_t AudioSystem::setStreamMute(audio_stream_type_t stream, bool mute) {
 
 status_t AudioSystem::setPortsVolume(
         const std::vector<audio_port_handle_t>& portIds, float volume, audio_io_handle_t output) {
-    for (const auto& port : portIds) {
-        if (port == AUDIO_PORT_HANDLE_NONE) {
-            return BAD_VALUE;
-        }
-    }
-    if (isnan(volume) || volume > 1.0f || volume < 0.0f) {
-        return BAD_VALUE;
-    }
     const sp<IAudioFlinger> af = get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
     std::vector<int32_t> portIdsAidl = VALUE_OR_RETURN_STATUS(

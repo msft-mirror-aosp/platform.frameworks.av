@@ -586,7 +586,8 @@ public:
                                              *  as soon as possible to have
                                              *  the lowest possible latency
                                              *  even if it might glitch. */
-            float speed = 1.0f);
+            float speed = 1.0f,
+            float volume = 1.0f);
 };
 
 class IAfPatchRecord : public virtual IAfRecordTrack, public virtual IAfPatchTrackBase {

@@ -1896,7 +1896,8 @@ ReflectedParamUpdater::Dict CCodecConfig::getReflectedFormat(
                 std::vector<C2QpOffsetRectStruct> c2QpOffsetRects;
                 char mutableStrQpOffsetRects[strlen(qpOffsetRects.c_str()) + 1];
                 strcpy(mutableStrQpOffsetRects, qpOffsetRects.c_str());
-                char* box = strtok(mutableStrQpOffsetRects, ";");
+                char* savePtr;
+                char* box = strtok_r(mutableStrQpOffsetRects, ";", &savePtr);
                 while (box != nullptr) {
                     int top, left, bottom, right, offset;
                     if (sscanf(box, "%d,%d-%d,%d=%d", &top, &left, &bottom, &right, &offset) == 5) {
@@ -1914,7 +1915,7 @@ ReflectedParamUpdater::Dict CCodecConfig::getReflectedFormat(
                     } else {
                         ALOGE("Rects configuration %s doesn't follow the string pattern.", box);
                     }
-                    box = strtok(nullptr, ";");
+                    box = strtok_r(nullptr, ";", &savePtr);
                 }
                 if (c2QpOffsetRects.size() != 0) {
                     const std::unique_ptr<C2StreamQpOffsetRects::output> regions =

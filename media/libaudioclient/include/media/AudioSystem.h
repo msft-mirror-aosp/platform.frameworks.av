@@ -138,8 +138,8 @@ public:
      * @param output to consider
      * @return NO_ERROR if successful
      */
-    static status_t setPortsVolume(
-            const std::vector<audio_port_handle_t>& portIds, float volume, audio_io_handle_t output);
+    static status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds,
+                                   float volume, audio_io_handle_t output);
 
     // set audio mode in audio hardware
     static status_t setMode(audio_mode_t mode);

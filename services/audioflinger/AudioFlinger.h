@@ -336,9 +336,12 @@ private:
             audio_config_base_t* mixerConfig,
             audio_devices_t deviceType,
             const String8& address,
-            audio_output_flags_t flags) final REQUIRES(mutex());
+            audio_output_flags_t flags,
+            audio_attributes_t attributes) final REQUIRES(mutex());
     const DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>&
-            getAudioHwDevs_l() const final REQUIRES(mutex()) { return mAudioHwDevs; }
+            getAudioHwDevs_l() const final REQUIRES(mutex(), hardwareMutex()) {
+              return mAudioHwDevs;
+            }
     void updateDownStreamPatches_l(const struct audio_patch* patch,
             const std::set<audio_io_handle_t>& streams) final REQUIRES(mutex());
     void updateOutDevicesForRecordThreads_l(const DeviceDescriptorBaseVector& devices) final
@@ -553,8 +556,6 @@ private:
 
     sp<VolumeInterface> getVolumeInterface_l(audio_io_handle_t output) const REQUIRES(mutex());
 
-    sp<VolumePortInterface> getVolumePortInterface_l(
-            audio_io_handle_t output, audio_port_handle_t port) const REQUIRES(mutex());
     std::vector<sp<VolumeInterface>> getAllVolumeInterfaces_l() const REQUIRES(mutex());
 
 
@@ -759,7 +760,6 @@ private:
     bool mIsDeviceTypeKnown GUARDED_BY(mutex()) = false;
     int64_t mTotalMemory GUARDED_BY(mutex()) = 0;
     std::atomic<size_t> mClientSharedHeapSize = kMinimumClientSharedHeapSizeBytes;
-
     static constexpr size_t kMinimumClientSharedHeapSizeBytes = 1024 * 1024; // 1MB
 
     // when a global effect was last enabled

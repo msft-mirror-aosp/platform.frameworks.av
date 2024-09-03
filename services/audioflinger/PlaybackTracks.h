@@ -225,10 +225,7 @@ public:
     void setInternalMute(bool muted) final { mInternalMute = muted; }
 
     // VolumePortInterface implementation
-    void setPortVolume(float volume) override {
-        mVolume = volume;
-        signal();
-    }
+    void setPortVolume(float volume) override;
     float getPortVolume() const override { return mVolume; }
 
 protected:
@@ -371,6 +368,8 @@ private:
         for (auto& tp : mTeePatches) { f(tp.patchTrack); }
     };
 
+    void                populateUsageAndContentTypeFromStreamType();
+
     size_t              mPresentationCompleteFrames = 0; // (Used for Mixed tracks)
                                     // The number of frames written to the
                                     // audio HAL when this track is considered fully rendered.
@@ -413,7 +412,7 @@ private:
     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
     mute_state_t        mMuteState;
     bool                mInternalMute = false;
-    float mVolume = 0.0f;
+    std::atomic<float> mVolume = 0.0f;
 };  // end of Track
 
 
@@ -510,7 +509,8 @@ public:
                                                                     *  as soon as possible to have
                                                                     *  the lowest possible latency
                                                                     *  even if it might glitch. */
-                                   float speed = 1.0f);
+                                   float speed = 1.0f,
+                                   float volume = 1.0f);
     ~PatchTrack() override;
 
     size_t framesReady() const final;

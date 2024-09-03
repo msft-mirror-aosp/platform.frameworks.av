@@ -379,10 +379,10 @@ public:
         return isOutput() ? outDeviceTypes_l() : DeviceTypeSet({inDeviceType_l()});
     }
 
-    const AudioDeviceTypeAddrVector& outDeviceTypeAddrs() const final {
+    const AudioDeviceTypeAddrVector& outDeviceTypeAddrs() const final REQUIRES(mutex()) {
         return mOutDeviceTypeAddrs;
     }
-    const AudioDeviceTypeAddr& inDeviceTypeAddr() const final {
+    const AudioDeviceTypeAddr& inDeviceTypeAddr() const final REQUIRES(mutex()) {
         return mInDeviceTypeAddr;
     }
 
@@ -1017,7 +1017,9 @@ public:
     void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
-    sp<VolumePortInterface> getVolumePortInterface(audio_port_handle_t port) const;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            final EXCLUDES_ThreadBase_Mutex;
+
     void setVolumeForOutput_l(float left, float right) const final;
 
     sp<IAfTrack> createTrack_l(
@@ -2393,8 +2395,8 @@ public:
     void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
-
-    sp<VolumePortInterface> getVolumePortInterface(audio_port_handle_t port) const;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            final EXCLUDES_ThreadBase_Mutex;
 
     void setMasterMute_l(bool muted) REQUIRES(mutex()) { mMasterMute = muted; }
 

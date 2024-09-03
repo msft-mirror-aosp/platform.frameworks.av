@@ -167,6 +167,9 @@ static const int kRecordThreadSleepUs = 5000;
 
 // maximum time to wait in sendConfigEvent_l() for a status to be received
 static const nsecs_t kConfigEventTimeoutNs = seconds(2);
+// longer timeout for create audio patch to account for specific scenarii
+// with Bluetooth devices
+static const nsecs_t kCreatePatchEventTimeoutNs = seconds(4);
 
 // minimum sleep time for the mixer thread loop when tracks are active but in underrun
 static const uint32_t kMinThreadSleepTimeUs = 5000;
@@ -733,9 +736,11 @@ NO_THREAD_SAFETY_ANALYSIS  // condition variable
     mutex().unlock();
     {
         audio_utils::unique_lock _l(event->mutex());
+        nsecs_t timeoutNs = event->mType == CFG_EVENT_CREATE_AUDIO_PATCH ?
+              kCreatePatchEventTimeoutNs : kConfigEventTimeoutNs;
         while (event->mWaitStatus) {
             if (event->mCondition.wait_for(
-                    _l, std::chrono::nanoseconds(kConfigEventTimeoutNs), getTid())
+                    _l, std::chrono::nanoseconds(timeoutNs), getTid())
                             == std::cv_status::timeout) {
                 event->mStatus = TIMED_OUT;
                 event->mWaitStatus = false;
@@ -1575,14 +1580,13 @@ status_t PlaybackThread::checkEffectCompatibility_l(
         }
         break;
     case SPATIALIZER:
-        // Global effects (AUDIO_SESSION_OUTPUT_MIX) are not supported on spatializer mixer
-        // as there is no common accumulation buffer for sptialized and non sptialized tracks.
+        // Global effects (AUDIO_SESSION_OUTPUT_MIX) are supported on spatializer mixer, but only
+        // the spatialized track have global effects applied for now.
         // Post processing effects (AUDIO_SESSION_OUTPUT_STAGE or AUDIO_SESSION_DEVICE)
         // are supported and added after the spatializer.
         if (sessionId == AUDIO_SESSION_OUTPUT_MIX) {
-            ALOGW("%s: global effect %s not supported on spatializer thread %s",
-                    __func__, desc->name, mThreadName);
-            return BAD_VALUE;
+            ALOGD("%s: global effect %s on spatializer thread %s", __func__, desc->name,
+                  mThreadName);
         } else if (sessionId == AUDIO_SESSION_OUTPUT_STAGE) {
             // only post processing , downmixer or spatializer effects on output stage session
             if (IAfEffectModule::isSpatializer(&desc->type)
@@ -1701,7 +1705,7 @@ sp<IAfEffectHandle> ThreadBase::createEffect_l(
             // TODO(b/184194057): Use the vibrator information from the vibrator that will be used
             // for the HapticGenerator.
             const std::optional<media::AudioVibratorInfo> defaultVibratorInfo =
-                    std::move(mAfThreadCallback->getDefaultVibratorInfo_l());
+                    mAfThreadCallback->getDefaultVibratorInfo_l();
             if (defaultVibratorInfo) {
                 audio_utils::lock_guard _cl(chain->mutex());
                 // Only set the vibrator info when it is a valid one.
@@ -2852,19 +2856,20 @@ float PlaybackThread::streamVolume(audio_stream_type_t stream) const
     return mStreamTypes[stream].volume;
 }
 
-sp<VolumePortInterface> PlaybackThread::getVolumePortInterface(audio_port_handle_t port) const
-{
+status_t PlaybackThread::setPortsVolume(
+        const std::vector<audio_port_handle_t>& portIds, float volume) {
     audio_utils::lock_guard _l(mutex());
-    if (port == AUDIO_PORT_HANDLE_NONE) {
-        return nullptr;
-    }
-    for (size_t i = 0; i < mTracks.size(); i++) {
-        sp<IAfTrack> track = mTracks[i].get();
-        if (port == track->portId()) {
-            return track;
+    for (const auto& portId : portIds) {
+        for (size_t i = 0; i < mTracks.size(); i++) {
+            sp<IAfTrack> track = mTracks[i].get();
+            if (portId == track->portId()) {
+                track->setPortVolume(volume);
+                break;
+            }
         }
     }
-    return nullptr;
+    broadcast_l();
+    return NO_ERROR;
 }
 
 void PlaybackThread::setVolumeForOutput_l(float left, float right) const
@@ -2940,7 +2945,7 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
                 // TODO(b/184194780): Use the vibrator information from the vibrator that will be
                 // used to play this track.
                  audio_utils::lock_guard _l(mAfThreadCallback->mutex());
-                vibratorInfo = std::move(mAfThreadCallback->getDefaultVibratorInfo_l());
+                vibratorInfo = mAfThreadCallback->getDefaultVibratorInfo_l();
             }
             mutex().lock();
             track->setHapticScale(hapticScale);
@@ -3818,19 +3823,31 @@ status_t PlaybackThread::addEffectChain_l(const sp<IAfEffectChain>& chain)
             ALOGV("addEffectChain_l() creating new input buffer %p session %d",
                     buffer, session);
         } else {
-            // A global session on a SPATIALIZER thread is either OUTPUT_STAGE or DEVICE
-            // - OUTPUT_STAGE session uses the mEffectBuffer as input buffer and
-            // mPostSpatializerBuffer as output buffer
-            // - DEVICE session uses the mPostSpatializerBuffer as input and output buffer.
-            status_t result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
-                    mEffectBuffer, mEffectBufferSize, &halInBuffer);
-            if (result != OK) return result;
-            result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
-                    mPostSpatializerBuffer, mPostSpatializerBufferSize, &halOutBuffer);
-            if (result != OK) return result;
+            status_t result = INVALID_OPERATION;
+            // Buffer configuration for global sessions on a SPATIALIZER thread:
+            // - AUDIO_SESSION_OUTPUT_MIX session uses the mEffectBuffer as input and output buffer
+            // - AUDIO_SESSION_OUTPUT_STAGE session uses the mEffectBuffer as input buffer and
+            //   mPostSpatializerBuffer as output buffer
+            // - AUDIO_SESSION_DEVICE session uses the mPostSpatializerBuffer as input and output
+            //   buffer
+            if (session == AUDIO_SESSION_OUTPUT_MIX || session == AUDIO_SESSION_OUTPUT_STAGE) {
+                result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
+                        mEffectBuffer, mEffectBufferSize, &halInBuffer);
+                if (result != OK) return result;
 
-            if (session == AUDIO_SESSION_DEVICE) {
-                halInBuffer = halOutBuffer;
+                if (session == AUDIO_SESSION_OUTPUT_MIX) {
+                    halOutBuffer = halInBuffer;
+                }
+            }
+
+            if (session == AUDIO_SESSION_OUTPUT_STAGE || session == AUDIO_SESSION_DEVICE) {
+                result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
+                        mPostSpatializerBuffer, mPostSpatializerBufferSize, &halOutBuffer);
+                if (result != OK) return result;
+
+                if (session == AUDIO_SESSION_DEVICE) {
+                    halInBuffer = halOutBuffer;
+                }
             }
         }
     } else {
@@ -5224,7 +5241,7 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
                                                     // audio to FastMixer
         fastTrack->mFormat = mFormat; // mPipeSink format for audio to FastMixer
         fastTrack->mHapticPlaybackEnabled = mHapticChannelMask != AUDIO_CHANNEL_NONE;
-        fastTrack->mHapticScale = {/*level=*/os::HapticLevel::NONE };
+        fastTrack->mHapticScale = os::HapticScale::none();
         fastTrack->mHapticMaxAmplitude = NAN;
         fastTrack->mGeneration++;
         state->mFastTracksGen++;
@@ -7225,7 +7242,7 @@ bool DirectOutputThread::checkForNewParameter_l(const String8& keyValuePair,
 uint32_t DirectOutputThread::activeSleepTimeUs() const
 {
     uint32_t time;
-    if (audio_has_proportional_frames(mFormat)) {
+    if (audio_has_proportional_frames(mFormat) && mType != OFFLOAD) {
         time = PlaybackThread::activeSleepTimeUs();
     } else {
         time = kDirectMinSleepTimeUs;
@@ -7236,7 +7253,7 @@ uint32_t DirectOutputThread::activeSleepTimeUs() const
 uint32_t DirectOutputThread::idleSleepTimeUs() const
 {
     uint32_t time;
-    if (audio_has_proportional_frames(mFormat)) {
+    if (audio_has_proportional_frames(mFormat) && mType != OFFLOAD) {
         time = (uint32_t)(((mFrameCount * 1000) / mSampleRate) * 1000) / 2;
     } else {
         time = kDirectMinSleepTimeUs;
@@ -7247,7 +7264,7 @@ uint32_t DirectOutputThread::idleSleepTimeUs() const
 uint32_t DirectOutputThread::suspendSleepTimeUs() const
 {
     uint32_t time;
-    if (audio_has_proportional_frames(mFormat)) {
+    if (audio_has_proportional_frames(mFormat) && mType != OFFLOAD) {
         time = (uint32_t)(((mFrameCount * 1000) / mSampleRate) * 1000);
     } else {
         time = kDirectMinSleepTimeUs;
@@ -7264,7 +7281,7 @@ void DirectOutputThread::cacheParameters_l()
     // no delay on outputs with HW A/V sync
     if (usesHwAvSync()) {
         mStandbyDelayNs = 0;
-    } else if ((mType == OFFLOAD) && !audio_has_proportional_frames(mFormat)) {
+    } else if (mType == OFFLOAD) {
         mStandbyDelayNs = kOffloadStandbyDelayNs;
     } else {
         mStandbyDelayNs = microseconds(mActiveSleepTimeUs*2);
@@ -11176,18 +11193,19 @@ void MmapPlaybackThread::setStreamMute(audio_stream_type_t stream, bool muted)
     }
 }
 
-sp<VolumePortInterface> MmapPlaybackThread::getVolumePortInterface(audio_port_handle_t port) const
-{
+status_t MmapPlaybackThread::setPortsVolume(
+        const std::vector<audio_port_handle_t>& portIds, float volume) {
     audio_utils::lock_guard _l(mutex());
-    if (port == AUDIO_PORT_HANDLE_NONE) {
-        return nullptr;
-    }
-    for (const sp<IAfMmapTrack>& track : mActiveTracks) {
-        if (port == track->portId()) {
-            return track;
+    for (const auto& portId : portIds) {
+        for (const sp<IAfMmapTrack>& track : mActiveTracks) {
+            if (portId == track->portId()) {
+                track->setPortVolume(volume);
+                break;
+            }
         }
     }
-    return nullptr;
+    broadcast_l();
+    return NO_ERROR;
 }
 
 void MmapPlaybackThread::invalidateTracks(audio_stream_type_t streamType)
