@@ -1196,6 +1196,8 @@ String16 ThreadBase::getWakeLockTag()
         return String16("MmapCapture");
     case SPATIALIZER:
         return String16("AudioSpatial");
+    case BIT_PERFECT:
+        return String16("AudioBitPerfect");
     default:
         ALOG_ASSERT(false);
         return String16("AudioUnknown");
@@ -7862,6 +7864,9 @@ void DuplicatingThread::threadLoop_exit()
         audio_utils::lock_guard l(mutex());
         localTracks = std::move(mOutputTracks);
         mOutputTracks.clear();
+        for (size_t i = 0; i < localTracks.size(); ++i) {
+            localTracks[i]->destroy();
+        }
     }
     localTracks.clear();
     outputTracks.clear();
