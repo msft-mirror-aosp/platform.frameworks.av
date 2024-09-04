@@ -17,9 +17,9 @@
 #define LOG_TAG "Camera3StreamSplitterTest"
 // #define LOG_NDEBUG 0
 
-#include "../device3/Camera3StreamSplitter.h"
-
 #include <android/hardware_buffer.h>
+#include <com_android_graphics_libgui_flags.h>
+#include <com_android_internal_camera_flags.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
@@ -34,6 +34,14 @@
 
 #include <gtest/gtest.h>
 
+#include "../device3/Flags.h"
+
+#if USE_NEW_STREAM_SPLITTER
+#include "../device3/Camera3StreamSplitter.h"
+#else
+#include "../device3/deprecated/DeprecatedCamera3StreamSplitter.h"
+#endif  // USE_NEW_STREAM_SPLITTER
+
 using namespace android;
 
 namespace {
@@ -47,19 +55,34 @@ PixelFormat kFormat = HAL_PIXEL_FORMAT_YCBCR_420_888;
 int64_t kDynamicRangeProfile = 0;
 
 std::tuple<sp<BufferItemConsumer>, sp<Surface>> createConsumerAndSurface() {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    sp<BufferItemConsumer> consumer = sp<BufferItemConsumer>::make(kConsumerUsage);
+    return {consumer, consumer->getSurface()};
+#else
     sp<IGraphicBufferProducer> producer;
     sp<IGraphicBufferConsumer> consumer;
     BufferQueue::createBufferQueue(&producer, &consumer);
 
     return {sp<BufferItemConsumer>::make(consumer, kConsumerUsage), sp<Surface>::make(producer)};
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 }
 
 class Camera3StreamSplitterTest : public testing::Test {
   public:
-    void SetUp() override { mSplitter = sp<Camera3StreamSplitter>::make(); }
+    void SetUp() override {
+#if USE_NEW_STREAM_SPLITTER
+        mSplitter = sp<Camera3StreamSplitter>::make();
+#else
+        mSplitter = sp<DeprecatedCamera3StreamSplitter>::make();
+#endif  // USE_NEW_STREAM_SPLITTER
+    }
 
   protected:
+#if USE_NEW_STREAM_SPLITTER
     sp<Camera3StreamSplitter> mSplitter;
+#else
+    sp<DeprecatedCamera3StreamSplitter> mSplitter;
+#endif  // USE_NEW_STREAM_SPLITTER
 };
 
 class TestSurfaceListener : public SurfaceListener {
@@ -96,7 +119,7 @@ class TestConsumerListener : public BufferItemConsumer::FrameAvailableListener {
 
 }  // namespace
 
-TEST_F(Camera3StreamSplitterTest, TestWithoutSurfaces_NoBuffersConsumed) {
+TEST_F(Camera3StreamSplitterTest, WithoutSurfaces_NoBuffersConsumed) {
     sp<Surface> consumer;
     EXPECT_EQ(OK, mSplitter->connect({}, kConsumerUsage, kProducerUsage, kHalMaxBuffers, kWidth,
                                      kHeight, kFormat, &consumer, kDynamicRangeProfile));
