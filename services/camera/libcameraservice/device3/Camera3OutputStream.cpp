@@ -555,8 +555,8 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
     // Configure consumer-side ANativeWindow interface. The listener may be used
     // to notify buffer manager (if it is used) of the returned buffers.
     res = mConsumer->connect(NATIVE_WINDOW_API_CAMERA,
-            /*reportBufferRemoval*/true,
-            /*listener*/mBufferProducerListener);
+            /*listener*/mBufferProducerListener,
+            /*reportBufferRemoval*/true);
     if (res != OK) {
         ALOGE("%s: Unable to connect to native window for stream %d",
                 __FUNCTION__, mId);
@@ -732,7 +732,11 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
         if (res == OK) {
             // Disable buffer allocation for this BufferQueue, buffer manager will take over
             // the buffer allocation responsibility.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+            mConsumer->allowAllocation(false);
+#else
             mConsumer->getIGraphicBufferProducer()->allowAllocation(false);
+#endif
             mUseBufferManager = true;
         } else {
             ALOGE("%s: Unable to register stream %d to camera3 buffer manager, "
