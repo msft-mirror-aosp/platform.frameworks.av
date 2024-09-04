@@ -128,7 +128,8 @@ public:
                                   std::vector<audio_io_handle_t> *secondaryOutputs,
                                   output_type_t *outputType,
                                   bool *isSpatialized,
-                                  bool *isBitPerfect) override;
+                                  bool *isBitPerfect,
+                                  float *volume) override;
         virtual status_t startOutput(audio_port_handle_t portId);
         virtual status_t stopOutput(audio_port_handle_t portId);
         virtual bool releaseOutput(audio_port_handle_t portId);
@@ -1155,7 +1156,8 @@ private:
                 const audio_config_t *config,
                 audio_output_flags_t flags,
                 const DeviceVector &devices,
-                audio_io_handle_t *output);
+                audio_io_handle_t *output,
+                audio_attributes_t attributes);
 
         /**
          * @brief Queries if some kind of spatialization will be performed if the audio playback

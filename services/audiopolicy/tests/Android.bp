@@ -107,7 +107,7 @@ cc_test {
         "-Werror",
     ],
 
-    test_suites: ["device-tests"],
+    test_suites: ["general-tests"],
 
 }
 

@@ -96,6 +96,9 @@ private:
     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
             EXCLUDES_AudioFlinger_Mutex;
 
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
+
     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setMicMute(bool state) final EXCLUDES_AudioFlinger_Mutex;
@@ -333,7 +336,8 @@ private:
             audio_config_base_t* mixerConfig,
             audio_devices_t deviceType,
             const String8& address,
-            audio_output_flags_t flags) final REQUIRES(mutex());
+            audio_output_flags_t flags,
+            audio_attributes_t attributes) final REQUIRES(mutex());
     const DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>&
             getAudioHwDevs_l() const final REQUIRES(mutex(), hardwareMutex()) {
               return mAudioHwDevs;
@@ -551,6 +555,7 @@ private:
     IAfPlaybackThread* checkMixerThread_l(audio_io_handle_t output) const REQUIRES(mutex());
 
     sp<VolumeInterface> getVolumeInterface_l(audio_io_handle_t output) const REQUIRES(mutex());
+
     std::vector<sp<VolumeInterface>> getAllVolumeInterfaces_l() const REQUIRES(mutex());
 
 
@@ -771,8 +776,6 @@ private:
 
     bool mSystemReady GUARDED_BY(mutex()) = false;
     std::atomic<bool> mAudioPolicyReady = false;
-
-    mediautils::UidInfo mUidInfo GUARDED_BY(mutex());
 
     // no mutex needed.
     SimpleLog  mRejectedSetParameterLog;
