@@ -463,12 +463,13 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
 
         // LE audio broadcast device is only used if:
         // - No call is active
-        // - either MEDIA, SONIFICATION_RESPECTFUL or SONIFICATION is the highest priority
-        // active strategy
+        // - the highest priority active strategy is not PHONE or TRANSMITTED_THROUGH_SPEAKER
         // OR the LE audio unicast device is not active
         if (devices2.isEmpty() && !isInCall()
-                && (strategy == STRATEGY_MEDIA || strategy == STRATEGY_SONIFICATION_RESPECTFUL
-                      || strategy == STRATEGY_SONIFICATION)) {
+                // also skipping routing queries from PHONE and TRANSMITTED_THROUGH_SPEAKER here
+                // so this code is not dependent on breaks for other strategies above
+                && (strategy != STRATEGY_PHONE)
+                && (strategy != STRATEGY_TRANSMITTED_THROUGH_SPEAKER)) {
             legacy_strategy topActiveStrategy = STRATEGY_NONE;
             for (const auto &ps : getOrderedProductStrategies()) {
                 if (outputs.isStrategyActive(ps)) {
@@ -478,9 +479,8 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                 }
             }
 
-            if (topActiveStrategy == STRATEGY_NONE || topActiveStrategy == STRATEGY_MEDIA
-                    || topActiveStrategy == STRATEGY_SONIFICATION_RESPECTFUL
-                    || topActiveStrategy == STRATEGY_SONIFICATION
+            if ((topActiveStrategy != STRATEGY_PHONE
+                        && topActiveStrategy != STRATEGY_TRANSMITTED_THROUGH_SPEAKER)
                     || !outputs.isAnyDeviceTypeActive(getAudioDeviceOutLeAudioUnicastSet())) {
                 devices2 =
                         availableOutputDevices.getDevicesFromType(AUDIO_DEVICE_OUT_BLE_BROADCAST);
