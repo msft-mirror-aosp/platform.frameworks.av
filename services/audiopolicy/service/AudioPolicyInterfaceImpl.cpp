@@ -423,6 +423,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized = false;
     bool isBitPerfect = false;
+    float volume;
     status_t result = mAudioPolicyManager->getOutputForAttr(&attr, &output, session,
                                                             &stream,
                                                             attributionSource,
@@ -431,7 +432,8 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
                                                             &secondaryOutputs,
                                                             &outputType,
                                                             &isSpatialized,
-                                                            &isBitPerfect);
+                                                            &isBitPerfect,
+                                                            &volume);
 
     // FIXME: Introduce a way to check for the the telephony device before opening the output
     if (result == NO_ERROR) {
@@ -477,7 +479,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
 
         sp<AudioPlaybackClient> client =
                 new AudioPlaybackClient(attr, output, attributionSource, session,
-                    portId, selectedDeviceId, stream, isSpatialized);
+                    portId, selectedDeviceId, stream, isSpatialized, config.channel_mask);
         mAudioPlaybackClients.add(portId, client);
 
         _aidl_return->output = VALUE_OR_RETURN_BINDER_STATUS(
@@ -495,6 +497,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
         _aidl_return->isBitPerfect = isBitPerfect;
         _aidl_return->attr = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_attributes_t_AudioAttributes(attr));
+        _aidl_return->volume = volume;
     } else {
         _aidl_return->configBase.format = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_format_t_AudioFormatDescription(config.format));

@@ -17,18 +17,21 @@
 #ifndef ANDROID_COMPANION_VIRTUALCAMERA_EGLSURFACETEXTURE_H
 #define ANDROID_COMPANION_VIRTUALCAMERA_EGLSURFACETEXTURE_H
 
+#include <GLES/gl.h>
+#include <gui/ConsumerBase.h>
+#include <gui/Surface.h>
+#include <utils/RefBase.h>
+
 #include <chrono>
 #include <cstdint>
 
-#include "GLES/gl.h"
-#include "gui/ConsumerBase.h"
-#include "gui/Surface.h"
-#include "utils/RefBase.h"
-
 namespace android {
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 class IGraphicBufferProducer;
 class IGraphicBufferConsumer;
+#endif  // !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
 class GLConsumer;
 
 namespace companion {
@@ -80,8 +83,10 @@ class EglSurfaceTexture {
   std::array<float, 16> getTransformMatrix();
 
  private:
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<IGraphicBufferProducer> mBufferProducer;
   sp<IGraphicBufferConsumer> mBufferConsumer;
+#endif  // !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<GLConsumer> mGlConsumer;
   sp<Surface> mSurface;
   GLuint mTextureId;

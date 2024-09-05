@@ -96,6 +96,7 @@ private:
     uint64_t mBqId;
     int32_t mMaxDequeueBufferCount;
     std::shared_ptr<int> mOwner;
+    std::shared_ptr<int> mConsumerAttachCount;
     // To migrate existing buffers
     sp<GraphicBuffer> mBuffers[BufferQueueDefs::NUM_BUFFER_SLOTS]; // find a better way
     std::weak_ptr<_C2BlockPoolData> mPoolDatas[BufferQueueDefs::NUM_BUFFER_SLOTS];

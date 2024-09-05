@@ -17,7 +17,6 @@
 #pragma once
 
 #include <psh_utils/PowerStatsCollector.h>
-#include <iostream>
 
 namespace android::media::psh_utils {
 
