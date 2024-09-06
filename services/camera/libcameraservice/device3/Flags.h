@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,19 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package android.media;
 
-/**
- * {@hide}
- */
-@Backing(type="int")
-enum AudioPolicyForceUse {
-    COMMUNICATION = 0,
-    MEDIA = 1,
-    RECORD = 2,
-    DOCK = 3,
-    SYSTEM = 4,
-    HDMI_SYSTEM_AUDIO = 5,
-    ENCODED_SURROUND = 6,
-    VIBRATE_RINGING = 7,
-}
+#pragma once
+
+#include <com_android_graphics_libgui_flags.h>
+
+#ifndef USE_NEW_STREAM_SPLITTER
+
+#define USE_NEW_STREAM_SPLITTER                              \
+    COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_STREAM_SPLITTER) && \
+            COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+
+#endif  // USE_NEW_STREAM_SPLITTER

@@ -56,23 +56,17 @@ public:
 
     // TODO: update Demux, Descrambler.
     static void updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
-                                     const vector<int64_t>& lnbHandles);
+                                     const vector<int32_t>& lnbHandles);
 
     static void updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
                                      const vector<TunerDemuxInfo>& demuxInfos,
-                                     const vector<int64_t>& lnbHandles);
+                                     const vector<int32_t>& lnbHandles);
     // TODO: create a map between resource id and handles.
-    static int getResourceIdFromHandle(long resourceHandle, int type);
-    static long getResourceHandleFromId(int id, int resourceType);
+    static int getResourceIdFromHandle(int resourceHandle, int type);
+    static int getResourceHandleFromId(int id, int resourceType);
 
 private:
     static int32_t sResourceRequestCount;
-
-    static constexpr int RESOURCE_ID_SHIFT = 24;
-    static constexpr int RESOURCE_TYPE_SHIFT = 56;
-    static constexpr long RESOURCE_COUNT_MASK = 0xffffff;
-    static constexpr long RESOURCE_ID_MASK = 0xffffffff;
-    static constexpr long RESOURCE_TYPE_MASK = 0xff;
 };
 
 }  // namespace tuner
