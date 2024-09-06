@@ -92,16 +92,12 @@ bool MediaMetricsService::useUidForPackage(
 /* static */
 std::pair<std::string, int64_t>
 MediaMetricsService::getSanitizedPackageNameAndVersionCode(uid_t uid) {
-    // Meyer's singleton, initialized on first access.
-    // mUidInfo is locked internally.
-    static mediautils::UidInfo uidInfo;
-
-    // get info.
-    mediautils::UidInfo::Info info = uidInfo.getInfo(uid);
-    if (useUidForPackage(info.package, info.installer)) {
+    const std::shared_ptr<const mediautils::UidInfo::Info> info =
+            mediautils::UidInfo::getInfo(uid);
+    if (useUidForPackage(info->package, info->installer)) {
         return { std::to_string(uid), /* versionCode */ 0 };
     } else {
-        return { info.package, info.versionCode };
+        return { info->package, info->versionCode };
     }
 }
 
