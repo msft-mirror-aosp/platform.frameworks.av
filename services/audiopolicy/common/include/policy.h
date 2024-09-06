@@ -26,6 +26,25 @@ namespace android {
 
 using StreamTypeVector = std::vector<audio_stream_type_t>;
 
+/**
+ * Legacy audio policy product strategies IDs. These strategies are supported by the default
+ * policy engine.
+ */
+enum legacy_strategy {
+    STRATEGY_NONE = -1,
+    STRATEGY_MEDIA,
+    STRATEGY_PHONE,
+    STRATEGY_SONIFICATION,
+    STRATEGY_SONIFICATION_RESPECTFUL,
+    STRATEGY_DTMF,
+    STRATEGY_ENFORCED_AUDIBLE,
+    STRATEGY_TRANSMITTED_THROUGH_SPEAKER,
+    STRATEGY_ACCESSIBILITY,
+    STRATEGY_REROUTING,
+    STRATEGY_CALL_ASSISTANT,
+    STRATEGY_PATCH,
+};
+
 static const audio_attributes_t defaultAttr = AUDIO_ATTRIBUTES_INITIALIZER;
 
 static const std::set<audio_usage_t > gHighPriorityUseCases = {
