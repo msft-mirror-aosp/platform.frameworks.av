@@ -45,7 +45,6 @@
 #include <android_media_audiopolicy.h>
 #include <com_android_media_audioserver.h>
 #include <cutils/bitops.h>
-#include <cutils/properties.h>
 #include <media/AudioParameter.h>
 #include <policy.h>
 #include <private/android_filesystem_config.h>
@@ -55,6 +54,7 @@
 #include <utils/Log.h>
 
 #include "AudioPolicyManager.h"
+#include "SpatializerHelper.h"
 #include "TypeConverter.h"
 
 namespace android {
@@ -3800,9 +3800,10 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
     // 1: An offloaded output. If the effect ends up not being offloadable,
     //    AudioFlinger will invalidate the track and the offloaded output
     //    will be closed causing the effect to be moved to a PCM output.
-    // 2: A deep buffer output
-    // 3: The primary output
-    // 4: the first output in the list
+    // 2: Spatializer output if the stereo spatializer feature enabled
+    // 3: A deep buffer output
+    // 4: The primary output
+    // 5: the first output in the list
 
     DeviceVector devices = mEngine->getOutputDevicesForAttributes(
                 attributes_initializer(AUDIO_USAGE_MEDIA), nullptr, false /*fromCache*/);
@@ -3817,28 +3818,36 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
 
     while (output == AUDIO_IO_HANDLE_NONE) {
         audio_io_handle_t outputOffloaded = AUDIO_IO_HANDLE_NONE;
+        audio_io_handle_t outputSpatializer = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputDeepBuffer = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputPrimary = AUDIO_IO_HANDLE_NONE;
 
-        for (audio_io_handle_t output : outputs) {
-            sp<SwAudioOutputDescriptor> desc = mOutputs.valueFor(output);
+        for (audio_io_handle_t outputLoop : outputs) {
+            sp<SwAudioOutputDescriptor> desc = mOutputs.valueFor(outputLoop);
             if (activeOnly && !desc->isActive(toVolumeSource(AUDIO_STREAM_MUSIC))) {
                 continue;
             }
             ALOGV("selectOutputForMusicEffects activeOnly %d output %d flags 0x%08x",
-                  activeOnly, output, desc->mFlags);
+                  activeOnly, outputLoop, desc->mFlags);
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) != 0) {
-                outputOffloaded = output;
+                outputOffloaded = outputLoop;
+            }
+            if ((desc->mFlags & AUDIO_OUTPUT_FLAG_SPATIALIZER) != 0) {
+                if (SpatializerHelper::isStereoSpatializationFeatureEnabled()) {
+                    outputSpatializer = outputLoop;
+                }
             }
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER) != 0) {
-                outputDeepBuffer = output;
+                outputDeepBuffer = outputLoop;
             }
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY) != 0) {
-                outputPrimary = output;
+                outputPrimary = outputLoop;
             }
         }
         if (outputOffloaded != AUDIO_IO_HANDLE_NONE) {
             output = outputOffloaded;
+        } else if (outputSpatializer != AUDIO_IO_HANDLE_NONE) {
+            output = outputSpatializer;
         } else if (outputDeepBuffer != AUDIO_IO_HANDLE_NONE) {
             output = outputDeepBuffer;
         } else if (outputPrimary != AUDIO_IO_HANDLE_NONE) {
@@ -6366,13 +6375,10 @@ bool AudioPolicyManager::canBeSpatializedInt(const audio_attributes_t *attr,
     // mode is not requested.
 
     if (config != nullptr && *config != AUDIO_CONFIG_INITIALIZER) {
-        static const bool stereo_spatialization_prop_enabled =
-                property_get_bool("ro.audio.stereo_spatialization_enabled", false);
         const bool channel_mask_spatialized =
-                (stereo_spatialization_prop_enabled
-                        && com_android_media_audio_stereo_spatialization())
-                ? audio_channel_mask_contains_stereo(config->channel_mask)
-                : audio_is_channel_mask_spatialized(config->channel_mask);
+                SpatializerHelper::isStereoSpatializationFeatureEnabled()
+                        ? audio_channel_mask_contains_stereo(config->channel_mask)
+                        : audio_is_channel_mask_spatialized(config->channel_mask);
         if (!channel_mask_spatialized) {
             return false;
         }
