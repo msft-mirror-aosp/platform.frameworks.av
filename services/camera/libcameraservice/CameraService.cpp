@@ -1612,11 +1612,12 @@ Status CameraService::initializeShimMetadata(int cameraId) {
     Status ret = Status::ok();
     sp<Client> tmp = nullptr;
 
-    logConnectionAttempt(getCallingPid(), kServiceName, cameraIdStr, API_1);
+    int callingPid = getCallingPid();
+    logConnectionAttempt(callingPid, kServiceName, cameraIdStr, API_1);
 
     if (!(ret = connectHelper<ICameraClient,Client>(
             sp<ICameraClient>{nullptr}, cameraIdStr, cameraId,
-            kServiceName, /*systemNativeClient*/ false, {}, uid, USE_CALLING_PID,
+            kServiceName, /*systemNativeClient*/ false, {}, uid, callingPid,
             API_1, /*shimUpdateOnly*/ true, /*oomScoreOffset*/ 0,
             /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
             /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
@@ -1690,7 +1691,7 @@ Status CameraService::getLegacyParametersLazy(int cameraId,
 }
 
 Status CameraService::validateConnectLocked(const std::string& cameraId,
-        const std::string& clientName8, /*inout*/int& clientUid, /*inout*/int& clientPid) const {
+        const std::string& clientName8, int clientUid, int clientPid) const {
 
 #ifdef __BRILLO__
     UNUSED(clientName8);
@@ -1734,36 +1735,24 @@ Status CameraService::validateConnectLocked(const std::string& cameraId,
     return Status::ok();
 }
 
-Status CameraService::validateClientPermissionsLocked(const std::string& cameraId,
-        const std::string& clientName, int& clientUid, int& clientPid) const {
+Status CameraService::errorNotTrusted(int clientPid, int clientUid, const std::string& cameraId,
+        const std::string& clientName, bool isPid) const {
     int callingPid = getCallingPid();
     int callingUid = getCallingUid();
+    ALOGE("CameraService::connect X (calling PID %d, calling UID %d) rejected "
+            "(don't trust %s %d)", callingPid, callingUid, isPid ? "clientPid" : "clientUid",
+            isPid ? clientPid : clientUid);
+    return STATUS_ERROR_FMT(ERROR_PERMISSION_DENIED,
+            "Untrusted caller (calling PID %d, UID %d) trying to "
+            "forward camera access to camera %s for client %s (PID %d, UID %d)",
+            getCallingPid(), getCallingUid(), cameraId.c_str(),
+            clientName.c_str(), clientPid, clientUid);
+}
 
-    // Check if we can trust clientUid
-    if (clientUid == USE_CALLING_UID) {
-        clientUid = callingUid;
-    } else if (!isTrustedCallingUid(callingUid)) {
-        ALOGE("CameraService::connect X (calling PID %d, calling UID %d) rejected "
-                "(don't trust clientUid %d)", callingPid, callingUid, clientUid);
-        return STATUS_ERROR_FMT(ERROR_PERMISSION_DENIED,
-                "Untrusted caller (calling PID %d, UID %d) trying to "
-                "forward camera access to camera %s for client %s (PID %d, UID %d)",
-                callingPid, callingUid, cameraId.c_str(),
-                clientName.c_str(), clientPid, clientUid);
-    }
-
-    // Check if we can trust clientPid
-    if (clientPid == USE_CALLING_PID) {
-        clientPid = callingPid;
-    } else if (!isTrustedCallingUid(callingUid)) {
-        ALOGE("CameraService::connect X (calling PID %d, calling UID %d) rejected "
-                "(don't trust clientPid %d)", callingPid, callingUid, clientPid);
-        return STATUS_ERROR_FMT(ERROR_PERMISSION_DENIED,
-                "Untrusted caller (calling PID %d, UID %d) trying to "
-                "forward camera access to camera %s for client %s (PID %d, UID %d)",
-                callingPid, callingUid, cameraId.c_str(),
-                clientName.c_str(), clientPid, clientUid);
-    }
+Status CameraService::validateClientPermissionsLocked(const std::string& cameraId,
+        const std::string& clientName, int clientUid, int clientPid) const {
+    int callingPid = getCallingPid();
+    int callingUid = getCallingUid();
 
     if (shouldRejectSystemCameraConnection(cameraId)) {
         ALOGW("Attempting to connect to system-only camera id %s, connection rejected",
@@ -2156,10 +2145,28 @@ Status CameraService::connect(
             clientPackageNameMaybe);
     logConnectionAttempt(clientAttribution.pid, clientPackageName, cameraIdStr, API_1);
 
+    int clientUid = clientAttribution.uid;
+    int clientPid = clientAttribution.pid;
+
+    // Resolve the client identity. In the near future, we will no longer rely on USE_CALLING_*, and
+    // need a way to guarantee the caller identity early.
+
+    // Check if we can trust clientUid
+    if (!resolveClientUid(clientUid)) {
+        return errorNotTrusted(clientPid, clientUid, cameraIdStr, clientPackageName,
+                /* isPid=*/ false);
+    }
+
+    // Check if we can trust clientUid
+    if (!resolveClientPid(clientPid)) {
+        return errorNotTrusted(clientPid, clientUid, cameraIdStr, clientPackageName,
+                /* isPid= */ true);
+    }
+
     sp<Client> client = nullptr;
     ret = connectHelper<ICameraClient,Client>(cameraClient, cameraIdStr, api1CameraId,
             clientPackageName, /*systemNativeClient*/ false, {},
-            clientAttribution.uid, clientAttribution.pid, API_1,
+            clientUid, clientPid, API_1,
             /*shimUpdateOnly*/ false, /*oomScoreOffset*/ 0, targetSdkVersion,
             rotationOverride, forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*out*/client);
 
@@ -2275,6 +2282,22 @@ Status CameraService::connectDevice(
             clientPackageNameMaybe);
     logConnectionAttempt(clientAttribution.pid, clientPackageName, cameraId, API_2);
 
+    userid_t clientUserId = multiuser_get_user_id(clientAttribution.uid);
+    if (clientAttribution.uid == USE_CALLING_UID) {
+        clientUserId = multiuser_get_user_id(callingUid);
+    }
+
+    // Resolve the client identity. In the near future, we will no longer rely on USE_CALLING_*, and
+    // need a way to guarantee the caller identity early.
+
+    int clientUid = clientAttribution.uid;
+    int clientPid = callingPid;
+    // Check if we can trust clientUid
+    if (!resolveClientUid(clientUid)) {
+        return errorNotTrusted(clientPid, clientUid, cameraId, clientPackageName,
+                /* isPid= */ false);
+    }
+
     if (oomScoreOffset < 0) {
         std::string msg =
                 fmt::sprintf("Cannot increase the priority of a client %s pid %d for "
@@ -2282,11 +2305,6 @@ Status CameraService::connectDevice(
                         cameraId.c_str());
         ALOGE("%s: %s", __FUNCTION__, msg.c_str());
         return STATUS_ERROR(ERROR_ILLEGAL_ARGUMENT, msg.c_str());
-    }
-
-    userid_t clientUserId = multiuser_get_user_id(clientAttribution.uid);
-    if (clientAttribution.uid == USE_CALLING_UID) {
-        clientUserId = multiuser_get_user_id(callingUid);
     }
 
     // Automotive privileged client AID_AUTOMOTIVE_EVS using exterior system camera for use cases
@@ -2312,7 +2330,7 @@ Status CameraService::connectDevice(
 
     ret = connectHelper<hardware::camera2::ICameraDeviceCallbacks,CameraDeviceClient>(cameraCb,
             cameraId, /*api1CameraId*/-1, clientPackageName, systemNativeClient,
-            clientAttribution.attributionTag, clientAttribution.uid, USE_CALLING_PID, API_2,
+            clientAttribution.attributionTag, clientUid, clientPid, API_2,
             /*shimUpdateOnly*/ false, oomScoreOffset, targetSdkVersion, rotationOverride,
             /*forceSlowJpegMode*/false, unresolvedCameraId, isNonSystemNdk, /*out*/client);
 
