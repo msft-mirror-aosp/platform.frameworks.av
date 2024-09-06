@@ -51,7 +51,7 @@ static const std::vector<legacy_strategy_map>& getLegacyStrategy() {
         { "STRATEGY_TRANSMITTED_THROUGH_SPEAKER", STRATEGY_TRANSMITTED_THROUGH_SPEAKER },
         { "STRATEGY_ACCESSIBILITY", STRATEGY_ACCESSIBILITY },
         { "STRATEGY_REROUTING", STRATEGY_REROUTING },
-        { "STRATEGY_PATCH", STRATEGY_REROUTING }, // boiler to manage stream patch volume
+        { "STRATEGY_PATCH", STRATEGY_PATCH }, // boiler to manage stream patch volume
         { "STRATEGY_CALL_ASSISTANT", STRATEGY_CALL_ASSISTANT },
     };
     return legacyStrategy;
