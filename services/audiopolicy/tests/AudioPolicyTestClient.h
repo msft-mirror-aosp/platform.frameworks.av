@@ -58,6 +58,10 @@ public:
                              float /*volume*/,
                              audio_io_handle_t /*output*/,
                              int /*delayMs*/) override { return NO_INIT; }
+
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& /*ports*/, float /*volume*/,
+            audio_io_handle_t /*output*/, int /*delayMs*/) override { return NO_INIT; }
+
     void setParameters(audio_io_handle_t /*ioHandle*/,
                        const String8& /*keyValuePairs*/,
                        int /*delayMs*/) override { }

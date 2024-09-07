@@ -836,6 +836,12 @@ protected:
                     typename SortedVector<sp<T>>::iterator end() {
                         return mActiveTracks.end();
                     }
+                    typename SortedVector<const sp<T>>::iterator begin() const {
+                        return mActiveTracks.begin();
+                    }
+                    typename SortedVector<const sp<T>>::iterator end() const {
+                        return mActiveTracks.end();
+                    }
 
                     // Due to Binder recursion optimization, clear() and updatePowerState()
                     // cannot be called from a Binder thread because they may call back into
@@ -1011,6 +1017,9 @@ public:
     void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            final EXCLUDES_ThreadBase_Mutex;
+
     void setVolumeForOutput_l(float left, float right) const final;
 
     sp<IAfTrack> createTrack_l(
@@ -1035,7 +1044,8 @@ public:
                                 const sp<media::IAudioTrackCallback>& callback,
                                 bool isSpatialized,
                                 bool isBitPerfect,
-                                audio_output_flags_t* afTrackFlags) final
+                                audio_output_flags_t* afTrackFlags,
+                                float volume) final
             REQUIRES(audio_utils::AudioFlinger_Mutex);
 
     bool isTrackActive(const sp<IAfTrack>& track) const final {
@@ -2385,6 +2395,8 @@ public:
     void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            final EXCLUDES_ThreadBase_Mutex;
 
     void setMasterMute_l(bool muted) REQUIRES(mutex()) { mMasterMute = muted; }
 

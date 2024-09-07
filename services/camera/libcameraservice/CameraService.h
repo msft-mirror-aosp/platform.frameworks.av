@@ -950,14 +950,16 @@ private:
     // If clientPid/clientUid are USE_CALLING_PID/USE_CALLING_UID, they will be overwritten with
     // the calling pid/uid.
     binder::Status validateConnectLocked(const std::string& cameraId, const std::string& clientName,
-            /*inout*/int& clientUid, /*inout*/int& clientPid) const;
+            int clientUid, int clientPid) const;
     binder::Status validateClientPermissionsLocked(const std::string& cameraId,
-            const std::string& clientName, /*inout*/int& clientUid, /*inout*/int& clientPid) const;
+            const std::string& clientName, int clientUid, int clientPid) const;
 
     // If clientPackageNameMaybe is empty, attempts to resolve the package name.
     std::string resolvePackageName(int clientUid, const std::string& clientPackageNameMaybe) const;
     void logConnectionAttempt(int clientPid, const std::string& clientPackageName,
         const std::string& cameraId, apiLevel effectiveApiLevel) const;
+    binder::Status errorNotTrusted(int clientPid, int clientUid, const std::string& cameraId,
+            const std::string& clientName, bool isPid) const;
 
     bool isCameraPrivacyEnabled(const String16& packageName,const std::string& cameraId,
            int clientPid, int ClientUid);

@@ -3266,7 +3266,9 @@ NO_THREAD_SAFETY_ANALYSIS
     }
 
     if (mThreadType == IAfThreadBase::SPATIALIZER) {
-        if (c->sessionId() == AUDIO_SESSION_OUTPUT_STAGE) {
+        if (c->sessionId() == AUDIO_SESSION_OUTPUT_MIX) {
+            return t->mixerChannelMask();
+        } else if (c->sessionId() == AUDIO_SESSION_OUTPUT_STAGE) {
             if (c->isFirstEffect_l(id)) {
                 return t->mixerChannelMask();
             } else {
@@ -3313,7 +3315,8 @@ NO_THREAD_SAFETY_ANALYSIS
                 return t->channelMask();
             }
         } else {
-            return t->channelMask();
+            return (c->sessionId() == AUDIO_SESSION_OUTPUT_MIX) ? t->mixerChannelMask()
+                                                                : t->channelMask();
         }
     } else {
         return t->channelMask();

@@ -79,6 +79,8 @@ using media::audio::common::AudioDeviceDescription;
 using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioMode;
 using media::audio::common::AudioOffloadInfo;
+using media::audio::common::AudioPolicyForceUse;
+using media::audio::common::AudioPolicyForcedConfig;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
 using media::audio::common::AudioUsage;
@@ -284,8 +286,8 @@ Status AudioPolicyService::getPhoneState(AudioMode* _aidl_return) {
     return Status::ok();
 }
 
-Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
-                                       media::AudioPolicyForcedConfig configAidl)
+Status AudioPolicyService::setForceUse(AudioPolicyForceUse usageAidl,
+                                       AudioPolicyForcedConfig configAidl)
 {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
@@ -316,8 +318,8 @@ Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
     return Status::ok();
 }
 
-Status AudioPolicyService::getForceUse(media::AudioPolicyForceUse usageAidl,
-                                       media::AudioPolicyForcedConfig* _aidl_return) {
+Status AudioPolicyService::getForceUse(AudioPolicyForceUse usageAidl,
+                                       AudioPolicyForcedConfig* _aidl_return) {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
 
@@ -423,6 +425,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized = false;
     bool isBitPerfect = false;
+    float volume;
     status_t result = mAudioPolicyManager->getOutputForAttr(&attr, &output, session,
                                                             &stream,
                                                             attributionSource,
@@ -431,7 +434,8 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
                                                             &secondaryOutputs,
                                                             &outputType,
                                                             &isSpatialized,
-                                                            &isBitPerfect);
+                                                            &isBitPerfect,
+                                                            &volume);
 
     // FIXME: Introduce a way to check for the the telephony device before opening the output
     if (result == NO_ERROR) {
@@ -495,6 +499,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
         _aidl_return->isBitPerfect = isBitPerfect;
         _aidl_return->attr = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_attributes_t_AudioAttributes(attr));
+        _aidl_return->volume = volume;
     } else {
         _aidl_return->configBase.format = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_format_t_AudioFormatDescription(config.format));

@@ -96,6 +96,9 @@ private:
     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
             EXCLUDES_AudioFlinger_Mutex;
 
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
+
     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setMicMute(bool state) final EXCLUDES_AudioFlinger_Mutex;
@@ -552,6 +555,7 @@ private:
     IAfPlaybackThread* checkMixerThread_l(audio_io_handle_t output) const REQUIRES(mutex());
 
     sp<VolumeInterface> getVolumeInterface_l(audio_io_handle_t output) const REQUIRES(mutex());
+
     std::vector<sp<VolumeInterface>> getAllVolumeInterfaces_l() const REQUIRES(mutex());
 
 
@@ -694,8 +698,7 @@ private:
 
     DefaultKeyedVector<audio_io_handle_t, sp<IAfRecordThread>> mRecordThreads GUARDED_BY(mutex());
 
-    DefaultKeyedVector<pid_t, sp<NotificationClient>> mNotificationClients
-            GUARDED_BY(clientMutex());
+    std::map<pid_t, sp<NotificationClient>> mNotificationClients GUARDED_BY(clientMutex());
 
                 // updated by atomic_fetch_add_explicit
     volatile atomic_uint_fast32_t mNextUniqueIds[AUDIO_UNIQUE_ID_USE_MAX];  // ctor init
@@ -772,8 +775,6 @@ private:
 
     bool mSystemReady GUARDED_BY(mutex()) = false;
     std::atomic<bool> mAudioPolicyReady = false;
-
-    mediautils::UidInfo mUidInfo GUARDED_BY(mutex());
 
     // no mutex needed.
     SimpleLog  mRejectedSetParameterLog;
