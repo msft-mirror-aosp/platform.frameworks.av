@@ -18,17 +18,14 @@
 
 #include <EngineConfig.h>
 
-#include <media/AudioProductStrategy.h>
-#include <policy.h>
 #include <system/audio.h>
 
 namespace android {
-
 /**
  * @brief AudioProductStrategies hard coded array of strategies to fill new engine API contract.
  */
 const engineConfig::ProductStrategies gOrderedStrategies = {
-    {"STRATEGY_PHONE", STRATEGY_PHONE,
+    {"STRATEGY_PHONE",
      {
          {AUDIO_STREAM_VOICE_CALL, "AUDIO_STREAM_VOICE_CALL",
           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_VOICE_COMMUNICATION, AUDIO_SOURCE_DEFAULT,
@@ -40,7 +37,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_SONIFICATION", STRATEGY_SONIFICATION,
+    {"STRATEGY_SONIFICATION",
      {
          {AUDIO_STREAM_RING, "AUDIO_STREAM_RING",
           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
@@ -52,7 +49,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_ENFORCED_AUDIBLE", STRATEGY_ENFORCED_AUDIBLE,
+    {"STRATEGY_ENFORCED_AUDIBLE",
      {
          {AUDIO_STREAM_ENFORCED_AUDIBLE, "AUDIO_STREAM_ENFORCED_AUDIBLE",
           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN, AUDIO_SOURCE_DEFAULT,
@@ -60,7 +57,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_ACCESSIBILITY", STRATEGY_ACCESSIBILITY,
+    {"STRATEGY_ACCESSIBILITY",
      {
          {AUDIO_STREAM_ACCESSIBILITY, "AUDIO_STREAM_ACCESSIBILITY",
           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_ASSISTANCE_ACCESSIBILITY,
@@ -68,7 +65,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_SONIFICATION_RESPECTFUL", STRATEGY_SONIFICATION_RESPECTFUL,
+    {"STRATEGY_SONIFICATION_RESPECTFUL",
      {
          {AUDIO_STREAM_NOTIFICATION, "AUDIO_STREAM_NOTIFICATION",
           {
@@ -80,7 +77,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_MEDIA", STRATEGY_MEDIA,
+    {"STRATEGY_MEDIA",
      {
          {AUDIO_STREAM_ASSISTANT, "AUDIO_STREAM_ASSISTANT",
           {{AUDIO_CONTENT_TYPE_SPEECH, AUDIO_USAGE_ASSISTANT,
@@ -106,7 +103,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_DTMF", STRATEGY_DTMF,
+    {"STRATEGY_DTMF",
      {
          {AUDIO_STREAM_DTMF, "AUDIO_STREAM_DTMF",
           {
@@ -116,7 +113,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_CALL_ASSISTANT", STRATEGY_CALL_ASSISTANT,
+    {"STRATEGY_CALL_ASSISTANT",
      {
          {AUDIO_STREAM_CALL_ASSISTANT, "AUDIO_STREAM_CALL_ASSISTANT",
           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_CALL_ASSISTANT, AUDIO_SOURCE_DEFAULT,
@@ -124,7 +121,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     },
-    {"STRATEGY_TRANSMITTED_THROUGH_SPEAKER", STRATEGY_TRANSMITTED_THROUGH_SPEAKER,
+    {"STRATEGY_TRANSMITTED_THROUGH_SPEAKER",
      {
          {AUDIO_STREAM_TTS, "AUDIO_STREAM_TTS",
           {
@@ -143,7 +140,7 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
  * For compatibility reason why apm volume config file, volume group name is the stream type.
  */
 const engineConfig::ProductStrategies gOrderedSystemStrategies = {
-    {"STRATEGY_REROUTING", STRATEGY_REROUTING,
+    {"STRATEGY_REROUTING",
      {
          {AUDIO_STREAM_REROUTING, "AUDIO_STREAM_REROUTING",
           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_VIRTUAL_SOURCE, AUDIO_SOURCE_DEFAULT,
@@ -151,7 +148,7 @@ const engineConfig::ProductStrategies gOrderedSystemStrategies = {
          }
      },
     },
-    {"STRATEGY_PATCH", STRATEGY_PATCH,
+    {"STRATEGY_PATCH",
      {
          {AUDIO_STREAM_PATCH, "AUDIO_STREAM_PATCH",
           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN, AUDIO_SOURCE_DEFAULT,

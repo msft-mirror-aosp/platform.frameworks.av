@@ -61,9 +61,6 @@ class AttributionAndPermissionUtils {
     virtual int64_t clearCallingIdentity();
     virtual void restoreCallingIdentity(int64_t token);
 
-    virtual bool resolveClientUid(/*inout*/ int& clientUid);
-    virtual bool resolveClientPid(/*inout*/ int& clientPid);
-
     /**
      * Pre-grants the permission if the attribution source uid is for an automotive
      * privileged client. Otherwise uses system service permission checker to check
@@ -171,14 +168,6 @@ public:
 
     void restoreCallingIdentity(int64_t token) const {
         mAttributionAndPermissionUtils->restoreCallingIdentity(token);
-    }
-
-    bool resolveClientUid(/*inout*/ int& clientUid) const {
-        return mAttributionAndPermissionUtils->resolveClientUid(clientUid);
-    }
-
-    bool resolveClientPid(/*inout*/ int& clientPid) const {
-        return mAttributionAndPermissionUtils->resolveClientPid(clientPid);
     }
 
     // The word 'System' here does not refer to callers only on the system

@@ -35,9 +35,8 @@
 
 ## tunables:
 ##
-## as of 2024/5, things are all on the same branch.
 DEV_BRANCH=main
-MAINLINE_BRANCH=main
+MAINLINE_BRANCH=udc-mainline-prod
 filelist_file=MainlineFiles.cfg
 
 ###

@@ -46,7 +46,7 @@ private:
     using VolumeGroupAttributesVector = std::vector<VolumeGroupAttributes>;
 
 public:
-    ProductStrategy(const std::string &name, int id = PRODUCT_STRATEGY_NONE);
+    ProductStrategy(const std::string &name);
 
     void addAttributes(const VolumeGroupAttributes &volumeGroupAttributes);
 
