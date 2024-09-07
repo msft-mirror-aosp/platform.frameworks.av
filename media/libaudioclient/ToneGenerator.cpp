@@ -1323,7 +1323,7 @@ bool ToneGenerator::initAudioTrack() {
 
     audio_attributes_t attr;
     audio_stream_type_t streamType = mStreamType;
-    if (mStreamType == AUDIO_STREAM_VOICE_CALL) {
+    if (mStreamType == AUDIO_STREAM_VOICE_CALL || mStreamType == AUDIO_STREAM_BLUETOOTH_SCO) {
         streamType = AUDIO_STREAM_DTMF;
     }
     attr = AudioSystem::streamTypeToAttributes(streamType);

@@ -53,7 +53,10 @@ cc_test {
         "libaudiopolicymanager_interface_headers",
     ],
 
-    srcs: ["audiopolicymanager_tests.cpp"],
+    srcs: [
+        "audiopolicymanager_tests.cpp",
+        "test_execution_tracer.cpp",
+    ],
 
     data: [":audiopolicytest_configuration_files"],
 
