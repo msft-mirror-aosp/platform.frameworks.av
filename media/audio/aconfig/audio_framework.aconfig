@@ -93,6 +93,13 @@ flag {
 }
 
 flag {
+    name: "muted_by_port_volume_api"
+    namespace: "media_audio"
+    description: "Playback monitoring flag used when player muted by port volume"
+    bug: "319515324"
+}
+
+flag {
     name: "sco_managed_by_audio"
     is_exported: true
     namespace: "media_audio"

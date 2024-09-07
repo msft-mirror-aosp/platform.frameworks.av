@@ -43,6 +43,7 @@
 #include "AudioPolicyManagerTestClient.h"
 #include "AudioPolicyTestClient.h"
 #include "AudioPolicyTestManager.h"
+#include "test_execution_tracer.h"
 
 using namespace android;
 using testing::UnorderedElementsAre;
@@ -3923,4 +3924,10 @@ TEST_F_WITH_FLAGS(
     EXPECT_EQ(2, mClient->getOpenInputCallsCount());
     EXPECT_EQ(1, mClient->getCloseInputCallsCount());
     EXPECT_NE(input1, input2);
+}
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
+    return RUN_ALL_TESTS();
 }
