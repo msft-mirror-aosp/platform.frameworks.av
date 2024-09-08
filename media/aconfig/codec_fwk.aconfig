@@ -98,6 +98,16 @@ flag {
 }
 
 flag {
+  name: "secure_codecs_require_crypto"
+  namespace: "codec_fwk"
+  description: "Bugfix flag for requiring setting crypto for secure codecs"
+  bug: "365162324"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
   name: "set_callback_stall"
   namespace: "codec_fwk"
   description: "Bugfix flag for setCallback stall"
