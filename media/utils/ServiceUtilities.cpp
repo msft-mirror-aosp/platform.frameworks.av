@@ -473,35 +473,38 @@ void MediaPackageManager::dump(int fd, int spaces) const {
     }
 }
 
+namespace mediautils {
+
 // How long we hold info before we re-fetch it (24 hours) if we found it previously.
 static constexpr nsecs_t INFO_EXPIRATION_NS = 24 * 60 * 60 * NANOS_PER_SECOND;
 // Maximum info records we retain before clearing everything.
 static constexpr size_t INFO_CACHE_MAX = 1000;
 
 // The original code is from MediaMetricsService.cpp.
-mediautils::UidInfo::Info mediautils::UidInfo::getInfo(uid_t uid)
+std::shared_ptr<const UidInfo::Info> UidInfo::getCachedInfo(uid_t uid)
 {
+    std::shared_ptr<const UidInfo::Info> info;
+
     const nsecs_t now = systemTime(SYSTEM_TIME_REALTIME);
-    struct mediautils::UidInfo::Info info;
     {
         std::lock_guard _l(mLock);
         auto it = mInfoMap.find(uid);
         if (it != mInfoMap.end()) {
             info = it->second;
             ALOGV("%s: uid %d expiration %lld now %lld",
-                    __func__, uid, (long long)info.expirationNs, (long long)now);
-            if (info.expirationNs <= now) {
+                    __func__, uid, (long long)info->expirationNs, (long long)now);
+            if (info->expirationNs <= now) {
                 // purge the stale entry and fall into re-fetching
                 ALOGV("%s: entry for uid %d expired, now %lld",
                         __func__, uid, (long long)now);
                 mInfoMap.erase(it);
-                info.uid = (uid_t)-1;  // this is always fully overwritten
+                info.reset();  // force refetch
             }
         }
     }
 
     // if we did not find it in our map, look it up
-    if (info.uid == (uid_t)(-1)) {
+    if (!info) {
         sp<IServiceManager> sm = defaultServiceManager();
         sp<content::pm::IPackageManagerNative> package_mgr;
         if (sm.get() == nullptr) {
@@ -586,17 +589,30 @@ mediautils::UidInfo::Info mediautils::UidInfo::getInfo(uid_t uid)
         // first clear if we have too many cached elements.  This would be rare.
         if (mInfoMap.size() >= INFO_CACHE_MAX) mInfoMap.clear();
 
-        // always overwrite
-        info.uid = uid;
-        info.package = std::move(pkg);
-        info.installer = std::move(installer);
-        info.versionCode = versionCode;
-        info.expirationNs = now + (notFound ? 0 : INFO_EXPIRATION_NS);
+        info = std::make_shared<const UidInfo::Info>(
+                uid,
+                std::move(pkg),
+                std::move(installer),
+                versionCode,
+                now + (notFound ? 0 : INFO_EXPIRATION_NS));
         ALOGV("%s: adding uid %d package '%s' expirationNs: %lld",
-                __func__, uid, info.package.c_str(), (long long)info.expirationNs);
+                __func__, uid, info->package.c_str(), (long long)info->expirationNs);
         mInfoMap[uid] = info;
     }
     return info;
 }
+
+/* static */
+UidInfo& UidInfo::getUidInfo() {
+    [[clang::no_destroy]] static UidInfo uidInfo;
+    return uidInfo;
+}
+
+/* static */
+std::shared_ptr<const UidInfo::Info> UidInfo::getInfo(uid_t uid) {
+    return UidInfo::getUidInfo().getCachedInfo(uid);
+}
+
+} // namespace mediautils
 
 } // namespace android
