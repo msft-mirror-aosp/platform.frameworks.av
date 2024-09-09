@@ -269,6 +269,9 @@ status_t AudioPolicyConfig::loadFromAidl(const media::AudioPolicyConfig& aidl) {
     mSurroundFormats = VALUE_OR_RETURN_STATUS(
             aidl2legacy_SurroundSoundConfig_SurroundFormats(aidl.surroundSoundConfig));
     mSource = kAidlConfigSource;
+    if (aidl.engineConfig.capSpecificConfig.has_value()) {
+        setEngineLibraryNameSuffix(kCapEngineLibraryNameSuffix);
+    }
     // No need to augmentData() as AIDL HAL must provide correct mic addresses.
     return NO_ERROR;
 }
