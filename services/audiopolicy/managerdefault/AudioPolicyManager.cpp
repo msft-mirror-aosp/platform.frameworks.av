@@ -8427,6 +8427,9 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
                                                int delayMs,
                                                bool force)
 {
+    // APM is single threaded, and single instance.
+    static std::set<IVolumeCurves*> invalidCurvesReported;
+
     // do not change actual attributes volume if the attributes is muted
     if (outputDesc->isMuted(volumeSource)) {
         ALOGVV("%s: volume source %d muted count %d active=%d", __func__, volumeSource,
@@ -8451,7 +8454,12 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
     }
 
     if (curves.getVolumeIndexMin() < 0 || curves.getVolumeIndexMax() < 0) {
-        ALOGE("invalid volume index range");
+        if (!invalidCurvesReported.count(&curves)) {
+            invalidCurvesReported.insert(&curves);
+            String8 dump;
+            curves.dump(&dump);
+            ALOGE("invalid volume index range in the curve:\n%s", dump.c_str());
+        }
         return BAD_VALUE;
     }
 

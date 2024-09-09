@@ -36,8 +36,8 @@ android_test {
     resource_dirs: ["res"],
 
     libs: [
-        "android.test.runner",
-        "android.test.base",
+        "android.test.runner.stubs.system",
+        "android.test.base.stubs.system",
     ],
 
     jni_libs: [
