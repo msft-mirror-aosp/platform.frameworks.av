@@ -687,11 +687,7 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
         }
     }
 
-    if (flags::surface_ipc()) {
-        res = mConsumer->setMaxDequeuedBufferCount(mTotalBufferCount - maxConsumerBuffers);
-    } else {
-        res = native_window_set_buffer_count(mConsumer.get(), mTotalBufferCount);
-    }
+    res = mConsumer->setMaxDequeuedBufferCount(mTotalBufferCount - maxConsumerBuffers);
     if (res != OK) {
         ALOGE("%s: Unable to set buffer count for stream %d",
                 __FUNCTION__, mId);
@@ -1035,7 +1031,7 @@ void Camera3OutputStream::applyZSLUsageQuirk(int format, uint64_t *consumerUsage
 status_t Camera3OutputStream::getEndpointUsageForSurface(uint64_t *usage,
         const sp<Surface>& surface) {
     bool internalConsumer = (mConsumer.get() != nullptr) && (mConsumer == surface);
-    if (mConsumerUsageCachedValue.has_value() && flags::surface_ipc() && internalConsumer) {
+    if (mConsumerUsageCachedValue.has_value() && internalConsumer) {
         *usage = mConsumerUsageCachedValue.value();
         return OK;
     }
