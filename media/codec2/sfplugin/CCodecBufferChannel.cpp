@@ -228,15 +228,17 @@ void CCodecBufferChannel::setComponent(
 status_t CCodecBufferChannel::setInputSurface(
         const std::shared_ptr<InputSurfaceWrapper> &surface) {
     ALOGV("[%s] setInputSurface", mName);
-    mInputSurface = surface;
-    return mInputSurface->connect(mComponent);
+    Mutexed<std::shared_ptr<InputSurfaceWrapper>>::Locked inputSurface(mInputSurface);
+    *inputSurface = surface;
+    return (*inputSurface)->connect(mComponent);
 }
 
 status_t CCodecBufferChannel::signalEndOfInputStream() {
-    if (mInputSurface == nullptr) {
+    Mutexed<std::shared_ptr<InputSurfaceWrapper>>::Locked inputSurface(mInputSurface);
+    if ((*inputSurface) == nullptr) {
         return INVALID_OPERATION;
     }
-    return mInputSurface->signalEndOfInputStream();
+    return (*inputSurface)->signalEndOfInputStream();
 }
 
 status_t CCodecBufferChannel::queueInputBufferInternal(
@@ -1069,9 +1071,11 @@ void CCodecBufferChannel::feedInputBufferIfAvailableInternal() {
             return;
         }
     }
-    if (android::media::codec::provider_->input_surface_throttle()
-            && mInputSurface != nullptr) {
-        mInputSurface->onInputBufferEmptied();
+    if (android::media::codec::provider_->input_surface_throttle()) {
+        Mutexed<std::shared_ptr<InputSurfaceWrapper>>::Locked inputSurface(mInputSurface);
+        if ((*inputSurface) != nullptr) {
+            (*inputSurface)->onInputBufferEmptied();
+        }
     }
     size_t numActiveSlots = 0;
     while (!mPipelineWatcher.lock()->pipelineFull()) {
@@ -1469,6 +1473,17 @@ void CCodecBufferChannel::onBufferReleasedFromOutputSurface(uint32_t generation)
     }
 }
 
+void CCodecBufferChannel::onBufferAttachedToOutputSurface(uint32_t generation) {
+    // Note: Since this is called asynchronously from IProducerListener not
+    // knowing the internal state of CCodec/CCodecBufferChannel,
+    // prevent mComponent from being destroyed by holding the shared reference
+    // during this interface being executed.
+    std::shared_ptr<Codec2Client::Component> comp = mComponent;
+    if (comp) {
+        comp->onBufferAttachedToOutputSurface(generation);
+    }
+}
+
 status_t CCodecBufferChannel::discardBuffer(const sp<MediaCodecBuffer> &buffer) {
     ALOGV("[%s] discardBuffer: %p", mName, buffer.get());
     bool released = false;
@@ -1689,7 +1704,7 @@ status_t CCodecBufferChannel::start(
                 && (hasCryptoOrDescrambler() || conforming)) {
             input->buffers.reset(new SlotInputBuffers(mName));
         } else if (graphic) {
-            if (mInputSurface) {
+            if (mInputSurface.lock()->get()) {
                 input->buffers.reset(new DummyInputBuffers(mName));
             } else if (mMetaMode == MODE_ANW) {
                 input->buffers.reset(new GraphicMetadataInputBuffers(mName));
@@ -1972,7 +1987,7 @@ status_t CCodecBufferChannel::start(
 
 status_t CCodecBufferChannel::prepareInitialInputBuffers(
         std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers, bool retry) {
-    if (mInputSurface) {
+    if (mInputSurface.lock()->get()) {
         return OK;
     }
 
@@ -2098,9 +2113,7 @@ void CCodecBufferChannel::stopUseOutputSurface(bool pushBlankBuffer) {
 
 void CCodecBufferChannel::reset() {
     stop();
-    if (mInputSurface != nullptr) {
-        mInputSurface.reset();
-    }
+    mInputSurface.lock()->reset();
     mPipelineWatcher.lock()->flush();
     {
         Mutexed<Input>::Locked input(mInput);
@@ -2195,7 +2208,7 @@ void CCodecBufferChannel::onWorkDone(
 
 void CCodecBufferChannel::onInputBufferDone(
         uint64_t frameIndex, size_t arrayIndex) {
-    if (mInputSurface) {
+    if (mInputSurface.lock()->get()) {
         return;
     }
     std::shared_ptr<C2Buffer> buffer =
@@ -2252,7 +2265,8 @@ bool CCodecBufferChannel::handleWork(
         notifyClient = false;
     }
 
-    if (mInputSurface == nullptr && (work->worklets.size() != 1u
+    bool hasInputSurface = (mInputSurface.lock()->get() != nullptr);
+    if (!hasInputSurface && (work->worklets.size() != 1u
             || !work->worklets.front()
             || !(work->worklets.front()->output.flags &
                  C2FrameData::FLAG_INCOMPLETE))) {
@@ -2461,7 +2475,7 @@ bool CCodecBufferChannel::handleWork(
     c2_cntr64_t timestamp =
         worklet->output.ordinal.timestamp + work->input.ordinal.customOrdinal
                 - work->input.ordinal.timestamp;
-    if (mInputSurface != nullptr) {
+    if (hasInputSurface) {
         // When using input surface we need to restore the original input timestamp.
         timestamp = work->input.ordinal.customOrdinal;
     }
@@ -2788,7 +2802,7 @@ void CCodecBufferChannel::resetBuffersPixelFormat(bool isEncoder) {
 }
 
 void CCodecBufferChannel::setInfoBuffer(const std::shared_ptr<C2InfoBuffer> &buffer) {
-    if (mInputSurface == nullptr) {
+    if (mInputSurface.lock()->get() == nullptr) {
         mInfoBuffers.push_back(buffer);
     } else {
         std::list<std::unique_ptr<C2Work>> items;
@@ -2796,7 +2810,6 @@ void CCodecBufferChannel::setInfoBuffer(const std::shared_ptr<C2InfoBuffer> &buf
         work->input.infoBuffers.emplace_back(*buffer);
         work->worklets.emplace_back(new C2Worklet);
         items.push_back(std::move(work));
-        c2_status_t err = mComponent->queue(&items);
     }
 }
 

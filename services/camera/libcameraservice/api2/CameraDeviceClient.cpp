@@ -295,7 +295,7 @@ binder::Status CameraDeviceClient::submitRequestList(
     }
 
     List<const CameraDeviceBase::PhysicalCameraSettingsList> metadataRequestList;
-    std::list<const SurfaceMap> surfaceMapList;
+    std::list<SurfaceMap> surfaceMapList;
     submitInfo->mRequestId = mRequestIdCounter;
     uint32_t loopCounter = 0;
 
@@ -546,14 +546,14 @@ binder::Status CameraDeviceClient::submitRequestList(
             mRunningSessionStats.mVideoStabilizationMode = entry.data.u8[0];
         }
 
-        if (!mRunningSessionStats.mUsedUltraWide && flags::log_ultrawide_usage()) {
+        if (!mRunningSessionStats.mUsedUltraWide) {
             entry = physicalSettingsList.begin()->metadata.find(
                     ANDROID_CONTROL_ZOOM_RATIO);
             if (entry.count == 1 && entry.data.f[0] < 1.0f ) {
                 mRunningSessionStats.mUsedUltraWide = true;
             }
         }
-        if (!mRunningSessionStats.mUsedSettingsOverrideZoom && flags::log_zoom_override_usage()) {
+        if (!mRunningSessionStats.mUsedSettingsOverrideZoom) {
             entry = physicalSettingsList.begin()->metadata.find(
                     ANDROID_CONTROL_SETTINGS_OVERRIDE);
             if (entry.count == 1 && entry.data.i32[0] ==
