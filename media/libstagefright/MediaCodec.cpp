@@ -487,7 +487,7 @@ private:
                                     .id = getId(mClient),
                                     .name = mCodecName,
                                     .importance = mImportance};
-        return std::move(clientInfo);
+        return clientInfo;
     }
 
 private:
@@ -2462,7 +2462,12 @@ status_t MediaCodec::configure(
             mediametrics_setInt32(nextMetricsHandle, kCodecCrypto, 1);
         }
     } else if (mFlags & kFlagIsSecure) {
-        ALOGW("Crypto or descrambler should be given for secure codec");
+        if (android::media::codec::provider_->secure_codecs_require_crypto()) {
+            mErrorLog.log(LOG_TAG, "Crypto or descrambler must be given for secure codec");
+            return INVALID_OPERATION;
+        } else {
+            ALOGW("Crypto or descrambler should be given for secure codec");
+        }
     }
 
     if (mConfigureMsg != nullptr) {
@@ -6699,8 +6704,8 @@ sp<Surface> MediaCodec::getOrCreateDetachedSurface() {
     if (!mDetachedSurface) {
         uint64_t usage = 0;
         if (!mSurface || mSurface->getConsumerUsage(&usage) != OK) {
-            // TODO: should we use a/the default consumer usage?
-            usage = 0;
+            // By default prepare buffer to be displayed on any of the common surfaces
+            usage = (GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_HW_COMPOSER);
         }
         mDetachedSurface.reset(new ReleaseSurface(usage));
     }
