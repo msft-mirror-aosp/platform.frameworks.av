@@ -622,12 +622,10 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         mHasFlashUnit = false;
     }
 
-    if (flags::feature_combination_query()) {
-        res = addSessionConfigQueryVersionTag();
-        if (OK != res) {
-            ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-        }
+    res = addSessionConfigQueryVersionTag();
+    if (OK != res) {
+        ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
     }
 
     camera_metadata_entry entry =
@@ -844,11 +842,7 @@ status_t AidlProviderInfo::AidlDeviceInfo3::isSessionConfigurationSupported(
                     mVersion.get_minor());
             return INVALID_OPERATION;
         }
-        if (flags::feature_combination_query()) {
-            ret = interface->isStreamCombinationWithSettingsSupported(streamConfiguration, status);
-        } else {
-            return INVALID_OPERATION;
-        }
+        ret = interface->isStreamCombinationWithSettingsSupported(streamConfiguration, status);
     } else {
         ret = interface->isStreamCombinationSupported(streamConfiguration, status);
     }
@@ -885,10 +879,6 @@ status_t AidlProviderInfo::AidlDeviceInfo3::createDefaultRequest(
             templateId, &id);
     if (res != OK) {
         return res;
-    }
-
-    if (!flags::feature_combination_query()) {
-        return INVALID_OPERATION;
     }
 
     auto err = interface->constructDefaultRequestSettings(id, &request);
