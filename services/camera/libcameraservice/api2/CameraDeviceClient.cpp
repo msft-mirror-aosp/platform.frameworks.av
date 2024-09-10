@@ -553,7 +553,7 @@ binder::Status CameraDeviceClient::submitRequestList(
                 mRunningSessionStats.mUsedUltraWide = true;
             }
         }
-        if (!mRunningSessionStats.mUsedSettingsOverrideZoom && flags::log_zoom_override_usage()) {
+        if (!mRunningSessionStats.mUsedSettingsOverrideZoom) {
             entry = physicalSettingsList.begin()->metadata.find(
                     ANDROID_CONTROL_SETTINGS_OVERRIDE);
             if (entry.count == 1 && entry.data.i32[0] ==
