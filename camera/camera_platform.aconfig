@@ -34,13 +34,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "log_ultrawide_usage"
-    description: "Enable measuring how much usage there is for ultrawide-angle cameras"
-    bug: "300515796"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "camera_manual_flash_strength_control"
     is_exported: true
     description: "Flash brightness level control in manual flash mode"

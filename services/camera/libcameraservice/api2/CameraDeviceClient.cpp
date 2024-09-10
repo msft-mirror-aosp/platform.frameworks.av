@@ -546,7 +546,7 @@ binder::Status CameraDeviceClient::submitRequestList(
             mRunningSessionStats.mVideoStabilizationMode = entry.data.u8[0];
         }
 
-        if (!mRunningSessionStats.mUsedUltraWide && flags::log_ultrawide_usage()) {
+        if (!mRunningSessionStats.mUsedUltraWide) {
             entry = physicalSettingsList.begin()->metadata.find(
                     ANDROID_CONTROL_ZOOM_RATIO);
             if (entry.count == 1 && entry.data.f[0] < 1.0f ) {
