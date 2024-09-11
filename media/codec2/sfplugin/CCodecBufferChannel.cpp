@@ -2625,8 +2625,8 @@ void CCodecBufferChannel::sendOutputBuffers() {
                                 bufferMetadata->m.values[nMeta];
                         flag = convertFlags(bufferMetadataStruct.flags, false);
                         accessUnitInfos.emplace_back(flag,
-                                static_cast<size_t>(bufferMetadataStruct.size),
-                                static_cast<size_t>(bufferMetadataStruct.timestamp));
+                                bufferMetadataStruct.size,
+                                bufferMetadataStruct.timestamp);
                     }
                     sp<WrapperObject<std::vector<AccessUnitInfo>>> obj{
                         new WrapperObject<std::vector<AccessUnitInfo>>{accessUnitInfos}};
