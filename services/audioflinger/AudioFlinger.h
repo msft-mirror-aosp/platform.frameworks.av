@@ -33,6 +33,7 @@
 #include <audio_utils/FdToString.h>
 #include <audio_utils/SimpleLog.h>
 #include <media/IAudioFlinger.h>
+#include <media/IAudioPolicyServiceLocal.h>
 #include <media/MediaMetricsItem.h>
 #include <media/audiohal/DevicesFactoryHalInterface.h>
 #include <mediautils/ServiceUtilities.h>
@@ -261,6 +262,10 @@ private:
     status_t getAudioMixPort(const struct audio_port_v7* devicePort,
                              struct audio_port_v7* mixPort) const final EXCLUDES_AudioFlinger_Mutex;
 
+    status_t setTracksInternalMute(
+            const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) final
+            EXCLUDES_AudioFlinger_Mutex;
+
     status_t onTransactWrapper(TransactionCode code, const Parcel& data, uint32_t flags,
             const std::function<status_t()>& delegate) final EXCLUDES_AudioFlinger_Mutex;
 
@@ -427,6 +432,13 @@ public:
                             const sp<MmapStreamCallback>& callback,
                             sp<MmapStreamInterface>& interface,
             audio_port_handle_t *handle) EXCLUDES_AudioFlinger_Mutex;
+
+    void initAudioPolicyLocal(sp<media::IAudioPolicyServiceLocal> audioPolicyLocal) {
+        if (mAudioPolicyServiceLocal.load() == nullptr) {
+            mAudioPolicyServiceLocal = std::move(audioPolicyLocal);
+        }
+    }
+
 private:
     // FIXME The 400 is temporarily too high until a leak of writers in media.log is fixed.
     static const size_t kLogMemorySize = 400 * 1024;
@@ -785,6 +797,9 @@ private:
 
     // Bluetooth Variable latency control logic is enabled or disabled
     std::atomic<bool> mBluetoothLatencyModesEnabled = true;
+
+    // Local interface to AudioPolicyService, late inited, but logically const
+    mediautils::atomic_sp<media::IAudioPolicyServiceLocal> mAudioPolicyServiceLocal;
 };
 
 // ----------------------------------------------------------------------------

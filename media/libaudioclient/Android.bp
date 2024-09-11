@@ -64,6 +64,7 @@ cc_library {
         "audiopolicy-aidl-cpp",
         "audiopolicy-types-aidl-cpp",
         "capture_state_listener-aidl-cpp",
+        "framework-permission-aidl-cpp",
         "libaudioclient_aidl_conversion",
         "libaudiofoundation",
         "libaudioutils",
@@ -129,6 +130,7 @@ cc_library {
         "audiopolicy-types-aidl-cpp",
         "av-types-aidl-cpp",
         "capture_state_listener-aidl-cpp",
+        "com.android.media.audioclient-aconfig-cc",
         "framework-permission-aidl-cpp",
         "libaudio_aidl_conversion_common_cpp",
         "libaudioclient_aidl_conversion",
@@ -313,6 +315,7 @@ aidl_interface {
         "aidl/android/media/DeviceConnectedState.aidl",
         "aidl/android/media/EffectDescriptor.aidl",
         "aidl/android/media/SurroundSoundConfig.aidl",
+        "aidl/android/media/TrackInternalMuteInfo.aidl",
         "aidl/android/media/TrackSecondaryOutputInfo.aidl",
     ],
     defaults: [
@@ -355,8 +358,6 @@ aidl_interface {
         "aidl/android/media/AudioMixerBehavior.aidl",
         "aidl/android/media/AudioOffloadMode.aidl",
         "aidl/android/media/AudioPolicyDeviceState.aidl",
-        "aidl/android/media/AudioPolicyForceUse.aidl",
-        "aidl/android/media/AudioPolicyForcedConfig.aidl",
         "aidl/android/media/AudioProductStrategy.aidl",
         "aidl/android/media/AudioVolumeGroup.aidl",
         "aidl/android/media/DeviceRole.aidl",
@@ -367,6 +368,7 @@ aidl_interface {
     ],
     imports: [
         "audioclient-types-aidl",
+        "framework-permission-aidl",
     ],
     backend: {
         cpp: {
@@ -454,6 +456,7 @@ aidl_interface {
         "latest_android_media_audio_common_types_import_interface",
     ],
     imports: [
+        "audio-permission-aidl",
         "audioclient-types-aidl",
         "audiopolicy-types-aidl",
         "capture_state_listener-aidl",
