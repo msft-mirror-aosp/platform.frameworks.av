@@ -34,6 +34,7 @@
 #include <inttypes.h>
 #include <android_companion_virtualdevice_flags.h>
 #include <android_companion_virtualdevice_build_flags.h>
+#include <android/binder_libbinder.h>
 #include <android/binder_manager.h>
 #include <android/hidl/manager/1.2/IServiceManager.h>
 #include <hidl/ServiceManagement.h>
@@ -2135,7 +2136,19 @@ status_t CameraProviderManager::tryToInitializeAidlProviderLocked(
     }
 
     AidlProviderInfo *aidlProviderInfo = static_cast<AidlProviderInfo *>(providerInfo.get());
-    return aidlProviderInfo->initializeAidlProvider(interface, mDeviceState);
+    status_t res = aidlProviderInfo->initializeAidlProvider(interface, mDeviceState);
+
+    if (flags::enable_hal_abort_from_cameraservicewatchdog()) {
+        pid_t pid = 0;
+
+        if (AIBinder_toPlatformBinder(interface->asBinder().get())->getDebugPid(&pid) == OK
+                && res == OK) {
+            std::lock_guard<std::mutex> lock(mProviderPidMapLock);
+            mProviderPidMap[providerInfo->mProviderInstance] = pid;
+        }
+    }
+
+    return res;
 }
 
 status_t CameraProviderManager::tryToInitializeHidlProviderLocked(
@@ -2152,7 +2165,23 @@ status_t CameraProviderManager::tryToInitializeHidlProviderLocked(
     }
 
     HidlProviderInfo *hidlProviderInfo = static_cast<HidlProviderInfo *>(providerInfo.get());
-    return hidlProviderInfo->initializeHidlProvider(interface, mDeviceState);
+    status_t res = hidlProviderInfo->initializeHidlProvider(interface, mDeviceState);
+
+    if (flags::enable_hal_abort_from_cameraservicewatchdog()) {
+        pid_t pid = 0;
+
+        auto ret = interface->getDebugInfo([&pid](
+                const ::android::hidl::base::V1_0::DebugInfo& info) {
+            pid = info.pid;
+        });
+
+        if (ret.isOk() && res == OK) {
+            std::lock_guard<std::mutex> lock(mProviderPidMapLock);
+            mProviderPidMap[providerInfo->mProviderInstance] = pid;
+        }
+    }
+
+    return res;
 }
 
 status_t CameraProviderManager::addAidlProviderLocked(const std::string& newProvider) {
@@ -2264,6 +2293,13 @@ status_t CameraProviderManager::removeProvider(const std::string& provider) {
         ALOGW("%s: Camera provider HAL with name '%s' is not registered", __FUNCTION__,
                 provider.c_str());
     } else {
+        if (flags::enable_hal_abort_from_cameraservicewatchdog()) {
+            {
+                std::lock_guard<std::mutex> pidLock(mProviderPidMapLock);
+                mProviderPidMap.erase(provider);
+            }
+        }
+
         // Check if there are any newer camera instances from the same provider and try to
         // initialize.
         for (const auto& providerInfo : mProviders) {
@@ -2449,6 +2485,20 @@ bool CameraProviderManager::ProviderInfo::isExternalLazyHAL() const {
                 mProviderName.substr(std::string(ICameraProvider::descriptor).size() + 1);
     }
     return kEnableLazyHal && (providerName == kExternalProviderName);
+}
+
+std::set<pid_t> CameraProviderManager::getProviderPids() {
+    std::set<pid_t> pids;
+
+    if (flags::enable_hal_abort_from_cameraservicewatchdog()) {
+        std::lock_guard<std::mutex> lock(mProviderPidMapLock);
+
+        std::transform(mProviderPidMap.begin(), mProviderPidMap.end(),
+                    std::inserter(pids, pids.begin()),
+                    [](std::pair<const std::string, pid_t>& entry) { return entry.second; });
+    }
+
+    return pids;
 }
 
 status_t CameraProviderManager::ProviderInfo::dump(int fd, const Vector<String16>&) const {
