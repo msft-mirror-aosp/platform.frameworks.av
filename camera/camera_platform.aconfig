@@ -256,3 +256,10 @@ flag {
         purpose: PURPOSE_BUGFIX
     }
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "enable_hal_abort_from_cameraservicewatchdog"
+    description: "Enable CameraServiceWatchdog to abort camera HAL to generate HAL tombstones"
+    bug: "349652177"
+}
