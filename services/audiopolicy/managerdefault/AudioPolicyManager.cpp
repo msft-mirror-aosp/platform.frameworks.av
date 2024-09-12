@@ -1194,8 +1194,7 @@ audio_io_handle_t AudioPolicyManager::getOutput(audio_stream_type_t stream)
 
     SortedVector<audio_io_handle_t> outputs = getOutputsForDevices(devices, mOutputs);
     audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
-    if (stream == AUDIO_STREAM_MUSIC &&
-        property_get_bool("audio.deep_buffer.media", false /* default_value */)) {
+    if (stream == AUDIO_STREAM_MUSIC && mConfig->useDeepBufferForMedia()) {
         flags = AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
     }
     const audio_io_handle_t output = selectOutput(outputs, flags);
@@ -1572,6 +1571,13 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
         return NAME_NOT_FOUND;
     }
 
+    // Reject flag combinations that do not make sense. Note that the requested flags might not
+    // have the 'DIRECT' flag set, however once a direct-capable profile is found, it will
+    // combine the requested flags with its own flags, yielding an unsupported combination.
+    if ((flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER) != 0) {
+        return NAME_NOT_FOUND;
+    }
+
     // Do not allow offloading if one non offloadable effect is enabled or MasterMono is enabled.
     // This prevents creating an offloaded track and tearing it down immediately after start
     // when audioflinger detects there is an active non offloadable effect.
@@ -1720,8 +1726,7 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
     if (stream != AUDIO_STREAM_MUSIC) {
         *flags = (audio_output_flags_t)(*flags &~AUDIO_OUTPUT_FLAG_DEEP_BUFFER);
     } else if (/* stream == AUDIO_STREAM_MUSIC && */
-            *flags == AUDIO_OUTPUT_FLAG_NONE &&
-            property_get_bool("audio.deep_buffer.media", false /* default_value */)) {
+            *flags == AUDIO_OUTPUT_FLAG_NONE && mConfig->useDeepBufferForMedia()) {
         // use DEEP_BUFFER as default output for music stream type
         *flags = (audio_output_flags_t)AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
     }

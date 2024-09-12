@@ -124,16 +124,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "single_thread_executor"
-    description: "Ensure device logic is run within one thread."
-    bug: "305857746"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
     name: "single_thread_executor_naming"
     description: "Set the device executor thread name."
     bug: "359709863"
@@ -195,16 +185,6 @@ flag {
     name: "analytics_24q3"
     description: "Miscellaneous camera platform metrics for 24Q3"
     bug: "332557570"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "realtime_priority_bump"
-    description: "Bump the scheduling priority of performance critical code paths"
-    bug: "336628522"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
 }
 
 flag {
