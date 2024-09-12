@@ -69,6 +69,9 @@ struct OutputBufferQueue {
     // update the number of dequeueable/allocatable buffers.
     void onBufferReleased(uint32_t generation);
 
+    // Nofify a buffer is attached to the output surface.
+    void onBufferAttached(uint32_t generation);
+
     // Retrieve frame event history from the output surface.
     void pollForRenderedFrames(FrameEventHistoryDelta* delta);
 

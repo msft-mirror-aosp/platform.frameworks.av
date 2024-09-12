@@ -1296,7 +1296,9 @@ void HeicCompositeStream::releaseInputFramesLocked() {
         if (firstPendingFrame != mPendingInputFrames.end()) {
             updateCodecQualityLocked(firstPendingFrame->second.quality);
         } else {
-            markTrackerIdle();
+            if (mSettingsByFrameNumber.size() == 0) {
+                markTrackerIdle();
+            }
         }
     }
 }
@@ -1588,7 +1590,7 @@ status_t HeicCompositeStream::copyOneYuvTile(sp<MediaCodecBuffer>& codecBuffer,
         // The chrome plane could be either Cb first, or Cr first. Take the
         // smaller address.
         uint8_t *src = std::min(yuvBuffer.dataCb, yuvBuffer.dataCr);
-        MediaImage2::PlaneIndex dstPlane = codecUvOffsetDiff > 0 ? MediaImage2::U : MediaImage2::V;
+        MediaImage2::PlaneIndex dstPlane = codecUPlaneFirst ? MediaImage2::U : MediaImage2::V;
         for (auto row = top/2; row < (top+height)/2; row++) {
             uint8_t *dst = codecBuffer->data() + imageInfo->mPlane[dstPlane].mOffset +
                     imageInfo->mPlane[dstPlane].mRowInc * (row - top/2);
@@ -1722,7 +1724,9 @@ bool HeicCompositeStream::threadLoop() {
                     // removed, they are simply skipped.
                     mPendingInputFrames.erase(failingFrameNumber);
                     if (mPendingInputFrames.size() == 0) {
-                        markTrackerIdle();
+                        if (mSettingsByFrameNumber.size() == 0) {
+                            markTrackerIdle();
+                        }
                     }
                     return true;
                 }

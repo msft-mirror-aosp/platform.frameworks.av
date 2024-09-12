@@ -47,17 +47,13 @@ sp<DeviceDescriptor> findPreferredDevice(
 
     if (active) {
         // On MMAP IOs, the preferred device is selected by the first client (virtual client
-        // created when the mmap stream is opened). This client is never active and we only
-        // consider the Filter criteria, not the active state.
+        // created when the mmap stream is opened). This client is never active.
         // On non MMAP IOs, the preferred device is honored only if all active clients have
         // a preferred device in which case the first client drives the selection.
         if (desc->isMmap()) {
-            auto matchingClients = desc->clientsList(
-                    false /*activeOnly*/, filter, false /*preferredDevice*/);
-            if (matchingClients.empty()) {
-                return nullptr;
-            }
-            return devices.getDeviceFromId(matchingClients[0]->preferredDeviceId());
+            // The client list is never empty on a MMAP IO
+            return devices.getDeviceFromId(
+                    desc->clientsList(false /*activeOnly*/)[0]->preferredDeviceId());
         } else {
             auto activeClientsWithRoute =
                 desc->clientsList(true /*activeOnly*/, filter, true /*preferredDevice*/);
