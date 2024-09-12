@@ -63,8 +63,6 @@ public:
      * HW Audio Source.
      */
     virtual bool isInternal() const { return false; }
-    virtual bool isCallRx() const { return false; }
-    virtual bool isCallTx() const { return false; }
     audio_port_handle_t portId() const { return mPortId; }
     uid_t uid() const { return mUid; }
     audio_session_t session() const { return mSessionId; };
@@ -238,7 +236,7 @@ public:
                            const sp<DeviceDescriptor>& srcDevice,
                            audio_stream_type_t stream, product_strategy_t strategy,
                            VolumeSource volumeSource,
-                           bool isInternal, bool isCallRx, bool isCallTx);
+                           bool isInternal);
 
     ~SourceClientDescriptor() override = default;
 
@@ -265,8 +263,6 @@ public:
     wp<HwAudioOutputDescriptor> hwOutput() const { return mHwOutput; }
     void setHwOutput(const sp<HwAudioOutputDescriptor>& hwOutput);
     bool isInternal() const override { return mIsInternal; }
-    bool isCallRx() const override { return mIsCallRx; }
-    bool isCallTx() const override { return mIsCallTx; }
 
     using ClientDescriptor::dump;
     void dump(String8 *dst, int spaces) const override;
@@ -298,8 +294,6 @@ public:
      * requester to prevent rerouting SwOutput involved in raw patches.
      */
     bool mIsInternal = false;
-    bool mIsCallRx = false;
-    bool mIsCallTx = false;
 };
 
 class SourceClientCollection :
