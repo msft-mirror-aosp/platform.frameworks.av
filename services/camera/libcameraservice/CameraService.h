@@ -24,18 +24,19 @@
 #include <android/hardware/camera2/BnCameraInjectionSession.h>
 #include <android/hardware/camera2/ICameraInjectionCallback.h>
 
-#include <cutils/multiuser.h>
-#include <utils/Vector.h>
-#include <utils/KeyedVector.h>
 #include <binder/ActivityManager.h>
 #include <binder/AppOpsManager.h>
 #include <binder/BinderService.h>
-#include <binder/IServiceManager.h>
 #include <binder/IActivityManager.h>
 #include <binder/IAppOpsCallback.h>
+#include <binder/IServiceManager.h>
 #include <binder/IUidObserver.h>
+#include <cutils/multiuser.h>
+#include <gui/Flags.h>
 #include <hardware/camera.h>
 #include <sensorprivacy/SensorPrivacyManager.h>
+#include <utils/KeyedVector.h>
+#include <utils/Vector.h>
 
 #include <android/hardware/camera/common/1.0/types.h>
 
@@ -543,10 +544,9 @@ public:
         virtual status_t      connect(const sp<hardware::ICameraClient>& client) = 0;
         virtual status_t      lock() = 0;
         virtual status_t      unlock() = 0;
-        virtual status_t      setPreviewTarget(const sp<IGraphicBufferProducer>& bufferProducer)=0;
+        virtual status_t      setPreviewTarget(const sp<SurfaceType>& target) = 0;
         virtual void          setPreviewCallbackFlag(int flag) = 0;
-        virtual status_t      setPreviewCallbackTarget(
-                const sp<IGraphicBufferProducer>& callbackProducer) = 0;
+        virtual status_t      setPreviewCallbackTarget(const sp<SurfaceType>& target) = 0;
         virtual status_t      startPreview() = 0;
         virtual void          stopPreview() = 0;
         virtual bool          previewEnabled() = 0;
@@ -561,7 +561,7 @@ public:
         virtual status_t      setParameters(const String8& params) = 0;
         virtual String8       getParameters() const = 0;
         virtual status_t      sendCommand(int32_t cmd, int32_t arg1, int32_t arg2) = 0;
-        virtual status_t      setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer) = 0;
+        virtual status_t      setVideoTarget(const sp<SurfaceType>& target) = 0;
 
         // Interface used by CameraService
         Client(const sp<CameraService>& cameraService,
