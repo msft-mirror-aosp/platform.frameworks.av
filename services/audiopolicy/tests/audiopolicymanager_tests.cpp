@@ -223,12 +223,17 @@ class AudioPolicyManagerTest : public testing::Test {
     std::unique_ptr<AudioPolicyTestManager> mManager;
 
     constexpr static const uint32_t k48000SamplingRate = 48000;
+
+    static const std::string sTestEngineConfig;
 };
+
+const std::string AudioPolicyManagerTest::sTestEngineConfig =
+        base::GetExecutableDirectory() + "/engine/test_audio_policy_engine_configuration.xml";
 
 void AudioPolicyManagerTest::SetUp() {
     mClient.reset(getClient());
     ASSERT_NO_FATAL_FAILURE(SetUpManagerConfig());  // Subclasses may want to customize the config.
-    mManager.reset(new AudioPolicyTestManager(mConfig, mClient.get()));
+    mManager.reset(new AudioPolicyTestManager(mConfig, mClient.get(), sTestEngineConfig));
     ASSERT_EQ(NO_ERROR, mManager->initialize());
     ASSERT_EQ(NO_ERROR, mManager->initCheck());
 }
