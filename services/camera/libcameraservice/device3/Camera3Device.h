@@ -36,6 +36,7 @@
 #include <aidl/android/hardware/camera/device/CameraBlob.h>
 
 #include "common/CameraDeviceBase.h"
+#include "common/DepthPhotoProcessor.h"
 #include "device3/BufferUtils.h"
 #include "device3/StatusTracker.h"
 #include "device3/Camera3BufferManager.h"
@@ -376,8 +377,8 @@ class Camera3Device :
 
     struct                     RequestTrigger;
     // minimal jpeg buffer size: 256KB + blob header
-    static const ssize_t       kMinJpegBufferSize =
-            256 * 1024 + sizeof(aidl::android::hardware::camera::device::CameraBlob);
+    static const ssize_t       kMinJpegBufferSize = camera3::MIN_JPEG_BUFFER_SIZE +
+            sizeof(aidl::android::hardware::camera::device::CameraBlob);
     // Constant to use for stream ID when one doesn't exist
     static const int           NO_STREAM = -1;
 
@@ -725,7 +726,7 @@ class Camera3Device :
      *
      * Must be called with mLock and mInterfaceLock held.
      */
-    status_t initializeCommonLocked();
+    status_t initializeCommonLocked(sp<CameraProviderManager> manager);
 
     /**
      * Update capture request list so that each batch size honors the batch_size_max report from
@@ -736,12 +737,19 @@ class Camera3Device :
     virtual void applyMaxBatchSizeLocked(
             RequestList* requestList, const sp<camera3::Camera3OutputStreamInterface>& stream) = 0;
 
+    struct LatestRequestInfo {
+        CameraMetadata requestSettings;
+        std::unordered_map<std::string, CameraMetadata> physicalRequestSettings;
+        int32_t inputStreamId = -1;
+        std::set<int32_t> outputStreamIds;
+    };
+
     /**
      * Get the last request submitted to the hal by the request thread.
      *
      * Must be called with mLock held.
      */
-    virtual CameraMetadata getLatestRequestLocked();
+    virtual LatestRequestInfo getLatestRequestInfoLocked();
 
     virtual status_t injectionCameraInitialize(const std::string &injectCamId,
             sp<CameraProviderManager> manager) = 0;
@@ -992,7 +1000,7 @@ class Camera3Device :
          * Get the latest request that was sent to the HAL
          * with process_capture_request.
          */
-        CameraMetadata getLatestRequest() const;
+        LatestRequestInfo getLatestRequestInfo() const;
 
         /**
          * Returns true if the stream is a target of any queued or repeating
@@ -1192,8 +1200,7 @@ class Camera3Device :
         // android.request.id for latest process_capture_request
         int32_t            mLatestRequestId;
         int32_t            mLatestFailedRequestId;
-        CameraMetadata     mLatestRequest;
-        std::unordered_map<std::string, CameraMetadata> mLatestPhysicalRequest;
+        LatestRequestInfo mLatestRequestInfo;
 
         typedef KeyedVector<uint32_t/*tag*/, RequestTrigger> TriggerMap;
         Mutex              mTriggerMutex;
