@@ -35,13 +35,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "lazy_aidl_wait_for_service"
-    description: "Use waitForService instead of getService with lazy AIDL HALs"
-    bug: "285546208"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "session_hal_buf_manager"
     description: "Enable or disable HAL buffer manager as requested by the camera HAL"
     bug: "311263114"
