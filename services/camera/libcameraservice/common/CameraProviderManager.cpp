@@ -149,11 +149,7 @@ CameraProviderManager::AidlServiceInteractionProxyImpl::getService(
     using aidl::android::hardware::camera::provider::ICameraProvider;
 
     AIBinder* binder = nullptr;
-    if (flags::lazy_aidl_wait_for_service()) {
-        binder = AServiceManager_waitForService(serviceName.c_str());
-    } else {
-        binder = AServiceManager_checkService(serviceName.c_str());
-    }
+    binder = AServiceManager_waitForService(serviceName.c_str());
 
     if (binder == nullptr) {
         ALOGE("%s: AIDL Camera provider HAL '%s' is not actually available, despite waiting "
@@ -2192,14 +2188,11 @@ status_t CameraProviderManager::addAidlProviderLocked(const std::string& newProv
     bool preexisting =
             (mAidlProviderWithBinders.find(newProvider) != mAidlProviderWithBinders.end());
     using aidl::android::hardware::camera::provider::ICameraProvider;
-    std::string providerNameUsed  =
-            newProvider.substr(std::string(ICameraProvider::descriptor).size() + 1);
-    if (flags::lazy_aidl_wait_for_service()) {
-        // 'newProvider' has the fully qualified name of the provider service in case of AIDL.
-        // ProviderInfo::mProviderName also has the fully qualified name - so we just compare them
-        // here.
-        providerNameUsed = newProvider;
-    }
+
+    // 'newProvider' has the fully qualified name of the provider service in case of AIDL.
+    // ProviderInfo::mProviderName also has the fully qualified name - so we just compare them
+    // here.
+    std::string providerNameUsed = newProvider;
 
     for (const auto& providerInfo : mProviders) {
         if (providerInfo->mProviderName == providerNameUsed) {
@@ -2305,15 +2298,11 @@ status_t CameraProviderManager::removeProvider(const std::string& provider) {
         for (const auto& providerInfo : mProviders) {
             if (providerInfo->mProviderName == removedProviderName) {
                 IPCTransport providerTransport = providerInfo->getIPCTransport();
-                std::string removedAidlProviderName = getFullAidlProviderName(removedProviderName);
-                if (flags::lazy_aidl_wait_for_service()) {
-                    removedAidlProviderName = removedProviderName;
-                }
                 switch(providerTransport) {
                     case IPCTransport::HIDL:
                         return tryToInitializeHidlProviderLocked(removedProviderName, providerInfo);
                     case IPCTransport::AIDL:
-                        return tryToInitializeAidlProviderLocked(removedAidlProviderName,
+                        return tryToInitializeAidlProviderLocked(removedProviderName,
                                 providerInfo);
                     default:
                         ALOGE("%s Unsupported Transport %d", __FUNCTION__, eToI(providerTransport));
@@ -2479,7 +2468,7 @@ void CameraProviderManager::ProviderInfo::removeAllDevices() {
 
 bool CameraProviderManager::ProviderInfo::isExternalLazyHAL() const {
     std::string providerName = mProviderName;
-    if (flags::lazy_aidl_wait_for_service() && getIPCTransport() == IPCTransport::AIDL) {
+    if (getIPCTransport() == IPCTransport::AIDL) {
         using aidl::android::hardware::camera::provider::ICameraProvider;
         providerName =
                 mProviderName.substr(std::string(ICameraProvider::descriptor).size() + 1);
