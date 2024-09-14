@@ -109,11 +109,8 @@ status_t AidlProviderInfo::initializeAidlProvider(
         std::shared_ptr<ICameraProvider>& interface, int64_t currentDeviceState) {
 
     using aidl::android::hardware::camera::provider::ICameraProvider;
-    std::string parsedProviderName = mProviderName;
-    if (flags::lazy_aidl_wait_for_service()) {
-        parsedProviderName =
+    std::string parsedProviderName =
                 mProviderName.substr(std::string(ICameraProvider::descriptor).size() + 1);
-    }
 
     status_t res = parseProviderName(parsedProviderName, &mType, &mId);
     if (res != OK) {
@@ -622,12 +619,10 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         mHasFlashUnit = false;
     }
 
-    if (flags::feature_combination_query()) {
-        res = addSessionConfigQueryVersionTag();
-        if (OK != res) {
-            ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-        }
+    res = addSessionConfigQueryVersionTag();
+    if (OK != res) {
+        ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
     }
 
     camera_metadata_entry entry =
@@ -844,11 +839,7 @@ status_t AidlProviderInfo::AidlDeviceInfo3::isSessionConfigurationSupported(
                     mVersion.get_minor());
             return INVALID_OPERATION;
         }
-        if (flags::feature_combination_query()) {
-            ret = interface->isStreamCombinationWithSettingsSupported(streamConfiguration, status);
-        } else {
-            return INVALID_OPERATION;
-        }
+        ret = interface->isStreamCombinationWithSettingsSupported(streamConfiguration, status);
     } else {
         ret = interface->isStreamCombinationSupported(streamConfiguration, status);
     }
@@ -885,10 +876,6 @@ status_t AidlProviderInfo::AidlDeviceInfo3::createDefaultRequest(
             templateId, &id);
     if (res != OK) {
         return res;
-    }
-
-    if (!flags::feature_combination_query()) {
-        return INVALID_OPERATION;
     }
 
     auto err = interface->constructDefaultRequestSettings(id, &request);
