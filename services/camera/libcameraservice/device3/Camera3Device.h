@@ -726,7 +726,7 @@ class Camera3Device :
      *
      * Must be called with mLock and mInterfaceLock held.
      */
-    status_t initializeCommonLocked();
+    status_t initializeCommonLocked(sp<CameraProviderManager> manager);
 
     /**
      * Update capture request list so that each batch size honors the batch_size_max report from
