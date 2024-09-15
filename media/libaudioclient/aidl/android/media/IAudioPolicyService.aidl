@@ -25,8 +25,6 @@ import android.media.AudioMixerAttributesInternal;
 import android.media.AudioOffloadMode;
 import android.media.AudioPatchFw;
 import android.media.AudioPolicyDeviceState;
-import android.media.AudioPolicyForcedConfig;
-import android.media.AudioPolicyForceUse;
 import android.media.AudioPortFw;
 import android.media.AudioPortConfigFw;
 import android.media.AudioPortRole;
@@ -49,6 +47,8 @@ import android.media.audio.common.AudioDevice;
 import android.media.audio.common.AudioDeviceDescription;
 import android.media.audio.common.AudioFormatDescription;
 import android.media.audio.common.AudioMode;
+import android.media.audio.common.AudioPolicyForcedConfig;
+import android.media.audio.common.AudioPolicyForceUse;
 import android.media.audio.common.AudioProfile;
 import android.media.audio.common.AudioOffloadInfo;
 import android.media.audio.common.AudioPort;
@@ -57,6 +57,8 @@ import android.media.audio.common.AudioStreamType;
 import android.media.audio.common.AudioUsage;
 import android.media.audio.common.AudioUuid;
 import android.media.audio.common.Int;
+
+import com.android.media.permission.INativePermissionController;
 
 /**
  * IAudioPolicyService interface (see AudioPolicyInterface for method descriptions).
@@ -113,6 +115,10 @@ interface IAudioPolicyService {
     void stopInput(int /* audio_port_handle_t */ portId);
 
     void releaseInput(int /* audio_port_handle_t */ portId);
+
+    oneway void setDeviceAbsoluteVolumeEnabled(in AudioDevice device,
+                                               boolean enabled,
+                                               AudioStreamType streamToDriveAbs);
 
     void initStreamVolume(AudioStreamType stream,
                           int indexMin,
@@ -471,6 +477,11 @@ interface IAudioPolicyService {
                                        int /* uid_t */ uid);
 
 
+    /**
+     * Get the native permission controller for audioserver, to push package and permission info
+     * required to control audio access.
+     */
+    INativePermissionController getPermissionController();
     // When adding a new method, please review and update
     // AudioPolicyService.cpp AudioPolicyService::onTransact()
     // AudioPolicyService.cpp IAUDIOPOLICYSERVICE_BINDER_METHOD_MACRO_LIST

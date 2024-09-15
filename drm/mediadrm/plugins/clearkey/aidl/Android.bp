@@ -85,7 +85,7 @@ cc_binary {
     ],
     srcs: ["Service.cpp"],
     init_rc: ["android.hardware.drm-service.clearkey.rc"],
-    vintf_fragments: ["android.hardware.drm-service.clearkey.xml"],
+    vintf_fragment_modules: ["android.hardware.drm-service.clearkey.xml_vintf"],
 }
 
 cc_binary {
@@ -97,7 +97,13 @@ cc_binary {
     overrides: ["android.hardware.drm-service.clearkey"],
     srcs: ["ServiceLazy.cpp"],
     init_rc: ["android.hardware.drm-service-lazy.clearkey.rc"],
-    vintf_fragments: ["android.hardware.drm-service.clearkey.xml"],
+    vintf_fragment_modules: ["android.hardware.drm-service.clearkey.xml_vintf"],
+}
+
+vintf_fragment {
+    name: "android.hardware.drm-service.clearkey.xml_vintf",
+    src: "android.hardware.drm-service.clearkey.xml",
+    vendor: true,
 }
 
 cc_binary {

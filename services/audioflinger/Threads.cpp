@@ -33,6 +33,7 @@
 #include <afutils/Vibrator.h>
 #include <audio_utils/MelProcessor.h>
 #include <audio_utils/Metadata.h>
+#include <com_android_media_audioserver.h>
 #ifdef DEBUG_CPU_USAGE
 #include <audio_utils/Statistics.h>
 #include <cpustats/ThreadCpuUsage.h>
@@ -2935,7 +2936,6 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
 
             // Set haptic intensity for effect
             if (chain != nullptr) {
-                // TODO(b/324559333): Add adaptive haptics scaling support for the HapticGenerator.
                 chain->setHapticScale_l(track->id(), hapticScale);
             }
         }
@@ -3534,7 +3534,7 @@ void PlaybackThread::checkSilentMode_l()
             char *endptr;
             unsigned long ul = strtoul(value, &endptr, 0);
             if (*endptr == '\0' && ul != 0) {
-                ALOGD("Silence is golden");
+                ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
                 // The setprop command will not allow a property to be changed after
                 // the first time it is set, so we don't have to worry about un-muting.
                 setMasterMute_l(true);
@@ -5804,6 +5804,11 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 vlf *= volume;
                 vrf *= volume;
 
+                if (track->getInternalMute()) {
+                    vlf = 0.f;
+                    vrf = 0.f;
+                }
+
                 track->setFinalVolume(vlf, vrf);
                 ++fastTracks;
             } else {
@@ -6003,6 +6008,11 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 vaf = v * sendLevel * (1. / MAX_GAIN_INT);
             }
 
+            if (track->getInternalMute()) {
+                vrf = 0.f;
+                vlf = 0.f;
+            }
+
             track->setFinalVolume(vlf, vrf);
 
             // Delegate volume control to effect in track effect chain if needed
@@ -6192,8 +6202,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 // No buffers for this track. Give it a few chances to
                 // fill a buffer, then remove it from active list.
                 if (--(track->retryCount()) <= 0) {
-                    ALOGI("BUFFER TIMEOUT: remove(%d) from active list on thread %p",
-                            trackId, this);
+                    ALOGI("%s BUFFER TIMEOUT: remove track(%d) from active list due to underrun"
+                          " on thread %d", __func__, trackId, mId);
                     tracksToRemove->add(track);
                     // indicate to client process that the track was disabled because of underrun;
                     // it will then automatically call start() when data is available
@@ -6950,7 +6960,8 @@ PlaybackThread::mixer_state DirectOutputThread::prepareTracks_l(
                     if (isTimestampAdvancing) { // HAL is still playing audio, give us more time.
                         track->retryCount() = kMaxTrackRetriesOffload;
                     } else {
-                        ALOGV("BUFFER TIMEOUT: remove track(%d) from active list", trackId);
+                        ALOGI("%s BUFFER TIMEOUT: remove track(%d) from active list due to"
+                              " underrun on thread %d", __func__, trackId, mId);
                         tracksToRemove->add(track);
                         // indicate to client process that the track was disabled because of
                         // underrun; it will then automatically call start() when data is available
@@ -7070,16 +7081,20 @@ bool DirectOutputThread::shouldStandby_l()
 {
     bool trackPaused = false;
     bool trackStopped = false;
+    bool trackDisabled = false;
 
-    // do not put the HAL in standby when paused. AwesomePlayer clear the offloaded AudioTrack
+    // do not put the HAL in standby when paused. NuPlayer clear the offloaded AudioTrack
     // after a timeout and we will enter standby then.
+    // On offload threads, do not enter standby if the main track is still underrunning.
     if (mTracks.size() > 0) {
-        trackPaused = mTracks[mTracks.size() - 1]->isPaused();
-        trackStopped = mTracks[mTracks.size() - 1]->isStopped() ||
-                           mTracks[mTracks.size() - 1]->state() == IAfTrackBase::IDLE;
+        const auto& mainTrack = mTracks[mTracks.size() - 1];
+
+        trackPaused = mainTrack->isPaused();
+        trackStopped = mainTrack->isStopped() || mainTrack->state() == IAfTrackBase::IDLE;
+        trackDisabled = (mType == OFFLOAD) && mainTrack->isDisabled();
     }
 
-    return !mStandby && !(trackPaused || (mHwPaused && !trackStopped));
+    return !mStandby && !(trackPaused || (mHwPaused && !trackStopped) || trackDisabled);
 }
 
 // checkForNewParameter_l() must be called with ThreadBase::mutex() held
@@ -7544,8 +7559,8 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
                     if (isTimestampAdvancing) { // HAL is still playing audio, give us more time.
                         track->retryCount() = kMaxTrackRetriesOffload;
                     } else {
-                        ALOGV("OffloadThread: BUFFER TIMEOUT: remove track(%d) from active list",
-                                track->id());
+                        ALOGI("%s BUFFER TIMEOUT: remove track(%d) from active list due to"
+                              " underrun on thread %d", __func__, track->id(), mId);
                         tracksToRemove->add(track);
                         // tell client process that the track was disabled because of underrun;
                         // it will then automatically call start() when data is available
@@ -7932,6 +7947,11 @@ void SpatializerThread::setHalLatencyMode_l() {
     if (mSupportedLatencyModes.empty()) {
         return;
     }
+    // Do not update the HAL latency mode if no track is active
+    if (mActiveTracks.isEmpty()) {
+        return;
+    }
+
     audio_latency_mode_t latencyMode = AUDIO_LATENCY_MODE_FREE;
     if (mSupportedLatencyModes.size() == 1) {
         // If the HAL only support one latency mode currently, confirm the choice
@@ -9201,7 +9221,7 @@ bool RecordThread::stop(IAfRecordTrack* recordTrack) {
     // This is needed for proper patchRecord peer release.
     while (recordTrack->state() == IAfTrackBase::PAUSING && !recordTrack->isInvalid()) {
         mWaitWorkCV.notify_all(); // signal thread to stop
-        mStartStopCV.wait(_l);
+        mStartStopCV.wait(_l, getTid());
     }
 
     if (recordTrack->state() == IAfTrackBase::PAUSED) { // successful stop
@@ -11382,14 +11402,15 @@ PlaybackThread::mixer_state BitPerfectThread::prepareTracks_l(
     // If there is only one active track and it is bit-perfect, enable tee buffer.
     float volumeLeft = 1.0f;
     float volumeRight = 1.0f;
-    if (mActiveTracks.size() == 1 && mActiveTracks[0]->isBitPerfect()) {
-        const int trackId = mActiveTracks[0]->id();
+    if (sp<IAfTrack> bitPerfectTrack = getTrackToStreamBitPerfectly_l();
+        bitPerfectTrack != nullptr) {
+        const int trackId = bitPerfectTrack->id();
         mAudioMixer->setParameter(
                     trackId, AudioMixer::TRACK, AudioMixer::TEE_BUFFER, (void *)mSinkBuffer);
         mAudioMixer->setParameter(
                     trackId, AudioMixer::TRACK, AudioMixer::TEE_BUFFER_FRAME_COUNT,
                     (void *)(uintptr_t)mNormalFrameCount);
-        mActiveTracks[0]->getFinalVolume(&volumeLeft, &volumeRight);
+        bitPerfectTrack->getFinalVolume(&volumeLeft, &volumeRight);
         mIsBitPerfect = true;
     } else {
         mIsBitPerfect = false;
@@ -11412,6 +11433,41 @@ PlaybackThread::mixer_state BitPerfectThread::prepareTracks_l(
 void BitPerfectThread::threadLoop_mix() {
     MixerThread::threadLoop_mix();
     mHasDataCopiedToSinkBuffer = mIsBitPerfect;
+}
+
+void BitPerfectThread::setTracksInternalMute(
+        std::map<audio_port_handle_t, bool>* tracksInternalMute) {
+    for (auto& track : mTracks) {
+        if (auto it = tracksInternalMute->find(track->portId()); it != tracksInternalMute->end()) {
+            track->setInternalMute(it->second);
+            tracksInternalMute->erase(it);
+        }
+    }
+}
+
+sp<IAfTrack> BitPerfectThread::getTrackToStreamBitPerfectly_l() {
+    if (com::android::media::audioserver::
+                fix_concurrent_playback_behavior_with_bit_perfect_client()) {
+        sp<IAfTrack> bitPerfectTrack = nullptr;
+        bool allOtherTracksMuted = true;
+        // Return the bit perfect track if all other tracks are muted
+        for (const auto& track : mActiveTracks) {
+            if (track->isBitPerfect()) {
+                bitPerfectTrack = track;
+            } else if (track->getFinalVolume() != 0.f) {
+                allOtherTracksMuted = false;
+                if (bitPerfectTrack != nullptr) {
+                    break;
+                }
+            }
+        }
+        return allOtherTracksMuted ? bitPerfectTrack : nullptr;
+    } else {
+        if (mActiveTracks.size() == 1 && mActiveTracks[0]->isBitPerfect()) {
+            return mActiveTracks[0];
+        }
+    }
+    return nullptr;
 }
 
 } // namespace android
