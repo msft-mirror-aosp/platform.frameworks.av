@@ -41,6 +41,7 @@ cc_test {
     static_libs: [
         "android.media.audiopolicy-aconfig-cc",
         "audioclient-types-aidl-cpp",
+        "com.android.media.audioserver-aconfig-cc",
         "libaudiopolicycomponents",
         "libflagtest",
         "libgmock",
@@ -108,4 +109,41 @@ cc_test {
 
     test_suites: ["general-tests"],
 
+}
+
+cc_test {
+    name: "spatializer_tests",
+
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_shared",
+        "libaudiopolicyservice_dependencies",
+    ],
+
+    require_root: true,
+
+    shared_libs: [
+        "libaudioclient",
+        "libaudiofoundation",
+        "libcutils",
+        "liblog",
+    ],
+
+    static_libs: [
+        "libaudiopolicyservice",
+    ],
+
+    header_libs: [
+        "libaudiohal_headers",
+        "libaudiopolicyservice_headers",
+        "libmediametrics_headers",
+    ],
+
+    srcs: ["spatializer_tests.cpp"],
+
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+
+    test_suites: ["device-tests"],
 }

@@ -40,6 +40,7 @@
 #include "common/CameraDeviceBase.h"
 #include "utils/ExifUtils.h"
 #include "utils/SessionConfigurationUtils.h"
+#include "utils/Utils.h"
 #include "HeicEncoderInfoManager.h"
 #include "HeicCompositeStream.h"
 
@@ -92,6 +93,11 @@ HeicCompositeStream::~HeicCompositeStream() {
     mMainImageSurfaceId = -1;
     mMainImageConsumer.clear();
     mMainImageSurface.clear();
+}
+
+bool HeicCompositeStream::isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo) {
+    return ((streamInfo.dataSpace == static_cast<android_dataspace_t>(HAL_DATASPACE_HEIF)) &&
+            (streamInfo.format == HAL_PIXEL_FORMAT_BLOB));
 }
 
 bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
@@ -1291,7 +1297,9 @@ void HeicCompositeStream::releaseInputFramesLocked() {
         if (firstPendingFrame != mPendingInputFrames.end()) {
             updateCodecQualityLocked(firstPendingFrame->second.quality);
         } else {
-            markTrackerIdle();
+            if (mSettingsByFrameNumber.size() == 0) {
+                markTrackerIdle();
+            }
         }
     }
 }
@@ -1459,7 +1467,7 @@ size_t HeicCompositeStream::findAppSegmentsSize(const uint8_t* appSegmentBuffer,
     const uint8_t *header = appSegmentBuffer + (maxSize - sizeof(CameraBlob));
     const CameraBlob *blob = (const CameraBlob*)(header);
     if (blob->blobId != CameraBlobId::JPEG_APP_SEGMENTS) {
-        ALOGE("%s: Invalid EXIF blobId %d", __FUNCTION__, blob->blobId);
+        ALOGE("%s: Invalid EXIF blobId %d", __FUNCTION__, eToI(blob->blobId));
         return 0;
     }
 
@@ -1717,7 +1725,9 @@ bool HeicCompositeStream::threadLoop() {
                     // removed, they are simply skipped.
                     mPendingInputFrames.erase(failingFrameNumber);
                     if (mPendingInputFrames.size() == 0) {
-                        markTrackerIdle();
+                        if (mSettingsByFrameNumber.size() == 0) {
+                            markTrackerIdle();
+                        }
                     }
                     return true;
                 }

@@ -47,6 +47,7 @@
 #include "device3/Camera3OutputInterface.h"
 #include "device3/Camera3OfflineSession.h"
 #include "device3/Camera3StreamInterface.h"
+#include "utils/AttributionAndPermissionUtils.h"
 #include "utils/TagMonitor.h"
 #include "utils/IPCTransport.h"
 #include "utils/LatencyHistogram.h"
@@ -79,13 +80,15 @@ class Camera3Device :
             public camera3::SetErrorInterface,
             public camera3::InflightRequestUpdateInterface,
             public camera3::RequestBufferInterface,
-            public camera3::FlushBufferInterface {
+            public camera3::FlushBufferInterface,
+            public AttributionAndPermissionUtilsEncapsulator {
   friend class HidlCamera3Device;
   friend class AidlCamera3Device;
   public:
 
     explicit Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
-            const std::string& id, bool overrideForPerfClass, bool overrideToPortrait,
+            std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+            const std::string& id, bool overrideForPerfClass, int rotationOverride,
             bool legacyClient = false);
 
     virtual ~Camera3Device();
@@ -370,8 +373,6 @@ class Camera3Device :
     static const size_t        kInFlightWarnLimitHighSpeed = 256; // batch size 32 * pipe depth 8
     static const nsecs_t       kMinInflightDuration = 5000000000; // 5 s
     static const nsecs_t       kBaseGetBufferWait = 3000000000; // 3 sec.
-    // SCHED_FIFO priority for request submission thread in HFR mode
-    static const int           kRequestThreadPriority = 1;
 
     struct                     RequestTrigger;
     // minimal jpeg buffer size: 256KB + blob header
@@ -876,7 +877,7 @@ class Camera3Device :
 
     // Override rotate_and_crop control if needed
     static bool    overrideAutoRotateAndCrop(const sp<CaptureRequest> &request /*out*/,
-            bool overrideToPortrait,
+            int rotationOverride,
             camera_metadata_enum_android_scaler_rotate_and_crop_t rotateAndCropOverride);
 
     // Override auto framing control if needed
@@ -913,7 +914,7 @@ class Camera3Device :
                 const Vector<int32_t>& sessionParamKeys,
                 bool useHalBufManager,
                 bool supportCameraMute,
-                bool overrideToPortrait,
+                int rotationOverride,
                 bool supportSettingsOverride);
         ~RequestThread();
 
@@ -1228,7 +1229,7 @@ class Camera3Device :
         bool               mUseHalBufManager = false;
         std::set<int32_t > mHalBufManagedStreamIds;
         const bool         mSupportCameraMute;
-        const bool         mOverrideToPortrait;
+        const bool         mRotationOverride;
         const bool         mSupportSettingsOverride;
         int32_t            mVndkVersion = -1;
     };
@@ -1239,7 +1240,7 @@ class Camera3Device :
                 const Vector<int32_t>& /*sessionParamKeys*/,
                 bool /*useHalBufManager*/,
                 bool /*supportCameraMute*/,
-                bool /*overrideToPortrait*/,
+                int /*rotationOverride*/,
                 bool /*supportSettingsOverride*/) = 0;
 
     sp<RequestThread> mRequestThread;
@@ -1406,6 +1407,10 @@ class Camera3Device :
             const camera_stream_buffer_t *outputBuffers, uint32_t numOutputBuffers,
             int32_t inputStreamId);
 
+    // Collect any statistics that are based on the stream of capture requests sent
+    // to the HAL
+    void collectRequestStats(int64_t frameNumber, const CameraMetadata& request);
+
     metadata_vendor_id_t mVendorTagId;
 
     // Cached last requested template id
@@ -1517,7 +1522,7 @@ class Camera3Device :
 
     // Whether the camera framework overrides the device characteristics for
     // app compatibility reasons.
-    bool mOverrideToPortrait;
+    int mRotationOverride;
     camera_metadata_enum_android_scaler_rotate_and_crop_t mRotateAndCropOverride;
     bool mComposerOutput;
 
@@ -1627,6 +1632,7 @@ class Camera3Device :
     sp<Camera3DeviceInjectionMethods> mInjectionMethods;
 
     void overrideStreamUseCaseLocked();
+
 
 }; // class Camera3Device
 

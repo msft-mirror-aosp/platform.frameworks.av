@@ -603,7 +603,7 @@ typedef enum acamera_metadata_tag {
      * ACAMERA_SENSOR_FRAME_DURATION.</p>
      * <p>Note that the actual achievable max framerate also depends on the minimum frame
      * duration of the output streams. The max frame rate will be
-     * <code>min(aeTargetFpsRange.maxFps, 1 / max(individual stream min durations)</code>. For example,
+     * <code>min(aeTargetFpsRange.maxFps, 1 / max(individual stream min durations))</code>. For example,
      * if the application sets this key to <code>{60, 60}</code>, but the maximum minFrameDuration among
      * all configured streams is 33ms, the maximum framerate won't be 60fps, but will be
      * 30fps.</p>
@@ -2291,6 +2291,7 @@ typedef enum acamera_metadata_tag {
      * indicate when it is not being applied by returning 'INACTIVE'.</p>
      * <p>This key will be absent from the CaptureResult if AE mode is not set to
      * 'ON_LOW_LIGHT_BOOST_BRIGHTNESS_PRIORITY.</p>
+     * <p>The default value will always be 'INACTIVE'.</p>
      */
     ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE =                     // byte (acamera_metadata_enum_android_control_low_light_boost_state_t)
             ACAMERA_CONTROL_START + 59,
@@ -2426,35 +2427,39 @@ typedef enum acamera_metadata_tag {
      * </ul></p>
      *
      * <p>Flash strength level to use in capture mode i.e. when the applications control
-     * flash with either SINGLE or TORCH mode.</p>
-     * <p>Use android.flash.info.singleStrengthMaxLevel and
-     * android.flash.info.torchStrengthMaxLevel to check whether the device supports
+     * flash with either <code>SINGLE</code> or <code>TORCH</code> mode.</p>
+     * <p>Use ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL and
+     * ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL to check whether the device supports
      * flash strength control or not.
-     * If the values of android.flash.info.singleStrengthMaxLevel and
-     * android.flash.info.torchStrengthMaxLevel are greater than 1,
+     * If the values of ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL and
+     * ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL are greater than 1,
      * then the device supports manual flash strength control.</p>
-     * <p>If the ACAMERA_FLASH_MODE <code>==</code> TORCH the value must be &gt;= 1
-     * and &lt;= android.flash.info.torchStrengthMaxLevel.
+     * <p>If the ACAMERA_FLASH_MODE <code>==</code> <code>TORCH</code> the value must be &gt;= 1
+     * and &lt;= ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL.
      * If the application doesn't set the key and
-     * android.flash.info.torchStrengthMaxLevel &gt; 1,
+     * ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL &gt; 1,
      * then the flash will be fired at the default level set by HAL in
-     * android.flash.info.torchStrengthDefaultLevel.
-     * If the ACAMERA_FLASH_MODE <code>==</code> SINGLE, then the value must be &gt;= 1
-     * and &lt;= android.flash.info.singleStrengthMaxLevel.
+     * ACAMERA_FLASH_TORCH_STRENGTH_DEFAULT_LEVEL.
+     * If the ACAMERA_FLASH_MODE <code>==</code> <code>SINGLE</code>, then the value must be &gt;= 1
+     * and &lt;= ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL.
      * If the application does not set this key and
-     * android.flash.info.singleStrengthMaxLevel &gt; 1,
+     * ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL &gt; 1,
      * then the flash will be fired at the default level set by HAL
-     * in android.flash.info.singleStrengthDefaultLevel.
-     * If ACAMERA_CONTROL_AE_MODE is set to any of ON_AUTO_FLASH, ON_ALWAYS_FLASH,
-     * ON_AUTO_FLASH_REDEYE, ON_EXTERNAL_FLASH values, then the strengthLevel will be ignored.</p>
+     * in ACAMERA_FLASH_SINGLE_STRENGTH_DEFAULT_LEVEL.
+     * If ACAMERA_CONTROL_AE_MODE is set to any of <code>ON_AUTO_FLASH</code>, <code>ON_ALWAYS_FLASH</code>,
+     * <code>ON_AUTO_FLASH_REDEYE</code>, <code>ON_EXTERNAL_FLASH</code> values, then the strengthLevel will be ignored.</p>
      *
      * @see ACAMERA_CONTROL_AE_MODE
      * @see ACAMERA_FLASH_MODE
+     * @see ACAMERA_FLASH_SINGLE_STRENGTH_DEFAULT_LEVEL
+     * @see ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL
+     * @see ACAMERA_FLASH_TORCH_STRENGTH_DEFAULT_LEVEL
+     * @see ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL
      */
     ACAMERA_FLASH_STRENGTH_LEVEL =                              // int32
             ACAMERA_FLASH_START + 6,
     /**
-     * <p>Maximum flash brightness level for manual flash control in SINGLE mode.</p>
+     * <p>Maximum flash brightness level for manual flash control in <code>SINGLE</code> mode.</p>
      *
      * <p>Type: int32</p>
      *
@@ -2464,7 +2469,7 @@ typedef enum acamera_metadata_tag {
      * </ul></p>
      *
      * <p>Maximum flash brightness level in camera capture mode and
-     * ACAMERA_FLASH_MODE set to SINGLE.
+     * ACAMERA_FLASH_MODE set to <code>SINGLE</code>.
      * Value will be &gt; 1 if the manual flash strength control feature is supported,
      * otherwise the value will be equal to 1.
      * Note that this level is just a number of supported levels (the granularity of control).
@@ -2475,7 +2480,7 @@ typedef enum acamera_metadata_tag {
     ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL =                   // int32
             ACAMERA_FLASH_START + 7,
     /**
-     * <p>Default flash brightness level for manual flash control in SINGLE mode.</p>
+     * <p>Default flash brightness level for manual flash control in <code>SINGLE</code> mode.</p>
      *
      * <p>Type: int32</p>
      *
@@ -2485,14 +2490,16 @@ typedef enum acamera_metadata_tag {
      * </ul></p>
      *
      * <p>If flash unit is available this will be greater than or equal to 1 and less
-     * or equal to <code>android.flash.info.singleStrengthMaxLevel</code>.
+     * or equal to ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL.
      * Note for devices that do not support the manual flash strength control
      * feature, this level will always be equal to 1.</p>
+     *
+     * @see ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL
      */
     ACAMERA_FLASH_SINGLE_STRENGTH_DEFAULT_LEVEL =               // int32
             ACAMERA_FLASH_START + 8,
     /**
-     * <p>Maximum flash brightness level for manual flash control in TORCH mode</p>
+     * <p>Maximum flash brightness level for manual flash control in <code>TORCH</code> mode</p>
      *
      * <p>Type: int32</p>
      *
@@ -2502,22 +2509,24 @@ typedef enum acamera_metadata_tag {
      * </ul></p>
      *
      * <p>Maximum flash brightness level in camera capture mode and
-     * ACAMERA_FLASH_MODE set to TORCH.
+     * ACAMERA_FLASH_MODE set to <code>TORCH</code>.
      * Value will be &gt; 1 if the manual flash strength control feature is supported,
      * otherwise the value will be equal to 1.</p>
      * <p>Note that this level is just a number of supported levels(the granularity of control).
      * There is no actual physical power units tied to this level.
-     * There is no relation between android.flash.info.torchStrengthMaxLevel and
-     * android.flash.info.singleStrengthMaxLevel i.e. the ratio of
-     * android.flash.info.torchStrengthMaxLevel:android.flash.info.singleStrengthMaxLevel
+     * There is no relation between ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL and
+     * ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL i.e. the ratio of
+     * ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL:ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL
      * is not guaranteed to be the ratio of actual brightness.</p>
      *
      * @see ACAMERA_FLASH_MODE
+     * @see ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL
+     * @see ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL
      */
     ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL =                    // int32
             ACAMERA_FLASH_START + 9,
     /**
-     * <p>Default flash brightness level for manual flash control in TORCH mode</p>
+     * <p>Default flash brightness level for manual flash control in <code>TORCH</code> mode</p>
      *
      * <p>Type: int32</p>
      *
@@ -2527,9 +2536,11 @@ typedef enum acamera_metadata_tag {
      * </ul></p>
      *
      * <p>If flash unit is available this will be greater than or equal to 1 and less
-     * or equal to android.flash.info.torchStrengthMaxLevel.
+     * or equal to ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL.
      * Note for the devices that do not support the manual flash strength control feature,
      * this level will always be equal to 1.</p>
+     *
+     * @see ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL
      */
     ACAMERA_FLASH_TORCH_STRENGTH_DEFAULT_LEVEL =                // int32
             ACAMERA_FLASH_START + 10,
@@ -2703,7 +2714,9 @@ typedef enum acamera_metadata_tag {
      * upright.</p>
      * <p>Camera devices may either encode this value into the JPEG EXIF header, or
      * rotate the image data to match this orientation. When the image data is rotated,
-     * the thumbnail data will also be rotated.</p>
+     * the thumbnail data will also be rotated. Additionally, in the case where the image data
+     * is rotated, <a href="https://developer.android.com/reference/android/media/Image.html#getWidth">Image#getWidth</a> and <a href="https://developer.android.com/reference/android/media/Image.html#getHeight">Image#getHeight</a>
+     * will not be updated to reflect the height and width of the rotated image.</p>
      * <p>Note that this orientation is relative to the orientation of the camera sensor, given
      * by ACAMERA_SENSOR_ORIENTATION.</p>
      * <p>To translate from the device orientation given by the Android sensor APIs for camera
@@ -5861,10 +5874,16 @@ typedef enum acamera_metadata_tag {
      *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
      * </ul></p>
      *
-     * <p>If TRUE, all images produced by the camera device in the RAW image formats will
-     * have lens shading correction already applied to it. If FALSE, the images will
-     * not be adjusted for lens shading correction.
-     * See android.request.maxNumOutputRaw for a list of RAW image formats.</p>
+     * <p>If <code>true</code>, all images produced by the camera device in the <code>RAW</code> image formats will have
+     * at least some lens shading correction already applied to it. If <code>false</code>, the images will
+     * not be adjusted for lens shading correction.  See android.request.maxNumOutputRaw for a
+     * list of RAW image formats.</p>
+     * <p>When <code>true</code>, the <code>lensShadingCorrectionMap</code> key may still have values greater than 1.0,
+     * and those will need to be applied to any captured RAW frames for them to match the shading
+     * correction of processed buffers such as <code>YUV</code> or <code>JPEG</code> images. This may occur, for
+     * example, when some basic fixed lens shading correction is applied by hardware to RAW data,
+     * and additional correction is done dynamically in the camera processing pipeline after
+     * demosaicing.</p>
      * <p>This key will be <code>null</code> for all devices do not report this information.
      * Devices with RAW capability will always report this information in this key.</p>
      */
@@ -8290,9 +8309,9 @@ typedef enum acamera_metadata_enum_acamera_control_ae_mode {
      * FPS.</p>
      * <p>If the session configuration is not supported, the AE mode reported in the
      * CaptureResult will be 'ON' instead of 'ON_LOW_LIGHT_BOOST_BRIGHTNESS_PRIORITY'.</p>
-     * <p>The application can observe the CapturerResult field
-     * ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE to determine when low light boost is 'ACTIVE' or
-     * 'INACTIVE'.</p>
+     * <p>When this AE mode is enabled, the CaptureResult field
+     * ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE will indicate when low light boost is 'ACTIVE'
+     * or 'INACTIVE'. By default ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE will be 'INACTIVE'.</p>
      * <p>The low light boost is 'ACTIVE' once the scene lighting condition is less than the
      * upper bound lux value defined by ACAMERA_CONTROL_LOW_LIGHT_BOOST_INFO_LUMINANCE_RANGE.
      * This mode will be 'INACTIVE' once the scene lighting condition is greater than the

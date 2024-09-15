@@ -146,8 +146,10 @@ cc_defaults {
     ],
 
     shared_libs: [
+        "audio-permission-aidl-cpp",
         "audioclient-types-aidl-cpp",
         "audioflinger-aidl-cpp",
+        "audiopermissioncontroller",
         "av-types-aidl-cpp",
         "com.android.media.audio-aconfig-cc",
         "effect-aidl-cpp",
@@ -218,9 +220,12 @@ cc_library {
     ],
 
     header_libs: [
+        "audiopolicyservicelocal_headers",
         "libaaudio_headers",
         "libmedia_headers",
     ],
+
+    export_header_lib_headers: ["audiopolicyservicelocal_headers"],
 
     export_include_dirs: ["."],
 

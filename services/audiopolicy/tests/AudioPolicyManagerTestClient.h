@@ -240,12 +240,26 @@ public:
         return NO_ERROR;
     }
 
+    status_t setTracksInternalMute(
+            const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) override {
+        for (const auto& trackInternalMute : tracksInternalMute) {
+            mTracksInternalMute[(audio_port_handle_t)trackInternalMute.portId] =
+                    trackInternalMute.muted;
+        }
+        return NO_ERROR;
+    }
+
     void addSupportedFormat(audio_format_t format) {
         mSupportedFormats.insert(format);
     }
 
     void addSupportedChannelMask(audio_channel_mask_t channelMask) {
         mSupportedChannelMasks.insert(channelMask);
+    }
+
+    bool getTrackInternalMute(audio_port_handle_t portId) {
+        auto it = mTracksInternalMute.find(portId);
+        return it == mTracksInternalMute.end() ? false : it->second;
     }
 
 private:
@@ -260,6 +274,7 @@ private:
     std::vector<struct audio_port_v7> mDisconnectedDevicePorts;
     std::set<audio_format_t> mSupportedFormats;
     std::set<audio_channel_mask_t> mSupportedChannelMasks;
+    std::map<audio_port_handle_t, bool> mTracksInternalMute;
     std::set<audio_io_handle_t> mOpenedInputs;
 };
 

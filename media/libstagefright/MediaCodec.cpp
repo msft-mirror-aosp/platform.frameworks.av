@@ -2459,7 +2459,12 @@ status_t MediaCodec::configure(
             mediametrics_setInt32(nextMetricsHandle, kCodecCrypto, 1);
         }
     } else if (mFlags & kFlagIsSecure) {
-        ALOGW("Crypto or descrambler should be given for secure codec");
+        if (android::media::codec::provider_->secure_codecs_require_crypto()) {
+            mErrorLog.log(LOG_TAG, "Crypto or descrambler must be given for secure codec");
+            return INVALID_OPERATION;
+        } else {
+            ALOGW("Crypto or descrambler should be given for secure codec");
+        }
     }
 
     if (mConfigureMsg != nullptr) {

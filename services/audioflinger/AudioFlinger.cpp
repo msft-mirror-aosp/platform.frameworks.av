@@ -4579,6 +4579,10 @@ NO_THREAD_SAFETY_ANALYSIS
             if ((pt->type() == IAfThreadBase::MIXER || pt->type() == IAfThreadBase::OFFLOAD) &&
                     ((sessionType & IAfThreadBase::EFFECT_SESSION) != 0)) {
                 srcThread = pt.get();
+                if (srcThread == dstThread) {
+                    ALOGD("%s() same dst and src threads, ignoring move", __func__);
+                    return NO_ERROR;
+                }
                 ALOGW("%s() found srcOutput %d hosting AUDIO_SESSION_OUTPUT_MIX", __func__,
                       pt->id());
                 break;
@@ -4985,6 +4989,23 @@ status_t AudioFlinger::getAudioMixPort(const struct audio_port_v7 *devicePort,
     return mPatchPanel->getAudioMixPort_l(devicePort, mixPort);
 }
 
+status_t AudioFlinger::setTracksInternalMute(
+        const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) {
+    audio_utils::lock_guard _l(mutex());
+    ALOGV("%s", __func__);
+
+    std::map<audio_port_handle_t, bool> tracksInternalMuteMap;
+    for (const auto& trackInternalMute : tracksInternalMute) {
+        audio_port_handle_t portId = VALUE_OR_RETURN_STATUS(
+                aidl2legacy_int32_t_audio_port_handle_t(trackInternalMute.portId));
+        tracksInternalMuteMap.emplace(portId, trackInternalMute.muted);
+    }
+    for (size_t i = 0; i < mPlaybackThreads.size() && !tracksInternalMuteMap.empty(); i++) {
+        mPlaybackThreads.valueAt(i)->setTracksInternalMute(&tracksInternalMuteMap);
+    }
+    return NO_ERROR;
+}
+
 status_t AudioFlinger::resetReferencesForTest() {
     mDeviceEffectManager.clear();
     mPatchPanel.clear();
@@ -5026,6 +5047,7 @@ status_t AudioFlinger::onTransactWrapper(TransactionCode code,
         case TransactionCode::INVALIDATE_TRACKS:
         case TransactionCode::GET_AUDIO_POLICY_CONFIG:
         case TransactionCode::GET_AUDIO_MIX_PORT:
+        case TransactionCode::SET_TRACKS_INTERNAL_MUTE:
         case TransactionCode::RESET_REFERENCES_FOR_TEST:
             ALOGW("%s: transaction %d received from PID %d",
                   __func__, static_cast<int>(code), IPCThreadState::self()->getCallingPid());
