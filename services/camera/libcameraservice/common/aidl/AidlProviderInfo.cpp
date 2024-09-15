@@ -109,11 +109,8 @@ status_t AidlProviderInfo::initializeAidlProvider(
         std::shared_ptr<ICameraProvider>& interface, int64_t currentDeviceState) {
 
     using aidl::android::hardware::camera::provider::ICameraProvider;
-    std::string parsedProviderName = mProviderName;
-    if (flags::lazy_aidl_wait_for_service()) {
-        parsedProviderName =
+    std::string parsedProviderName =
                 mProviderName.substr(std::string(ICameraProvider::descriptor).size() + 1);
-    }
 
     status_t res = parseProviderName(parsedProviderName, &mType, &mId);
     if (res != OK) {
