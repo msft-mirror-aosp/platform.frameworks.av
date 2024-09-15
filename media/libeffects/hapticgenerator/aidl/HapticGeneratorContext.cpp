@@ -353,7 +353,7 @@ float* HapticGeneratorContext::runProcessingChain(float* buf1, float* buf2, size
 
 std::string HapticGeneratorContext::paramToString(const struct HapticGeneratorParam& param) const {
     std::stringstream ss;
-    ss << "\t\ttHapticGenerator Parameters:\n";
+    ss << "\t\tHapticGenerator Parameters:\n";
     ss << "\t\t- mHapticChannelCount: " << param.mHapticChannelCount << '\n';
     ss << "\t\t- mAudioChannelCount: " << param.mAudioChannelCount << '\n';
     ss << "\t\t- mHapticChannelSource: " << param.mHapticChannelSource[0] << ", "
@@ -378,7 +378,7 @@ std::string HapticGeneratorContext::contextToString() const {
     ss << "\t\t- distortion input gain: " << DEFAULT_DISTORTION_INPUT_GAIN << '\n';
     ss << "\t\t- distortion cube threshold: " << DEFAULT_DISTORTION_CUBE_THRESHOLD << '\n';
     ss << "\t\t- distortion output gain: " << getDistortionOutputGain() << '\n';
-    ss << "\t\tHapticGenerator Parameters:\n" << paramToString(mParams) << "\n";
+    ss << paramToString(mParams) << "\n";
     return ss.str();
 }
 
