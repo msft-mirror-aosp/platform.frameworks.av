@@ -73,7 +73,9 @@ class EffectHalAidl : public EffectHalInterface {
     const int32_t mSessionId;
     const int32_t mIoId;
     const bool mIsProxyEffect;
+    const int mHalVersion;
     bool mIsHapticGenerator = false;
+    std::string mEffectName;
 
     std::unique_ptr<EffectConversionHelperAidl> mConversion;
 
@@ -92,6 +94,14 @@ class EffectHalAidl : public EffectHalInterface {
             bool isProxyEffect);
     bool setEffectReverse(bool reverse);
     bool needUpdateReturnParam(uint32_t cmdCode);
+
+    status_t maybeReopen(const std::shared_ptr<android::hardware::EventFlag>& efGroup) const;
+    void writeHapticGeneratorData(size_t totalSamples, float* const outputRawBuffer,
+                                  float* const fmqOutputBuffer) const;
+    size_t writeToHalInputFmqAndSignal(
+            const std::shared_ptr<android::hardware::EventFlag>& efGroup) const;
+    status_t waitHalStatusFmq(size_t samplesWritten) const;
+    status_t readFromHalOutputFmq(size_t samplesWritten) const;
 
     // The destructor automatically releases the effect.
     virtual ~EffectHalAidl();
