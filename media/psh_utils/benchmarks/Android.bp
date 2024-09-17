@@ -17,14 +17,15 @@ cc_benchmark {
         "-Werror",
     ],
     static_libs: [
-        "libaudioutils",
         "libpshutils",
     ],
     shared_libs: [
+        "libaudioutils",
         "libbase",
         "libbinder_ndk",
         "libcutils",
         "liblog",
+        "libmediautils",
         "libutils",
     ],
 }
@@ -38,14 +39,37 @@ cc_benchmark {
         "-Werror",
     ],
     static_libs: [
-        "libaudioutils",
         "libpshutils",
     ],
     shared_libs: [
+        "libaudioutils",
         "libbase",
         "libbinder_ndk",
         "libcutils",
         "liblog",
+        "libmediautils",
+        "libutils",
+    ],
+}
+
+cc_benchmark {
+    name: "audio_token_benchmark",
+
+    srcs: ["audio_token_benchmark.cpp"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+    static_libs: [
+        "libpshutils",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "liblog",
+        "libmediautils",
         "libutils",
     ],
 }

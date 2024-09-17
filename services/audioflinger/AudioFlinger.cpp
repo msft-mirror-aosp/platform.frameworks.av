@@ -899,6 +899,17 @@ NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 
         BUFLOG_RESET;
 
+        if (media::psh_utils::AudioPowerManager::enabled()) {
+            char value[PROPERTY_VALUE_MAX];
+            property_get("ro.build.display.id", value, "Unknown build");
+            std::string build(value);
+            build.append("\n");
+            write(fd, build.c_str(), build.size());
+            const std::string powerLog =
+                    media::psh_utils::AudioPowerManager::getAudioPowerManager().toString();
+            write(fd, powerLog.c_str(), powerLog.size());
+        }
+
         if (locked) {
             mutex().unlock();
         }
@@ -2327,6 +2338,9 @@ AudioFlinger::NotificationClient::NotificationClient(const sp<AudioFlinger>& aud
                                                      pid_t pid,
                                                      uid_t uid)
     : mAudioFlinger(audioFlinger), mPid(pid), mUid(uid), mAudioFlingerClient(client)
+    , mClientToken(media::psh_utils::AudioPowerManager::enabled()
+            ? media::psh_utils::createAudioClientToken(pid, uid)
+            : nullptr)
 {
 }
 

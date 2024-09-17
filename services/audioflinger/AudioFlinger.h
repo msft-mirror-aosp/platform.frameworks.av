@@ -38,6 +38,7 @@
 #include <media/audiohal/DevicesFactoryHalInterface.h>
 #include <mediautils/ServiceUtilities.h>
 #include <mediautils/Synchronization.h>
+#include <psh_utils/AudioPowerManager.h>
 
 // not needed with the includes above, added to prevent transitive include dependency.
 #include <utils/KeyedVector.h>
@@ -499,6 +500,7 @@ private:
         const pid_t             mPid;
         const uid_t             mUid;
         const sp<media::IAudioFlingerClient> mAudioFlingerClient;
+        const std::unique_ptr<media::psh_utils::Token> mClientToken;
     };
 
     // --- MediaLogNotifier ---
