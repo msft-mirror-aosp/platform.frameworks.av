@@ -325,6 +325,18 @@ void TrackBase::deferRestartIfDisabled()
         });
 }
 
+void TrackBase::beginBatteryAttribution() {
+    mBatteryStatsHolder.emplace(uid());
+    if (media::psh_utils::AudioPowerManager::enabled()) {
+        mTrackToken = media::psh_utils::createAudioTrackToken(uid());
+    }
+}
+
+void TrackBase::endBatteryAttribution() {
+    mBatteryStatsHolder.reset();
+    mTrackToken.reset();
+}
+
 PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,
         IAfThreadBase* thread, const Timeout& timeout)
     : mProxy(proxy)

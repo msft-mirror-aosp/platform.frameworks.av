@@ -33,6 +33,7 @@
 #include <fastpath/FastMixer.h>
 #include <mediautils/Synchronization.h>
 #include <mediautils/ThreadSnapshot.h>
+#include <psh_utils/Token.h>
 #include <timing/MonotonicFrameCounter.h>
 #include <utils/Log.h>
 
@@ -725,6 +726,7 @@ protected:
                 char                    mThreadName[kThreadNameLength]; // guaranteed NUL-terminated
     sp<os::IPowerManager> mPowerManager GUARDED_BY(mutex());
     sp<IBinder> mWakeLockToken GUARDED_BY(mutex());
+    std::unique_ptr<media::psh_utils::Token> mThreadToken GUARDED_BY(mutex());
                 const sp<PMDeathRecipient> mDeathRecipient;
                 // list of suspended effects per session and per type. The first (outer) vector is
                 // keyed by session ID, the second (inner) by type UUID timeLow field

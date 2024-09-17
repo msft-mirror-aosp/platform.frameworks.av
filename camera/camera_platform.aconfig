@@ -127,16 +127,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "surface_leak_fix"
-    description: "Address Surface release leaks in CaptureRequest"
-    bug: "324071855"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
     name: "concert_mode_api"
     description: "Covers the eyes free videography public facing API"
     bug: "297083874"
