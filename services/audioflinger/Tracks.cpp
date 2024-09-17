@@ -318,11 +318,23 @@ void TrackBase::deferRestartIfDisabled()
 {
     const auto thread = mThread.promote();
     if (thread == nullptr) return;
-    thread->getThreadloopExecutor().defer(
-            [track = wp<TrackBase>::fromExisting(this)] {
-            const auto actual = track.promote();
+    auto weakTrack = wp<TrackBase>::fromExisting(this);
+    thread->getThreadloopExecutor().defer([weakTrack] {
+            const auto actual = weakTrack.promote();
             if (actual) actual->restartIfDisabled();
         });
+}
+
+void TrackBase::beginBatteryAttribution() {
+    mBatteryStatsHolder.emplace(uid());
+    if (media::psh_utils::AudioPowerManager::enabled()) {
+        mTrackToken = media::psh_utils::createAudioTrackToken(uid());
+    }
+}
+
+void TrackBase::endBatteryAttribution() {
+    mBatteryStatsHolder.reset();
+    mTrackToken.reset();
 }
 
 PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,

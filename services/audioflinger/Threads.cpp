@@ -81,6 +81,7 @@
 #include <powermanager/PowerManager.h>
 #include <private/android_filesystem_config.h>
 #include <private/media/AudioTrackShared.h>
+#include <psh_utils/AudioPowerManager.h>
 #include <system/audio_effects/effect_aec.h>
 #include <system/audio_effects/effect_downmix.h>
 #include <system/audio_effects/effect_ns.h>
@@ -1218,6 +1219,10 @@ void ThreadBase::acquireWakeLock_l()
                     {} /* historyTag */);
         if (status.isOk()) {
             mWakeLockToken = binder;
+            if (media::psh_utils::AudioPowerManager::enabled()) {
+                mThreadToken = media::psh_utils::createAudioThreadToken(
+                        getTid(), String8(getWakeLockTag()).c_str());
+            }
         }
         ALOGV("acquireWakeLock_l() %s status %d", mThreadName, status.exceptionCode());
     }
@@ -1243,6 +1248,7 @@ void ThreadBase::releaseWakeLock_l()
         }
         mWakeLockToken.clear();
     }
+    mThreadToken.reset();
 }
 
 void ThreadBase::getPowerManager_l() {

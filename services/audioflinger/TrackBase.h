@@ -24,6 +24,7 @@
 #include <android-base/macros.h>  // DISALLOW_COPY_AND_ASSIGN
 #include <datapath/TrackMetrics.h>
 #include <mediautils/BatteryNotifier.h>
+#include <psh_utils/AudioPowerManager.h>
 
 #include <atomic>    // avoid transitive dependency
 #include <list>      // avoid transitive dependency
@@ -240,17 +241,13 @@ public:
      * Called when a track moves to active state to record its contribution to battery usage.
      * Track state transitions should eventually be handled within the track class.
      */
-    void beginBatteryAttribution() final {
-        mBatteryStatsHolder.emplace(uid());
-    }
+    void beginBatteryAttribution() final;
 
     /**
      * Called when a track moves out of the active state to record its contribution
      * to battery usage.
      */
-    void endBatteryAttribution() final {
-        mBatteryStatsHolder.reset();
-    }
+    void endBatteryAttribution() final;
 
 protected:
     DISALLOW_COPY_AND_ASSIGN(TrackBase);
@@ -400,6 +397,7 @@ protected:
     std::atomic_flag    mChangeNotified = ATOMIC_FLAG_INIT;
     // RAII object for battery stats book-keeping
     std::optional<mediautils::BatteryStatsAudioHandle> mBatteryStatsHolder;
+    std::unique_ptr<media::psh_utils::Token> mTrackToken;
 };
 
 class PatchTrackBase : public PatchProxyBufferProvider, public virtual IAfPatchTrackBase
