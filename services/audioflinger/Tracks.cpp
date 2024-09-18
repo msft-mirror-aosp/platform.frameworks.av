@@ -318,9 +318,9 @@ void TrackBase::deferRestartIfDisabled()
 {
     const auto thread = mThread.promote();
     if (thread == nullptr) return;
-    thread->getThreadloopExecutor().defer(
-            [track = wp<TrackBase>::fromExisting(this)] {
-            const auto actual = track.promote();
+    auto weakTrack = wp<TrackBase>::fromExisting(this);
+    thread->getThreadloopExecutor().defer([weakTrack] {
+            const auto actual = weakTrack.promote();
             if (actual) actual->restartIfDisabled();
         });
 }
