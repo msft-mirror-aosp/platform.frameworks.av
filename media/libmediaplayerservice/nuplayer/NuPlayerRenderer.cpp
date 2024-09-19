@@ -15,6 +15,7 @@
  */
 
 //#define LOG_NDEBUG 0
+#define ATRACE_TAG ATRACE_TAG_AUDIO
 #define LOG_TAG "NuPlayerRenderer"
 #include <utils/Log.h>
 
@@ -36,6 +37,9 @@
 #include <utils/SystemClock.h>
 
 #include <inttypes.h>
+
+#include <android-base/stringprintf.h>
+using ::android::base::StringPrintf;
 
 namespace android {
 
@@ -2000,6 +2004,8 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
         bool isStreaming) {
     ALOGV("openAudioSink: offloadOnly(%d) offloadingAudio(%d)",
             offloadOnly, offloadingAudio());
+    ATRACE_BEGIN(StringPrintf("NuPlayer::Renderer::onOpenAudioSink: offloadOnly(%d) "
+            "offloadingAudio(%d)", offloadOnly, offloadingAudio()).c_str());
     bool audioSinkChanged = false;
 
     int32_t numChannels;
@@ -2071,6 +2077,7 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
             if (memcmp(&mCurrentOffloadInfo, &offloadInfo, sizeof(offloadInfo)) == 0) {
                 ALOGV("openAudioSink: no change in offload mode");
                 // no change from previous configuration, everything ok.
+                ATRACE_END();
                 return OK;
             }
             mCurrentPcmInfo = AUDIO_PCMINFO_INITIALIZER;
@@ -2140,6 +2147,7 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
         if (memcmp(&mCurrentPcmInfo, &info, sizeof(info)) == 0) {
             ALOGV("openAudioSink: no change in pcm mode");
             // no change from previous configuration, everything ok.
+            ATRACE_END();
             return OK;
         }
 
@@ -2184,6 +2192,7 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
             ALOGW("openAudioSink: non offloaded open failed status: %d", err);
             mAudioSink->close();
             mCurrentPcmInfo = AUDIO_PCMINFO_INITIALIZER;
+            ATRACE_END();
             return err;
         }
         mCurrentPcmInfo = info;
@@ -2195,13 +2204,16 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
         onAudioSinkChanged();
     }
     mAudioTornDown = false;
+    ATRACE_END();
     return OK;
 }
 
 void NuPlayer::Renderer::onCloseAudioSink() {
+    ATRACE_BEGIN("NuPlyer::Renderer::onCloseAudioSink");
     mAudioSink->close();
     mCurrentOffloadInfo = AUDIO_INFO_INITIALIZER;
     mCurrentPcmInfo = AUDIO_PCMINFO_INITIALIZER;
+    ATRACE_END();
 }
 
 void NuPlayer::Renderer::onChangeAudioFormat(
