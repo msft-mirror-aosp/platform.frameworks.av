@@ -17,6 +17,8 @@
 
 #define LOG_TAG "AudioFlinger"
 //#define LOG_NDEBUG 0
+#define ATRACE_TAG ATRACE_TAG_AUDIO
+#include <utils/Trace.h>
 
 // Define AUDIO_ARRAYS_STATIC_CHECK to check all audio arrays are correct
 #define AUDIO_ARRAYS_STATIC_CHECK 1
@@ -1065,6 +1067,7 @@ void AudioFlinger::unregisterWriter(const sp<NBLog::Writer>& writer)
 status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
                                    media::CreateTrackResponse& _output)
 {
+    ATRACE_CALL();
     // Local version of VALUE_OR_RETURN, specific to this method's calling conventions.
     CreateTrackInput input = VALUE_OR_RETURN_STATUS(CreateTrackInput::fromAidl(_input));
     CreateTrackOutput output;
