@@ -39,12 +39,12 @@ void PowerClientStats::start(int64_t actualNs) {
 void PowerClientStats::stop(int64_t actualNs) {
     std::lock_guard l(mMutex);
     if (--mTokenCount > 0) return;
-    if (mStartNs != 0) mDeltaNs += actualNs - mStartNs;
+    if (mStartNs != 0) mCumulativeNs += actualNs - mStartNs;
     mStartNs = 0;
     if (!mStartStats) return;
     const auto stopStats = PowerStatsCollector::getCollector().getStats(kStatTimeToleranceNs);
     if (stopStats && stopStats != mStartStats) {
-        *mDeltaStats += *stopStats - *mStartStats;
+        *mCumulativeStats += *stopStats - *mStartStats;
     }
     mStartStats.reset();
 }
@@ -64,15 +64,15 @@ std::string PowerClientStats::toString(bool stats, const std::string& prefix) co
     std::lock_guard l(mMutex);
 
     // Adjust delta time and stats if currently running.
-    auto deltaStats = mDeltaStats;
-    auto deltaNs = mDeltaNs;
-    if (mStartNs) deltaNs += systemTime(SYSTEM_TIME_BOOTTIME) - mStartNs;
+    auto cumulativeStats = mCumulativeStats;
+    auto cumulativeNs = mCumulativeNs;
+    if (mStartNs) cumulativeNs += systemTime(SYSTEM_TIME_BOOTTIME) - mStartNs;
     if (mStartStats) {
         const auto stopStats = PowerStatsCollector::getCollector().getStats(kStatTimeToleranceNs);
         if (stopStats && stopStats != mStartStats) {
-            auto newStats = std::make_shared<PowerStats>(*deltaStats);
+            auto newStats = std::make_shared<PowerStats>(*cumulativeStats);
             *newStats += *stopStats - *mStartStats;
-            deltaStats = newStats;
+            cumulativeStats = newStats;
         }
     }
 
@@ -81,7 +81,7 @@ std::string PowerClientStats::toString(bool stats, const std::string& prefix) co
             .append(std::to_string(mUid))
             .append(" ").append(mediautils::UidInfo::getInfo(mUid)->package)
             .append(" streams: ").append(std::to_string(mTokenCount))
-            .append(" seconds: ").append(std::to_string(deltaNs * 1e-9));
+            .append(" seconds: ").append(std::to_string(cumulativeNs * 1e-9));
     result.append(" {");
     for (auto pid : mPids) {
         result.append(" ").append(std::to_string(pid));
@@ -93,7 +93,7 @@ std::string PowerClientStats::toString(bool stats, const std::string& prefix) co
     if (stats) {
         std::string prefix2(prefix);
         prefix2.append("  ");
-        result.append("\n").append(deltaStats->normalizedEnergy(prefix2));
+        result.append("\n").append(cumulativeStats->normalizedEnergy(prefix2));
     }
     return result;
 }

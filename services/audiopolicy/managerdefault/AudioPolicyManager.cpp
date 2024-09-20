@@ -2379,8 +2379,8 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
                 // the bit-perfect sink so that it is guaranteed only bit-perfect stream is active.
                 PortHandleVector clientsToInvalidate;
                 for (size_t i = 0; i < mOutputs.size(); i++) {
-                    if (mOutputs[i] == outputDesc ||
-                        mOutputs[i]->devices().filter(outputDesc->devices()).isEmpty()) {
+                    if (mOutputs[i] == outputDesc || (!mOutputs[i]->devices().isEmpty() &&
+                        mOutputs[i]->devices().filter(outputDesc->devices()).isEmpty())) {
                         continue;
                     }
                     for (const auto& c : mOutputs[i]->getClientIterable()) {

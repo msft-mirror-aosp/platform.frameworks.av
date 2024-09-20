@@ -60,6 +60,15 @@ flag {
 }
 
 flag {
+    name: "equal_sco_lea_vc_index_range"
+    namespace: "media_audio"
+    description:
+        "Introduce the same index range for voice calls over SCO and "
+        "LE audio"
+    bug: "364364777"
+}
+
+flag {
     name: "music_fx_edge_to_edge"
     namespace: "media_audio"
     description: "Enable Edge-to-edge feature for MusicFx and handle insets"
