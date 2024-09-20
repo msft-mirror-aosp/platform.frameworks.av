@@ -32,6 +32,7 @@ cc_library {
         "com.android.media.audio-aconfig-cc",
         "libaudioutils",
         "libbase",
+        "libbinder",
         "libbinder_ndk",
         "libcutils",
         "liblog",
