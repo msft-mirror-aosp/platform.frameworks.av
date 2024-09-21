@@ -87,10 +87,12 @@ private:
     int64_t mStartNs GUARDED_BY(mMutex) = 0;
     std::shared_ptr<const PowerStats> mStartStats GUARDED_BY(mMutex);
 
-    // Total actual time app is active (stop - start)
-    int64_t mDeltaNs GUARDED_BY(mMutex) = 0;
-    // The stats taken for the active time (snapshots are quantized to 500ms accuracy).
-    std::shared_ptr<PowerStats> mDeltaStats GUARDED_BY(mMutex) = std::make_shared<PowerStats>();
+    // Cumulative time while active: sum of deltas of (stop - start).
+    int64_t mCumulativeNs GUARDED_BY(mMutex) = 0;
+    // Cumulative stats while active: sum of deltas of (stop - start),
+    // where snapshots are quantized to ~500ms accuracy.
+    std::shared_ptr<PowerStats> mCumulativeStats GUARDED_BY(mMutex) =
+            std::make_shared<PowerStats>();
 };
 
 } // namespace android::media::psh_utils
