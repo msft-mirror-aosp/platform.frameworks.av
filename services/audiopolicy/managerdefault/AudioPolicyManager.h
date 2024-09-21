@@ -1366,6 +1366,11 @@ private:
                                          DeviceVector &devices,
                                          bool forVolume);
 
+        // A helper method used by getDevicesForAttributes to retrieve input devices when
+        // capture preset is available in the given audio attributes parameter.
+        status_t getInputDevicesForAttributes(const audio_attributes_t &attr,
+                                              DeviceVector &devices);
+
         status_t getProfilesForDevices(const DeviceVector& devices,
                                        AudioProfileVector& audioProfiles,
                                        uint32_t flags,
