@@ -41,6 +41,14 @@ AudioClientToken::~AudioClientToken() {
     // APM has a back pointer to AudioToken, which is accessible on toString().
     // We first remove ourselves to prevent use after free.
     apm.clear_token_ptr(this);
+
+    // The client token is released when it is no longer registered with AudioFlinger.
+    // However, it is possible that AudioTrackTokens are still active when the client is released
+    // after crashing and some of its tracks are draining.  Those track tokens also
+    // maintain a pointer to the PowerClientStats keeping that consistent.
+
+    // Stopping the client moves its PowerClientStats from active to historical
+    // if it is the last pid associated with the client uid.
     apm.stopClient(mPid);
 }
 
