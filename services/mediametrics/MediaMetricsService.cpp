@@ -49,12 +49,9 @@ using mediametrics::startsWith;
 // (0 for either of these disables that threshold)
 //
 static constexpr nsecs_t kMaxRecordAgeNs = 28 * 3600 * NANOS_PER_SECOND;
-// 2019/6: average daily per device is currently 375-ish;
-// setting this to 2000 is large enough to catch most devices
-// we'll lose some data on very very media-active devices, but only for
-// the gms collection; statsd will have already covered those for us.
-// This also retains enough information to help with bugreports
-static constexpr size_t kMaxRecords = 2000;
+
+// Max records to keep in queue which dump out for bugreports.
+static constexpr size_t kMaxRecords = 2500;
 
 // max we expire in a single call, to constrain how long we hold the
 // mutex, which also constrains how long a client might wait.
@@ -311,7 +308,8 @@ status_t MediaMetricsService::dump(int fd, const Vector<String16>& args)
 
             // TODO: maybe consider a better way of dumping audio analytics info.
             const int32_t linesToDump = all ? INT32_MAX : 1000;
-            auto [ dumpString, lines ] = mAudioAnalytics.dump(linesToDump, sinceNs, prefixptr);
+            auto [ dumpString, lines ] = mAudioAnalytics.dump(
+                    all, linesToDump, sinceNs, prefixptr);
             result << dumpString;
             if (lines == linesToDump) {
                 result << "-- some lines may be truncated --\n";

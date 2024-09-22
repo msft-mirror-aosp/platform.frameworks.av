@@ -218,3 +218,10 @@ flag {
     description: "Enable CameraServiceWatchdog to abort camera HAL to generate HAL tombstones"
     bug: "349652177"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "enable_stream_reconfiguration_for_unchanged_streams"
+    description: "Enable stream reconfiguration for unchanged streams"
+    bug: "341740105"
+}

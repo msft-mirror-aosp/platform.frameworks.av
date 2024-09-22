@@ -29,6 +29,9 @@
 #include "ui/GraphicBufferMapper.h"
 
 #include <cutils/properties.h>
+#include <com_android_internal_camera_flags.h>
+
+namespace flags = com::android::internal::camera::flags;
 
 namespace android {
 
@@ -388,6 +391,10 @@ status_t Camera3Stream::finishConfiguration(/*out*/bool* streamReconfigured) {
             mOldDataSpace == camera_stream::data_space &&
             mOldFormat == camera_stream::format) {
         mState = STATE_CONFIGURED;
+        if (flags::enable_stream_reconfiguration_for_unchanged_streams()
+                && streamReconfigured != nullptr) {
+            *streamReconfigured = true;
+        }
         return OK;
     }
 

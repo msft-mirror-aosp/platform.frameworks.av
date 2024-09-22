@@ -4065,7 +4065,13 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
     // FIXME could this be made local to while loop?
     writeFrames = 0;
 
-    cacheParameters_l();
+    {
+        audio_utils::lock_guard l(mutex());
+
+        cacheParameters_l();
+        checkSilentMode_l();
+    }
+
     mSleepTimeUs = mIdleSleepTimeUs;
 
     if (mType == MIXER || mType == SPATIALIZER) {
@@ -4089,8 +4095,6 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
     // Estimated time for next buffer to be written to hal. This is used only on
     // suspended mode (for now) to help schedule the wait time until next iteration.
     nsecs_t timeLoopNextNs = 0;
-
-    checkSilentMode_l();
 
     audio_patch_handle_t lastDownstreamPatchHandle = AUDIO_PATCH_HANDLE_NONE;
 
@@ -11609,6 +11613,7 @@ void BitPerfectThread::threadLoop_mix() {
 
 void BitPerfectThread::setTracksInternalMute(
         std::map<audio_port_handle_t, bool>* tracksInternalMute) {
+    audio_utils::lock_guard _l(mutex());
     for (auto& track : mTracks) {
         if (auto it = tracksInternalMute->find(track->portId()); it != tracksInternalMute->end()) {
             track->setInternalMute(it->second);
@@ -11625,6 +11630,11 @@ sp<IAfTrack> BitPerfectThread::getTrackToStreamBitPerfectly_l() {
         // Return the bit perfect track if all other tracks are muted
         for (const auto& track : mActiveTracks) {
             if (track->isBitPerfect()) {
+                if (track->getInternalMute()) {
+                    // There can only be one bit-perfect client active. If it is mute internally,
+                    // there is no need to stream bit-perfectly.
+                    break;
+                }
                 bitPerfectTrack = track;
             } else if (track->getFinalVolume() != 0.f) {
                 allOtherTracksMuted = false;
