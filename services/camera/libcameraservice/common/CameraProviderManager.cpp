@@ -467,10 +467,6 @@ status_t  CameraProviderManager::createDefaultRequest(const std::string& cameraI
 status_t CameraProviderManager::getSessionCharacteristics(
         const std::string& id, const SessionConfiguration& configuration, bool overrideForPerfClass,
         int rotationOverride, CameraMetadata* sessionCharacteristics /*out*/) const {
-    if (!flags::feature_combination_query()) {
-        return INVALID_OPERATION;
-    }
-
     std::lock_guard<std::mutex> lock(mInterfaceMutex);
     auto deviceInfo = findDeviceInfoLocked(id);
     if (deviceInfo == nullptr) {

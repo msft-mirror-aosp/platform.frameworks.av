@@ -2379,8 +2379,8 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
                 // the bit-perfect sink so that it is guaranteed only bit-perfect stream is active.
                 PortHandleVector clientsToInvalidate;
                 for (size_t i = 0; i < mOutputs.size(); i++) {
-                    if (mOutputs[i] == outputDesc ||
-                        mOutputs[i]->devices().filter(outputDesc->devices()).isEmpty()) {
+                    if (mOutputs[i] == outputDesc || (!mOutputs[i]->devices().isEmpty() &&
+                        mOutputs[i]->devices().filter(outputDesc->devices()).isEmpty())) {
                         continue;
                     }
                     for (const auto& c : mOutputs[i]->getClientIterable()) {
@@ -9068,6 +9068,13 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
 
 status_t AudioPolicyManager::getDevicesForAttributes(
         const audio_attributes_t &attr, DeviceVector &devices, bool forVolume) {
+    // attr containing source set by AudioAttributes.Builder.setCapturePreset() has precedence
+    // over any usage or content type also present in attr.
+    if (com::android::media::audioserver::enable_audio_input_device_routing() &&
+        attr.source != AUDIO_SOURCE_INVALID) {
+        return getInputDevicesForAttributes(attr, devices);
+    }
+
     // Devices are determined in the following precedence:
     //
     // 1) Devices associated with a dynamic policy matching the attributes.  This is often
@@ -9128,6 +9135,15 @@ status_t AudioPolicyManager::getDevicesForAttributes(
         }
     }
 
+    return NO_ERROR;
+}
+
+status_t AudioPolicyManager::getInputDevicesForAttributes(
+        const audio_attributes_t &attr, DeviceVector &devices) {
+    devices = DeviceVector(
+            mEngine->getInputDeviceForAttributes(attr, 0 /*uid unknown here*/,
+                                                 AUDIO_SESSION_NONE,
+                                                 nullptr /* mix */));
     return NO_ERROR;
 }
 
