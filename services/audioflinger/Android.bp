@@ -234,6 +234,22 @@ cc_library {
         "libpermission",
     ],
 
+    export_static_lib_headers: [
+        "libpshutils",
+    ],
+
+    shared: {
+        static_libs: [
+            "libpshutils",
+        ],
+    },
+
+    static: {
+        whole_static_libs: [
+            "libpshutils",
+        ],
+    },
+
     cflags: [
         "-Wall",
         "-Werror",

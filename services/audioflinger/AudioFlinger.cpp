@@ -17,6 +17,8 @@
 
 #define LOG_TAG "AudioFlinger"
 //#define LOG_NDEBUG 0
+#define ATRACE_TAG ATRACE_TAG_AUDIO
+#include <utils/Trace.h>
 
 // Define AUDIO_ARRAYS_STATIC_CHECK to check all audio arrays are correct
 #define AUDIO_ARRAYS_STATIC_CHECK 1
@@ -899,6 +901,17 @@ NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 
         BUFLOG_RESET;
 
+        if (media::psh_utils::AudioPowerManager::enabled()) {
+            char value[PROPERTY_VALUE_MAX];
+            property_get("ro.build.display.id", value, "Unknown build");
+            std::string build(value);
+            build.append("\n");
+            write(fd, build.c_str(), build.size());
+            const std::string powerLog =
+                    media::psh_utils::AudioPowerManager::getAudioPowerManager().toString();
+            write(fd, powerLog.c_str(), powerLog.size());
+        }
+
         if (locked) {
             mutex().unlock();
         }
@@ -1054,6 +1067,7 @@ void AudioFlinger::unregisterWriter(const sp<NBLog::Writer>& writer)
 status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
                                    media::CreateTrackResponse& _output)
 {
+    ATRACE_CALL();
     // Local version of VALUE_OR_RETURN, specific to this method's calling conventions.
     CreateTrackInput input = VALUE_OR_RETURN_STATUS(CreateTrackInput::fromAidl(_input));
     CreateTrackOutput output;
@@ -2327,6 +2341,9 @@ AudioFlinger::NotificationClient::NotificationClient(const sp<AudioFlinger>& aud
                                                      pid_t pid,
                                                      uid_t uid)
     : mAudioFlinger(audioFlinger), mPid(pid), mUid(uid), mAudioFlingerClient(client)
+    , mClientToken(media::psh_utils::AudioPowerManager::enabled()
+            ? media::psh_utils::createAudioClientToken(pid, uid)
+            : nullptr)
 {
 }
 
