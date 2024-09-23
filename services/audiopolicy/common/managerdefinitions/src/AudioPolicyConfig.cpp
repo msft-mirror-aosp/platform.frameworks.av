@@ -16,6 +16,7 @@
 
 #define LOG_TAG "APM_Config"
 
+#include <android-base/properties.h>
 #include <AudioPolicyConfig.h>
 #include <IOProfile.h>
 #include <Serializer.h>
@@ -339,6 +340,11 @@ void AudioPolicyConfig::setDefaultSurroundFormats() {
         {AUDIO_FORMAT_DOLBY_TRUEHD, {}},
         {AUDIO_FORMAT_E_AC3_JOC, {}},
         {AUDIO_FORMAT_AC4, {}}};
+}
+
+bool AudioPolicyConfig::useDeepBufferForMedia() const {
+    if (mUseDeepBufferForMediaOverride.has_value()) return *mUseDeepBufferForMediaOverride;
+    return property_get_bool("audio.deep_buffer.media", false /* default_value */);
 }
 
 } // namespace android
