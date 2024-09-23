@@ -8156,6 +8156,9 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
 
     for (;;) {
         sp<IOProfile> firstInexact = nullptr;
+        uint32_t inexactSamplingRate = 0;
+        audio_format_t inexactFormat = AUDIO_FORMAT_INVALID;
+        audio_channel_mask_t inexactChannelMask = AUDIO_CHANNEL_INVALID;
         uint32_t updatedSamplingRate = 0;
         audio_format_t updatedFormat = AUDIO_FORMAT_INVALID;
         audio_channel_mask_t updatedChannelMask = AUDIO_CHANNEL_INVALID;
@@ -8193,14 +8196,17 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
                                 false /*exactMatchRequiredForInputFlags*/)
                                 != IOProfile::NO_MATCH) {
                     firstInexact = profile;
+                    inexactSamplingRate = updatedSamplingRate;
+                    inexactFormat = updatedFormat;
+                    inexactChannelMask = updatedChannelMask;
                 }
             }
         }
 
         if (firstInexact != nullptr) {
-            samplingRate = updatedSamplingRate;
-            format = updatedFormat;
-            channelMask = updatedChannelMask;
+            samplingRate = inexactSamplingRate;
+            format = inexactFormat;
+            channelMask = inexactChannelMask;
             return firstInexact;
         } else if (flags & AUDIO_INPUT_FLAG_RAW) {
             flags = (audio_input_flags_t) (flags & ~AUDIO_INPUT_FLAG_RAW); // retry
