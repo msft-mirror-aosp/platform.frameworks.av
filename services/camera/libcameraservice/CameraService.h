@@ -33,7 +33,6 @@
 #include <binder/IServiceManager.h>
 #include <binder/IActivityManager.h>
 #include <binder/IAppOpsCallback.h>
-#include <binder/IPermissionController.h>
 #include <binder/IUidObserver.h>
 #include <hardware/camera.h>
 #include <sensorprivacy/SensorPrivacyManager.h>
@@ -686,25 +685,6 @@ private:
         return activityManager;
     }
 
-    static const sp<IPermissionController>& getPermissionController() {
-        static const char* kPermissionControllerService = "permission";
-        static thread_local sp<IPermissionController> sPermissionController = nullptr;
-
-        if (sPermissionController == nullptr ||
-                !IInterface::asBinder(sPermissionController)->isBinderAlive()) {
-            sp<IServiceManager> sm = defaultServiceManager();
-            sp<IBinder> binder = sm->checkService(toString16(kPermissionControllerService));
-            if (binder == nullptr) {
-                ALOGE("%s: Could not get permission service", __FUNCTION__);
-                sPermissionController = nullptr;
-            } else {
-                sPermissionController = interface_cast<IPermissionController>(binder);
-            }
-        }
-
-        return sPermissionController;
-    }
-
     /**
      * Typesafe version of device status, containing both the HAL-layer and the service interface-
      * layer values.
@@ -996,15 +976,6 @@ private:
     // This function expects @param normalDeviceIds, to have normalDeviceIds
     // sorted in alpha-numeric order.
     void filterAPI1SystemCameraLocked(const std::vector<std::string> &normalDeviceIds);
-
-    // In some cases the calling code has no access to the package it runs under.
-    // For example, NDK camera API.
-    // In this case we will get the packages for the calling UID and pick the first one
-    // for attributing the app op. This will work correctly for runtime permissions
-    // as for legacy apps we will toggle the app op for all packages in the UID.
-    // The caveat is that the operation may be attributed to the wrong package and
-    // stats based on app ops may be slightly off.
-    std::string getPackageNameFromUid(int clientUid) const;
 
     // Single implementation shared between the various connect calls
     template<class CALLBACK, class CLIENT>

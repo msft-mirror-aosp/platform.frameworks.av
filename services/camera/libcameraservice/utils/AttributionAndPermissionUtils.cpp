@@ -28,6 +28,10 @@
 #include <hwbinder/IPCThreadState.h>
 #include <binderthreadstate/CallerUtils.h>
 
+namespace {
+    static const std::string kPermissionServiceName = "permission";
+} // namespace anonymous
+
 namespace android {
 
 namespace flags = com::android::internal::camera::flags;
@@ -138,16 +142,9 @@ bool AttributionAndPermissionUtils::checkPermissionForPreflight(const std::strin
         return true;
     }
 
-    if (!flags::cache_permission_services()) {
-        PermissionChecker permissionChecker;
-        return permissionChecker.checkPermissionForPreflight(
-                       toString16(permission), attributionSource, toString16(message),
-                       attributedOpCode) != PermissionChecker::PERMISSION_HARD_DENIED;
-    } else {
-        return mPermissionChecker->checkPermissionForPreflight(
-                       toString16(permission), attributionSource, toString16(message),
-                       attributedOpCode) != PermissionChecker::PERMISSION_HARD_DENIED;
-    }
+    return mPermissionChecker->checkPermissionForPreflight(
+                    toString16(permission), attributionSource, toString16(message),
+                    attributedOpCode) != PermissionChecker::PERMISSION_HARD_DENIED;
 }
 
 // Can camera service trust the caller based on the calling UID?
@@ -187,6 +184,33 @@ bool AttributionAndPermissionUtils::isAutomotivePrivilegedClient(int32_t uid) {
     // privileged client uid used for safety critical use cases such as
     // rear view and surround view.
     return uid == AID_AUTOMOTIVE_EVS;
+}
+
+std::string AttributionAndPermissionUtils::getPackageNameFromUid(int clientUid) const {
+    std::string packageName("");
+
+    sp<IPermissionController> permCtrl = getPermissionController();
+    if (permCtrl == nullptr) {
+        // Return empty package name and the further interaction
+        // with camera will likely fail
+        return packageName;
+    }
+
+    Vector<String16> packages;
+
+    permCtrl->getPackagesForUid(clientUid, packages);
+
+    if (packages.isEmpty()) {
+        ALOGE("No packages for calling UID %d", clientUid);
+        // Return empty package name and the further interaction
+        // with camera will likely fail
+        return packageName;
+    }
+
+    // Arbitrarily pick the first name in the list
+    packageName = toStdString(packages[0]);
+
+    return packageName;
 }
 
 status_t AttributionAndPermissionUtils::getUidForPackage(const std::string &packageName,
@@ -243,6 +267,25 @@ bool AttributionAndPermissionUtils::hasPermissionsForOpenCloseListener(
         const AttributionSourceState& attributionSource) {
     return checkPermissionForPreflight(std::string(), sCameraOpenCloseListenerPermission,
             attributionSource, std::string(), AppOpsManager::OP_NONE);
+}
+
+const sp<IPermissionController>& AttributionAndPermissionUtils::getPermissionController() const {
+    static const char* kPermissionControllerService = "permission";
+    static thread_local sp<IPermissionController> sPermissionController = nullptr;
+
+    if (sPermissionController == nullptr ||
+            !IInterface::asBinder(sPermissionController)->isBinderAlive()) {
+        sp<IServiceManager> sm = defaultServiceManager();
+        sp<IBinder> binder = sm->checkService(toString16(kPermissionControllerService));
+        if (binder == nullptr) {
+            ALOGE("%s: Could not get permission service", __FUNCTION__);
+            sPermissionController = nullptr;
+        } else {
+            sPermissionController = interface_cast<IPermissionController>(binder);
+        }
+    }
+
+    return sPermissionController;
 }
 
 } // namespace android
