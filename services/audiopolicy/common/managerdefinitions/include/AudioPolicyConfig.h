@@ -16,10 +16,10 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 #include <DeviceDescriptor.h>
 #include <HwModule.h>
@@ -140,6 +140,12 @@ public:
 
     void setDefault();
 
+    void setUseDeepBufferForMediaOverrideForTests(bool useDeepBufferForMedia)
+    {
+        mUseDeepBufferForMediaOverride = useDeepBufferForMedia;
+    }
+    bool useDeepBufferForMedia() const;
+
 private:
     friend class sp<AudioPolicyConfig>;
 
@@ -157,6 +163,7 @@ private:
     sp<DeviceDescriptor> mDefaultOutputDevice;
     bool mIsCallScreenModeSupported = false;
     SurroundFormats mSurroundFormats;
+    std::optional<bool> mUseDeepBufferForMediaOverride;
 };
 
 } // namespace android
