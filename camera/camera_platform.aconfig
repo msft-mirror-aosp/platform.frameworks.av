@@ -215,3 +215,10 @@ flag {
     description: "Enable stream reconfiguration for unchanged streams"
     bug: "341740105"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "use_context_attribution_source"
+    description: "Use the context-provided AttributionSource when checking for client permissions"
+    bug: "190657833"
+}
