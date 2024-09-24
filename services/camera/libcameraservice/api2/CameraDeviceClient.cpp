@@ -1240,6 +1240,18 @@ binder::Status CameraDeviceClient::getInputSurface(/*out*/ view::Surface *inputS
     if (!mDevice.get()) {
         return STATUS_ERROR(CameraService::ERROR_DISCONNECTED, "Camera device no longer alive");
     }
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    sp<Surface> surface;
+    status_t err = mDevice->getInputSurface(&surface);
+    if (err != OK) {
+        res = STATUS_ERROR_FMT(CameraService::ERROR_INVALID_OPERATION,
+                "Camera %s: Error getting input Surface: %s (%d)",
+                mCameraIdStr.c_str(), strerror(-err), err);
+    } else {
+        inputSurface->name = toString16("CameraInput");
+        inputSurface->graphicBufferProducer = surface->getIGraphicBufferProducer();
+    }
+#else
     sp<IGraphicBufferProducer> producer;
     status_t err = mDevice->getInputBufferProducer(&producer);
     if (err != OK) {
@@ -1250,6 +1262,7 @@ binder::Status CameraDeviceClient::getInputSurface(/*out*/ view::Surface *inputS
         inputSurface->name = toString16("CameraInput");
         inputSurface->graphicBufferProducer = producer;
     }
+#endif
     return res;
 }
 
