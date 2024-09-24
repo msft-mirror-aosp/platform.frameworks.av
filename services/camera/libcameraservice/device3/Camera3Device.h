@@ -31,6 +31,7 @@
 #include <utils/Timers.h>
 
 #include <camera/CaptureResult.h>
+#include <gui/Flags.h>
 
 #include "CameraServiceWatchdog.h"
 #include <aidl/android/hardware/camera/device/CameraBlob.h>
@@ -197,8 +198,12 @@ class Camera3Device :
     status_t configureStreams(const CameraMetadata& sessionParams,
             int operatingMode =
             camera_stream_configuration_mode_t::CAMERA_STREAM_CONFIGURATION_NORMAL_MODE) override;
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    status_t getInputSurface(sp<Surface> *surface) override;
+#else
     status_t getInputBufferProducer(
             sp<IGraphicBufferProducer> *producer) override;
+#endif
 
     void getOfflineStreamIds(std::vector<int> *offlineStreamIds) override;
 
