@@ -80,7 +80,9 @@ EffectHalAidl::EffectHalAidl(const std::shared_ptr<IFactory>& factory,
           int version = 0;
           // use factory HAL version because effect can be an EffectProxy instance
           return factory->getInterfaceVersion(&version).isOk() ? version : 0;
-      }()) {
+      }()),
+      mEventFlagDataMqNotEmpty(mHalVersion >= kReopenSupportedVersion ? kEventFlagDataMqNotEmpty
+                                                                      : kEventFlagNotEmpty) {
     assert(mFactory != nullptr);
     assert(mEffect != nullptr);
     createAidlConversion(effect, sessionId, ioId, desc);
@@ -249,9 +251,7 @@ size_t EffectHalAidl::writeToHalInputFmqAndSignal(
         return 0;
     }
 
-    // for V2 audio effect HAL, expect different EventFlag to avoid bit conflict with FMQ_NOT_EMPTY
-    efGroup->wake(mHalVersion >= kReopenSupportedVersion ? kEventFlagDataMqNotEmpty
-                                                         : kEventFlagNotEmpty);
+    efGroup->wake(mEventFlagDataMqNotEmpty);
     return samplesToWrite;
 }
 
