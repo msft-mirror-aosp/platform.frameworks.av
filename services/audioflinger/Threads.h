@@ -623,7 +623,8 @@ protected:
      * ThreadBase_Mutex during this time.  No other mutex is held.
      */
 
-    void waitWhileThreadBusy_l(audio_utils::unique_lock& ul) final REQUIRES(mutex()) {
+    void waitWhileThreadBusy_l(audio_utils::unique_lock<audio_utils::mutex>& ul)
+            final REQUIRES(mutex()) {
         // the wait returns immediately if the predicate is satisfied.
         mThreadBusyCv.wait(ul, [&]{ return mThreadBusy == false;});
     }
