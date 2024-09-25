@@ -79,13 +79,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "delay_lazy_hal_instantiation"
-    description: "Only trigger lazy HAL instantiation when the HAL is needed for an operation."
-    bug: "319735068"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "return_buffers_outside_locks"
     description: "Enable returning graphics buffers to buffer queues without holding the in-flight mutex"
     bug: "315526878"
