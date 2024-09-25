@@ -1244,6 +1244,33 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, SetDeviceConnectionStateClos
     EXPECT_EQ(streamCountBefore, mClient->getOpenedInputsCount());
 }
 
+TEST_F(AudioPolicyManagerTestWithConfigurationFile, UpdateConfigFromInexactProfile) {
+    const audio_format_t expectedFormat = AUDIO_FORMAT_PCM_16_BIT;
+    const uint32_t expectedSampleRate = 48000;
+    const audio_channel_mask_t expectedChannelMask = AUDIO_CHANNEL_IN_STEREO;
+    const std::string expectedIOProfile = "primary input";
+
+    auto devices = mManager->getAvailableInputDevices();
+    sp<DeviceDescriptor> mic = nullptr;
+    for (auto device : devices) {
+        if (device->type() == AUDIO_DEVICE_IN_BUILTIN_MIC) {
+            mic = device;
+            break;
+        }
+    }
+    EXPECT_NE(nullptr, mic);
+
+    audio_format_t requestedFormat = AUDIO_FORMAT_PCM_16_BIT;
+    uint32_t requestedSampleRate = 44100;
+    audio_channel_mask_t requestedChannelMask = AUDIO_CHANNEL_IN_STEREO;
+    auto profile = mManager->getInputProfile(
+            mic, requestedSampleRate, requestedFormat, requestedChannelMask, AUDIO_INPUT_FLAG_NONE);
+    EXPECT_EQ(expectedIOProfile, profile->getName());
+    EXPECT_EQ(expectedFormat, requestedFormat);
+    EXPECT_EQ(expectedSampleRate, requestedSampleRate);
+    EXPECT_EQ(expectedChannelMask, requestedChannelMask);
+}
+
 class AudioPolicyManagerTestDynamicPolicy : public AudioPolicyManagerTestWithConfigurationFile {
 protected:
     void TearDown() override;
