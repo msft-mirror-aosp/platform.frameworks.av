@@ -89,7 +89,6 @@
 #include "utils/Utils.h"
 
 namespace {
-    const char* kPermissionServiceName = "permission";
     const char* kActivityServiceName = "activity";
     const char* kSensorPrivacyServiceName = "sensor_privacy";
     const char* kAppopsServiceName = "appops";
@@ -2385,51 +2384,6 @@ bool CameraService::isCameraPrivacyEnabled(const String16& packageName, const st
         }
     }
     return false;
-}
-
-std::string CameraService::getPackageNameFromUid(int clientUid) const {
-    std::string packageName("");
-
-    sp<IPermissionController> permCtrl;
-    if (flags::cache_permission_services()) {
-        permCtrl = getPermissionController();
-    } else {
-        sp<IServiceManager> sm = defaultServiceManager();
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        // Using deprecated function to preserve functionality until the
-        // cache_permission_services flag is removed.
-        sp<IBinder> binder = sm->getService(toString16(kPermissionServiceName));
-#pragma clang diagnostic pop
-        if (binder == 0) {
-            ALOGE("Cannot get permission service");
-            permCtrl = nullptr;
-        } else {
-            permCtrl = interface_cast<IPermissionController>(binder);
-        }
-    }
-
-    if (permCtrl == nullptr) {
-        // Return empty package name and the further interaction
-        // with camera will likely fail
-        return packageName;
-    }
-
-    Vector<String16> packages;
-
-    permCtrl->getPackagesForUid(clientUid, packages);
-
-    if (packages.isEmpty()) {
-        ALOGE("No packages for calling UID %d", clientUid);
-        // Return empty package name and the further interaction
-        // with camera will likely fail
-        return packageName;
-    }
-
-    // Arbitrarily pick the first name in the list
-    packageName = toStdString(packages[0]);
-
-    return packageName;
 }
 
 void CameraService::logConnectionAttempt(int clientPid, const std::string& clientPackageName,
