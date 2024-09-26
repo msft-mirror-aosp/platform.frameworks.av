@@ -54,6 +54,8 @@ soong_config_module_type {
 mediaserver_cc_binary {
     name: "mediaserver",
 
+    defaults: ["libcodec2_hal_selection"],
+
     srcs: ["main_mediaserver.cpp"],
 
     shared_libs: [
@@ -61,6 +63,7 @@ mediaserver_cc_binary {
         "libicu",
         "libfmq",
         "libbinder",
+        "libbinder_ndk",
         "libhidlbase",
         "liblog",
         "libmediaplayerservice",
