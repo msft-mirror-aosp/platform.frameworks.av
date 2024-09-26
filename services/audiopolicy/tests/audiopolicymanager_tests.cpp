@@ -498,6 +498,9 @@ INSTANTIATE_TEST_CASE_P(
 void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
     // TODO: Consider using Serializer to load part of the config from a string.
     ASSERT_NO_FATAL_FAILURE(AudioPolicyManagerTest::SetUpManagerConfig());
+    mConfig->getHwModules().getModuleFromName(
+            AUDIO_HARDWARE_MODULE_ID_PRIMARY)->setHalVersion(3, 0);
+
     mMsdOutputDevice = new DeviceDescriptor(AUDIO_DEVICE_OUT_BUS);
     sp<AudioProfile> pcmOutputProfile = new AudioProfile(
             AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO, k48000SamplingRate);
@@ -529,7 +532,7 @@ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
                 addOutputProfile(spdifOutputProfile);
     }
 
-    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 2 /*halVersionMajor*/);
+    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 3 /*halVersionMajor*/);
     HwModuleCollection modules = mConfig->getHwModules();
     modules.add(msdModule);
     mConfig->setHwModules(modules);
