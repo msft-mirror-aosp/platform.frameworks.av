@@ -915,8 +915,7 @@ Status CameraService::isSessionConfigurationWithParametersSupported(
                 cameraId.c_str());
     }
 
-    bool overrideForPerfClass = flags::calculate_perf_override_during_session_support() &&
-                                SessionConfigurationUtils::targetPerfClassPrimaryCamera(
+    bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
                                         mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
 
     auto ret = isSessionConfigurationWithParametersSupportedUnsafe(cameraId,

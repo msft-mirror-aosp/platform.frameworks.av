@@ -2112,14 +2112,8 @@ status_t CameraProviderManager::tryToInitializeAidlProviderLocked(
         const std::string& providerName, const sp<ProviderInfo>& providerInfo) {
     using aidl::android::hardware::camera::provider::ICameraProvider;
 
-    std::shared_ptr<ICameraProvider> interface;
-    if (flags::delay_lazy_hal_instantiation()) {
-        // Only get remote instance if already running. Lazy Providers will be
-        // woken up later.
-        interface = mAidlServiceProxy->tryGetService(providerName);
-    } else {
-        interface = mAidlServiceProxy->getService(providerName);
-    }
+    // Only get remote instance if already running. Lazy Providers will be woken up later.
+    std::shared_ptr<ICameraProvider> interface = mAidlServiceProxy->tryGetService(providerName);
 
     if (interface == nullptr) {
         ALOGW("%s: AIDL Camera provider HAL '%s' is not actually available", __FUNCTION__,
