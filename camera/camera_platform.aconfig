@@ -64,13 +64,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "use_ro_board_api_level_for_vndk_version"
-    description: "Enable using ro.board.api_level instead of ro.vndk.version to get VNDK version"
-    bug: "312315580"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "camera_extensions_characteristics_get"
     is_exported: true
     description: "Enable get extension specific camera characteristics API"
@@ -143,16 +136,6 @@ flag {
     name: "analytics_24q3"
     description: "Miscellaneous camera platform metrics for 24Q3"
     bug: "332557570"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "use_system_api_for_vndk_version"
-    description: "ro.board.api_level isn't reliable. Use system api to replace ro.vndk.version"
-    bug: "312315580"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
 }
 
 flag {
