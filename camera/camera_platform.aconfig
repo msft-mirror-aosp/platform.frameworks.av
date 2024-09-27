@@ -35,13 +35,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "session_hal_buf_manager"
-    description: "Enable or disable HAL buffer manager as requested by the camera HAL"
-    bug: "311263114"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "inject_session_params"
     description: "Enable session parameter injection via reconfiguration"
     bug: "308984721"
@@ -64,24 +57,10 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "use_ro_board_api_level_for_vndk_version"
-    description: "Enable using ro.board.api_level instead of ro.vndk.version to get VNDK version"
-    bug: "312315580"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "camera_extensions_characteristics_get"
     is_exported: true
     description: "Enable get extension specific camera characteristics API"
     bug: "280649914"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "delay_lazy_hal_instantiation"
-    description: "Only trigger lazy HAL instantiation when the HAL is needed for an operation."
-    bug: "319735068"
 }
 
 flag {
@@ -137,29 +116,9 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "calculate_perf_override_during_session_support"
-    description: "Dynamically calulate whether perf class override should be set in isSessionConfigurationWithParametersSupported."
-    bug: "332975108"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
     name: "analytics_24q3"
     description: "Miscellaneous camera platform metrics for 24Q3"
     bug: "332557570"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "use_system_api_for_vndk_version"
-    description: "ro.board.api_level isn't reliable. Use system api to replace ro.vndk.version"
-    bug: "312315580"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
 }
 
 flag {
