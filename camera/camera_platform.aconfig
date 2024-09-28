@@ -35,13 +35,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "session_hal_buf_manager"
-    description: "Enable or disable HAL buffer manager as requested by the camera HAL"
-    bug: "311263114"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "inject_session_params"
     description: "Enable session parameter injection via reconfiguration"
     bug: "308984721"
@@ -106,16 +99,6 @@ flag {
     name: "single_thread_executor_naming"
     description: "Set the device executor thread name."
     bug: "359709863"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "check_session_support_before_session_char"
-    description: "Validate that a SessionConfiguration is supported before fetching SessionCharacteristics."
-    bug: "327008530"
     metadata {
         purpose: PURPOSE_BUGFIX
     }
