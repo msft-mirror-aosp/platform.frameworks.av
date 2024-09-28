@@ -1011,23 +1011,23 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
 
     bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
             mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
-    if (flags::check_session_support_before_session_char()) {
-        bool sessionConfigSupported;
-        Status res = isSessionConfigurationWithParametersSupportedUnsafe(
-                cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
-        if (!res.isOk()) {
-            // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
-            // report the correct Status to send to the client. Simply forward the error to
-            // the client.
-            outMetadata->clear();
-            return res;
-        }
-        if (!sessionConfigSupported) {
-            std::string msg = fmt::sprintf(
-                    "Session configuration not supported for camera device %s.", cameraId.c_str());
-            outMetadata->clear();
-            return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
-        }
+
+    bool sessionConfigSupported;
+    Status res = isSessionConfigurationWithParametersSupportedUnsafe(
+            cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
+    if (!res.isOk()) {
+        // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
+        // report the correct Status to send to the client. Simply forward the error to
+        // the client.
+        outMetadata->clear();
+        return res;
+    }
+
+    if (!sessionConfigSupported) {
+        std::string msg = fmt::sprintf("Session configuration not supported for camera device %s.",
+                                       cameraId.c_str());
+        outMetadata->clear();
+        return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
     }
 
     status_t ret = mCameraProviderManager->getSessionCharacteristics(
@@ -1069,7 +1069,7 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
             }
     }
 
-    Status res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
+    res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
     if (flags::analytics_24q3()) {
         mCameraServiceProxyWrapper->logSessionCharacteristicsQuery(cameraId,
                 getCallingUid(), sessionConfiguration, res);
