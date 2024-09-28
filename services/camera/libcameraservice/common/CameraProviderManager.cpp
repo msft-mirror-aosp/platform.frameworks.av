@@ -2800,7 +2800,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::getCameraInfo(
         hardware::CameraInfo *info) const {
     if (info == nullptr) return BAD_VALUE;
 
-    bool freeform_compat_enabled = wm_flags::camera_compat_for_freeform();
+    bool freeform_compat_enabled = wm_flags::enable_camera_compat_for_desktop_windowing();
     if (!freeform_compat_enabled &&
             rotationOverride > hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT) {
         ALOGW("Camera compat freeform flag disabled but rotation override is %d", rotationOverride);

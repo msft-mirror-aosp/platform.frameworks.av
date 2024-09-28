@@ -106,16 +106,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "check_session_support_before_session_char"
-    description: "Validate that a SessionConfiguration is supported before fetching SessionCharacteristics."
-    bug: "327008530"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
     name: "analytics_24q3"
     description: "Miscellaneous camera platform metrics for 24Q3"
     bug: "332557570"
