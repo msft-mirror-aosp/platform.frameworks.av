@@ -123,17 +123,16 @@ status_t AudioPolicyManager::setDeviceConnectionState(audio_devices_t device,
     }
 }
 
-void AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
+status_t AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
                                                         media::DeviceConnectedState state)
 {
     audio_port_v7 devicePort;
     device->toAudioPort(&devicePort);
-    if (status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
-            status != OK) {
-        ALOGE("Error %d while setting connected state %d for device %s",
-                status, static_cast<int>(state),
-                device->getDeviceTypeAddr().toString(false).c_str());
-    }
+    status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
+    ALOGE_IF(status != OK, "Error %d while setting connected state %d for device %s", status,
+             static_cast<int>(state), device->getDeviceTypeAddr().toString(false).c_str());
+
+    return status;
 }
 
 status_t AudioPolicyManager::setDeviceConnectionStateInt(
@@ -214,7 +213,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking outputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the outputs...)
-            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
+            if (broadcastDeviceConnectionState(
+                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
+                mAvailableOutputDevices.remove(device);
+                mHwModules.cleanUpForDevice(device);
+                ALOGE("%s() device %s format %x connection failed", __func__,
+                      device->toString().c_str(), device->getEncodedFormat());
+                return INVALID_OPERATION;
+            }
 
             if (checkOutputsForDevice(device, state, outputs) != NO_ERROR) {
                 mAvailableOutputDevices.remove(device);
@@ -399,7 +405,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking intputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the inputs...)
-            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
+            if (broadcastDeviceConnectionState(
+                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
+                mAvailableInputDevices.remove(device);
+                mHwModules.cleanUpForDevice(device);
+                ALOGE("%s() device %s format %x connection failed", __func__,
+                      device->toString().c_str(), device->getEncodedFormat());
+                return INVALID_OPERATION;
+            }
             // Propagate device availability to Engine
             setEngineDeviceConnectionState(device, state);
 
@@ -1407,6 +1420,16 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 (!info->isBitPerfect() || info->getActiveClientCount() == 0)) {
                 info = nullptr;
             }
+
+            if (info != nullptr && info->isBitPerfect() &&
+                (*flags & (AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD |
+                        AUDIO_OUTPUT_FLAG_HW_AV_SYNC | AUDIO_OUTPUT_FLAG_MMAP_NOIRQ)) != 0) {
+                // Reject direct request if a preferred mixer config in use is bit-perfect.
+                ALOGD("%s reject direct request as bit-perfect mixer attributes is active",
+                      __func__);
+                return BAD_VALUE;
+            }
+
             if (com::android::media::audioserver::
                     fix_concurrent_playback_behavior_with_bit_perfect_client()) {
                 if (info != nullptr && info->getUid() == uid &&
@@ -2378,10 +2401,14 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
                 // If it is first bit-perfect client, reroute all clients that will be routed to
                 // the bit-perfect sink so that it is guaranteed only bit-perfect stream is active.
                 PortHandleVector clientsToInvalidate;
+                std::vector<sp<SwAudioOutputDescriptor>> outputsToResetDevice;
                 for (size_t i = 0; i < mOutputs.size(); i++) {
                     if (mOutputs[i] == outputDesc || (!mOutputs[i]->devices().isEmpty() &&
                         mOutputs[i]->devices().filter(outputDesc->devices()).isEmpty())) {
                         continue;
+                    }
+                    if (mOutputs[i]->getPatchHandle() != AUDIO_PATCH_HANDLE_NONE) {
+                        outputsToResetDevice.push_back(mOutputs[i]);
                     }
                     for (const auto& c : mOutputs[i]->getClientIterable()) {
                         clientsToInvalidate.push_back(c->portId());
@@ -2391,6 +2418,9 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
                     ALOGD("%s Invalidate clients due to first bit-perfect client started",
                           __func__);
                     mpClientInterface->invalidateTracks(clientsToInvalidate);
+                }
+                for (const auto& output : outputsToResetDevice) {
+                    resetOutputDevice(output, 0 /*delayMs*/, nullptr /*patchHandle*/);
                 }
             }
         }
@@ -4379,8 +4409,9 @@ void AudioPolicyManager::updateCallAndOutputRouting(bool forceVolumeReeval, uint
             // As done in setDeviceConnectionState, we could also fix default device issue by
             // preventing the force re-routing in case of default dev that distinguishes on address.
             // Let's give back to engine full device choice decision however.
-            bool forceRouting = !newDevices.isEmpty();
-            if (outputDesc->mPreferredAttrInfo != nullptr && newDevices != outputDesc->devices()) {
+            bool newDevicesNotEmpty = !newDevices.isEmpty();
+            if (outputDesc->mPreferredAttrInfo != nullptr && newDevices != outputDesc->devices()
+                && newDevicesNotEmpty) {
                 // If the device is using preferred mixer attributes, the output need to reopen
                 // with default configuration when the new selected devices are different from
                 // current routing devices.
@@ -4388,9 +4419,10 @@ void AudioPolicyManager::updateCallAndOutputRouting(bool forceVolumeReeval, uint
                 continue;
             }
 
-            waitMs = setOutputDevices(__func__, outputDesc, newDevices, forceRouting, delayMs,
-                                       nullptr, !skipDelays /*requiresMuteCheck*/,
-                                      !forceRouting /*requiresVolumeCheck*/, skipDelays);
+            waitMs = setOutputDevices(__func__, outputDesc, newDevices,
+                                      newDevicesNotEmpty /*force*/, delayMs,
+                                      nullptr /*patchHandle*/, !skipDelays /*requiresMuteCheck*/,
+                                      !newDevicesNotEmpty /*requiresVolumeCheck*/, skipDelays);
             // Only apply special touch sound delay once
             delayMs = 0;
         }
@@ -4832,6 +4864,17 @@ audio_direct_mode_t AudioPolicyManager::getDirectPlaybackSupport(const audio_att
     flags = (audio_output_flags_t)((flags & relevantFlags) | AUDIO_OUTPUT_FLAG_DIRECT);
 
     DeviceVector engineOutputDevices = mEngine->getOutputDevicesForAttributes(*attr);
+    if (std::any_of(engineOutputDevices.begin(), engineOutputDevices.end(),
+            [this, attr](sp<DeviceDescriptor> device) {
+                    return getPreferredMixerAttributesInfo(
+                            device->getId(),
+                            mEngine->getProductStrategyForAttributes(*attr),
+                            true /*activeBitPerfectPreferred*/) != nullptr;
+            })) {
+        // Bit-perfect playback is active on one of the selected devices, direct output will
+        // be rejected at this instant.
+        return AUDIO_DIRECT_NOT_SUPPORTED;
+    }
     for (const auto& hwModule : mHwModules) {
         DeviceVector outputDevices = engineOutputDevices;
         // the MSD module checks for different conditions and output devices
@@ -8156,6 +8199,9 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
 
     for (;;) {
         sp<IOProfile> firstInexact = nullptr;
+        uint32_t inexactSamplingRate = 0;
+        audio_format_t inexactFormat = AUDIO_FORMAT_INVALID;
+        audio_channel_mask_t inexactChannelMask = AUDIO_CHANNEL_INVALID;
         uint32_t updatedSamplingRate = 0;
         audio_format_t updatedFormat = AUDIO_FORMAT_INVALID;
         audio_channel_mask_t updatedChannelMask = AUDIO_CHANNEL_INVALID;
@@ -8193,14 +8239,17 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
                                 false /*exactMatchRequiredForInputFlags*/)
                                 != IOProfile::NO_MATCH) {
                     firstInexact = profile;
+                    inexactSamplingRate = updatedSamplingRate;
+                    inexactFormat = updatedFormat;
+                    inexactChannelMask = updatedChannelMask;
                 }
             }
         }
 
         if (firstInexact != nullptr) {
-            samplingRate = updatedSamplingRate;
-            format = updatedFormat;
-            channelMask = updatedChannelMask;
+            samplingRate = inexactSamplingRate;
+            format = inexactFormat;
+            channelMask = inexactChannelMask;
             return firstInexact;
         } else if (flags & AUDIO_INPUT_FLAG_RAW) {
             flags = (audio_input_flags_t) (flags & ~AUDIO_INPUT_FLAG_RAW); // retry
