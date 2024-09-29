@@ -402,7 +402,7 @@ public:
     // the Thread is not busy releasing the Tracks, during which the Thread mutex
     // may be temporarily unlocked.  Some Track methods will use this method to
     // avoid races.
-    virtual void waitWhileThreadBusy_l(audio_utils::unique_lock& ul)
+    virtual void waitWhileThreadBusy_l(audio_utils::unique_lock<audio_utils::mutex>& ul)
             REQUIRES(mutex()) = 0;
 
     // The ThreadloopExecutor is used to defer functors or dtors
