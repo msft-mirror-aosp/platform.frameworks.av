@@ -89,7 +89,6 @@
 #include "utils/Utils.h"
 
 namespace {
-    const char* kPermissionServiceName = "permission";
     const char* kActivityServiceName = "activity";
     const char* kSensorPrivacyServiceName = "sensor_privacy";
     const char* kAppopsServiceName = "appops";
@@ -916,8 +915,7 @@ Status CameraService::isSessionConfigurationWithParametersSupported(
                 cameraId.c_str());
     }
 
-    bool overrideForPerfClass = flags::calculate_perf_override_during_session_support() &&
-                                SessionConfigurationUtils::targetPerfClassPrimaryCamera(
+    bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
                                         mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
 
     auto ret = isSessionConfigurationWithParametersSupportedUnsafe(cameraId,
@@ -1013,23 +1011,23 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
 
     bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
             mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
-    if (flags::check_session_support_before_session_char()) {
-        bool sessionConfigSupported;
-        Status res = isSessionConfigurationWithParametersSupportedUnsafe(
-                cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
-        if (!res.isOk()) {
-            // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
-            // report the correct Status to send to the client. Simply forward the error to
-            // the client.
-            outMetadata->clear();
-            return res;
-        }
-        if (!sessionConfigSupported) {
-            std::string msg = fmt::sprintf(
-                    "Session configuration not supported for camera device %s.", cameraId.c_str());
-            outMetadata->clear();
-            return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
-        }
+
+    bool sessionConfigSupported;
+    Status res = isSessionConfigurationWithParametersSupportedUnsafe(
+            cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
+    if (!res.isOk()) {
+        // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
+        // report the correct Status to send to the client. Simply forward the error to
+        // the client.
+        outMetadata->clear();
+        return res;
+    }
+
+    if (!sessionConfigSupported) {
+        std::string msg = fmt::sprintf("Session configuration not supported for camera device %s.",
+                                       cameraId.c_str());
+        outMetadata->clear();
+        return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
     }
 
     status_t ret = mCameraProviderManager->getSessionCharacteristics(
@@ -1071,7 +1069,7 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
             }
     }
 
-    Status res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
+    res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
     if (flags::analytics_24q3()) {
         mCameraServiceProxyWrapper->logSessionCharacteristicsQuery(cameraId,
                 getCallingUid(), sessionConfiguration, res);
@@ -2385,51 +2383,6 @@ bool CameraService::isCameraPrivacyEnabled(const String16& packageName, const st
         }
     }
     return false;
-}
-
-std::string CameraService::getPackageNameFromUid(int clientUid) const {
-    std::string packageName("");
-
-    sp<IPermissionController> permCtrl;
-    if (flags::cache_permission_services()) {
-        permCtrl = getPermissionController();
-    } else {
-        sp<IServiceManager> sm = defaultServiceManager();
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        // Using deprecated function to preserve functionality until the
-        // cache_permission_services flag is removed.
-        sp<IBinder> binder = sm->getService(toString16(kPermissionServiceName));
-#pragma clang diagnostic pop
-        if (binder == 0) {
-            ALOGE("Cannot get permission service");
-            permCtrl = nullptr;
-        } else {
-            permCtrl = interface_cast<IPermissionController>(binder);
-        }
-    }
-
-    if (permCtrl == nullptr) {
-        // Return empty package name and the further interaction
-        // with camera will likely fail
-        return packageName;
-    }
-
-    Vector<String16> packages;
-
-    permCtrl->getPackagesForUid(clientUid, packages);
-
-    if (packages.isEmpty()) {
-        ALOGE("No packages for calling UID %d", clientUid);
-        // Return empty package name and the further interaction
-        // with camera will likely fail
-        return packageName;
-    }
-
-    // Arbitrarily pick the first name in the list
-    packageName = toStdString(packages[0]);
-
-    return packageName;
 }
 
 void CameraService::logConnectionAttempt(int clientPid, const std::string& clientPackageName,

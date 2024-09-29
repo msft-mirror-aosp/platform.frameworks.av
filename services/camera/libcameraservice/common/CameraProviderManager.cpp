@@ -2112,14 +2112,8 @@ status_t CameraProviderManager::tryToInitializeAidlProviderLocked(
         const std::string& providerName, const sp<ProviderInfo>& providerInfo) {
     using aidl::android::hardware::camera::provider::ICameraProvider;
 
-    std::shared_ptr<ICameraProvider> interface;
-    if (flags::delay_lazy_hal_instantiation()) {
-        // Only get remote instance if already running. Lazy Providers will be
-        // woken up later.
-        interface = mAidlServiceProxy->tryGetService(providerName);
-    } else {
-        interface = mAidlServiceProxy->getService(providerName);
-    }
+    // Only get remote instance if already running. Lazy Providers will be woken up later.
+    std::shared_ptr<ICameraProvider> interface = mAidlServiceProxy->tryGetService(providerName);
 
     if (interface == nullptr) {
         ALOGW("%s: AIDL Camera provider HAL '%s' is not actually available", __FUNCTION__,
@@ -2806,7 +2800,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::getCameraInfo(
         hardware::CameraInfo *info) const {
     if (info == nullptr) return BAD_VALUE;
 
-    bool freeform_compat_enabled = wm_flags::camera_compat_for_freeform();
+    bool freeform_compat_enabled = wm_flags::enable_camera_compat_for_desktop_windowing();
     if (!freeform_compat_enabled &&
             rotationOverride > hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT) {
         ALOGW("Camera compat freeform flag disabled but rotation override is %d", rotationOverride);
