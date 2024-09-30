@@ -37,17 +37,16 @@ class AudioStreamOut {
 public:
     AudioHwDevice * const audioHwDev;
     sp<StreamOutHalInterface> stream;
-    audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
+    const audio_output_flags_t flags;
 
     [[nodiscard]] sp<DeviceHalInterface> hwDev() const;
 
-    explicit AudioStreamOut(AudioHwDevice *dev);
+    AudioStreamOut(AudioHwDevice *dev, audio_output_flags_t flags);
 
     virtual status_t open(
             audio_io_handle_t handle,
             audio_devices_t deviceType,
             struct audio_config *config,
-            audio_output_flags_t *flagsPtr,
             const char *address,
             const std::vector<playback_track_metadata_v7_t>& sourceMetadata);
 
