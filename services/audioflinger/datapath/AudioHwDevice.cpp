@@ -81,12 +81,6 @@ status_t AudioHwDevice::openOutputStream(
                         status);
                     delete outputStream;
                     outputStream = nullptr;
-                } else {
-                    // on success, we need to assign the actual HAL stream config so that clients
-                    // know and can later patch correctly.
-                    config->format = originalConfig.format;
-                    config->channel_mask = originalConfig.channel_mask;
-                    config->sample_rate = originalConfig.sample_rate;
                 }
             } else {
                 ALOGE("ERROR - openOutputStream(), SPDIFEncoder does not support format 0x%08x",
@@ -160,12 +154,6 @@ status_t AudioHwDevice::openInputStream(
                         status);
                     delete inputStream;
                     inputStream = nullptr;
-                } else {
-                    // on success, we need to assign the actual HAL stream config so that clients
-                    // know and can later patch correctly.
-                    config->format = originalConfig.format;
-                    config->channel_mask = originalConfig.channel_mask;
-                    config->sample_rate = originalConfig.sample_rate;
                 }
             } else {
                 ALOGE("ERROR - openInputStream(), SPDIFDecoder does not support format 0x%08x",

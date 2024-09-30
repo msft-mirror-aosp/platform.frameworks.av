@@ -1680,16 +1680,11 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
             outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, &flags, output,
                              attributes);
 
-    // only accept an output with the requested parameters, unless the format can be IEC61937
-    // encapsulated and opened by AudioFlinger as wrapped IEC61937.
-    const bool ignoreRequestedParametersCheck = audio_is_iec61937_compatible(config->format)
-            && (flags & AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO)
-            && audio_has_proportional_frames(outputDesc->getFormat());
+    // only accept an output with the requested parameters
     if (status != NO_ERROR ||
-        (!ignoreRequestedParametersCheck &&
-        ((config->sample_rate != 0 && config->sample_rate != outputDesc->getSamplingRate()) ||
-         (config->format != AUDIO_FORMAT_DEFAULT && config->format != outputDesc->getFormat()) ||
-         (config->channel_mask != 0 && config->channel_mask != outputDesc->getChannelMask())))) {
+        (config->sample_rate != 0 && config->sample_rate != outputDesc->getSamplingRate()) ||
+        (config->format != AUDIO_FORMAT_DEFAULT && config->format != outputDesc->getFormat()) ||
+        (config->channel_mask != 0 && config->channel_mask != outputDesc->getChannelMask())) {
         ALOGV("%s failed opening direct output: output %d sample rate %d %d,"
                 "format %d %d, channel mask %04x %04x", __func__, *output, config->sample_rate,
                 outputDesc->getSamplingRate(), config->format, outputDesc->getFormat(),
