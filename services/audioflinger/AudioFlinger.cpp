@@ -2923,7 +2923,7 @@ sp<IAfThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t module,
                                                         audio_config_base_t *mixerConfig,
                                                         audio_devices_t deviceType,
                                                         const String8& address,
-                                                        audio_output_flags_t *flags,
+                                                        audio_output_flags_t flags,
                                                         const audio_attributes_t attributes)
 {
     AudioHwDevice *outHwDev = findSuitableHwDev_l(module, deviceType);
@@ -2958,7 +2958,7 @@ sp<IAfThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t module,
     mHardwareStatus = AUDIO_HW_IDLE;
 
     if (status == NO_ERROR) {
-        if (*flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
+        if (flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
             const sp<IAfMmapPlaybackThread> thread = IAfMmapPlaybackThread::create(
                     this, *output, outHwDev, outputStream, mSystemReady);
             mMmapThreads.add(*output, thread);
@@ -2967,22 +2967,22 @@ sp<IAfThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t module,
             return thread;
         } else {
             sp<IAfPlaybackThread> thread;
-            if (*flags & AUDIO_OUTPUT_FLAG_BIT_PERFECT) {
+            if (flags & AUDIO_OUTPUT_FLAG_BIT_PERFECT) {
                 thread = IAfPlaybackThread::createBitPerfectThread(
                         this, outputStream, *output, mSystemReady);
                 ALOGV("%s() created bit-perfect output: ID %d thread %p",
                       __func__, *output, thread.get());
-            } else if (*flags & AUDIO_OUTPUT_FLAG_SPATIALIZER) {
+            } else if (flags & AUDIO_OUTPUT_FLAG_SPATIALIZER) {
                 thread = IAfPlaybackThread::createSpatializerThread(this, outputStream, *output,
                                                     mSystemReady, mixerConfig);
                 ALOGV("openOutput_l() created spatializer output: ID %d thread %p",
                       *output, thread.get());
-            } else if (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
+            } else if (flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
                 thread = IAfPlaybackThread::createOffloadThread(this, outputStream, *output,
                         mSystemReady, halConfig->offload_info);
                 ALOGV("openOutput_l() created offload output: ID %d thread %p",
                       *output, thread.get());
-            } else if ((*flags & AUDIO_OUTPUT_FLAG_DIRECT)
+            } else if ((flags & AUDIO_OUTPUT_FLAG_DIRECT)
                     || !IAfThreadBase::isValidPcmSinkFormat(halConfig->format)
                     || !IAfThreadBase::isValidPcmSinkChannelMask(halConfig->channel_mask)) {
                 thread = IAfPlaybackThread::createDirectOutputThread(this, outputStream, *output,
@@ -3046,7 +3046,7 @@ status_t AudioFlinger::openOutput(const media::OpenOutputRequest& request,
     audio_utils::lock_guard _l(mutex());
 
     const sp<IAfThreadBase> thread = openOutput_l(module, &output, &halConfig,
-            &mixerConfig, deviceType, address, &flags, attributes);
+            &mixerConfig, deviceType, address, flags, attributes);
     if (thread != 0) {
         uint32_t latencyMs = 0;
         if ((flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) == 0) {
