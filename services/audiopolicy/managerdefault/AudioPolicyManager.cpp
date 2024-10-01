@@ -122,17 +122,16 @@ status_t AudioPolicyManager::setDeviceConnectionState(audio_devices_t device,
     }
 }
 
-void AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
+status_t AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
                                                         media::DeviceConnectedState state)
 {
     audio_port_v7 devicePort;
     device->toAudioPort(&devicePort);
-    if (status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
-            status != OK) {
-        ALOGE("Error %d while setting connected state %d for device %s",
-                status, static_cast<int>(state),
-                device->getDeviceTypeAddr().toString(false).c_str());
-    }
+    status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
+    ALOGE_IF(status != OK, "Error %d while setting connected state %d for device %s", status,
+             static_cast<int>(state), device->getDeviceTypeAddr().toString(false).c_str());
+
+    return status;
 }
 
 status_t AudioPolicyManager::setDeviceConnectionStateInt(
@@ -213,7 +212,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking outputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the outputs...)
-            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
+            if (broadcastDeviceConnectionState(
+                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
+                mAvailableOutputDevices.remove(device);
+                mHwModules.cleanUpForDevice(device);
+                ALOGE("%s() device %s format %x connection failed", __func__,
+                      device->toString().c_str(), device->getEncodedFormat());
+                return INVALID_OPERATION;
+            }
 
             if (checkOutputsForDevice(device, state, outputs) != NO_ERROR) {
                 mAvailableOutputDevices.remove(device);
@@ -398,7 +404,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
 
             // Before checking intputs, broadcast connect event to allow HAL to retrieve dynamic
             // parameters on newly connected devices (instead of opening the inputs...)
-            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
+            if (broadcastDeviceConnectionState(
+                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
+                mAvailableInputDevices.remove(device);
+                mHwModules.cleanUpForDevice(device);
+                ALOGE("%s() device %s format %x connection failed", __func__,
+                      device->toString().c_str(), device->getEncodedFormat());
+                return INVALID_OPERATION;
+            }
             // Propagate device availability to Engine
             setEngineDeviceConnectionState(device, state);
 
@@ -1637,11 +1650,11 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     outputDesc->mDirectClientSession = session;
 
     addOutput(*output, outputDesc);
-    setOutputDevices(__func__, outputDesc,
-                     devices,
-                     true,
-                     0,
-                     NULL);
+    // The version check is essentially to avoid making this call in the case of the HIDL HAL.
+    if (auto hwModule = mHwModules.getModuleFromHandle(mPrimaryModuleHandle); hwModule &&
+            hwModule->getHalVersionMajor() >= 3) {
+        setOutputDevices(__func__, outputDesc, devices, true, 0, NULL);
+    }
     mPreviousOutputs = mOutputs;
     ALOGV("%s returns new direct output %d", __func__, *output);
     mpClientInterface->onAudioPortListUpdate();
@@ -8873,11 +8886,11 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
     }
 
     addOutput(output, desc);
-    setOutputDevices(__func__, desc,
-                     devices,
-                     true,
-                     0,
-                     NULL);
+    // The version check is essentially to avoid making this call in the case of the HIDL HAL.
+    if (auto hwModule = mHwModules.getModuleFromHandle(mPrimaryModuleHandle); hwModule &&
+            hwModule->getHalVersionMajor() >= 3) {
+        setOutputDevices(__func__, desc, devices, true, 0, NULL);
+    }
     sp<DeviceDescriptor> speaker = mAvailableOutputDevices.getDevice(
             AUDIO_DEVICE_OUT_SPEAKER, String8(""), AUDIO_FORMAT_DEFAULT);
 
