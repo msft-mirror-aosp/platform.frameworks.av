@@ -498,6 +498,9 @@ INSTANTIATE_TEST_CASE_P(
 void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
     // TODO: Consider using Serializer to load part of the config from a string.
     ASSERT_NO_FATAL_FAILURE(AudioPolicyManagerTest::SetUpManagerConfig());
+    mConfig->getHwModules().getModuleFromName(
+            AUDIO_HARDWARE_MODULE_ID_PRIMARY)->setHalVersion(3, 0);
+
     mMsdOutputDevice = new DeviceDescriptor(AUDIO_DEVICE_OUT_BUS);
     sp<AudioProfile> pcmOutputProfile = new AudioProfile(
             AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO, k48000SamplingRate);
@@ -529,7 +532,7 @@ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
                 addOutputProfile(spdifOutputProfile);
     }
 
-    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 2 /*halVersionMajor*/);
+    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 3 /*halVersionMajor*/);
     HwModuleCollection modules = mConfig->getHwModules();
     modules.add(msdModule);
     mConfig->setHwModules(modules);
@@ -2539,8 +2542,29 @@ class AudioPolicyManagerTestClientOpenFails : public AudioPolicyManagerTestClien
 
     void setSimulateFailure(bool simulateFailure) { mSimulateFailure = simulateFailure; }
 
+    void setSimulateBroadcastDeviceStatus(audio_devices_t device, status_t status) {
+        if (status != NO_ERROR) {
+            // simulate device connect status
+            mSimulateBroadcastDeviceStatus[device] = status;
+        } else {
+            // remove device connection fixed status
+            mSimulateBroadcastDeviceStatus.erase(device);
+        }
+    }
+
+    status_t setDeviceConnectedState(const struct audio_port_v7* port,
+                                     media::DeviceConnectedState state) override {
+        if (mSimulateBroadcastDeviceStatus.find(port->ext.device.type) !=
+            mSimulateBroadcastDeviceStatus.end()) {
+            // If a simulated status exists, return a status value
+            return mSimulateBroadcastDeviceStatus[port->ext.device.type];
+        }
+        return AudioPolicyManagerTestClient::setDeviceConnectedState(port, state);
+    }
+
   private:
     bool mSimulateFailure = false;
+    std::map<audio_devices_t, status_t> mSimulateBroadcastDeviceStatus;
 };
 
 }  // namespace
@@ -2560,6 +2584,9 @@ class AudioPolicyManagerTestDeviceConnectionFailed :
     }
     void setSimulateOpenFailure(bool simulateFailure) {
         mFullClient->setSimulateFailure(simulateFailure); }
+
+    void setSimulateBroadcastDeviceStatus(audio_devices_t device, status_t status) {
+        mFullClient->setSimulateBroadcastDeviceStatus(device, status); }
 
     static const std::string sBluetoothConfig;
 
@@ -2602,6 +2629,30 @@ TEST_P(AudioPolicyManagerTestDeviceConnectionFailed, SetDeviceConnectedStateHasA
         EXPECT_EQ(0, strncmp(port->ext.device.address, address.c_str(),
                         AUDIO_DEVICE_MAX_ADDRESS_LEN)) << "\"" << port->ext.device.address << "\"";
     }
+}
+
+TEST_P(AudioPolicyManagerTestDeviceConnectionFailed, BroadcastDeviceFailure) {
+    const audio_devices_t type = std::get<0>(GetParam());
+    const std::string name = std::get<1>(GetParam());
+    const std::string address = std::get<2>(GetParam());
+    const audio_format_t format = std::get<3>(GetParam());
+
+    // simulate broadcastDeviceConnectionState return failure
+    setSimulateBroadcastDeviceStatus(type, INVALID_OPERATION);
+    ASSERT_EQ(INVALID_OPERATION, mManager->setDeviceConnectionState(
+            type, AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+            address.c_str(), name.c_str(), format));
+
+    // if broadcast is fail, device should not be added to available devices list
+    if (audio_is_output_device(type)) {
+        auto availableDevices = mManager->getAvailableOutputDevices();
+        EXPECT_FALSE(availableDevices.containsDeviceWithType(type));
+    } else if (audio_is_input_device(type)) {
+        auto availableDevices = mManager->getAvailableInputDevices();
+        EXPECT_FALSE(availableDevices.containsDeviceWithType(type));
+    }
+
+    setSimulateBroadcastDeviceStatus(type, NO_ERROR);
 }
 
 INSTANTIATE_TEST_CASE_P(
