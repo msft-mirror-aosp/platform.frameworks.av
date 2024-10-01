@@ -337,7 +337,7 @@ private:
             audio_config_base_t* mixerConfig,
             audio_devices_t deviceType,
             const String8& address,
-            audio_output_flags_t* flags,
+            audio_output_flags_t flags,
             audio_attributes_t attributes) final REQUIRES(mutex());
     const DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>&
             getAudioHwDevs_l() const final REQUIRES(mutex(), hardwareMutex()) {
