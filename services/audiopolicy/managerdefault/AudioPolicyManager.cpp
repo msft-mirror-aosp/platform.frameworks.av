@@ -7982,9 +7982,21 @@ status_t AudioPolicyManager::setInputDevice(audio_io_handle_t input,
                         if (result.source == AUDIO_SOURCE_HOTWORD && !inputDesc->isSoundTrigger()) {
                             result.source = AUDIO_SOURCE_VOICE_RECOGNITION;
                         }
-                        return result; }).
+                        return result; });
             //only one input device for now
-                    addSource(device);
+            if (audio_is_remote_submix_device(device->type())) {
+                // remote submix HAL does not support audio conversion, need source device
+                // audio config to match the sink input descriptor audio config, otherwise AIDL
+                // HAL patching will fail
+                audio_port_config srcDevicePortConfig = {};
+                device->toAudioPortConfig(&srcDevicePortConfig, nullptr);
+                srcDevicePortConfig.sample_rate = inputDesc->getSamplingRate();
+                srcDevicePortConfig.channel_mask = inputDesc->getChannelMask();
+                srcDevicePortConfig.format = inputDesc->getFormat();
+                patchBuilder.addSource(srcDevicePortConfig);
+            } else {
+                patchBuilder.addSource(device);
+            }
             status = installPatch(__func__, patchHandle, inputDesc.get(), patchBuilder.patch(), 0);
         }
     }
