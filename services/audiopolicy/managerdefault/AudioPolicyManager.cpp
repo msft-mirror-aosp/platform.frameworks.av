@@ -4533,6 +4533,9 @@ status_t AudioPolicyManager::setDevicesRoleForCapturePreset(
             "Engine could not set preferred devices %s for audio source %d role %d",
             dumpAudioDeviceTypeAddrVector(devices).c_str(), audioSource, role);
 
+    if (status == NO_ERROR) {
+        updateInputRouting();
+    }
     return status;
 }
 
