@@ -57,6 +57,7 @@
 #include <android/hardware/camera/device/3.7/ICameraInjectionSession.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
 #include <com_android_internal_camera_flags.h>
+#include <com_android_window_flags.h>
 
 #include "CameraService.h"
 #include "aidl/android/hardware/graphics/common/Dataspace.h"
@@ -82,6 +83,8 @@ using namespace android::hardware::camera;
 using namespace android::hardware::cameraservice::utils::conversion::aidl;
 
 namespace flags = com::android::internal::camera::flags;
+namespace wm_flags = com::android::window::flags;
+
 namespace android {
 
 Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
@@ -5808,7 +5811,13 @@ void Camera3Device::overrideStreamUseCaseLocked() {
 status_t Camera3Device::deriveAndSetTransformLocked(
         Camera3OutputStreamInterface& stream, int mirrorMode, int surfaceId) {
     int transform = -1;
-    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode, &transform);
+    bool enableTransformInverseDisplay = true;
+    using hardware::ICameraService::ROTATION_OVERRIDE_ROTATION_ONLY;
+    if (wm_flags::enable_camera_compat_for_desktop_windowing()) {
+        enableTransformInverseDisplay = (mRotationOverride != ROTATION_OVERRIDE_ROTATION_ONLY);
+    }
+    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode,
+            enableTransformInverseDisplay, &transform);
     if (res != OK) {
         return res;
     }
