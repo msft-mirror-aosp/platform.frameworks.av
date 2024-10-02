@@ -81,6 +81,11 @@ status_t SpdifStreamOut::open(
             address,
             sourceMetadata);
 
+    // reset config back to whatever is returned by HAL
+    config->sample_rate = customConfig.sample_rate;
+    config->format = customConfig.format;
+    config->channel_mask = customConfig.channel_mask;
+
     ALOGI("SpdifStreamOut::open() status = %d", status);
 
 #ifdef TEE_SINK
