@@ -5276,7 +5276,10 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         mFastMixerNBLogWriter = afThreadCallback->newWriter_l(kFastMixerLogSize, "FastMixer");
         state->mNBLogWriter = mFastMixerNBLogWriter.get();
         sq->end();
-        sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+        {
+            audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+            sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+        }
 
         NBLog::thread_info_t info;
         info.id = mId;
@@ -5335,8 +5338,11 @@ MixerThread::~MixerThread()
         }
         state->mCommand = FastMixerState::EXIT;
         sq->end();
-        sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
-        mFastMixer->join();
+        {
+            audio_utils::mutex::scoped_join_wait_check queueWaitCheck(mFastMixer->getTid());
+            sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+            mFastMixer->join();
+        }
         // Though the fast mixer thread has exited, it's state queue is still valid.
         // We'll use that extract the final state which contains one remaining fast track
         // corresponding to our sub-mix.
@@ -5416,7 +5422,10 @@ ssize_t MixerThread::threadLoop_write()
                 FastThreadDumpState::kSamplingNforLowRamDevice : FastThreadDumpState::kSamplingN);
 #endif
             sq->end();
-            sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+            {
+                audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+                sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+            }
             if (kUseFastMixer == FastMixer_Dynamic) {
                 mNormalSink = mPipeSink;
             }
@@ -5449,7 +5458,10 @@ void MixerThread::threadLoop_standby()
             mFastMixerFutex = 0;
             sq->end();
             // BLOCK_UNTIL_PUSHED would be insufficient, as we need it to stop doing I/O now
-            sq->push(FastMixerStateQueue::BLOCK_UNTIL_ACKED);
+            {
+                audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+                sq->push(FastMixerStateQueue::BLOCK_UNTIL_ACKED);
+            }
             if (kUseFastMixer == FastMixer_Dynamic) {
                 mNormalSink = mOutputSink;
             }
@@ -6345,7 +6357,10 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
         //
         // This occurs with BT suspend when we idle the FastMixer with
         // active tracks, which may be added or removed.
-        sq->push(coldIdle ? FastMixerStateQueue::BLOCK_NEVER : block);
+        {
+            audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+            sq->push(coldIdle ? FastMixerStateQueue::BLOCK_NEVER : block);
+        }
     }
 #ifdef AUDIO_WATCHDOG
     if (pauseAudioWatchdog && mAudioWatchdog != 0) {
@@ -8318,8 +8333,10 @@ RecordThread::RecordThread(const sp<IAfThreadCallback>& afThreadCallback,
                 afThreadCallback->newWriter_l(kFastCaptureLogSize, "FastCapture");
         state->mNBLogWriter = mFastCaptureNBLogWriter.get();
         sq->end();
-        sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
-
+        {
+            audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastCapture->getTid());
+            sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
+        }
         // start the fast capture
         mFastCapture->run("FastCapture", ANDROID_PRIORITY_URGENT_AUDIO);
         pid_t tid = mFastCapture->getTid();
@@ -8353,8 +8370,11 @@ RecordThread::~RecordThread()
         }
         state->mCommand = FastCaptureState::EXIT;
         sq->end();
-        sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
-        mFastCapture->join();
+        {
+            audio_utils::mutex::scoped_join_wait_check queueWaitCheck(mFastCapture->getTid());
+            sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
+            mFastCapture->join();
+        }
         mFastCapture.clear();
     }
     mAfThreadCallback->unregisterWriter(mFastCaptureNBLogWriter);
@@ -8987,7 +9007,11 @@ void RecordThread::inputStandBy()
             mFastCaptureFutex = 0;
             sq->end();
             // BLOCK_UNTIL_PUSHED would be insufficient, as we need it to stop doing I/O now
-            sq->push(FastCaptureStateQueue::BLOCK_UNTIL_ACKED);
+            {
+                audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastCapture->getTid());
+                sq->push(FastCaptureStateQueue::BLOCK_UNTIL_ACKED);
+            }
+
 #if 0
             if (kUseFastCapture == FastCapture_Dynamic) {
                 // FIXME
