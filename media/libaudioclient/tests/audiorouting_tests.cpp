@@ -86,7 +86,18 @@ TEST(AudioTrackTest, TestPerformanceMode) {
     }
 }
 
-TEST(AudioTrackTest, DefaultRoutingTest) {
+class AudioTrackTest
+        : public ::testing::TestWithParam<int> {
+
+public:
+    AudioTrackTest()
+            : mSampleRate(GetParam()){};
+
+    const uint32_t mSampleRate;
+
+};
+
+TEST_P(AudioTrackTest, DefaultRoutingTest) {
     audio_port_v7 port;
     if (OK != getPortByAttributes(AUDIO_PORT_ROLE_SOURCE, AUDIO_PORT_TYPE_DEVICE,
                                   AUDIO_DEVICE_IN_REMOTE_SUBMIX, "0", port)) {
@@ -95,7 +106,8 @@ TEST(AudioTrackTest, DefaultRoutingTest) {
 
     // create record instance
     sp<AudioCapture> capture = sp<AudioCapture>::make(
-            AUDIO_SOURCE_REMOTE_SUBMIX, 48000, AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO);
+            AUDIO_SOURCE_REMOTE_SUBMIX, mSampleRate, AUDIO_FORMAT_PCM_16_BIT,
+            AUDIO_CHANNEL_IN_STEREO);
     ASSERT_NE(nullptr, capture);
     ASSERT_EQ(OK, capture->create()) << "record creation failed";
     sp<OnAudioDeviceUpdateNotifier> cbCapture = sp<OnAudioDeviceUpdateNotifier>::make();
@@ -103,7 +115,7 @@ TEST(AudioTrackTest, DefaultRoutingTest) {
 
     // create playback instance
     sp<AudioPlayback> playback = sp<AudioPlayback>::make(
-            48000 /* sampleRate */, AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO,
+            mSampleRate, AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO,
             AUDIO_OUTPUT_FLAG_NONE, AUDIO_SESSION_NONE);
     ASSERT_NE(nullptr, playback);
     ASSERT_EQ(OK, playback->loadResource("/data/local/tmp/bbb_2ch_24kHz_s16le.raw"))
@@ -132,6 +144,12 @@ TEST(AudioTrackTest, DefaultRoutingTest) {
     capture->stop();
     playback->stop();
 }
+
+INSTANTIATE_TEST_SUITE_P(
+        AudioTrackParameterizedTest,
+        AudioTrackTest,
+        ::testing::Values(44100, 48000)
+);
 
 class AudioRoutingTest : public ::testing::Test {
   public:
