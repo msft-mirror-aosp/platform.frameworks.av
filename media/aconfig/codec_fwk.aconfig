@@ -13,6 +13,16 @@ flag {
 }
 
 flag {
+  name: "codec_buffer_state_cleanup"
+  namespace: "codec_fwk"
+  description: "Bugfix flag for more buffer state cleanup in MediaCodec"
+  bug: "343502509"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
   name: "dataspace_v0_partial"
   namespace: "codec_fwk"
   description: "Bugfix flag for using V0 dataspace in some cases"
