@@ -1055,6 +1055,14 @@ AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& de
     return OK;
 }
 
+namespace {
+    // Use '01' for LSB bits 0 and 1 as Bluetooth MAC addresses are never multicast
+    // and universaly administered
+    constexpr std::array<uint8_t, 4> BTANON_PREFIX {0xFD, 0xFF, 0xFF, 0xFF};
+    // Keep sync with ServiceUtilities.cpp mustAnonymizeBluetoothAddress
+    constexpr const char * BTANON_PREFIX_STR = "XX:XX:XX:XX:";
+}
+
 ::android::status_t aidl2legacy_AudioDevice_audio_device(
         const AudioDevice& aidl,
         audio_devices_t* legacyType, std::string* legacyAddress) {
@@ -1069,8 +1077,16 @@ AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& de
         case Tag::mac: {
             const std::vector<uint8_t>& mac = aidl.address.get<AudioDeviceAddress::mac>();
             if (mac.size() != 6) return BAD_VALUE;
-            snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
-                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            if (std::equal(BTANON_PREFIX.begin(), BTANON_PREFIX.end(), mac.begin())) {
+                // special case for anonymized mac address:
+                // change anonymized bytes back from FD:FF:FF:FF: to XX:XX:XX:XX:
+                snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN,
+                        "%s%02X:%02X", BTANON_PREFIX_STR, mac[4], mac[5]);
+            } else {
+                snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN,
+                        "%02X:%02X:%02X:%02X:%02X:%02X",
+                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            }
         } break;
         case Tag::ipv4: {
             const std::vector<uint8_t>& ipv4 = aidl.address.get<AudioDeviceAddress::ipv4>();
@@ -1132,8 +1148,20 @@ legacy2aidl_audio_device_AudioDevice(
         switch (suggestDeviceAddressTag(aidl.type)) {
             case Tag::mac: {
                 std::vector<uint8_t> mac(6);
-                int status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
-                        &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+                int status;
+                // special case for anonymized mac address:
+                // change anonymized bytes so that they can be scanned as HEX bytes
+                if (legacyAddress.starts_with(BTANON_PREFIX_STR)) {
+                    std::copy(BTANON_PREFIX.begin(), BTANON_PREFIX.end(), mac.begin());
+                    LOG_ALWAYS_FATAL_IF(legacyAddress.length() <= strlen(BTANON_PREFIX_STR));
+                    status = sscanf(legacyAddress.c_str() + strlen(BTANON_PREFIX_STR),
+                                        "%hhX:%hhX",
+                                        &mac[4], &mac[5]);
+                    status += 4;
+                } else {
+                    status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
+                            &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+                }
                 if (status != mac.size()) {
                     ALOGE("%s: malformed MAC address: \"%s\"", __func__, legacyAddress.c_str());
                     return unexpected(BAD_VALUE);

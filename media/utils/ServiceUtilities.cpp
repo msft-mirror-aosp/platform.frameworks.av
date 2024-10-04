@@ -18,6 +18,7 @@
 #define LOG_TAG "ServiceUtilities"
 
 #include <audio_utils/clock.h>
+#include <android-base/properties.h>
 #include <binder/AppOpsManager.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
@@ -28,9 +29,11 @@
 #include <media/AidlConversionUtil.h>
 #include <android/content/AttributionSourceState.h>
 
-#include <iterator>
 #include <algorithm>
+#include <iterator>
+#include <mutex>
 #include <pwd.h>
+#include <thread>
 
 /* When performing permission checks we do not use permission cache for
  * runtime permissions (protection level dangerous) as they may change at
@@ -394,6 +397,106 @@ status_t checkIMemory(const sp<IMemory>& iMemory)
     }
 
     return NO_ERROR;
+}
+
+// TODO(b/285588444), clean this up on main, but soak it for backporting purposes for now
+namespace {
+class BluetoothPermissionCache {
+    static constexpr auto SYSPROP_NAME = "cache_key.system_server.package_info";
+    const String16 BLUETOOTH_PERM {"android.permission.BLUETOOTH_CONNECT"};
+    mutable std::mutex mLock;
+    // Cached property conditionally defined, since only avail on bionic. On host, don't inval cache
+#if defined(__BIONIC__)
+    // Unlocked, but only accessed from mListenerThread
+    base::CachedProperty mCachedProperty;
+#endif
+    // This thread is designed to never join/terminate, so no signal is fine
+    const std::thread mListenerThread;
+    GUARDED_BY(mLock)
+    std::string mPropValue;
+    GUARDED_BY(mLock)
+    std::unordered_map<uid_t, bool> mCache;
+    PermissionController mPc{};
+public:
+    BluetoothPermissionCache()
+#if defined(__BIONIC__)
+            : mCachedProperty{SYSPROP_NAME},
+            mListenerThread([this]() mutable {
+                    while (true) {
+                        std::string newVal = mCachedProperty.WaitForChange() ?: "";
+                        std::lock_guard l{mLock};
+                        if (newVal != mPropValue) {
+                            ALOGV("Bluetooth permission update");
+                            mPropValue = newVal;
+                            mCache.clear();
+                        }
+                    }
+                })
+#endif
+            {}
+
+    bool checkPermission(uid_t uid, pid_t pid) {
+        std::lock_guard l{mLock};
+        auto it = mCache.find(uid);
+        if (it == mCache.end()) {
+            it = mCache.insert({uid, mPc.checkPermission(BLUETOOTH_PERM, uid, pid)}).first;
+        }
+        return it->second;
+    }
+};
+
+// Don't call this from locks, since it potentially calls up to system server!
+// Check for non-app UIDs above this method!
+bool checkBluetoothPermission(const AttributionSourceState& attr) {
+    [[clang::no_destroy]]  static BluetoothPermissionCache impl{};
+    return impl.checkPermission(attr.uid, attr.pid);
+}
+} // anonymous
+
+/**
+ * Determines if the MAC address in Bluetooth device descriptors returned by APIs of
+ * a native audio service (audio flinger, audio policy) must be anonymized.
+ * MAC addresses returned to system server or apps with BLUETOOTH_CONNECT permission
+ * are not anonymized.
+ *
+ * @param attributionSource The attribution source of the calling app.
+ * @param caller string identifying the caller for logging.
+ * @return true if the MAC addresses must be anonymized, false otherwise.
+ */
+bool mustAnonymizeBluetoothAddress(
+        const AttributionSourceState& attributionSource, const String16&) {
+    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+    bool res;
+    switch(multiuser_get_app_id(uid)) {
+        case AID_ROOT:
+        case AID_SYSTEM:
+        case AID_RADIO:
+        case AID_BLUETOOTH:
+        case AID_MEDIA:
+        case AID_AUDIOSERVER:
+            // Don't anonymize for privileged clients
+            res = false;
+            break;
+        default:
+            res = !checkBluetoothPermission(attributionSource);
+            break;
+    }
+    ALOGV("%s uid: %d, result: %d", __func__, uid, res);
+    return res;
+}
+
+/**
+ * Modifies the passed MAC address string in place for consumption by unprivileged clients.
+ * the string is assumed to have a valid MAC address format.
+ * the anonymization must be kept in sync with toAnonymizedAddress() in BluetoothUtils.java
+ *
+ * @param address input/output the char string contining the MAC address to anonymize.
+ */
+void anonymizeBluetoothAddress(char *address) {
+    if (address == nullptr || strlen(address) != strlen("AA:BB:CC:DD:EE:FF")) {
+        return;
+    }
+    memcpy(address, "XX:XX:XX:XX", strlen("XX:XX:XX:XX"));
 }
 
 sp<content::pm::IPackageManagerNative> MediaPackageManager::retrievePackageManager() {
