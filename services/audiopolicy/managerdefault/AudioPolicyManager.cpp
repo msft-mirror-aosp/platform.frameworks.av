@@ -6162,7 +6162,8 @@ status_t AudioPolicyManager::getReportedSurroundFormats(unsigned int *numSurroun
         audio_devices_t deviceType = device->type();
         // Enabling/disabling formats are applied to only HDMI devices. So, this function
         // returns formats reported by HDMI devices.
-        if (deviceType != AUDIO_DEVICE_OUT_HDMI) {
+        if (deviceType != AUDIO_DEVICE_OUT_HDMI &&
+            deviceType != AUDIO_DEVICE_OUT_HDMI_ARC && deviceType != AUDIO_DEVICE_OUT_HDMI_EARC) {
             continue;
         }
         // Formats reported by sink devices
@@ -6231,13 +6232,13 @@ status_t AudioPolicyManager::setSurroundFormatEnabled(audio_format_t audioFormat
 
     sp<SwAudioOutputDescriptor> outputDesc;
     bool profileUpdated = false;
-    DeviceVector hdmiOutputDevices = mAvailableOutputDevices.getDevicesFromType(
-        AUDIO_DEVICE_OUT_HDMI);
+    DeviceVector hdmiOutputDevices = mAvailableOutputDevices.getDevicesFromTypes(
+        {AUDIO_DEVICE_OUT_HDMI, AUDIO_DEVICE_OUT_HDMI_ARC, AUDIO_DEVICE_OUT_HDMI_EARC});
     for (size_t i = 0; i < hdmiOutputDevices.size(); i++) {
         // Simulate reconnection to update enabled surround sound formats.
         String8 address = String8(hdmiOutputDevices[i]->address().c_str());
         std::string name = hdmiOutputDevices[i]->getName();
-        status_t status = setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_HDMI,
+        status_t status = setDeviceConnectionStateInt(hdmiOutputDevices[i]->type(),
                                                       AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
                                                       address.c_str(),
                                                       name.c_str(),
@@ -6245,7 +6246,7 @@ status_t AudioPolicyManager::setSurroundFormatEnabled(audio_format_t audioFormat
         if (status != NO_ERROR) {
             continue;
         }
-        status = setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_HDMI,
+        status = setDeviceConnectionStateInt(hdmiOutputDevices[i]->type(),
                                              AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
                                              address.c_str(),
                                              name.c_str(),
@@ -8903,6 +8904,8 @@ void AudioPolicyManager::updateAudioProfiles(const sp<DeviceDescriptor>& devDesc
     mReportedFormatsMap[devDesc] = formats;
 
     if (devDesc->type() == AUDIO_DEVICE_OUT_HDMI ||
+        devDesc->type() == AUDIO_DEVICE_OUT_HDMI_ARC ||
+        devDesc->type() == AUDIO_DEVICE_OUT_HDMI_EARC ||
         isDeviceOfModule(devDesc,AUDIO_HARDWARE_MODULE_ID_MSD)) {
         modifySurroundFormats(devDesc, &formats);
         size_t modifiedNumProfiles = 0;
