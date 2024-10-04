@@ -120,6 +120,12 @@ public:
             const std::vector<media::TrackInternalMuteInfo>& /*tracksInternalMute*/) override {
         return INVALID_OPERATION;
     }
+
+    status_t getMmapPolicyInfos(
+            media::audio::common::AudioMMapPolicyType /*policyType*/,
+            std::vector<media::audio::common::AudioMMapPolicyInfo>* /*policyInfos*/) override {
+        return INVALID_OPERATION;
+    }
 };
 
 } // namespace android

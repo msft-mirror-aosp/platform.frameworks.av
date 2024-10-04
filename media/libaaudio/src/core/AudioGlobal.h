@@ -40,6 +40,11 @@ const char* AudioGlobal_convertResultToText(aaudio_result_t returnCode);
 const char* AudioGlobal_convertSharingModeToText(aaudio_sharing_mode_t mode);
 const char* AudioGlobal_convertStreamStateToText(aaudio_stream_state_t state);
 
+aaudio_policy_t AudioGlobal_getPlatformMMapPolicy(
+        AAudio_DeviceType device, aaudio_direction_t direction);
+aaudio_policy_t AudioGlobal_getPlatformMMapExclusivePolicy(
+        AAudio_DeviceType device, aaudio_direction_t direction);
+
 } // namespace aaudio
 
 #endif  // AAUDIO_AUDIOGLOBAL_H
