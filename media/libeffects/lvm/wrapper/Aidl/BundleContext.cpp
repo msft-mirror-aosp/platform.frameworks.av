@@ -90,6 +90,12 @@ void BundleContext::deInit() {
     }
 }
 
+RetCode BundleContext::setCommon(const Parameter::Common& common) {
+    RetCode ret = EffectContext::setCommon(common);
+    RETURN_VALUE_IF(ret != RetCode::SUCCESS, ret, " setCommonFailed");
+    return init();
+}
+
 RetCode BundleContext::enable() {
     if (mEnabled) return RetCode::ERROR_ILLEGAL_PARAMETER;
     // Bass boost or Virtualizer can be temporarily disabled if playing over device speaker due to
