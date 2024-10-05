@@ -656,7 +656,7 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
                                        const audio_config_base_t *mixerConfig,
                                        const DeviceVector &devices,
                                        audio_stream_type_t stream,
-                                       audio_output_flags_t flags,
+                                       audio_output_flags_t *flags,
                                        audio_io_handle_t *output,
                                        audio_attributes_t attributes)
 {
@@ -686,7 +686,7 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
     // create a default one
     if ((mProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) &&
             lHalConfig.offload_info.format == AUDIO_FORMAT_DEFAULT) {
-        flags = (audio_output_flags_t)(flags | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD);
+        *flags = (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD);
         lHalConfig.offload_info = AUDIO_INFO_INITIALIZER;
         lHalConfig.offload_info.sample_rate = lHalConfig.sample_rate;
         lHalConfig.offload_info.channel_mask = lHalConfig.channel_mask;
@@ -704,7 +704,7 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
         lMixerConfig = *mixerConfig;
     }
 
-    mFlags = (audio_output_flags_t)(mFlags | flags);
+    mFlags = (audio_output_flags_t)(mFlags | *flags);
 
     // If no mixer config is specified for a spatializer output, default to 5.1 for proper
     // configuration of the final downmixer or spatializer
@@ -722,8 +722,9 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
                                                    &lMixerConfig,
                                                    device,
                                                    &mLatency,
-                                                   mFlags,
+                                                   &mFlags,
                                                    attributes);
+    *flags = mFlags;
 
     if (status == NO_ERROR) {
         LOG_ALWAYS_FATAL_IF(*output == AUDIO_IO_HANDLE_NONE,
