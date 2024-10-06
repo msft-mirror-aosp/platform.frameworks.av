@@ -412,7 +412,7 @@ public:
                       const audio_config_base_t *mixerConfig,
                       const DeviceVector &devices,
                       audio_stream_type_t stream,
-                      audio_output_flags_t flags,
+                      audio_output_flags_t *flags,
                       audio_io_handle_t *output,
                       audio_attributes_t attributes);
 
