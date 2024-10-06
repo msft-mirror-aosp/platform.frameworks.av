@@ -1677,14 +1677,19 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     releaseMsdOutputPatches(devices);
 
     status_t status =
-            outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, flags, output,
+            outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, &flags, output,
                              attributes);
 
-    // only accept an output with the requested parameters
+    // only accept an output with the requested parameters, unless the format can be IEC61937
+    // encapsulated and opened by AudioFlinger as wrapped IEC61937.
+    const bool ignoreRequestedParametersCheck = audio_is_iec61937_compatible(config->format)
+            && (flags & AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO)
+            && audio_has_proportional_frames(outputDesc->getFormat());
     if (status != NO_ERROR ||
-        (config->sample_rate != 0 && config->sample_rate != outputDesc->getSamplingRate()) ||
-        (config->format != AUDIO_FORMAT_DEFAULT && config->format != outputDesc->getFormat()) ||
-        (config->channel_mask != 0 && config->channel_mask != outputDesc->getChannelMask())) {
+        (!ignoreRequestedParametersCheck &&
+        ((config->sample_rate != 0 && config->sample_rate != outputDesc->getSamplingRate()) ||
+         (config->format != AUDIO_FORMAT_DEFAULT && config->format != outputDesc->getFormat()) ||
+         (config->channel_mask != 0 && config->channel_mask != outputDesc->getChannelMask())))) {
         ALOGV("%s failed opening direct output: output %d sample rate %d %d,"
                 "format %d %d, channel mask %04x %04x", __func__, *output, config->sample_rate,
                 outputDesc->getSamplingRate(), config->format, outputDesc->getFormat(),
@@ -1704,11 +1709,11 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     outputDesc->mDirectClientSession = session;
 
     addOutput(*output, outputDesc);
-    setOutputDevices(__func__, outputDesc,
-                     devices,
-                     true,
-                     0,
-                     NULL);
+    // The version check is essentially to avoid making this call in the case of the HIDL HAL.
+    if (auto hwModule = mHwModules.getModuleFromHandle(mPrimaryModuleHandle); hwModule &&
+            hwModule->getHalVersionMajor() >= 3) {
+        setOutputDevices(__func__, outputDesc, devices, true, 0, NULL);
+    }
     mPreviousOutputs = mOutputs;
     ALOGV("%s returns new direct output %d", __func__, *output);
     mpClientInterface->onAudioPortListUpdate();
@@ -4533,6 +4538,9 @@ status_t AudioPolicyManager::setDevicesRoleForCapturePreset(
             "Engine could not set preferred devices %s for audio source %d role %d",
             dumpAudioDeviceTypeAddrVector(devices).c_str(), audioSource, role);
 
+    if (status == NO_ERROR) {
+        updateInputRouting();
+    }
     return status;
 }
 
@@ -6154,7 +6162,8 @@ status_t AudioPolicyManager::getReportedSurroundFormats(unsigned int *numSurroun
         audio_devices_t deviceType = device->type();
         // Enabling/disabling formats are applied to only HDMI devices. So, this function
         // returns formats reported by HDMI devices.
-        if (deviceType != AUDIO_DEVICE_OUT_HDMI) {
+        if (deviceType != AUDIO_DEVICE_OUT_HDMI &&
+            deviceType != AUDIO_DEVICE_OUT_HDMI_ARC && deviceType != AUDIO_DEVICE_OUT_HDMI_EARC) {
             continue;
         }
         // Formats reported by sink devices
@@ -6223,13 +6232,13 @@ status_t AudioPolicyManager::setSurroundFormatEnabled(audio_format_t audioFormat
 
     sp<SwAudioOutputDescriptor> outputDesc;
     bool profileUpdated = false;
-    DeviceVector hdmiOutputDevices = mAvailableOutputDevices.getDevicesFromType(
-        AUDIO_DEVICE_OUT_HDMI);
+    DeviceVector hdmiOutputDevices = mAvailableOutputDevices.getDevicesFromTypes(
+        {AUDIO_DEVICE_OUT_HDMI, AUDIO_DEVICE_OUT_HDMI_ARC, AUDIO_DEVICE_OUT_HDMI_EARC});
     for (size_t i = 0; i < hdmiOutputDevices.size(); i++) {
         // Simulate reconnection to update enabled surround sound formats.
         String8 address = String8(hdmiOutputDevices[i]->address().c_str());
         std::string name = hdmiOutputDevices[i]->getName();
-        status_t status = setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_HDMI,
+        status_t status = setDeviceConnectionStateInt(hdmiOutputDevices[i]->type(),
                                                       AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
                                                       address.c_str(),
                                                       name.c_str(),
@@ -6237,7 +6246,7 @@ status_t AudioPolicyManager::setSurroundFormatEnabled(audio_format_t audioFormat
         if (status != NO_ERROR) {
             continue;
         }
-        status = setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_HDMI,
+        status = setDeviceConnectionStateInt(hdmiOutputDevices[i]->type(),
                                              AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
                                              address.c_str(),
                                              name.c_str(),
@@ -6775,11 +6784,12 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
             sp<SwAudioOutputDescriptor> outputDesc = new SwAudioOutputDescriptor(outProfile,
                                                                                  mpClientInterface);
             audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
+            audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
             audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
             status_t status = outputDesc->open(nullptr /* halConfig */, nullptr /* mixerConfig */,
                                                DeviceVector(supportedDevice),
                                                AUDIO_STREAM_DEFAULT,
-                                               AUDIO_OUTPUT_FLAG_NONE, &output, attributes);
+                                               &flags, &output, attributes);
             if (status != NO_ERROR) {
                 ALOGW("Cannot open output stream for devices %s on hw module %s",
                       supportedDevice->toString().c_str(), hwModule->getName());
@@ -8149,9 +8159,21 @@ status_t AudioPolicyManager::setInputDevice(audio_io_handle_t input,
                         if (result.source == AUDIO_SOURCE_HOTWORD && !inputDesc->isSoundTrigger()) {
                             result.source = AUDIO_SOURCE_VOICE_RECOGNITION;
                         }
-                        return result; }).
+                        return result; });
             //only one input device for now
-                    addSource(device);
+            if (audio_is_remote_submix_device(device->type())) {
+                // remote submix HAL does not support audio conversion, need source device
+                // audio config to match the sink input descriptor audio config, otherwise AIDL
+                // HAL patching will fail
+                audio_port_config srcDevicePortConfig = {};
+                device->toAudioPortConfig(&srcDevicePortConfig, nullptr);
+                srcDevicePortConfig.sample_rate = inputDesc->getSamplingRate();
+                srcDevicePortConfig.channel_mask = inputDesc->getChannelMask();
+                srcDevicePortConfig.format = inputDesc->getFormat();
+                patchBuilder.addSource(srcDevicePortConfig);
+            } else {
+                patchBuilder.addSource(device);
+            }
             status = installPatch(__func__, patchHandle, inputDesc.get(), patchBuilder.patch(), 0);
         }
     }
@@ -8518,9 +8540,11 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
     }
 
     float volumeDb = computeVolume(curves, volumeSource, index, deviceTypes);
+    const VolumeSource dtmfVolSrc = toVolumeSource(AUDIO_STREAM_DTMF, false);
     if (outputDesc->isFixedVolume(deviceTypes) ||
             // Force VoIP volume to max for bluetooth SCO/BLE device except if muted
-            (index != 0 && (isVoiceVolSrc || isBtScoVolSrc) &&
+            (index != 0 && (isVoiceVolSrc || isBtScoVolSrc
+                        || (isInCall() && (dtmfVolSrc == volumeSource))) &&
                     (isSingleDeviceType(deviceTypes, audio_is_bluetooth_out_sco_device)
                     || isSingleDeviceType(deviceTypes, audio_is_ble_out_device)))) {
         volumeDb = 0.0f;
@@ -8882,6 +8906,8 @@ void AudioPolicyManager::updateAudioProfiles(const sp<DeviceDescriptor>& devDesc
     mReportedFormatsMap[devDesc] = formats;
 
     if (devDesc->type() == AUDIO_DEVICE_OUT_HDMI ||
+        devDesc->type() == AUDIO_DEVICE_OUT_HDMI_ARC ||
+        devDesc->type() == AUDIO_DEVICE_OUT_HDMI_EARC ||
         isDeviceOfModule(devDesc,AUDIO_HARDWARE_MODULE_ID_MSD)) {
         modifySurroundFormats(devDesc, &formats);
         size_t modifiedNumProfiles = 0;
@@ -9016,7 +9042,7 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
     audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
     audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
     status_t status = desc->open(halConfig, mixerConfig, devices,
-            AUDIO_STREAM_DEFAULT, flags, &output, attributes);
+            AUDIO_STREAM_DEFAULT, &flags, &output, attributes);
     if (status != NO_ERROR) {
         ALOGE("%s failed to open output %d", __func__, status);
         return nullptr;
@@ -9054,7 +9080,7 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
         config.offload_info.channel_mask = config.channel_mask;
         config.offload_info.format = config.format;
 
-        status = desc->open(&config, mixerConfig, devices, AUDIO_STREAM_DEFAULT, flags, &output,
+        status = desc->open(&config, mixerConfig, devices, AUDIO_STREAM_DEFAULT, &flags, &output,
                             attributes);
         if (status != NO_ERROR) {
             return nullptr;
@@ -9062,11 +9088,11 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
     }
 
     addOutput(output, desc);
-    setOutputDevices(__func__, desc,
-                     devices,
-                     true,
-                     0,
-                     NULL);
+    // The version check is essentially to avoid making this call in the case of the HIDL HAL.
+    if (auto hwModule = mHwModules.getModuleFromHandle(mPrimaryModuleHandle); hwModule &&
+            hwModule->getHalVersionMajor() >= 3) {
+        setOutputDevices(__func__, desc, devices, true, 0, NULL);
+    }
     sp<DeviceDescriptor> speaker = mAvailableOutputDevices.getDevice(
             AUDIO_DEVICE_OUT_SPEAKER, String8(""), AUDIO_FORMAT_DEFAULT);
 
