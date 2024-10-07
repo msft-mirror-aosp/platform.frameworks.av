@@ -741,6 +741,8 @@ const detail::AudioFormatPairs& getAudioFormatPairs() {
             {// Note: not in the IANA registry.
              AUDIO_FORMAT_APTX_HD, make_AudioFormatDescription("audio/vnd.qcom.aptx.hd")},
             {AUDIO_FORMAT_AC4, make_AudioFormatDescription(::android::MEDIA_MIMETYPE_AUDIO_AC4)},
+            {AUDIO_FORMAT_AC4_L4, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_AC4) + ";version=02.01.04")},
             {// Note: not in the IANA registry.
              AUDIO_FORMAT_LDAC, make_AudioFormatDescription("audio/vnd.sony.ldac")},
             {AUDIO_FORMAT_MAT,
