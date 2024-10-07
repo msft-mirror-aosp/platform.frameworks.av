@@ -89,7 +89,6 @@
 #include "utils/Utils.h"
 
 namespace {
-    const char* kPermissionServiceName = "permission";
     const char* kActivityServiceName = "activity";
     const char* kSensorPrivacyServiceName = "sensor_privacy";
     const char* kAppopsServiceName = "appops";
@@ -828,10 +827,6 @@ Status CameraService::createDefaultRequest(const std::string& unresolvedCameraId
         hardware::camera2::impl::CameraMetadataNative* request) {
     ATRACE_CALL();
 
-    if (!flags::feature_combination_query()) {
-        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
-                "Camera subsystem doesn't support this method!");
-    }
     if (!mInitialized) {
         ALOGE("%s: Camera subsystem is not available", __FUNCTION__);
         logServiceError("Camera subsystem is not available", ERROR_DISCONNECTED);
@@ -891,10 +886,6 @@ Status CameraService::isSessionConfigurationWithParametersSupported(
         /*out*/ bool* supported) {
     ATRACE_CALL();
 
-    if (!flags::feature_combination_query()) {
-        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
-                "Camera subsystem doesn't support this method!");
-    }
     if (!mInitialized) {
         ALOGE("%s: Camera HAL couldn't be initialized", __FUNCTION__);
         logServiceError("Camera subsystem is not available", ERROR_DISCONNECTED);
@@ -924,8 +915,7 @@ Status CameraService::isSessionConfigurationWithParametersSupported(
                 cameraId.c_str());
     }
 
-    bool overrideForPerfClass = flags::calculate_perf_override_during_session_support() &&
-                                SessionConfigurationUtils::targetPerfClassPrimaryCamera(
+    bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
                                         mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
 
     auto ret = isSessionConfigurationWithParametersSupportedUnsafe(cameraId,
@@ -1021,23 +1011,23 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
 
     bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
             mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
-    if (flags::check_session_support_before_session_char()) {
-        bool sessionConfigSupported;
-        Status res = isSessionConfigurationWithParametersSupportedUnsafe(
-                cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
-        if (!res.isOk()) {
-            // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
-            // report the correct Status to send to the client. Simply forward the error to
-            // the client.
-            outMetadata->clear();
-            return res;
-        }
-        if (!sessionConfigSupported) {
-            std::string msg = fmt::sprintf(
-                    "Session configuration not supported for camera device %s.", cameraId.c_str());
-            outMetadata->clear();
-            return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
-        }
+
+    bool sessionConfigSupported;
+    Status res = isSessionConfigurationWithParametersSupportedUnsafe(
+            cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
+    if (!res.isOk()) {
+        // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
+        // report the correct Status to send to the client. Simply forward the error to
+        // the client.
+        outMetadata->clear();
+        return res;
+    }
+
+    if (!sessionConfigSupported) {
+        std::string msg = fmt::sprintf("Session configuration not supported for camera device %s.",
+                                       cameraId.c_str());
+        outMetadata->clear();
+        return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
     }
 
     status_t ret = mCameraProviderManager->getSessionCharacteristics(
@@ -1079,7 +1069,7 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
             }
     }
 
-    Status res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
+    res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
     if (flags::analytics_24q3()) {
         mCameraServiceProxyWrapper->logSessionCharacteristicsQuery(cameraId,
                 getCallingUid(), sessionConfiguration, res);
@@ -1612,11 +1602,12 @@ Status CameraService::initializeShimMetadata(int cameraId) {
     Status ret = Status::ok();
     sp<Client> tmp = nullptr;
 
-    logConnectionAttempt(getCallingPid(), kServiceName, cameraIdStr, API_1);
+    int callingPid = getCallingPid();
+    logConnectionAttempt(callingPid, kServiceName, cameraIdStr, API_1);
 
     if (!(ret = connectHelper<ICameraClient,Client>(
             sp<ICameraClient>{nullptr}, cameraIdStr, cameraId,
-            kServiceName, /*systemNativeClient*/ false, {}, uid, USE_CALLING_PID,
+            kServiceName, /*systemNativeClient*/ false, {}, uid, callingPid,
             API_1, /*shimUpdateOnly*/ true, /*oomScoreOffset*/ 0,
             /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
             /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
@@ -1690,7 +1681,7 @@ Status CameraService::getLegacyParametersLazy(int cameraId,
 }
 
 Status CameraService::validateConnectLocked(const std::string& cameraId,
-        const std::string& clientName8, /*inout*/int& clientUid, /*inout*/int& clientPid) const {
+        const std::string& clientName8, int clientUid, int clientPid) const {
 
 #ifdef __BRILLO__
     UNUSED(clientName8);
@@ -1734,36 +1725,24 @@ Status CameraService::validateConnectLocked(const std::string& cameraId,
     return Status::ok();
 }
 
-Status CameraService::validateClientPermissionsLocked(const std::string& cameraId,
-        const std::string& clientName, int& clientUid, int& clientPid) const {
+Status CameraService::errorNotTrusted(int clientPid, int clientUid, const std::string& cameraId,
+        const std::string& clientName, bool isPid) const {
     int callingPid = getCallingPid();
     int callingUid = getCallingUid();
+    ALOGE("CameraService::connect X (calling PID %d, calling UID %d) rejected "
+            "(don't trust %s %d)", callingPid, callingUid, isPid ? "clientPid" : "clientUid",
+            isPid ? clientPid : clientUid);
+    return STATUS_ERROR_FMT(ERROR_PERMISSION_DENIED,
+            "Untrusted caller (calling PID %d, UID %d) trying to "
+            "forward camera access to camera %s for client %s (PID %d, UID %d)",
+            getCallingPid(), getCallingUid(), cameraId.c_str(),
+            clientName.c_str(), clientPid, clientUid);
+}
 
-    // Check if we can trust clientUid
-    if (clientUid == USE_CALLING_UID) {
-        clientUid = callingUid;
-    } else if (!isTrustedCallingUid(callingUid)) {
-        ALOGE("CameraService::connect X (calling PID %d, calling UID %d) rejected "
-                "(don't trust clientUid %d)", callingPid, callingUid, clientUid);
-        return STATUS_ERROR_FMT(ERROR_PERMISSION_DENIED,
-                "Untrusted caller (calling PID %d, UID %d) trying to "
-                "forward camera access to camera %s for client %s (PID %d, UID %d)",
-                callingPid, callingUid, cameraId.c_str(),
-                clientName.c_str(), clientPid, clientUid);
-    }
-
-    // Check if we can trust clientPid
-    if (clientPid == USE_CALLING_PID) {
-        clientPid = callingPid;
-    } else if (!isTrustedCallingUid(callingUid)) {
-        ALOGE("CameraService::connect X (calling PID %d, calling UID %d) rejected "
-                "(don't trust clientPid %d)", callingPid, callingUid, clientPid);
-        return STATUS_ERROR_FMT(ERROR_PERMISSION_DENIED,
-                "Untrusted caller (calling PID %d, UID %d) trying to "
-                "forward camera access to camera %s for client %s (PID %d, UID %d)",
-                callingPid, callingUid, cameraId.c_str(),
-                clientName.c_str(), clientPid, clientUid);
-    }
+Status CameraService::validateClientPermissionsLocked(const std::string& cameraId,
+        const std::string& clientName, int clientUid, int clientPid) const {
+    int callingPid = getCallingPid();
+    int callingUid = getCallingUid();
 
     if (shouldRejectSystemCameraConnection(cameraId)) {
         ALOGW("Attempting to connect to system-only camera id %s, connection rejected",
@@ -2156,10 +2135,28 @@ Status CameraService::connect(
             clientPackageNameMaybe);
     logConnectionAttempt(clientAttribution.pid, clientPackageName, cameraIdStr, API_1);
 
+    int clientUid = clientAttribution.uid;
+    int clientPid = clientAttribution.pid;
+
+    // Resolve the client identity. In the near future, we will no longer rely on USE_CALLING_*, and
+    // need a way to guarantee the caller identity early.
+
+    // Check if we can trust clientUid
+    if (!resolveClientUid(clientUid)) {
+        return errorNotTrusted(clientPid, clientUid, cameraIdStr, clientPackageName,
+                /* isPid=*/ false);
+    }
+
+    // Check if we can trust clientUid
+    if (!resolveClientPid(clientPid)) {
+        return errorNotTrusted(clientPid, clientUid, cameraIdStr, clientPackageName,
+                /* isPid= */ true);
+    }
+
     sp<Client> client = nullptr;
     ret = connectHelper<ICameraClient,Client>(cameraClient, cameraIdStr, api1CameraId,
             clientPackageName, /*systemNativeClient*/ false, {},
-            clientAttribution.uid, clientAttribution.pid, API_1,
+            clientUid, clientPid, API_1,
             /*shimUpdateOnly*/ false, /*oomScoreOffset*/ 0, targetSdkVersion,
             rotationOverride, forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*out*/client);
 
@@ -2275,6 +2272,22 @@ Status CameraService::connectDevice(
             clientPackageNameMaybe);
     logConnectionAttempt(clientAttribution.pid, clientPackageName, cameraId, API_2);
 
+    userid_t clientUserId = multiuser_get_user_id(clientAttribution.uid);
+    if (clientAttribution.uid == USE_CALLING_UID) {
+        clientUserId = multiuser_get_user_id(callingUid);
+    }
+
+    // Resolve the client identity. In the near future, we will no longer rely on USE_CALLING_*, and
+    // need a way to guarantee the caller identity early.
+
+    int clientUid = clientAttribution.uid;
+    int clientPid = callingPid;
+    // Check if we can trust clientUid
+    if (!resolveClientUid(clientUid)) {
+        return errorNotTrusted(clientPid, clientUid, cameraId, clientPackageName,
+                /* isPid= */ false);
+    }
+
     if (oomScoreOffset < 0) {
         std::string msg =
                 fmt::sprintf("Cannot increase the priority of a client %s pid %d for "
@@ -2282,11 +2295,6 @@ Status CameraService::connectDevice(
                         cameraId.c_str());
         ALOGE("%s: %s", __FUNCTION__, msg.c_str());
         return STATUS_ERROR(ERROR_ILLEGAL_ARGUMENT, msg.c_str());
-    }
-
-    userid_t clientUserId = multiuser_get_user_id(clientAttribution.uid);
-    if (clientAttribution.uid == USE_CALLING_UID) {
-        clientUserId = multiuser_get_user_id(callingUid);
     }
 
     // Automotive privileged client AID_AUTOMOTIVE_EVS using exterior system camera for use cases
@@ -2312,7 +2320,7 @@ Status CameraService::connectDevice(
 
     ret = connectHelper<hardware::camera2::ICameraDeviceCallbacks,CameraDeviceClient>(cameraCb,
             cameraId, /*api1CameraId*/-1, clientPackageName, systemNativeClient,
-            clientAttribution.attributionTag, clientAttribution.uid, USE_CALLING_PID, API_2,
+            clientAttribution.attributionTag, clientUid, clientPid, API_2,
             /*shimUpdateOnly*/ false, oomScoreOffset, targetSdkVersion, rotationOverride,
             /*forceSlowJpegMode*/false, unresolvedCameraId, isNonSystemNdk, /*out*/client);
 
@@ -2375,51 +2383,6 @@ bool CameraService::isCameraPrivacyEnabled(const String16& packageName, const st
         }
     }
     return false;
-}
-
-std::string CameraService::getPackageNameFromUid(int clientUid) const {
-    std::string packageName("");
-
-    sp<IPermissionController> permCtrl;
-    if (flags::cache_permission_services()) {
-        permCtrl = getPermissionController();
-    } else {
-        sp<IServiceManager> sm = defaultServiceManager();
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        // Using deprecated function to preserve functionality until the
-        // cache_permission_services flag is removed.
-        sp<IBinder> binder = sm->getService(toString16(kPermissionServiceName));
-#pragma clang diagnostic pop
-        if (binder == 0) {
-            ALOGE("Cannot get permission service");
-            permCtrl = nullptr;
-        } else {
-            permCtrl = interface_cast<IPermissionController>(binder);
-        }
-    }
-
-    if (permCtrl == nullptr) {
-        // Return empty package name and the further interaction
-        // with camera will likely fail
-        return packageName;
-    }
-
-    Vector<String16> packages;
-
-    permCtrl->getPackagesForUid(clientUid, packages);
-
-    if (packages.isEmpty()) {
-        ALOGE("No packages for calling UID %d", clientUid);
-        // Return empty package name and the further interaction
-        // with camera will likely fail
-        return packageName;
-    }
-
-    // Arbitrarily pick the first name in the list
-    packageName = toStdString(packages[0]);
-
-    return packageName;
 }
 
 void CameraService::logConnectionAttempt(int clientPid, const std::string& clientPackageName,
@@ -4330,14 +4293,9 @@ status_t CameraService::BasicClient::startCameraOps() {
         // Notify app ops that the camera is not available
         mOpsCallback = new OpsCallback(this);
 
-        if (flags::watch_foreground_changes()) {
-            mAppOpsManager->startWatchingMode(AppOpsManager::OP_CAMERA,
-                toString16(mClientPackageName),
-                AppOpsManager::WATCH_FOREGROUND_CHANGES, mOpsCallback);
-        } else {
-            mAppOpsManager->startWatchingMode(AppOpsManager::OP_CAMERA,
-                toString16(mClientPackageName), mOpsCallback);
-        }
+        mAppOpsManager->startWatchingMode(AppOpsManager::OP_CAMERA,
+            toString16(mClientPackageName),
+            AppOpsManager::WATCH_FOREGROUND_CHANGES, mOpsCallback);
 
         // Just check for camera acccess here on open - delay startOp until
         // camera frames start streaming in startCameraStreamingOps
@@ -4520,19 +4478,10 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
         // (WAR for b/175320666)the AppOpsManager could return MODE_IGNORED. Do not treat such
         // cases as error.
         if (!mUidIsTrusted) {
-            if (flags::watch_foreground_changes()) {
-                if (isUidVisible && isCameraPrivacyEnabled && supportsCameraMute()) {
-                    setCameraMute(true);
-                } else {
-                    block();
-                }
+            if (isUidVisible && isCameraPrivacyEnabled && supportsCameraMute()) {
+                setCameraMute(true);
             } else {
-                if (isUidActive && isCameraPrivacyEnabled && supportsCameraMute()) {
-                    setCameraMute(true);
-                } else if (!isUidActive
-                    || (isCameraPrivacyEnabled && !supportsCameraMute())) {
-                    block();
-                }
+                block();
             }
         }
     } else if (res == AppOpsManager::MODE_ALLOWED) {

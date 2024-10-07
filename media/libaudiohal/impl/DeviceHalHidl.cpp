@@ -280,11 +280,9 @@ status_t DeviceHalHidl::openOutputStream(
     ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION::SourceMetadata hidlMetadata;
 #endif
 
-    if (status_t status = CoreUtils::sourceMetadataFromHalV7(
-                sourceMetadata, true /*ignoreNonVendorTags*/, &hidlMetadata);
-            status != OK) {
-        return status;
-    }
+    RETURN_STATUS_IF_ERROR(CoreUtils::sourceMetadataFromHalV7(
+            sourceMetadata, true /*ignoreNonVendorTags*/, &hidlMetadata
+            ));
 
 #if !(MAJOR_VERSION == 7 && MINOR_VERSION == 1)
     //TODO: b/193496180 use spatializer flag at audio HAL when available
@@ -621,7 +619,14 @@ status_t DeviceHalHidl::setConnectedState(const struct audio_port_v7 *port, bool
             result != NO_ERROR) {
         return result;
     }
-    return processReturn("setConnectedState", mDevice->setConnectedState(hidlAddress, connected));
+    Return<Result> ret = mDevice->setConnectedState(hidlAddress, connected);
+    if (ret.isOk() || ret == Result::NOT_SUPPORTED) {
+        // The framework is only interested in errors occurring due to connection state handling,
+        // so it can decide whether retrying is needed. If the HAL does not support this operation,
+        // it's not an error.
+        return NO_ERROR;
+    }
+    return processReturn("setConnectedState", ret);
 }
 
 error::Result<audio_hw_sync_t> DeviceHalHidl::getHwAvSync() {

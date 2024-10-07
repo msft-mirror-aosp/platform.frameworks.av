@@ -54,7 +54,7 @@ interface ITunerService {
      * @param frontendHandle the handle of the frontend granted by TRM.
      * @return the aidl interface of the frontend.
      */
-    ITunerFrontend openFrontend(in long frontendHandle);
+    ITunerFrontend openFrontend(in int frontendHandle);
 
     /**
      * Open a new interface of ITunerLnb given a lnbHandle.
@@ -62,7 +62,7 @@ interface ITunerService {
      * @param lnbHandle the handle of the LNB granted by TRM.
      * @return a newly created ITunerLnb interface.
      */
-    ITunerLnb openLnb(in long lnbHandle);
+    ITunerLnb openLnb(in int lnbHandle);
 
     /**
      * Open a new interface of ITunerLnb given a LNB name.
@@ -75,7 +75,7 @@ interface ITunerService {
     /**
      * Create a new instance of Demux.
      */
-    ITunerDemux openDemux(in long demuxHandle);
+    ITunerDemux openDemux(in int demuxHandle);
 
     /**
      * Retrieve the supported filter main types
@@ -83,7 +83,7 @@ interface ITunerService {
      * @param demuxHandle the handle of the demux to query demux info for
      * @return the demux info
      */
-    DemuxInfo getDemuxInfo(in long demuxHandle);
+    DemuxInfo getDemuxInfo(in int demuxHandle);
 
     /**
      * Retrieve the list of demux info for all the demuxes on the system
@@ -104,7 +104,7 @@ interface ITunerService {
      * @param descramblerHandle the handle of the descrambler granted by TRM.
      * @return a newly created ITunerDescrambler interface.
      */
-    ITunerDescrambler openDescrambler(in long descramblerHandle);
+    ITunerDescrambler openDescrambler(in int descramblerHandle);
 
     /**
      * Get an integer that carries the Tuner HIDL version. The high 16 bits are the

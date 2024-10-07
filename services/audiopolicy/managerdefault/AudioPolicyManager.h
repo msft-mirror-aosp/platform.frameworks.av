@@ -128,7 +128,8 @@ public:
                                   std::vector<audio_io_handle_t> *secondaryOutputs,
                                   output_type_t *outputType,
                                   bool *isSpatialized,
-                                  bool *isBitPerfect) override;
+                                  bool *isBitPerfect,
+                                  float *volume) override;
         virtual status_t startOutput(audio_port_handle_t portId);
         virtual status_t stopOutput(audio_port_handle_t portId);
         virtual bool releaseOutput(audio_port_handle_t portId);
@@ -1108,8 +1109,8 @@ private:
         // It can give a chance to HAL implementer to retrieve dynamic capabilities associated
         // to this device for example.
         // TODO avoid opening stream to retrieve capabilities of a profile.
-        void broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
-                                            media::DeviceConnectedState state);
+        status_t broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
+                                                media::DeviceConnectedState state);
 
         // updates device caching and output for streams that can influence the
         //    routing of notifications
@@ -1155,7 +1156,8 @@ private:
                 const audio_config_t *config,
                 audio_output_flags_t flags,
                 const DeviceVector &devices,
-                audio_io_handle_t *output);
+                audio_io_handle_t *output,
+                audio_attributes_t attributes);
 
         /**
          * @brief Queries if some kind of spatialization will be performed if the audio playback
@@ -1363,6 +1365,11 @@ private:
         status_t getDevicesForAttributes(const audio_attributes_t &attr,
                                          DeviceVector &devices,
                                          bool forVolume);
+
+        // A helper method used by getDevicesForAttributes to retrieve input devices when
+        // capture preset is available in the given audio attributes parameter.
+        status_t getInputDevicesForAttributes(const audio_attributes_t &attr,
+                                              DeviceVector &devices);
 
         status_t getProfilesForDevices(const DeviceVector& devices,
                                        AudioProfileVector& audioProfiles,

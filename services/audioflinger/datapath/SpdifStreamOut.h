@@ -36,14 +36,15 @@ namespace android {
 class SpdifStreamOut : public AudioStreamOut {
 public:
 
-    SpdifStreamOut(AudioHwDevice *dev, audio_output_flags_t flags,
-            audio_format_t format);
+    SpdifStreamOut(AudioHwDevice *dev, audio_format_t format);
 
     status_t open(
             audio_io_handle_t handle,
             audio_devices_t devices,
             struct audio_config *config,
-            const char *address) override;
+            audio_output_flags_t *flags,
+            const char *address,
+            const std::vector<playback_track_metadata_v7_t>& sourceMetadata) override;
 
     /**
     * Write audio buffer to driver. Returns number of bytes written, or a

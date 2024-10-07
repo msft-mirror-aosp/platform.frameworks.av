@@ -19,6 +19,7 @@
 #include <android/content/AttributionSourceState.h>
 #include <android/permission/PermissionChecker.h>
 #include <binder/BinderService.h>
+#include <binder/IPermissionController.h>
 #include <private/android_filesystem_config.h>
 
 namespace android {
@@ -61,6 +62,9 @@ class AttributionAndPermissionUtils {
     virtual int64_t clearCallingIdentity();
     virtual void restoreCallingIdentity(int64_t token);
 
+    virtual bool resolveClientUid(/*inout*/ int& clientUid);
+    virtual bool resolveClientPid(/*inout*/ int& clientPid);
+
     /**
      * Pre-grants the permission if the attribution source uid is for an automotive
      * privileged client. Otherwise uses system service permission checker to check
@@ -84,6 +88,15 @@ class AttributionAndPermissionUtils {
      * Returns true if the client has uid AID_AUTOMOTIVE_EVS and the device is an automotive device.
      */
     virtual bool isAutomotivePrivilegedClient(int32_t uid);
+
+    // In some cases the calling code has no access to the package it runs under.
+    // For example, NDK camera API.
+    // In this case we will get the packages for the calling UID and pick the first one
+    // for attributing the app op. This will work correctly for runtime permissions
+    // as for legacy apps we will toggle the app op for all packages in the UID.
+    // The caveat is that the operation may be attributed to the wrong package and
+    // stats based on app ops may be slightly off.
+    virtual std::string getPackageNameFromUid(int clientUid) const;
 
     virtual status_t getUidForPackage(const std::string &packageName, int userId,
             /*inout*/uid_t& uid, int err);
@@ -118,6 +131,8 @@ class AttributionAndPermissionUtils {
             const AttributionSourceState &attributionSource);
 
   private:
+    virtual const sp<IPermissionController>& getPermissionController() const;
+
     std::unique_ptr<permission::PermissionChecker> mPermissionChecker =
             std::make_unique<permission::PermissionChecker>();
 };
@@ -168,6 +183,14 @@ public:
 
     void restoreCallingIdentity(int64_t token) const {
         mAttributionAndPermissionUtils->restoreCallingIdentity(token);
+    }
+
+    bool resolveClientUid(/*inout*/ int& clientUid) const {
+        return mAttributionAndPermissionUtils->resolveClientUid(clientUid);
+    }
+
+    bool resolveClientPid(/*inout*/ int& clientPid) const {
+        return mAttributionAndPermissionUtils->resolveClientPid(clientPid);
     }
 
     // The word 'System' here does not refer to callers only on the system
@@ -245,6 +268,10 @@ public:
     status_t getUidForPackage(const std::string &packageName, int userId,
             /*inout*/uid_t& uid, int err) const {
         return mAttributionAndPermissionUtils->getUidForPackage(packageName, userId, uid, err);
+    }
+
+    std::string getPackageNameFromUid(int clientUid) const {
+        return mAttributionAndPermissionUtils->getPackageNameFromUid(clientUid);
     }
 
     bool isCallerCameraServerNotDelegating() const {
