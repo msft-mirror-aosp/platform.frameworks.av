@@ -469,9 +469,10 @@ private:
     // AudioFlinger::setParameters() updates with mutex().
     std::atomic_uint32_t mScreenState{};
 
-    void dumpPermissionDenial(int fd, const Vector<String16>& args);
-    void dumpClients_ll(int fd, const Vector<String16>& args) REQUIRES(mutex(), clientMutex());
-    void dumpInternals_l(int fd, const Vector<String16>& args) REQUIRES(mutex());
+    void dumpPermissionDenial(int fd);
+    void dumpClients_ll(int fd, bool dumpAllocators) REQUIRES(mutex(), clientMutex());
+    void dumpInternals_l(int fd) REQUIRES(mutex());
+    void dumpStats(int fd);
 
     SimpleLog mThreadLog{16}; // 16 Thread history limit
 
