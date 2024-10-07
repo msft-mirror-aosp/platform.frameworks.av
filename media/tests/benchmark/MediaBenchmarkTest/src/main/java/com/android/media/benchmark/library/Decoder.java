@@ -18,6 +18,7 @@ package com.android.media.benchmark.library;
 
 import android.view.Surface;
 
+import android.media.AudioFormat;
 import android.media.MediaCodec;
 import android.media.MediaCodec.BufferInfo;
 import android.media.MediaFormat;
@@ -58,6 +59,8 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
     protected int mNumOutputFrame;
     protected int mIndex;
 
+    protected boolean mUseFrameReleaseQueue = false;
+
     protected ArrayList<ByteBuffer> mInputBuffer;
     protected FileOutputStream mOutputStream;
     protected FrameReleaseQueue mFrameReleaseQueue = null;
@@ -94,10 +97,24 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
         mSignalledError = false;
         mOutputStream = outputStream;
     }
+
+    /*
+     * This can be used to setup audio decoding, simulating audio playback.
+     */
+    public void setupDecoder(
+            boolean render, boolean useFrameReleaseQueue, int numInFramesRequired) {
+        mRender = render;
+        mUseFrameReleaseQueue = useFrameReleaseQueue;
+        mNumInFramesRequired = numInFramesRequired;
+        mSignalledError = false;
+        setupDecoder(null);
+    }
+
     public void setupDecoder(Surface surface, boolean render,
             boolean useFrameReleaseQueue, int frameRate) {
         setupDecoder(surface, render, useFrameReleaseQueue, frameRate, -1);
     }
+
     public void setupDecoder(Surface surface, boolean render,
             boolean useFrameReleaseQueue, int frameRate, int numInFramesRequired) {
         mSignalledError = false;
@@ -166,6 +183,18 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
         public void onOutputFormatChanged(
                 @NonNull MediaCodec mediaCodec, @NonNull MediaFormat format) {
             Log.i(TAG, "Output format changed. Format: " + format.toString());
+            if (mUseFrameReleaseQueue
+                    && mFrameReleaseQueue == null && mMime.startsWith("audio/")) {
+                // start a frame release thread for this configuration.
+                int bytesPerSample = AudioFormat.getBytesPerSample(
+                        format.getInteger(MediaFormat.KEY_PCM_ENCODING,
+                                AudioFormat.ENCODING_PCM_16BIT));
+                int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                int channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                mFrameReleaseQueue = new FrameReleaseQueue(
+                        mRender, sampleRate, channelCount, bytesPerSample);
+                mFrameReleaseQueue.setMediaCodec(mCodec);
+            }
         }
 
         @Override
@@ -395,8 +424,17 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
             }
         }
         if (mFrameReleaseQueue != null) {
-            mFrameReleaseQueue.pushFrame(mNumOutputFrame, outputBufferId,
-                                            outputBufferInfo.presentationTimeUs);
+            if (mMime.startsWith("audio/")) {
+                try {
+                    ByteBuffer outputBuffer = mediaCodec.getOutputBuffer(outputBufferId);
+                    mFrameReleaseQueue.pushFrame(outputBufferId, outputBuffer.remaining());
+                } catch (Exception e) {
+                    Log.d(TAG, "Error in getting MediaCodec buffer" + e.toString());
+                }
+            } else {
+                mFrameReleaseQueue.pushFrame(mNumOutputFrame, outputBufferId,
+                                                outputBufferInfo.presentationTimeUs);
+            }
         } else if (mIBufferSend != null) {
             IBufferXfer.BufferXferInfo info = new IBufferXfer.BufferXferInfo();
             info.buf = mediaCodec.getOutputBuffer(outputBufferId);
