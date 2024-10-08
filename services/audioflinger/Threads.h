@@ -891,7 +891,7 @@ protected:
                     bool                mHasChanged = false;
                 };
 
-                SimpleLog mLocalLog;  // locked internally
+                SimpleLog mLocalLog {/* maxLogLines= */ 120};  // locked internally
 
     // mThreadloopExecutor contains deferred functors and object (dtors) to
     // be executed at the end of the processing period, without any
