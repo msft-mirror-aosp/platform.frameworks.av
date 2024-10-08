@@ -27,7 +27,7 @@
 #include "MelReporter.h"
 #include "ResamplerBufferProvider.h"
 
-#include <afutils/DumpTryLock.h>
+#include <afutils/FallibleLockGuard.h>
 #include <afutils/Permission.h>
 #include <afutils/TypedLogger.h>
 #include <afutils/Vibrator.h>
@@ -1042,23 +1042,19 @@ String8 channelMaskToString(audio_channel_mask_t mask, bool output) {
 }
 
 void ThreadBase::dump(int fd, const Vector<String16>& args)
-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 {
     dprintf(fd, "\n%s thread %p, name %s, tid %d, type %d (%s):\n", isOutput() ? "Output" : "Input",
             this, mThreadName, getTid(), type(), threadTypeToString(type()));
 
-    const bool locked = afutils::dumpTryLock(mutex());
-    if (!locked) {
-        dprintf(fd, "  Thread may be deadlocked\n");
-    }
-
-    dumpBase_l(fd, args);
-    dumpInternals_l(fd, args);
-    dumpTracks_l(fd, args);
-    dumpEffectChains_l(fd, args);
-
-    if (locked) {
-        mutex().unlock();
+    {
+        afutils::FallibleLockGuard l{mutex()};
+        if (!l) {
+            dprintf(fd, "  Thread may be deadlocked\n");
+        }
+        dumpBase_l(fd, args);
+        dumpInternals_l(fd, args);
+        dumpTracks_l(fd, args);
+        dumpEffectChains_l(fd, args);
     }
 
     dprintf(fd, "  Local log:\n");
