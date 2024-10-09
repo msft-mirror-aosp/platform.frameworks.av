@@ -27,7 +27,7 @@
 #include "MelReporter.h"
 #include "ResamplerBufferProvider.h"
 
-#include <afutils/DumpTryLock.h>
+#include <afutils/FallibleLockGuard.h>
 #include <afutils/Permission.h>
 #include <afutils/TypedLogger.h>
 #include <afutils/Vibrator.h>
@@ -1042,23 +1042,19 @@ String8 channelMaskToString(audio_channel_mask_t mask, bool output) {
 }
 
 void ThreadBase::dump(int fd, const Vector<String16>& args)
-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 {
     dprintf(fd, "\n%s thread %p, name %s, tid %d, type %d (%s):\n", isOutput() ? "Output" : "Input",
             this, mThreadName, getTid(), type(), threadTypeToString(type()));
 
-    const bool locked = afutils::dumpTryLock(mutex());
-    if (!locked) {
-        dprintf(fd, "  Thread may be deadlocked\n");
-    }
-
-    dumpBase_l(fd, args);
-    dumpInternals_l(fd, args);
-    dumpTracks_l(fd, args);
-    dumpEffectChains_l(fd, args);
-
-    if (locked) {
-        mutex().unlock();
+    {
+        afutils::FallibleLockGuard l{mutex()};
+        if (!l) {
+            dprintf(fd, "  Thread may be deadlocked\n");
+        }
+        dumpBase_l(fd, args);
+        dumpInternals_l(fd, args);
+        dumpTracks_l(fd, args);
+        dumpEffectChains_l(fd, args);
     }
 
     dprintf(fd, "  Local log:\n");
@@ -3256,9 +3252,9 @@ NO_THREAD_SAFETY_ANALYSIS
 
     // Calculate size of normal sink buffer relative to the HAL output buffer size
     double multiplier = 1.0;
-    // Note: mType == SPATIALIZER does not support FastMixer.
-    if (mType == MIXER && (kUseFastMixer == FastMixer_Static ||
-            kUseFastMixer == FastMixer_Dynamic)) {
+    // Note: mType == SPATIALIZER does not support FastMixer and DEEP is by definition not "fast"
+    if ((mType == MIXER && !(mOutput->flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) &&
+            (kUseFastMixer == FastMixer_Static || kUseFastMixer == FastMixer_Dynamic)) {
         size_t minNormalFrameCount = (kMinNormalSinkBufferSizeMs * mSampleRate) / 1000;
         size_t maxNormalFrameCount = (kMaxNormalSinkBufferSizeMs * mSampleRate) / 1000;
 
@@ -5187,7 +5183,16 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
             break;
         case FastMixer_Static:
         case FastMixer_Dynamic:
-            initFastMixer = mFrameCount < mNormalFrameCount;
+            if (mType == MIXER && (output->flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) {
+                /* Do not init fast mixer on deep buffer, warn if buffers are confed too small */
+                initFastMixer = false;
+                ALOGW_IF(mFrameCount * 1000 / mSampleRate < kMinNormalSinkBufferSizeMs,
+                         "HAL DEEP BUFFER Buffer (%zu ms) is smaller than set minimal buffer "
+                         "(%u ms), seems like a configuration error",
+                         mFrameCount * 1000 / mSampleRate, kMinNormalSinkBufferSizeMs);
+            } else {
+                initFastMixer = mFrameCount < mNormalFrameCount;
+            }
             break;
         }
         ALOGW_IF(initFastMixer == false && mFrameCount < mNormalFrameCount,
