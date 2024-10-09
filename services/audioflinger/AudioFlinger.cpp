@@ -1009,14 +1009,14 @@ status_t AudioFlinger::dump(int fd, const Vector<String16>& args)
     return NO_ERROR;
 }
 
-sp<Client> AudioFlinger::registerPid(pid_t pid)
+sp<Client> AudioFlinger::registerClient(pid_t pid, uid_t uid)
 {
     audio_utils::lock_guard _cl(clientMutex());
     // If pid is already in the mClients wp<> map, then use that entry
     // (for which promote() is always != 0), otherwise create a new entry and Client.
     sp<Client> client = mClients.valueFor(pid).promote();
     if (client == 0) {
-        client = sp<Client>::make(sp<IAfClientCallback>::fromExisting(this), pid);
+        client = sp<Client>::make(sp<IAfClientCallback>::fromExisting(this), pid, uid);
         mClients.add(pid, client);
     }
 
@@ -1194,7 +1194,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
             goto Exit;
         }
 
-        client = registerPid(adjAttributionSource.pid);
+        client = registerClient(adjAttributionSource.pid, adjAttributionSource.uid);
 
         IAfPlaybackThread* effectThread = nullptr;
         sp<IAfEffectChain> effectChain = nullptr;
@@ -2489,7 +2489,7 @@ status_t AudioFlinger::createRecord(const media::CreateRecordRequest& _input,
     output.selectedDeviceId = input.selectedDeviceId;
     output.flags = input.flags;
 
-    client = registerPid(VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(adjAttributionSource.pid)));
+    client = registerClient(adjAttributionSource.pid, adjAttributionSource.uid);
 
     // Not a conventional loop, but a retry loop for at most two iterations total.
     // Try first maybe with FAST flag then try again without FAST flag if that fails.
@@ -4412,7 +4412,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
         audio_utils::lock_guard _l(mutex());
 
         if (sessionId == AUDIO_SESSION_DEVICE) {
-            sp<Client> client = registerPid(currentPid);
+            sp<Client> client = registerClient(currentPid, adjAttributionSource.uid);
             ALOGV("%s device type %#x address %s", __func__, device.mType, device.getAddress());
             handle = mDeviceEffectManager->createEffect_l(
                     &descOut, device, client, effectClient, mPatchPanel->patches_l(),
@@ -4474,7 +4474,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
                     goto Exit;
                 }
                 ALOGV("%s() got io %d for effect %s", __func__, io, descOut.name);
-                sp<Client> client = registerPid(currentPid);
+                sp<Client> client = registerClient(currentPid, adjAttributionSource.uid);
                 bool pinned = !audio_is_global_session(sessionId) && isSessionAcquired_l(sessionId);
                 handle = createOrphanEffect_l(client, effectClient, priority, sessionId,
                                               &descOut, &enabledOut, &lStatus, pinned,
@@ -4536,7 +4536,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
             }
         }
 
-        sp<Client> client = registerPid(currentPid);
+        sp<Client> client = registerClient(currentPid, adjAttributionSource.uid);
 
         // create effect on selected output thread
         bool pinned = !audio_is_global_session(sessionId) && isSessionAcquired_l(sessionId);

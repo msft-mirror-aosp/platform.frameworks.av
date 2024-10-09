@@ -295,7 +295,7 @@ public:
 
     static constexpr std::string_view getLogHeader() {
         using namespace std::literals;
-        return "Type     Id Active Client Session Port Id S  Flags "
+        return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
                         "  Format Chn mask  SRate "
                         "ST Usg CT "
                         " G db  L dB  R dB  VS dB  PortVol dB "
@@ -480,7 +480,8 @@ public:
 
     static constexpr std::string_view getLogHeader() {
         using namespace std::literals;
-        return "Client Session Port Id   Format Chn mask  SRate Flags Usg/Src PortVol dB\n"sv;
+        return "Client(pid/uid) Session Port Id"
+                "   Format Chn mask  SRate Flags Usg/Src PortVol dB\n"sv;
     };
 
     // protected by MMapThread::mLock
@@ -528,7 +529,7 @@ public:
 
     static constexpr std::string_view getLogHeader() {
         using namespace std::literals;
-        return "Active     Id Client Session Port Id  S  Flags  "
+        return "Active     Id Client(pid/uid) Session Port Id  S  Flags  "
                         " Format Chn mask  SRate Source  "
                         " Server FrmCnt FrmRdy Sil   Latency\n"sv;
     }

@@ -728,7 +728,8 @@ private:
                 // Audio data transfer is directly handled by the client creating the MMAP stream
     DefaultKeyedVector<audio_io_handle_t, sp<IAfMmapThread>> mMmapThreads GUARDED_BY(mutex());
 
-    sp<Client> registerPid(pid_t pid) EXCLUDES_AudioFlinger_ClientMutex; // always returns non-0
+    // always returns non-null
+    sp<Client> registerClient(pid_t pid, uid_t uid) EXCLUDES_AudioFlinger_ClientMutex;
 
     sp<IAfEffectHandle> createOrphanEffect_l(const sp<Client>& client,
                                           const sp<media::IEffectClient>& effectClient,
