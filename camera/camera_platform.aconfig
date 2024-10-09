@@ -178,3 +178,11 @@ flag {
     description: "Pass the full AttributionSource chain to PermissionChecker"
     bug: "190657833"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "mirror_mode_shared_surfaces"
+    is_exported: true
+    description: "Support setting and getting mirror mode for shared surfaces"
+    bug: "298899993"
+}

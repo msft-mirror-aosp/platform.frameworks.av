@@ -50,6 +50,7 @@
 #include <utils/Trace.h>
 #include <utils/Timers.h>
 #include <cutils/properties.h>
+#include <camera/CameraUtils.h>
 #include <camera/StringUtils.h>
 
 #include <android-base/properties.h>
@@ -1046,13 +1047,13 @@ status_t Camera3Device::createStream(sp<Surface> consumer,
         return BAD_VALUE;
     }
 
-    std::vector<sp<Surface>> consumers;
-    consumers.push_back(consumer);
+    std::vector<SurfaceHolder> consumers;
+    consumers.push_back(SurfaceHolder{consumer, mirrorMode});
 
     return createStream(consumers, /*hasDeferredConsumer*/ false, width, height,
             format, dataSpace, rotation, id, physicalCameraId, sensorPixelModesUsed, surfaceIds,
             streamSetId, isShared, isMultiResolution, consumerUsage, dynamicRangeProfile,
-            streamUseCase, timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
+            streamUseCase, timestampBase, colorSpace, useReadoutTimestamp);
 }
 
 static bool isRawFormat(int format) {
@@ -1067,14 +1068,14 @@ static bool isRawFormat(int format) {
     }
 }
 
-status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
+status_t Camera3Device::createStream(const std::vector<SurfaceHolder>& consumers,
         bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
         android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
         const std::string& physicalCameraId,
         const std::unordered_set<int32_t> &sensorPixelModesUsed,
         std::vector<int> *surfaceIds, int streamSetId, bool isShared, bool isMultiResolution,
         uint64_t consumerUsage, int64_t dynamicRangeProfile, int64_t streamUseCase,
-        int timestampBase, int mirrorMode, int32_t colorSpace, bool useReadoutTimestamp) {
+        int timestampBase, int32_t colorSpace, bool useReadoutTimestamp) {
     ATRACE_CALL();
 
     Mutex::Autolock il(mInterfaceLock);
@@ -1083,10 +1084,10 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
     ALOGV("Camera %s: Creating new stream %d: %d x %d, format %d, dataspace %d rotation %d"
             " consumer usage %" PRIu64 ", isShared %d, physicalCameraId %s, isMultiResolution %d"
             " dynamicRangeProfile 0x%" PRIx64 ", streamUseCase %" PRId64 ", timestampBase %d,"
-            " mirrorMode %d, colorSpace %d, useReadoutTimestamp %d",
+            " colorSpace %d, useReadoutTimestamp %d",
             mId.c_str(), mNextStreamId, width, height, format, dataSpace, rotation,
             consumerUsage, isShared, physicalCameraId.c_str(), isMultiResolution,
-            dynamicRangeProfile, streamUseCase, timestampBase, mirrorMode, colorSpace,
+            dynamicRangeProfile, streamUseCase, timestampBase, colorSpace,
             useReadoutTimestamp);
 
     status_t res;
@@ -1155,11 +1156,11 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
                 return BAD_VALUE;
             }
         }
-        newStream = new Camera3OutputStream(mNextStreamId, consumers[0],
+        newStream = new Camera3OutputStream(mNextStreamId, consumers[0].mSurface,
                 width, height, blobBufferSize, format, dataSpace, rotation,
                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
+                timestampBase, consumers[0].mMirrorMode, colorSpace, useReadoutTimestamp);
     } else if (format == HAL_PIXEL_FORMAT_RAW_OPAQUE) {
         bool maxResolution =
                 sensorPixelModesUsed.find(ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION) !=
@@ -1170,40 +1171,45 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
             SET_ERR_L("Invalid RAW opaque buffer size %zd", rawOpaqueBufferSize);
             return BAD_VALUE;
         }
-        newStream = new Camera3OutputStream(mNextStreamId, consumers[0],
+        newStream = new Camera3OutputStream(mNextStreamId, consumers[0].mSurface,
                 width, height, rawOpaqueBufferSize, format, dataSpace, rotation,
                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
+                timestampBase, consumers[0].mMirrorMode, colorSpace, useReadoutTimestamp);
     } else if (isShared) {
         newStream = new Camera3SharedOutputStream(mNextStreamId, consumers,
                 width, height, format, consumerUsage, dataSpace, rotation,
                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
                 mUseHalBufManager, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
+                timestampBase, colorSpace, useReadoutTimestamp);
     } else if (consumers.size() == 0 && hasDeferredConsumer) {
         newStream = new Camera3OutputStream(mNextStreamId,
                 width, height, format, consumerUsage, dataSpace, rotation,
                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
+                timestampBase, colorSpace, useReadoutTimestamp);
     } else {
-        newStream = new Camera3OutputStream(mNextStreamId, consumers[0],
+        newStream = new Camera3OutputStream(mNextStreamId, consumers[0].mSurface,
                 width, height, format, dataSpace, rotation,
                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
+                timestampBase, consumers[0].mMirrorMode, colorSpace, useReadoutTimestamp);
     }
 
     size_t consumerCount = consumers.size();
     for (size_t i = 0; i < consumerCount; i++) {
-        int id = newStream->getSurfaceId(consumers[i]);
+        int id = newStream->getSurfaceId(consumers[i].mSurface);
         if (id < 0) {
             SET_ERR_L("Invalid surface id");
             return BAD_VALUE;
         }
         if (surfaceIds != nullptr) {
             surfaceIds->push_back(id);
+        }
+
+        res = deriveAndSetTransformLocked(*newStream, consumers[i].mMirrorMode, id);
+        if (res < 0) {
+            return res;
         }
     }
 
@@ -2038,7 +2044,7 @@ void Camera3Device::notifyStatus(bool idle) {
 }
 
 status_t Camera3Device::setConsumerSurfaces(int streamId,
-        const std::vector<sp<Surface>>& consumers, std::vector<int> *surfaceIds) {
+        const std::vector<SurfaceHolder>& consumers, std::vector<int> *surfaceIds) {
     ATRACE_CALL();
     ALOGV("%s: Camera %s: set consumer surface for stream %d",
             __FUNCTION__, mId.c_str(), streamId);
@@ -2070,12 +2076,17 @@ status_t Camera3Device::setConsumerSurfaces(int streamId,
     }
 
     for (auto &consumer : consumers) {
-        int id = stream->getSurfaceId(consumer);
+        int id = stream->getSurfaceId(consumer.mSurface);
         if (id < 0) {
             CLOGE("Invalid surface id!");
             return BAD_VALUE;
         }
         surfaceIds->push_back(id);
+
+        res = deriveAndSetTransformLocked(*stream, consumer.mMirrorMode, id);
+        if (res != OK) {
+            return res;
+        }
     }
 
     if (isDeferred) {
@@ -2101,7 +2112,7 @@ status_t Camera3Device::setConsumerSurfaces(int streamId,
     return OK;
 }
 
-status_t Camera3Device::updateStream(int streamId, const std::vector<sp<Surface>> &newSurfaces,
+status_t Camera3Device::updateStream(int streamId, const std::vector<SurfaceHolder> &newSurfaces,
         const std::vector<OutputStreamInfo> &outputInfo,
         const std::vector<size_t> &removedSurfaceIds, KeyedVector<sp<Surface>, size_t> *outputMap) {
     Mutex::Autolock il(mInterfaceLock);
@@ -2129,6 +2140,14 @@ status_t Camera3Device::updateStream(int streamId, const std::vector<sp<Surface>
                     __FUNCTION__);
         }
         return res;
+    }
+
+    for (size_t i = 0; i < outputMap->size(); i++) {
+        res = deriveAndSetTransformLocked(
+                *stream, newSurfaces[i].mMirrorMode, outputMap->valueAt(i));
+        if (res != OK) {
+            return res;
+        }
     }
 
     return res;
@@ -5784,6 +5803,17 @@ void Camera3Device::overrideStreamUseCaseLocked() {
         mOutputStreams[outputStreamsIndices[i]]->setStreamUseCase(
                 mStreamUseCaseOverrides[std::min(i, overlapSize-1)]);
     }
+}
+
+status_t Camera3Device::deriveAndSetTransformLocked(
+        Camera3OutputStreamInterface& stream, int mirrorMode, int surfaceId) {
+    int transform = -1;
+    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode, &transform);
+    if (res != OK) {
+        return res;
+    }
+    stream.setTransform(transform, false /*mayChangeMirror*/, surfaceId);
+    return OK;
 }
 
 }; // namespace android
