@@ -86,6 +86,7 @@ private:
     void onTimestamp(const ExtendedTimestamp &timestamp) final;
 
     const pid_t mPid;
+    const uid_t mUid;
     bool  mSilenced;            // protected by MMapThread::mLock
     bool  mSilencedNotified;    // protected by MMapThread::mLock
 

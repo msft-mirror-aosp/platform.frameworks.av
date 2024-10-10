@@ -480,10 +480,21 @@ typedef enum acamera_metadata_tag {
      * camera device auto-exposure routine for the overridden
      * fields for a given capture will be available in its
      * CaptureResult.</p>
+     * <p>When ACAMERA_CONTROL_AE_MODE is AE_MODE_ON and if the device
+     * supports manual flash strength control, i.e.,
+     * if ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL and
+     * ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL are greater than 1, then
+     * the auto-exposure (AE) precapture metering sequence should be
+     * triggered to avoid the image being incorrectly exposed at
+     * different ACAMERA_FLASH_STRENGTH_LEVEL.</p>
      *
+     * @see ACAMERA_CONTROL_AE_MODE
      * @see ACAMERA_CONTROL_MODE
      * @see ACAMERA_FLASH_INFO_AVAILABLE
      * @see ACAMERA_FLASH_MODE
+     * @see ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL
+     * @see ACAMERA_FLASH_STRENGTH_LEVEL
+     * @see ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL
      * @see ACAMERA_SENSOR_EXPOSURE_TIME
      * @see ACAMERA_SENSOR_FRAME_DURATION
      * @see ACAMERA_SENSOR_SENSITIVITY
@@ -8233,7 +8244,17 @@ typedef enum acamera_metadata_enum_acamera_control_ae_mode {
      * ACAMERA_SENSOR_FRAME_DURATION are ignored. The
      * application has control over the various
      * ACAMERA_FLASH_* fields.</p>
+     * <p>If the device supports manual flash strength control, i.e.,
+     * if ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL and
+     * ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL are greater than 1, then
+     * the auto-exposure (AE) precapture metering sequence should be
+     * triggered for the configured flash mode and strength to avoid
+     * the image being incorrectly exposed at different
+     * ACAMERA_FLASH_STRENGTH_LEVEL.</p>
      *
+     * @see ACAMERA_FLASH_SINGLE_STRENGTH_MAX_LEVEL
+     * @see ACAMERA_FLASH_STRENGTH_LEVEL
+     * @see ACAMERA_FLASH_TORCH_STRENGTH_MAX_LEVEL
      * @see ACAMERA_SENSOR_EXPOSURE_TIME
      * @see ACAMERA_SENSOR_FRAME_DURATION
      * @see ACAMERA_SENSOR_SENSITIVITY
