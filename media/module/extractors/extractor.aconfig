@@ -1,0 +1,13 @@
+# Media Extractor flags.
+#
+# !!! Please add flags in alphabetical order. !!!
+package: "com.android.media.extractor.flags"
+container: "com.android.media"
+
+flag {
+    name: "extractor_sniff_midi_optimizations"
+    is_exported: true
+    namespace: "media_extractor"
+    description: "Enable SniffMidi optimizations."
+    bug: "359920208"
+}
