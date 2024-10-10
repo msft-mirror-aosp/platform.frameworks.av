@@ -1000,13 +1000,8 @@ void Track::destroy()
 
 void Track::appendDumpHeader(String8& result) const
 {
-    result.appendFormat("Type     Id Active Client Session Port Id S  Flags "
-                        "  Format Chn mask  SRate "
-                        "ST Usg CT "
-                        " G db  L dB  R dB  VS dB  PortVol dB "
-                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
-                        "%s\n",
-                        isServerLatencySupported() ? "   Latency" : "");
+    const auto res = IAfTrack::getLogHeader();
+    result.append(res.data(), res.size());
 }
 
 void Track::appendDump(String8& result, bool active) const
@@ -2989,10 +2984,8 @@ void RecordTrack::invalidate()
 
 void RecordTrack::appendDumpHeader(String8& result) const
 {
-    result.appendFormat("Active     Id Client Session Port Id  S  Flags  "
-                        " Format Chn mask  SRate Source  "
-                        " Server FrmCnt FrmRdy Sil%s\n",
-                        isServerLatencySupported() ? "   Latency" : "");
+    const auto res = IAfRecordTrack::getLogHeader();
+    result.append(res.data(), res.size());
 }
 
 void RecordTrack::appendDump(String8& result, bool active) const
@@ -3648,8 +3641,8 @@ void MmapTrack::processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_s
 
 void MmapTrack::appendDumpHeader(String8& result) const
 {
-    result.appendFormat("Client Session Port Id  Format Chn mask  SRate Flags %s  %s\n",
-                        isOut() ? "Usg CT": "Source", isOut() ? "PortVol dB" : "");
+    const auto res = IAfMmapTrack::getLogHeader();
+    result.append(res.data(), res.size());
 }
 
 void MmapTrack::appendDump(String8& result, bool active __unused) const
@@ -3663,10 +3656,10 @@ void MmapTrack::appendDump(String8& result, bool active __unused) const
             mSampleRate,
             mAttr.flags);
     if (isOut()) {
-        result.appendFormat("%3x %2x", mAttr.usage, mAttr.content_type);
+        result.appendFormat("%4x %2x", mAttr.usage, mAttr.content_type);
         result.appendFormat("%11.2g", 20.0 * log10(mVolume));
     } else {
-        result.appendFormat("%6x", mAttr.source);
+        result.appendFormat("%7x", mAttr.source);
     }
     result.append("\n");
 }

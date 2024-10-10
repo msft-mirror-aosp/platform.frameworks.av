@@ -293,6 +293,16 @@ public:
             bool isBitPerfect = false,
             float volume = 0.0f);
 
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Type     Id Active Client Session Port Id S  Flags "
+                        "  Format Chn mask  SRate "
+                        "ST Usg CT "
+                        " G db  L dB  R dB  VS dB  PortVol dB "
+                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
+                        "   Latency\n"sv;
+    }
+
     virtual void pause() = 0;
     virtual void flush() = 0;
     virtual audio_stream_type_t streamType() const = 0;
@@ -468,6 +478,11 @@ public:
             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
             float volume = 0.0f);
 
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Client Session Port Id   Format Chn mask  SRate Flags Usg/Src PortVol dB\n"sv;
+    };
+
     // protected by MMapThread::mLock
     virtual void setSilenced_l(bool silenced) = 0;
     // protected by MMapThread::mLock
@@ -510,6 +525,13 @@ public:
             track_type type,
             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
             int32_t startFrames = -1);
+
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Active     Id Client Session Port Id  S  Flags  "
+                        " Format Chn mask  SRate Source  "
+                        " Server FrmCnt FrmRdy Sil   Latency\n"sv;
+    }
 
     // clear the buffer overflow flag
     virtual void clearOverflow() = 0;
