@@ -28,6 +28,10 @@ cc_defaults {
         "liblog",
     ],
 
+    static_libs: [
+        "libstagefright_metadatautils",
+    ],
+
     // extractors are expected to run on Q(29)
     min_sdk_version: "29",
     apex_available: [
@@ -56,6 +60,7 @@ cc_defaults {
                 "libutils",
                 "libmediandk_format",
                 "libmedia_ndkformatpriv",
+                "libstagefright_metadatautils",
             ],
         },
     },
