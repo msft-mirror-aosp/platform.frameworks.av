@@ -576,6 +576,9 @@ public:
         return mThreadloopExecutor;
     }
 
+    // Used to print the header for the local log on a particular thread type
+    virtual std::string getLocalLogHeader() const { return {}; };
+
 protected:
 
                 // entry describing an effect being suspended in mSuspendedSessions keyed vector
@@ -1230,6 +1233,9 @@ public:
             override EXCLUDES_ThreadBase_Mutex {
         // Do nothing. It is only used for bit perfect thread
     }
+
+    std::string getLocalLogHeader() const override;
+
 protected:
     // updated by readOutputParameters_l()
     size_t                          mNormalFrameCount;  // normal mixer and effects
@@ -2134,6 +2140,8 @@ public:
                             return !(mInput == nullptr || mInput->stream == nullptr);
                         }
 
+    std::string getLocalLogHeader() const override;
+
 protected:
     void dumpInternals_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
     void dumpTracks_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
@@ -2324,6 +2332,8 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
             EXCLUDES_ThreadBase_Mutex {}
 
     bool isStreamInitialized() const override { return false; }
+
+    std::string getLocalLogHeader() const override;
 
     void setClientSilencedState_l(audio_port_handle_t portId, bool silenced) REQUIRES(mutex()) {
                                 mClientSilencedStates[portId] = silenced;

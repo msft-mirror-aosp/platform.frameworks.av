@@ -1058,6 +1058,8 @@ void ThreadBase::dump(int fd, const Vector<String16>& args)
     }
 
     dprintf(fd, "  Local log:\n");
+    const auto logHeader = this->getLocalLogHeader();
+    write(fd, logHeader.data(), logHeader.length());
     mLocalLog.dump(fd, "   " /* prefix */, 40 /* lines */);
 
     // --all does the statistics
@@ -5120,6 +5122,12 @@ void PlaybackThread::toAudioPortConfig(struct audio_port_config* config)
     }
 }
 
+std::string PlaybackThread::getLocalLogHeader() const {
+    using namespace std::literals;
+    static constexpr auto indent = "                             "
+                                   "                            "sv;
+    return std::string{indent}.append(IAfTrack::getLogHeader());
+}
 // ----------------------------------------------------------------------------
 
 /* static */
@@ -10252,6 +10260,13 @@ void RecordThread::toAudioPortConfig(struct audio_port_config* config)
     }
 }
 
+std::string RecordThread::getLocalLogHeader() const {
+    using namespace std::literals;
+    static constexpr auto indent = "                             "
+                                   "                            "sv;
+    return std::string{indent}.append(IAfRecordTrack::getLogHeader());
+}
+
 // ----------------------------------------------------------------------------
 //      Mmap
 // ----------------------------------------------------------------------------
@@ -11130,6 +11145,13 @@ void MmapThread::dumpTracks_l(int fd, const Vector<String16>& /* args */)
         dprintf(fd, "\n");
     }
     write(fd, result.c_str(), result.size());
+}
+
+std::string MmapThread::getLocalLogHeader() const {
+    using namespace std::literals;
+    static constexpr auto indent = "                             "
+                                   "                            "sv;
+    return std::string{indent}.append(IAfMmapTrack::getLogHeader());
 }
 
 /* static */
