@@ -55,32 +55,23 @@ namespace flags = com::android::internal::camera::flags;
 
 // Interface used by CameraService
 
-Camera2Client::Camera2Client(const sp<CameraService>& cameraService,
-        const sp<hardware::ICameraClient>& cameraClient,
+Camera2Client::Camera2Client(
+        const sp<CameraService>& cameraService, const sp<hardware::ICameraClient>& cameraClient,
         std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-        const std::string& clientPackageName,
-        const std::optional<std::string>& clientFeatureId,
-        const std::string& cameraDeviceId,
-        int api1CameraId,
-        int cameraFacing,
-        int sensorOrientation,
-        int clientPid,
-        uid_t clientUid,
-        int servicePid,
-        bool overrideForPerfClass,
-        int rotationOverride,
-        bool forceSlowJpegMode):
-        Camera2ClientBase(cameraService, cameraClient, cameraServiceProxyWrapper,
-                attributionAndPermissionUtils, clientPackageName,
-                false/*systemNativeClient - since no ndk for api1*/, clientFeatureId,
-                cameraDeviceId, api1CameraId, cameraFacing, sensorOrientation, clientPid,
-                clientUid, servicePid, overrideForPerfClass, rotationOverride,
-                /*legacyClient*/ true),
-        mParameters(api1CameraId, cameraFacing),
-        mLatestRequestIds(kMaxRequestIds),
-        mLatestFailedRequestIds(kMaxRequestIds)
-{
+        const AttributionSourceState& clientAttribution, int callingPid,
+        const std::string& cameraDeviceId, int api1CameraId, int cameraFacing,
+        int sensorOrientation, int servicePid, bool overrideForPerfClass, int rotationOverride,
+        bool forceSlowJpegMode)
+    : Camera2ClientBase(cameraService, cameraClient, cameraServiceProxyWrapper,
+                        attributionAndPermissionUtils, clientAttribution, callingPid,
+                        false /*systemNativeClient - since no ndk for api1*/, cameraDeviceId,
+                        api1CameraId, cameraFacing, sensorOrientation, servicePid,
+                        overrideForPerfClass, rotationOverride,
+                        /*legacyClient*/ true),
+      mParameters(api1CameraId, cameraFacing),
+      mLatestRequestIds(kMaxRequestIds),
+      mLatestFailedRequestIds(kMaxRequestIds) {
     ATRACE_CALL();
 
     mRotateAndCropMode = ANDROID_SCALER_ROTATE_AND_CROP_NONE;
@@ -218,7 +209,7 @@ status_t Camera2Client::dumpClient(int fd, const Vector<String16>& args) {
     result << fmt::sprintf("Client2[%d] (%p) PID: %d, dump:\n", mCameraId,
             (getRemoteCallback() != NULL ?
                     (void *) (IInterface::asBinder(getRemoteCallback()).get()) : NULL),
-            mClientPid);
+            mCallingPid);
     result << "  State: ";
 #define CASE_APPEND_ENUM(x) case x: result << #x "\n"; break;
 
@@ -449,7 +440,7 @@ binder::Status Camera2Client::disconnect() {
     binder::Status res = binder::Status::ok();
     // Allow both client and the cameraserver to disconnect at all times
     int callingPid = getCallingPid();
-    if (callingPid != mClientPid && callingPid != mServicePid) return res;
+    if (callingPid != mCallingPid && callingPid != mServicePid) return res;
 
     if (mDevice == 0) return res;
 
@@ -526,14 +517,14 @@ status_t Camera2Client::connect(const sp<hardware::ICameraClient>& client) {
     ALOGV("%s: E", __FUNCTION__);
     Mutex::Autolock icl(mBinderSerializationLock);
 
-    if (mClientPid != 0 && getCallingPid() != mClientPid) {
+    if (mCallingPid != 0 && getCallingPid() != mCallingPid) {
         ALOGE("%s: Camera %d: Connection attempt from pid %d; "
                 "current locked to pid %d", __FUNCTION__,
-                mCameraId, getCallingPid(), mClientPid);
+                mCameraId, getCallingPid(), mCallingPid);
         return BAD_VALUE;
     }
 
-    mClientPid = getCallingPid();
+    mCallingPid = getCallingPid();
 
     mRemoteCallback = client;
     mSharedCameraCallbacks = client;
@@ -546,16 +537,16 @@ status_t Camera2Client::lock() {
     ALOGV("%s: E", __FUNCTION__);
     Mutex::Autolock icl(mBinderSerializationLock);
     ALOGV("%s: Camera %d: Lock call from pid %d; current client pid %d",
-            __FUNCTION__, mCameraId, getCallingPid(), mClientPid);
+            __FUNCTION__, mCameraId, getCallingPid(), mCallingPid);
 
-    if (mClientPid == 0) {
-        mClientPid = getCallingPid();
+    if (mCallingPid == 0) {
+        mCallingPid = getCallingPid();
         return OK;
     }
 
-    if (mClientPid != getCallingPid()) {
+    if (mCallingPid != getCallingPid()) {
         ALOGE("%s: Camera %d: Lock call from pid %d; currently locked to pid %d",
-                __FUNCTION__, mCameraId, getCallingPid(), mClientPid);
+                __FUNCTION__, mCameraId, getCallingPid(), mCallingPid);
         return EBUSY;
     }
 
@@ -567,23 +558,23 @@ status_t Camera2Client::unlock() {
     ALOGV("%s: E", __FUNCTION__);
     Mutex::Autolock icl(mBinderSerializationLock);
     ALOGV("%s: Camera %d: Unlock call from pid %d; current client pid %d",
-            __FUNCTION__, mCameraId, getCallingPid(), mClientPid);
+            __FUNCTION__, mCameraId, getCallingPid(), mCallingPid);
 
-    if (mClientPid == getCallingPid()) {
+    if (mCallingPid == getCallingPid()) {
         SharedParameters::Lock l(mParameters);
         if (l.mParameters.state == Parameters::RECORD ||
                 l.mParameters.state == Parameters::VIDEO_SNAPSHOT) {
             ALOGD("Not allowed to unlock camera during recording.");
             return INVALID_OPERATION;
         }
-        mClientPid = 0;
+        mCallingPid = 0;
         mRemoteCallback.clear();
         mSharedCameraCallbacks.clear();
         return OK;
     }
 
     ALOGE("%s: Camera %d: Unlock call from pid %d; currently locked to pid %d",
-            __FUNCTION__, mCameraId, getCallingPid(), mClientPid);
+            __FUNCTION__, mCameraId, getCallingPid(), mCallingPid);
     return EBUSY;
 }
 
