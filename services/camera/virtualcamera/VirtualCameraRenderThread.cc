@@ -557,8 +557,9 @@ std::chrono::nanoseconds VirtualCameraRenderThread::throttleRendering(
 std::chrono::nanoseconds VirtualCameraRenderThread::getSurfaceTimestamp(
     std::chrono::nanoseconds timeSinceLastFrame) {
   std::chrono::nanoseconds surfaceTimestamp = mEglSurfaceTexture->getTimestamp();
-  if (surfaceTimestamp.count() < 0) {
-    uint64_t lastSurfaceTimestamp = mLastSurfaceTimestampNanoseconds.load();
+  uint64_t lastSurfaceTimestamp = mLastSurfaceTimestampNanoseconds.load();
+  if (surfaceTimestamp.count() < 0 ||
+      surfaceTimestamp.count() == lastSurfaceTimestamp) {
     if (lastSurfaceTimestamp > 0) {
       // The timestamps were provided by the producer but we are
       // repeating the last frame, so we increase the previous timestamp by
