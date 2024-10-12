@@ -73,3 +73,21 @@ cc_defaults {
         ],
     },
 }
+
+aconfig_declarations {
+    name: "android.media.extractor.flags-aconfig",
+    package: "com.android.media.extractor.flags",
+    container: "com.android.media",
+    srcs: ["extractor.aconfig"],
+}
+
+cc_aconfig_library {
+    name: "android.media.extractor.flags-aconfig-cc",
+    aconfig_declarations: "android.media.extractor.flags-aconfig",
+    host_supported: true,
+    min_sdk_version: "29",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.media",
+    ],
+}

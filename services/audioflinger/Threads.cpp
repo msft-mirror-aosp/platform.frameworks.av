@@ -1060,7 +1060,7 @@ void ThreadBase::dump(int fd, const Vector<String16>& args)
     dprintf(fd, "  Local log:\n");
     const auto logHeader = this->getLocalLogHeader();
     write(fd, logHeader.data(), logHeader.length());
-    mLocalLog.dump(fd, "   " /* prefix */, 40 /* lines */);
+    mLocalLog.dump(fd, "   " /* prefix */);
 
     // --all does the statistics
     bool dumpAll = false;
