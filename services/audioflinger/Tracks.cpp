@@ -1000,13 +1000,8 @@ void Track::destroy()
 
 void Track::appendDumpHeader(String8& result) const
 {
-    result.appendFormat("Type     Id Active Client Session Port Id S  Flags "
-                        "  Format Chn mask  SRate "
-                        "ST Usg CT "
-                        " G db  L dB  R dB  VS dB  PortVol dB "
-                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
-                        "%s\n",
-                        isServerLatencySupported() ? "   Latency" : "");
+    const auto res = IAfTrack::getLogHeader();
+    result.append(res.data(), res.size());
 }
 
 void Track::appendDump(String8& result, bool active) const
@@ -1086,13 +1081,14 @@ void Track::appendDump(String8& result, bool active) const
             ? 'r' /* buffer reduced */: bufferSizeInFrames > mFrameCount
                     ? 'e' /* error */ : ' ' /* identical */;
 
-    result.appendFormat("%7s %6u %7u %7u %2s 0x%03X "
+    result.appendFormat("%7s %7u/%7u %7u %7u %2s 0x%03X "
                         "%08X %08X %6u "
                         "%2u %3x %2x "
                         "%5.2g %5.2g %5.2g %5.2g%c %11.2g "
                         "%08X %6zu%c %6zu %c %9u%c %7u %10s %12s",
             active ? "yes" : "no",
-            (mClient == 0) ? getpid() : mClient->pid(),
+            mClient ? mClient->pid() : getpid() ,
+            mClient ? mClient->uid() : getuid(),
             mSessionId,
             mPortId,
             getTrackStateAsCodedString(),
@@ -2989,21 +2985,20 @@ void RecordTrack::invalidate()
 
 void RecordTrack::appendDumpHeader(String8& result) const
 {
-    result.appendFormat("Active     Id Client Session Port Id  S  Flags  "
-                        " Format Chn mask  SRate Source  "
-                        " Server FrmCnt FrmRdy Sil%s\n",
-                        isServerLatencySupported() ? "   Latency" : "");
+    const auto res = IAfRecordTrack::getLogHeader();
+    result.append(res.data(), res.size());
 }
 
 void RecordTrack::appendDump(String8& result, bool active) const
 {
-    result.appendFormat("%c%5s %6d %6u %7u %7u  %2s 0x%03X "
+    result.appendFormat("%c%5s %6d %7u/%7u %7u %7u  %2s 0x%03X "
             "%08X %08X %6u %6X "
             "%08X %6zu %6zu %3c",
             isFastTrack() ? 'F' : ' ',
             active ? "yes" : "no",
             mId,
-            (mClient == 0) ? getpid() : mClient->pid(),
+            mClient ? mClient->pid() : getpid(),
+            mClient ? mClient->uid() : getuid(),
             mSessionId,
             mPortId,
             getTrackStateAsCodedString(),
@@ -3561,6 +3556,7 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
                   TYPE_DEFAULT, portId,
                   std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_MMAP) + std::to_string(portId)),
         mPid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.pid))),
+        mUid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid))),
             mSilenced(false), mSilencedNotified(false), mVolume(volume)
 {
     // Once this item is logged by the server, the client can add properties.
@@ -3648,14 +3644,15 @@ void MmapTrack::processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_s
 
 void MmapTrack::appendDumpHeader(String8& result) const
 {
-    result.appendFormat("Client Session Port Id  Format Chn mask  SRate Flags %s  %s\n",
-                        isOut() ? "Usg CT": "Source", isOut() ? "PortVol dB" : "");
+    const auto res = IAfMmapTrack::getLogHeader();
+    result.append(res.data(), res.size());
 }
 
 void MmapTrack::appendDump(String8& result, bool active __unused) const
 {
-    result.appendFormat("%6u %7u %7u %08X %08X %6u 0x%03X ",
+    result.appendFormat("%7u/%7u %7u %7u %08X %08X %6u 0x%03X ",
             mPid,
+            mUid,
             mSessionId,
             mPortId,
             mFormat,
@@ -3663,10 +3660,10 @@ void MmapTrack::appendDump(String8& result, bool active __unused) const
             mSampleRate,
             mAttr.flags);
     if (isOut()) {
-        result.appendFormat("%3x %2x", mAttr.usage, mAttr.content_type);
+        result.appendFormat("%4x %2x", mAttr.usage, mAttr.content_type);
         result.appendFormat("%11.2g", 20.0 * log10(mVolume));
     } else {
-        result.appendFormat("%6x", mAttr.source);
+        result.appendFormat("%7x", mAttr.source);
     }
     result.append("\n");
 }
