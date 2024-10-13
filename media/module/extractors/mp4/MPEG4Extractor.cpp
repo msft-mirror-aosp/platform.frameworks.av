@@ -51,6 +51,7 @@
 #include <media/stagefright/MediaBufferGroup.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MetaDataBase.h>
+#include <media/stagefright/MetaDataUtils.h>
 #include <utils/String8.h>
 
 #include <byteswap.h>
@@ -2596,8 +2597,32 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
             *offset += chunk_size;
             break;
         }
-
         case FOURCC("vpcC"):
+        {
+            if (mLastTrack == NULL) {
+                return ERROR_MALFORMED;
+            }
+
+            auto buffer = heapbuffer<uint8_t>(chunk_data_size);
+
+            if (buffer.get() == NULL) {
+                ALOGE("b/28471206");
+                return NO_MEMORY;
+            }
+
+            if (mDataSource->readAt(data_offset, buffer.get(), chunk_data_size) < chunk_data_size) {
+                return ERROR_IO;
+            }
+
+            if (!MakeVP9CodecPrivateFromVpcC(mLastTrack->meta, buffer.get(), chunk_data_size)) {
+                ALOGE("Failed to create VP9 CodecPrivate from vpcC.");
+                return ERROR_MALFORMED;
+            }
+
+            *offset += chunk_size;
+            break;
+        }
+
         case FOURCC("av1C"):
         {
             auto buffer = heapbuffer<uint8_t>(chunk_data_size);
