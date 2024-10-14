@@ -7,6 +7,7 @@ container: "com.android.media"
 flag {
     name: "extractor_sniff_midi_optimizations"
     is_exported: true
+    is_fixed_read_only: true
     namespace: "media_extractor"
     description: "Enable SniffMidi optimizations."
     bug: "359920208"
