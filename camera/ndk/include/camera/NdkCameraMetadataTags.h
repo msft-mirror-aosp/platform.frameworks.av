@@ -8182,6 +8182,33 @@ typedef enum acamera_metadata_tag {
     ACAMERA_AUTOMOTIVE_LENS_END,
 
     /**
+     * <p>Indicates when to activate Night Mode Camera Extension for high-quality
+     * still captures in low-light conditions.</p>
+     *
+     * <p>Type: int32 (acamera_metadata_enum_android_extension_night_mode_indicator_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
+     * </ul></p>
+     *
+     * <p>Provides awareness to the application when the current scene can benefit from using a
+     * Night Mode Camera Extension to take a high-quality photo.</p>
+     * <p>Support for this capture result can be queried via
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics.html#getAvailableCaptureResultKeys">CameraCharacteristics#getAvailableCaptureResultKeys</a>.</p>
+     * <p>If the device supports this capability then it will also support
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraExtensionCharacteristics.html#EXTENSION_NIGHT">NIGHT</a>
+     * and will be available in both
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraCaptureSession.html">sessions</a> and
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraExtensionSession.html">sessions</a>.</p>
+     * <p>The value will be {@code UNKNOWN} in the following auto exposure modes: ON_AUTO_FLASH,
+     * ON_ALWAYS_FLASH, ON_AUTO_FLASH_REDEYE, or ON_EXTERNAL_FLASH.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR =                    // int32 (acamera_metadata_enum_android_extension_night_mode_indicator_t)
+            ACAMERA_EXTENSION_START + 2,
+    ACAMERA_EXTENSION_END,
+
+    /**
      * <p>The available Jpeg/R stream
      * configurations that this camera device supports
      * (i.e. format, width, height, output/input stream).</p>
@@ -11847,6 +11874,33 @@ typedef enum acamera_metadata_enum_acamera_automotive_lens_facing {
 
 } acamera_metadata_enum_android_automotive_lens_facing_t;
 
+
+// ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR
+typedef enum acamera_metadata_enum_acamera_extension_night_mode_indicator {
+    /**
+     * <p>The camera can't accurately assess the scene's lighting to determine if a Night Mode
+     * Camera Extension capture would improve the photo. This can happen when the current
+     * camera configuration doesn't support night mode indicator detection, such as when
+     * the auto exposure mode is ON_AUTO_FLASH, ON_ALWAYS_FLASH, ON_AUTO_FLASH_REDEYE, or
+     * ON_EXTERNAL_FLASH.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_UNKNOWN                   = 0,
+
+    /**
+     * <p>The camera has detected lighting conditions that are sufficiently bright. Night
+     * Mode Camera Extensions is available but may not be able to optimize the camera
+     * settings to take a higher quality photo.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_OFF                       = 1,
+
+    /**
+     * <p>The camera has detected low-light conditions. It is recommended to use Night Mode
+     * Camera Extension to optimize the camera settings to take a high-quality photo in
+     * the dark.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_ON                        = 2,
+
+} acamera_metadata_enum_android_extension_night_mode_indicator_t;
 
 
 // ACAMERA_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS

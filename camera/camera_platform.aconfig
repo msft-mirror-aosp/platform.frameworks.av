@@ -211,3 +211,10 @@ flag {
     bug: "359409044"
 }
 
+flag {
+    namespace: "camera_platform"
+    name: "night_mode_indicator"
+    is_exported: true
+    description: "Indicates when to activate Night Mode Camera Extension"
+    bug: "335902696"
+}
