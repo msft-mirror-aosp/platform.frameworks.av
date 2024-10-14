@@ -905,6 +905,26 @@ status_t AudioFlinger::dump(int fd, const Vector<String16>& args)
         // Unknown arg silently ignored
     }
 
+    {
+        std::string res;
+        res.reserve(100);
+        res += "Start begin: ";
+        const auto startTimeStr = audio_utils_time_string_from_ns(mStartTime);
+        res += startTimeStr.time;
+        const auto startFinishedTime = getStartupFinishedTime();
+        if (startFinishedTime != 0) {
+            res += "\nStart end:   ";
+            const auto startEndStr = audio_utils_time_string_from_ns(startFinishedTime);
+            res += startEndStr.time;
+        } else {
+            res += "\nStartup not yet finished!";
+        }
+        const auto nowTimeStr = audio_utils_time_string_from_ns(audio_utils_get_real_time_ns());
+        res += "\nNow:         ";
+        res += nowTimeStr.time;
+        res += "\n";
+        writeStr(fd, res);
+    }
     // get state of hardware lock
     {
         FallibleLockGuard l{hardwareMutex()};

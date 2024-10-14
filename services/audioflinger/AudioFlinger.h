@@ -27,6 +27,7 @@
 #include "IAfTrack.h"
 #include "MelReporter.h"
 #include "PatchCommandThread.h"
+#include "audio_utils/clock.h"
 
 // External classes
 #include <audio_utils/mutex.h>
@@ -64,6 +65,11 @@ public:
     static void instantiate() ANDROID_API;
 
     status_t resetReferencesForTest();
+
+    // Called by main when startup finished -- for logging purposes only
+    void startupFinished() {
+        mStartupFinishedTime.store(audio_utils_get_real_time_ns(), std::memory_order_release);
+    }
 
 private:
 
@@ -419,6 +425,10 @@ private:
             EXCLUDES_AudioFlinger_Mutex;
 
     sp<EffectsFactoryHalInterface> getEffectsFactory();
+
+    int64_t getStartupFinishedTime() {
+        return mStartupFinishedTime.load(std::memory_order_acquire);
+    }
 
 public:
     // TODO(b/292281786): Remove this when Oboeservice can get access to
@@ -803,6 +813,10 @@ private:
 
     // Local interface to AudioPolicyService, late inited, but logically const
     mediautils::atomic_sp<media::IAudioPolicyServiceLocal> mAudioPolicyServiceLocal;
+
+    const int64_t mStartTime = audio_utils_get_real_time_ns();
+    // Late-inited from main()
+    std::atomic<int64_t> mStartupFinishedTime {};
 };
 
 // ----------------------------------------------------------------------------
