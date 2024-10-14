@@ -43,6 +43,7 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
 
     protected final Object mLock = new Object();
     protected MediaCodec mCodec;
+    protected int mExtraFlags = 0;
     protected Surface mSurface = null;
     protected boolean mRender = false;
     protected ArrayList<BufferInfo> mInputBufferInfo;
@@ -88,6 +89,11 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
         mIBufferSend = receiver;
         return true;
     }
+
+    public void setExtraConfigureFlags(int flags) {
+        this.mExtraFlags = flags;
+    }
+
     /**
      * Setup of decoder
      *
@@ -121,7 +127,8 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
         mOutputStream = null;
         mSurface = surface;
         mRender = render;
-        if (useFrameReleaseQueue) {
+        mUseFrameReleaseQueue = useFrameReleaseQueue;
+        if (mUseFrameReleaseQueue) {
             Log.i(TAG, "Using FrameReleaseQueue with frameRate " + frameRate);
             mFrameReleaseQueue = new FrameReleaseQueue(mRender, frameRate);
         }
@@ -252,11 +259,10 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
         if (asyncMode) {
             setCallback(mCodec);
         }
-        int isEncoder = 0;
         if (DEBUG) {
             Log.d(TAG, "Media Format : " + format.toString());
         }
-        mCodec.configure(format, mSurface, null, isEncoder);
+        mCodec.configure(format, mSurface, null, mExtraFlags);
 
         mCodec.start();
         Log.i(TAG, "Codec started async mode ?  " + asyncMode);
