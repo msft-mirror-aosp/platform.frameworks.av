@@ -443,9 +443,29 @@ status_t StreamHalAidl::pause(StreamDescriptor::Reply* reply) {
     if (!mStream) return NO_INIT;
 
     if (const auto state = getState(); isInPlayOrRecordState(state)) {
-        return sendCommand(
-                makeHalCommand<HalCommand::Tag::pause>(), reply,
+        StreamDescriptor::Reply localReply{};
+        StreamDescriptor::Reply* innerReply = reply ?: &localReply;
+        auto status = sendCommand(
+                makeHalCommand<HalCommand::Tag::pause>(), innerReply,
                 true /*safeFromNonWorkerThread*/);  // The workers stops its I/O activity first.
+        if (status == STATUS_INVALID_OPERATION &&
+                !isInPlayOrRecordState(innerReply->state)) {
+            /**
+             * In case of transient states like DRAINING, the HAL may change its
+             * StreamDescriptor::State on its own and may not be in synchronization with client.
+             * Thus, client can send the unexpected command and HAL returns failure. such failure is
+             * natural. The client handles it gracefully.
+             * Example where HAL change its state,
+             * 1) DRAINING -> IDLE (on empty buffer)
+             * 2) DRAINING -> IDLE (on IStreamCallback::onDrainReady)
+             **/
+            AUGMENT_LOG(D,
+                        "HAL failed to handle the 'pause' command, but stream state is in one of"
+                        " the PAUSED kind of states, current state: %s",
+                        toString(state).c_str());
+            return OK;
+        }
+        return status;
     } else {
         AUGMENT_LOG(D, "already stream in one of the PAUSED kind of states, current state: %s",
                 toString(state).c_str());
@@ -473,13 +493,9 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
                 return INVALID_OPERATION;
             }
             return OK;
-        } else if (state == StreamDescriptor::State::PAUSED ||
-                   state == StreamDescriptor::State::TRANSFER_PAUSED ||
-                   state == StreamDescriptor::State::DRAIN_PAUSED) {
+        } else if (isInPausedState(state)) {
             return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
-        } else if (state == StreamDescriptor::State::ACTIVE ||
-                   state == StreamDescriptor::State::TRANSFERRING ||
-                   state == StreamDescriptor::State::DRAINING) {
+        } else if (isInPlayOrRecordState(state)) {
             AUGMENT_LOG(D, "already in stream state: %s", toString(state).c_str());
             return OK;
         } else {
