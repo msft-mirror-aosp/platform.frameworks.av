@@ -891,7 +891,7 @@ protected:
                     bool                mHasChanged = false;
                 };
 
-                SimpleLog mLocalLog;  // locked internally
+                SimpleLog mLocalLog {/* maxLogLines= */ 120};  // locked internally
 
     // mThreadloopExecutor contains deferred functors and object (dtors) to
     // be executed at the end of the processing period, without any
@@ -1020,11 +1020,12 @@ public:
     void setMasterVolume(float value) final;
     void setMasterBalance(float balance) override EXCLUDES_ThreadBase_Mutex;
     void setMasterMute(bool muted) final;
-    void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
+    void setStreamVolume(audio_stream_type_t stream, float value, bool muted) final
+            EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
-    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
-            final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+                            bool muted) final EXCLUDES_ThreadBase_Mutex;
 
     void setVolumeForOutput_l(float left, float right) const final;
 
@@ -1051,7 +1052,8 @@ public:
                                 bool isSpatialized,
                                 bool isBitPerfect,
                                 audio_output_flags_t* afTrackFlags,
-                                float volume) final
+                                float volume,
+                                bool muted) final
             REQUIRES(audio_utils::AudioFlinger_Mutex);
 
     bool isTrackActive(const sp<IAfTrack>& track) const final {
@@ -2405,11 +2407,13 @@ public:
     // Needs implementation?
     void setMasterBalance(float /* value */) final EXCLUDES_ThreadBase_Mutex {}
     void setMasterMute(bool muted) final EXCLUDES_ThreadBase_Mutex;
-    void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
+
+    void setStreamVolume(audio_stream_type_t stream, float value, bool muted) final
+            EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
-    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
-            final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+                            bool muted) final EXCLUDES_ThreadBase_Mutex;
 
     void setMasterMute_l(bool muted) REQUIRES(mutex()) { mMasterMute = muted; }
 
