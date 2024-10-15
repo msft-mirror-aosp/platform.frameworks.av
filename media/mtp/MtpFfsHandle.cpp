@@ -300,7 +300,6 @@ void MtpFfsHandle::close() {
     int count = mChildThreads.size();
     for (int i = 0; i < count; i++) {
         mChildThreads[i].join();
-        delete &mChildThreads[i];
     }
     mChildThreads.clear();
 
