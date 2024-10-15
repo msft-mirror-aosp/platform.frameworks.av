@@ -528,7 +528,14 @@ status_t StreamHalAidl::exit() {
 }
 
 void StreamHalAidl::onAsyncTransferReady() {
-    if (auto state = getState(); state == StreamDescriptor::State::TRANSFERRING) {
+    StreamDescriptor::State state;
+    {
+        // Use 'mCommandReplyLock' to ensure that 'sendCommand' has finished updating the state
+        // after the reply from the 'burst' command.
+        std::lock_guard l(mCommandReplyLock);
+        state = getState();
+    }
+    if (state == StreamDescriptor::State::TRANSFERRING) {
         // Retrieve the current state together with position counters unconditionally
         // to ensure that the state on our side gets updated.
         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(),
@@ -539,7 +546,14 @@ void StreamHalAidl::onAsyncTransferReady() {
 }
 
 void StreamHalAidl::onAsyncDrainReady() {
-    if (auto state = getState(); state == StreamDescriptor::State::DRAINING) {
+    StreamDescriptor::State state;
+    {
+        // Use 'mCommandReplyLock' to ensure that 'sendCommand' has finished updating the state
+        // after the reply from the 'drain' command.
+        std::lock_guard l(mCommandReplyLock);
+        state = getState();
+    }
+    if (state == StreamDescriptor::State::DRAINING) {
         // Retrieve the current state together with position counters unconditionally
         // to ensure that the state on our side gets updated.
         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(), nullptr,
