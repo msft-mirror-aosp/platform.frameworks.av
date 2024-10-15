@@ -126,14 +126,14 @@ interface IAudioPolicyService {
 
     void setStreamVolumeIndex(AudioStreamType stream,
                               in AudioDeviceDescription device,
-                              int index);
+                              int index, boolean muted);
 
     int getStreamVolumeIndex(AudioStreamType stream,
                              in AudioDeviceDescription device);
 
     void setVolumeIndexForAttributes(in AudioAttributes attr,
                                      in AudioDeviceDescription device,
-                                     int index);
+                                     int index, boolean muted);
 
     int getVolumeIndexForAttributes(in AudioAttributes attr,
                                     in AudioDeviceDescription device);

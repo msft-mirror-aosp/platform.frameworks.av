@@ -27,6 +27,7 @@
 #include "IAfTrack.h"
 #include "MelReporter.h"
 #include "PatchCommandThread.h"
+#include "audio_utils/clock.h"
 
 // External classes
 #include <audio_utils/mutex.h>
@@ -65,6 +66,11 @@ public:
 
     status_t resetReferencesForTest();
 
+    // Called by main when startup finished -- for logging purposes only
+    void startupFinished() {
+        mStartupFinishedTime.store(audio_utils_get_real_time_ns(), std::memory_order_release);
+    }
+
 private:
 
     // ---- begin IAudioFlinger interface
@@ -93,12 +99,12 @@ private:
     status_t getMasterBalance(float* balance) const final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setStreamVolume(audio_stream_type_t stream, float value,
-            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
+            bool muted, audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
             EXCLUDES_AudioFlinger_Mutex;
 
     status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
-            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
+                            bool muted, audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
 
@@ -419,6 +425,10 @@ private:
             EXCLUDES_AudioFlinger_Mutex;
 
     sp<EffectsFactoryHalInterface> getEffectsFactory();
+
+    int64_t getStartupFinishedTime() {
+        return mStartupFinishedTime.load(std::memory_order_acquire);
+    }
 
 public:
     // TODO(b/292281786): Remove this when Oboeservice can get access to
@@ -803,6 +813,10 @@ private:
 
     // Local interface to AudioPolicyService, late inited, but logically const
     mediautils::atomic_sp<media::IAudioPolicyServiceLocal> mAudioPolicyServiceLocal;
+
+    const int64_t mStartTime = audio_utils_get_real_time_ns();
+    // Late-inited from main()
+    std::atomic<int64_t> mStartupFinishedTime {};
 };
 
 // ----------------------------------------------------------------------------
