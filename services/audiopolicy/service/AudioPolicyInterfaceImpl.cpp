@@ -430,6 +430,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
     bool isSpatialized = false;
     bool isBitPerfect = false;
     float volume;
+    bool muted;
     status_t result = mAudioPolicyManager->getOutputForAttr(&attr, &output, session,
                                                             &stream,
                                                             attributionSource,
@@ -439,7 +440,8 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
                                                             &outputType,
                                                             &isSpatialized,
                                                             &isBitPerfect,
-                                                            &volume);
+                                                            &volume,
+                                                            &muted);
 
     // FIXME: Introduce a way to check for the the telephony device before opening the output
     if (result == NO_ERROR) {
@@ -504,6 +506,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
         _aidl_return->attr = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_attributes_t_AudioAttributes(attr));
         _aidl_return->volume = volume;
+        _aidl_return->muted = muted;
     } else {
         _aidl_return->configBase.format = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_format_t_AudioFormatDescription(config.format));
@@ -1170,7 +1173,7 @@ Status AudioPolicyService::initStreamVolume(AudioStreamType streamAidl,
 
 Status AudioPolicyService::setStreamVolumeIndex(AudioStreamType streamAidl,
                                                 const AudioDeviceDescription& deviceAidl,
-                                                int32_t indexAidl) {
+                                                int32_t indexAidl, bool muted) {
     audio_stream_type_t stream = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioStreamType_audio_stream_type_t(streamAidl));
     int index = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int>(indexAidl));
@@ -1192,6 +1195,7 @@ Status AudioPolicyService::setStreamVolumeIndex(AudioStreamType streamAidl,
     AutoCallerClear acc;
     return binderStatusFromStatusT(mAudioPolicyManager->setStreamVolumeIndex(stream,
                                                                              index,
+                                                                             muted,
                                                                              device));
 }
 
@@ -1220,7 +1224,7 @@ Status AudioPolicyService::getStreamVolumeIndex(AudioStreamType streamAidl,
 
 Status AudioPolicyService::setVolumeIndexForAttributes(
         const media::audio::common::AudioAttributes& attrAidl,
-        const AudioDeviceDescription& deviceAidl, int32_t indexAidl) {
+        const AudioDeviceDescription& deviceAidl, int32_t indexAidl, bool muted) {
     audio_attributes_t attributes = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioAttributes_audio_attributes_t(attrAidl));
     int index = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int>(indexAidl));
@@ -1240,7 +1244,7 @@ Status AudioPolicyService::setVolumeIndexForAttributes(
     audio_utils::lock_guard _l(mMutex);
     AutoCallerClear acc;
     return binderStatusFromStatusT(
-            mAudioPolicyManager->setVolumeIndexForAttributes(attributes, index, device));
+            mAudioPolicyManager->setVolumeIndexForAttributes(attributes, index, muted, device));
 }
 
 Status AudioPolicyService::getVolumeIndexForAttributes(

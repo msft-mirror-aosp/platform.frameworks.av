@@ -511,11 +511,11 @@ void AudioFlingerFuzzer::invokeAudioSystem() {
 
         stream = getValue(&mFdp, kStreamtypes);
         AudioSystem::setStreamVolume(stream, mFdp.ConsumeFloatingPoint<float>(),
-                                     mFdp.ConsumeIntegral<int32_t>());
+                                     mFdp.ConsumeBool(), mFdp.ConsumeIntegral<int32_t>());
     } else {
         std::vector <audio_port_handle_t> portsForVolumeChange{};
         AudioSystem::setPortsVolume(portsForVolumeChange, mFdp.ConsumeFloatingPoint<float>(),
-                                    mFdp.ConsumeIntegral<int32_t>());
+                                    mFdp.ConsumeBool(), mFdp.ConsumeIntegral<int32_t>());
     }
     audio_mode_t mode = getValue(&mFdp, kModes);
     AudioSystem::setMode(mode);
