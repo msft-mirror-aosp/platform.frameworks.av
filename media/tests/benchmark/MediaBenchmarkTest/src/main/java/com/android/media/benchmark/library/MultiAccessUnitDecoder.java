@@ -199,41 +199,27 @@ public class MultiAccessUnitDecoder extends Decoder {
                 Log.d(TAG, "Error Dumping File: Exception " + e.toString());
             }
         }
-        Iterator<BufferInfo> iter = infos.iterator();
-        while (iter.hasNext()) {
-            BufferInfo bufferInfo = iter.next();
-            mNumOutputFrame++;
-            if (DEBUG) {
-                Log.d(TAG,
-                        "In OutputBuffersAvailable ,"
-                                + " OutputBuffer ID " + outputBufferId
-                                + " output frame number = " + mNumOutputFrame
-                                + " timestamp = " + bufferInfo.presentationTimeUs
-                                + " size = " + bufferInfo.size);
-            }
-            if (mIBufferSend != null && mFrameReleaseQueue == null) {
-                IBufferXfer.BufferXferInfo info = new IBufferXfer.BufferXferInfo();
-                info.buf = mc.getOutputBuffer(outputBufferId);
-                info.idx = outputBufferId;
-                info.obj = mc;
-                info.bytesRead = bufferInfo.size;
-                info.presentationTimeUs = bufferInfo.presentationTimeUs;
-                info.flag = bufferInfo.flags;
-                info.isComplete = iter.hasNext() ? false : true;
-                mIBufferSend.sendBuffer(this, info);
-            }
-            mSawOutputEOS |= (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+        mNumOutputFrame += infos.size();
+        MediaCodec.BufferInfo last = infos.peekLast();
+        if (last != null) {
+            mSawOutputEOS |= ((last.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0);
         }
-        if (mFrameReleaseQueue != null) {
+        if (mIBufferSend != null) {
+            IBufferXfer.BufferXferInfo info = new IBufferXfer.BufferXferInfo();
+            info.buf = mc.getOutputBuffer(outputBufferId);
+            info.idx = outputBufferId;
+            info.obj = mc;
+            info.infos = infos;
+            mIBufferSend.sendBuffer(this, info);
+        } else if (mFrameReleaseQueue != null) {
             ByteBuffer outputBuffer = mc.getOutputBuffer(outputBufferId);
             mFrameReleaseQueue.pushFrame(
                     outputBufferId, outputBuffer.remaining());
-        } else if (mIBufferSend == null) {
+        } else {
             mc.releaseOutputBuffer(outputBufferId, mRender);
         }
         if (mSawOutputEOS) {
             Log.i(TAG, "Large frame - saw output EOS");
         }
-        // we don't support frame release queue for large audio frame
     }
 }
