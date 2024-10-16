@@ -5022,8 +5022,7 @@ status_t AudioPolicyManager::setPreferredMixerAttributes(
                             nullptr /*updatedFormat*/,
                             mixerAttributes->config.channel_mask,
                             nullptr /*updatedChannelMask*/,
-                            flags,
-                            false /*exactMatchRequiredForInputFlags*/)
+                            flags)
                             != IOProfile::NO_MATCH) {
                 profile = curProfile;
                 break;
@@ -8233,7 +8232,7 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
     const underlying_input_flag_t oriFlags = flags;
 
     for (;;) {
-        sp<IOProfile> firstInexact = nullptr;
+        sp<IOProfile> inexact = nullptr;
         uint32_t inexactSamplingRate = 0;
         audio_format_t inexactFormat = AUDIO_FORMAT_INVALID;
         audio_channel_mask_t inexactChannelMask = AUDIO_CHANNEL_INVALID;
@@ -8244,7 +8243,7 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
             for (const auto& profile : hwModule->getInputProfiles()) {
                 // profile->log();
                 //updatedFormat = format;
-                if (profile->getCompatibilityScore(
+                auto compatibleScore = profile->getCompatibilityScore(
                         DeviceVector(device),
                         samplingRate,
                         &updatedSamplingRate,
@@ -8253,27 +8252,16 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
                         channelMask,
                         &updatedChannelMask,
                         // FIXME ugly cast
-                        (audio_output_flags_t) flags,
-                        true /*exactMatchRequiredForInputFlags*/) == IOProfile::EXACT_MATCH) {
+                        (audio_output_flags_t) flags);
+                if (compatibleScore == IOProfile::EXACT_MATCH) {
                     samplingRate = updatedSamplingRate;
                     format = updatedFormat;
                     channelMask = updatedChannelMask;
                     return profile;
-                }
-                if (firstInexact == nullptr
-                        && profile->getCompatibilityScore(
-                                DeviceVector(device),
-                                samplingRate,
-                                &updatedSamplingRate,
-                                format,
-                                &updatedFormat,
-                                channelMask,
-                                &updatedChannelMask,
-                                // FIXME ugly cast
-                                (audio_output_flags_t) flags,
-                                false /*exactMatchRequiredForInputFlags*/)
-                                != IOProfile::NO_MATCH) {
-                    firstInexact = profile;
+                } else if ((flags != AUDIO_INPUT_FLAG_NONE
+                        && compatibleScore == IOProfile::PARTIAL_MATCH_WITH_FLAG)
+                    || (inexact == nullptr && compatibleScore != IOProfile::NO_MATCH)) {
+                    inexact = profile;
                     inexactSamplingRate = updatedSamplingRate;
                     inexactFormat = updatedFormat;
                     inexactChannelMask = updatedChannelMask;
@@ -8281,11 +8269,11 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
             }
         }
 
-        if (firstInexact != nullptr) {
+        if (inexact != nullptr) {
             samplingRate = inexactSamplingRate;
             format = inexactFormat;
             channelMask = inexactChannelMask;
-            return firstInexact;
+            return inexact;
         } else if (flags & AUDIO_INPUT_FLAG_RAW) {
             flags = (audio_input_flags_t) (flags & ~AUDIO_INPUT_FLAG_RAW); // retry
         } else if ((flags & mustMatchFlag) == AUDIO_INPUT_FLAG_NONE &&
@@ -9258,8 +9246,7 @@ status_t AudioPolicyManager::getProfilesForDevices(const DeviceVector& devices,
                                                  : hwModule->getOutputProfiles();
         for (const auto& profile : ioProfiles) {
             if (!profile->areAllDevicesSupported(devices) ||
-                    !profile->isCompatibleProfileForFlags(
-                            flags, false /*exactMatchRequiredForInputFlags*/)) {
+                    !profile->isCompatibleProfileForFlags(flags)) {
                 continue;
             }
             audioProfiles.addAllValidProfiles(profile->asAudioPort()->getAudioProfiles());
