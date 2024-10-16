@@ -222,8 +222,9 @@ class AttributionAndPermissionUtilsEncapsulator {
 
     bool hasPermissionsForCamera(int callingPid, int callingUid, const std::string& packageName,
                                  int32_t deviceId) const {
-        return hasPermissionsForCamera(std::string(), callingPid, callingUid, packageName,
-                                       deviceId);
+        auto attributionSource =
+                buildAttributionSource(callingPid, callingUid, packageName, deviceId);
+        return hasPermissionsForCamera(std::string(), attributionSource);
     }
 
     bool hasPermissionsForCamera(const std::string& cameraId, int callingPid, int callingUid,
@@ -232,11 +233,9 @@ class AttributionAndPermissionUtilsEncapsulator {
         return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, attributionSource);
     }
 
-    bool hasPermissionsForCamera(const std::string& cameraId, int callingPid, int callingUid,
-                                 const std::string& packageName, int32_t deviceId) const {
-        auto attributionSource =
-                buildAttributionSource(callingPid, callingUid, packageName, deviceId);
-        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, attributionSource);
+    bool hasPermissionsForCamera(const std::string& cameraId,
+                                 const AttributionSourceState& clientAttribution) const {
+        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution);
     }
 
     bool hasPermissionsForSystemCamera(const std::string& cameraId, int callingPid, int callingUid,
