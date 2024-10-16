@@ -126,7 +126,7 @@ public:
 
     // set stream volume on specified output
     static status_t setStreamVolume(audio_stream_type_t stream, float value,
-                                    audio_io_handle_t output);
+                                    bool muted, audio_io_handle_t output);
 
     // mute/unmute stream
     static status_t setStreamMute(audio_stream_type_t stream, bool mute);
@@ -135,11 +135,12 @@ public:
      * Set volume for given AudioTrack port ids on specified output
      * @param portIds to consider
      * @param volume to set
+     * @param muted to set
      * @param output to consider
      * @return NO_ERROR if successful
      */
     static status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds,
-                                   float volume, audio_io_handle_t output);
+                                   float volume, bool muted, audio_io_handle_t output);
 
     // set audio mode in audio hardware
     static status_t setMode(audio_mode_t mode);
@@ -345,7 +346,8 @@ public:
                                      std::vector<audio_io_handle_t> *secondaryOutputs,
                                      bool *isSpatialized,
                                      bool *isBitPerfect,
-                                     float *volume);
+                                     float *volume,
+                                     bool *muted);
     static status_t startOutput(audio_port_handle_t portId);
     static status_t stopOutput(audio_port_handle_t portId);
     static void releaseOutput(audio_port_handle_t portId);
@@ -391,6 +393,7 @@ public:
                                      int indexMax);
     static status_t setStreamVolumeIndex(audio_stream_type_t stream,
                                          int index,
+                                         bool muted,
                                          audio_devices_t device);
     static status_t getStreamVolumeIndex(audio_stream_type_t stream,
                                          int *index,
@@ -398,6 +401,7 @@ public:
 
     static status_t setVolumeIndexForAttributes(const audio_attributes_t &attr,
                                                 int index,
+                                                bool muted,
                                                 audio_devices_t device);
     static status_t getVolumeIndexForAttributes(const audio_attributes_t &attr,
                                                 int &index,
