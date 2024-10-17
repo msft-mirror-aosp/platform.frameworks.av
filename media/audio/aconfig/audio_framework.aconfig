@@ -1,5 +1,6 @@
 # Top level framework (android.media) flags
 # Only add flags here which must be included in framework.jar
+# Flags used in both framework.jar and native can be added here
 #
 # Please add flags in alphabetical order.
 
@@ -144,6 +145,14 @@ flag {
     is_fixed_read_only: true
 }
 
+flag {
+    name: "routed_device_ids"
+    namespace: "media_audio"
+    description:
+        "Enable Java and native functions to get"
+        "multiple routed device ids"
+    bug: "367816690"
+}
 
 # TODO remove
 flag {
