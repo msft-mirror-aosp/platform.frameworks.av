@@ -863,14 +863,17 @@ Track::Track(
     }
 
     populateUsageAndContentTypeFromStreamType();
-    setPortMute(muted);
+
+    mute_state_t newMuteState = mMuteState.load();
+    newMuteState.muteFromPortVolume = muted;
 
     // Audio patch and call assistant volume are always max
     if (mAttr.usage == AUDIO_USAGE_CALL_ASSISTANT
             || mAttr.usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
         mVolume = 1.0f;
-        setPortMute(false);
+        newMuteState.muteFromPortVolume = false;
     }
+    mMuteState.store(newMuteState);
 
     mServerLatencySupported = checkServerLatencySupported(format, flags);
 #ifdef TEE_SINK
