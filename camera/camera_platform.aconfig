@@ -171,3 +171,10 @@ flag {
     description: "Use the context-provided AttributionSource when checking for client permissions"
     bug: "190657833"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "check_full_attribution_source_chain"
+    description: "Pass the full AttributionSource chain to PermissionChecker"
+    bug: "190657833"
+}

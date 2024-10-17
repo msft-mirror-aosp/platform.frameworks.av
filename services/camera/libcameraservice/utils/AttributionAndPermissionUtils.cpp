@@ -32,7 +32,32 @@
 #include <hwbinder/IPCThreadState.h>
 
 namespace {
+
+using android::content::AttributionSourceState;
+
 static const std::string kPermissionServiceName = "permission";
+
+static std::string getAttributionString(const AttributionSourceState& attributionSource) {
+    std::ostringstream ret;
+    const AttributionSourceState* current = &attributionSource;
+    while (current != nullptr) {
+        if (current != &attributionSource) {
+            ret << ", ";
+        }
+
+        ret << "[uid " << current->uid << ", pid " << current->pid;
+        ret << ", packageName \"" << current->packageName.value_or("<unknown>");
+        ret << "\"]";
+
+        if (!current->next.empty()) {
+            current = &current->next[0];
+        } else {
+            current = nullptr;
+        }
+    }
+    return ret.str();
+}
+
 } // namespace
 
 namespace android {
@@ -111,13 +136,22 @@ bool AttributionAndPermissionUtils::checkPermissionForPreflight(
         const std::string& cameraId, const std::string& permission,
         const AttributionSourceState& attributionSource, const std::string& message,
         int32_t attributedOpCode) {
-    if (checkAutomotivePrivilegedClient(cameraId, attributionSource)) {
+    AttributionSourceState clientAttribution = attributionSource;
+    if (!flags::check_full_attribution_source_chain() && !clientAttribution.next.empty()) {
+        clientAttribution.next.clear();
+    }
+
+    if (checkAutomotivePrivilegedClient(cameraId, clientAttribution)) {
         return true;
     }
 
-    return mPermissionChecker->checkPermissionForPreflight(
-                   toString16(permission), attributionSource, toString16(message),
-                   attributedOpCode) != PermissionChecker::PERMISSION_HARD_DENIED;
+    PermissionChecker::PermissionResult result = mPermissionChecker->checkPermissionForPreflight(
+            toString16(permission), clientAttribution, toString16(message), attributedOpCode);
+    if (result == PermissionChecker::PERMISSION_HARD_DENIED) {
+        ALOGE("%s: Permission denied for client attribution %s", __FUNCTION__,
+              getAttributionString(clientAttribution).c_str());
+    }
+    return result != PermissionChecker::PERMISSION_HARD_DENIED;
 }
 
 // Can camera service trust the caller based on the calling UID?
