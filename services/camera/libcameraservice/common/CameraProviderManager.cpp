@@ -23,6 +23,8 @@
 
 #include "CameraProviderManager.h"
 
+#include "config/SharedSessionConfigReader.h"
+
 #include <aidl/android/hardware/camera/device/ICameraDevice.h>
 
 #include <algorithm>
@@ -2090,63 +2092,72 @@ bool CameraProviderManager::ProviderInfo::DeviceInfo3::isAutomotiveDevice() {
     return strncmp(value, "automotive", PROPERTY_VALUE_MAX) == 0;
 }
 
-status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfigurationTags() {
+status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfigurationTags(
+        const std::string &cameraId) {
     status_t res = OK;
     if (flags::camera_multi_client()) {
+        SharedSessionConfigReader configReader;
+        ErrorCode status =
+                configReader.parseSharedSessionConfig(
+                                    (std::string(SHARED_SESSION_FILE_PATH)
+                                     + std::string(SHARED_SESSION_FILE_NAME)).c_str());
+        if (status != 0) {
+            ALOGE("%s: failed to initialize SharedSessionConfigReader with ErrorCode %s",
+                  __FUNCTION__, SharedSessionConfigUtils::toString(status));
+            return BAD_VALUE;
+        }
         const int32_t sharedColorSpaceTag = ANDROID_SHARED_SESSION_COLOR_SPACE;
         const int32_t sharedOutputConfigurationsTag = ANDROID_SHARED_SESSION_OUTPUT_CONFIGURATIONS;
         auto& c = mCameraCharacteristics;
         int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED;
 
+        status = configReader.getColorSpace(&colorSpace);
+        if (status != 0) {
+            ALOGE("%s: failed to get color space from config reader with ErrorCode %s",
+                  __FUNCTION__, SharedSessionConfigUtils::toString(status));
+            return BAD_VALUE;
+        }
+
         res = c.update(sharedColorSpaceTag, &colorSpace, 1);
+        if (res != OK) {
+            ALOGE("%s: failed to update sharedColorSpaceTag with error %d", __FUNCTION__, res);
+            return res;
+        }
 
-        // ToDo: b/372321187 Hardcoding the shared session configuration. Update the code to
-        // take these values from XML instead.
+        std::vector<SharedSessionConfigReader::SharedSessionConfig> outputConfigurations;
+        status = configReader.getAvailableSharedSessionConfigs(cameraId.c_str(),
+                                                               &outputConfigurations);
+        if (status != 0) {
+            ALOGE("%s: failed to get output configurations from config reader with ErrorCode %s",
+                  __FUNCTION__, SharedSessionConfigUtils::toString(status));
+            return BAD_VALUE;
+        }
+
         std::vector<int64_t> sharedOutputConfigEntries;
-        int64_t surfaceType1 =  OutputConfiguration::SURFACE_TYPE_IMAGE_READER;
-        int64_t width = 1920;
-        int64_t height = 1080;
-        int64_t format1 = HAL_PIXEL_FORMAT_RGBA_8888;
-        int64_t mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO;
-        int64_t timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT;
-        int64_t usage1 = 3;
-        int64_t dataspace = 0;
-        int64_t useReadoutTimestamp = 0;
-        int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
-        int64_t physicalCamIdLen = 0;
 
-        // Stream 1 configuration hardcoded
-        sharedOutputConfigEntries.push_back(surfaceType1);
-        sharedOutputConfigEntries.push_back(width);
-        sharedOutputConfigEntries.push_back(height);
-        sharedOutputConfigEntries.push_back(format1);
-        sharedOutputConfigEntries.push_back(mirrorMode);
-        sharedOutputConfigEntries.push_back(useReadoutTimestamp);
-        sharedOutputConfigEntries.push_back(timestampBase);
-        sharedOutputConfigEntries.push_back(dataspace);
-        sharedOutputConfigEntries.push_back(usage1);
-        sharedOutputConfigEntries.push_back(streamUseCase);
-        sharedOutputConfigEntries.push_back(physicalCamIdLen);
-
-        // Stream 2 configuration hardcoded
-        int64_t surfaceType2 =  OutputConfiguration::SURFACE_TYPE_SURFACE_VIEW;
-        int64_t format2 = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
-        int64_t usage2 = GraphicBuffer::USAGE_HW_TEXTURE | GraphicBuffer::USAGE_HW_COMPOSER;
-
-        sharedOutputConfigEntries.push_back(surfaceType2);
-        sharedOutputConfigEntries.push_back(width);
-        sharedOutputConfigEntries.push_back(height);
-        sharedOutputConfigEntries.push_back(format2);
-        sharedOutputConfigEntries.push_back(mirrorMode);
-        sharedOutputConfigEntries.push_back(useReadoutTimestamp);
-        sharedOutputConfigEntries.push_back(timestampBase);
-        sharedOutputConfigEntries.push_back(dataspace);
-        sharedOutputConfigEntries.push_back(usage2);
-        sharedOutputConfigEntries.push_back(streamUseCase);
-        sharedOutputConfigEntries.push_back(physicalCamIdLen);
+        for (auto outputConfig : outputConfigurations) {
+            sharedOutputConfigEntries.push_back(outputConfig.surfaceType);
+            sharedOutputConfigEntries.push_back(outputConfig.width);
+            sharedOutputConfigEntries.push_back(outputConfig.height);
+            sharedOutputConfigEntries.push_back(outputConfig.format);
+            sharedOutputConfigEntries.push_back(outputConfig.mirrorMode);
+            sharedOutputConfigEntries.push_back(outputConfig.useReadoutTimestamp);
+            sharedOutputConfigEntries.push_back(outputConfig.timestampBase);
+            sharedOutputConfigEntries.push_back(outputConfig.dataSpace);
+            sharedOutputConfigEntries.push_back(outputConfig.usage);
+            sharedOutputConfigEntries.push_back(outputConfig.streamUseCase);
+            if (strcmp(outputConfig.physicalCameraId.c_str(), "")) {
+                sharedOutputConfigEntries.push_back(outputConfig.physicalCameraId.length());
+                for (char c : outputConfig.physicalCameraId) {
+                    sharedOutputConfigEntries.push_back(c);
+                }
+            } else {
+                sharedOutputConfigEntries.push_back(/* physical camera id len */ 0);
+            }
+        }
 
         res = c.update(sharedOutputConfigurationsTag, sharedOutputConfigEntries.data(),
-                sharedOutputConfigEntries.size());
+                       sharedOutputConfigEntries.size());
     }
     return res;
 }
