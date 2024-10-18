@@ -4121,7 +4121,7 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
                                                        frameCountToBeReady,
                                                        track->getSpeed(),
                                                        1.f /* volume */,
-                                                       track->getPortMute() /* muted */);
+                                                       false /* muted */);
         status = patchTrack->initCheck();
         if (status != NO_ERROR) {
             ALOGE("Secondary output patchTrack init failed: %d", status);
