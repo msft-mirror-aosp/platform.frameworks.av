@@ -2052,6 +2052,14 @@ status_t CCodecBufferChannel::prepareInitialInputBuffers(
 
 status_t CCodecBufferChannel::requestInitialInputBuffers(
         std::map<size_t, sp<MediaCodecBuffer>> &&clientInputBuffers) {
+    std::optional<QueueGuard> guard;
+    if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
+        guard.emplace(mSync);
+        if (!guard->isRunning()) {
+            ALOGD("[%s] skip requestInitialInputBuffers when not running", mName);
+            return OK;
+        }
+    }
     C2StreamBufferTypeSetting::output oStreamFormat(0u);
     C2PrependHeaderModeSetting prepend(PREPEND_HEADER_TO_NONE);
     c2_status_t err = mComponent->query({ &oStreamFormat, &prepend }, {}, C2_DONT_BLOCK, nullptr);
