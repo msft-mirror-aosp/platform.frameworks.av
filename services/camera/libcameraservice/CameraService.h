@@ -927,12 +927,10 @@ private:
     void removeStates(const std::string& id);
 
     // Check if we can connect, before we acquire the service lock.
-    // If clientPid/clientUid are USE_CALLING_PID/USE_CALLING_UID, they will be overwritten with
-    // the calling pid/uid.
-    binder::Status validateConnectLocked(const std::string& cameraId, const std::string& clientName,
-            int clientUid, int clientPid) const;
-    binder::Status validateClientPermissionsLocked(const std::string& cameraId,
-            const std::string& clientName, int clientUid, int clientPid) const;
+    binder::Status validateConnectLocked(const std::string& cameraId,
+                                         const AttributionSourceState& clientAttribution) const;
+    binder::Status validateClientPermissionsLocked(
+            const std::string& cameraId, const AttributionSourceState& clientAttribution) const;
 
     void logConnectionAttempt(int clientPid, const std::string& clientPackageName,
         const std::string& cameraId, apiLevel effectiveApiLevel) const;
@@ -974,14 +972,14 @@ private:
     void filterAPI1SystemCameraLocked(const std::vector<std::string> &normalDeviceIds);
 
     // Single implementation shared between the various connect calls
-    template<class CALLBACK, class CLIENT>
+    template <class CALLBACK, class CLIENT>
     binder::Status connectHelper(const sp<CALLBACK>& cameraCb, const std::string& cameraId,
-            int api1CameraId, const std::string& clientPackageName, bool systemNativeClient,
-            const std::optional<std::string>& clientFeatureId, int clientUid, int clientPid,
-            apiLevel effectiveApiLevel, bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
-            int rotationOverride, bool forceSlowJpegMode,
-            const std::string& originalCameraId, bool isNonSystemNdk,
-            /*out*/sp<CLIENT>& device);
+                                 int api1CameraId, const AttributionSourceState& clientAttribution,
+                                 bool systemNativeClient, apiLevel effectiveApiLevel,
+                                 bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
+                                 int rotationOverride, bool forceSlowJpegMode,
+                                 const std::string& originalCameraId, bool isNonSystemNdk,
+                                 /*out*/ sp<CLIENT>& device);
 
     // Lock guarding camera service state
     Mutex               mServiceLock;

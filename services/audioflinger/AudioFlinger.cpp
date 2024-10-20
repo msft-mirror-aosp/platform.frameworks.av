@@ -629,6 +629,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         bool isSpatialized;
         bool isBitPerfect;
         float volume;
+        bool muted;
         ret = AudioSystem::getOutputForAttr(&localAttr, &io,
                                             actualSessionId,
                                             &streamType, adjAttributionSource,
@@ -637,7 +638,8 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
                                                     AUDIO_OUTPUT_FLAG_DIRECT),
                                             deviceId, &portId, &secondaryOutputs, &isSpatialized,
                                             &isBitPerfect,
-                                            &volume);
+                                            &volume,
+                                            &muted);
         if (ret != NO_ERROR) {
             config->sample_rate = fullConfig.sample_rate;
             config->channel_mask = fullConfig.channel_mask;
@@ -905,6 +907,26 @@ status_t AudioFlinger::dump(int fd, const Vector<String16>& args)
         // Unknown arg silently ignored
     }
 
+    {
+        std::string res;
+        res.reserve(100);
+        res += "Start begin: ";
+        const auto startTimeStr = audio_utils_time_string_from_ns(mStartTime);
+        res += startTimeStr.time;
+        const auto startFinishedTime = getStartupFinishedTime();
+        if (startFinishedTime != 0) {
+            res += "\nStart end:   ";
+            const auto startEndStr = audio_utils_time_string_from_ns(startFinishedTime);
+            res += startEndStr.time;
+        } else {
+            res += "\nStartup not yet finished!";
+        }
+        const auto nowTimeStr = audio_utils_time_string_from_ns(audio_utils_get_real_time_ns());
+        res += "\nNow:         ";
+        res += nowTimeStr.time;
+        res += "\n";
+        writeStr(fd, res);
+    }
     // get state of hardware lock
     {
         FallibleLockGuard l{hardwareMutex()};
@@ -1097,6 +1119,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
     bool isSpatialized = false;
     bool isBitPerfect = false;
     float volume;
+    bool muted;
 
     audio_io_handle_t effectThreadId = AUDIO_IO_HANDLE_NONE;
     std::vector<int> effectIds;
@@ -1157,7 +1180,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
     lStatus = AudioSystem::getOutputForAttr(&localAttr, &output.outputId, sessionId, &streamType,
                                             adjAttributionSource, &input.config, input.flags,
                                             &output.selectedDeviceId, &portId, &secondaryOutputs,
-                                            &isSpatialized, &isBitPerfect, &volume);
+                                            &isSpatialized, &isBitPerfect, &volume, &muted);
 
     if (lStatus != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
         ALOGE("createTrack() getOutputForAttr() return error %d or invalid output handle", lStatus);
@@ -1214,7 +1237,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
         if (effectThread == nullptr) {
             effectChain = getOrphanEffectChain_l(sessionId);
         }
-        ALOGV("createTrack() sessionId: %d volume: %f", sessionId, volume);
+        ALOGV("createTrack() sessionId: %d volume: %f muted %d", sessionId, volume, muted);
 
         output.sampleRate = input.config.sample_rate;
         output.frameCount = input.frameCount;
@@ -1229,7 +1252,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
                                       input.sharedBuffer, sessionId, &output.flags,
                                       callingPid, adjAttributionSource, input.clientInfo.clientTid,
                                       &lStatus, portId, input.audioTrackCallback, isSpatialized,
-                                      isBitPerfect, &output.afTrackFlags, volume);
+                                      isBitPerfect, &output.afTrackFlags, volume, muted);
         LOG_ALWAYS_FATAL_IF((lStatus == NO_ERROR) && (track == 0));
         // we don't abort yet if lStatus != NO_ERROR; there is still work to be done regardless
 
@@ -1653,7 +1676,7 @@ status_t AudioFlinger::checkStreamType(audio_stream_type_t stream)
 }
 
 status_t AudioFlinger::setStreamVolume(audio_stream_type_t stream, float value,
-        audio_io_handle_t output)
+        bool muted, audio_io_handle_t output)
 {
     // check calling permissions
     if (!settingsAllowed()) {
@@ -1675,14 +1698,14 @@ status_t AudioFlinger::setStreamVolume(audio_stream_type_t stream, float value,
     if (volumeInterface == NULL) {
         return BAD_VALUE;
     }
-    volumeInterface->setStreamVolume(stream, value);
+    volumeInterface->setStreamVolume(stream, value, muted);
 
     return NO_ERROR;
 }
 
 status_t AudioFlinger::setPortsVolume(
-        const std::vector<audio_port_handle_t>& ports, float volume, audio_io_handle_t output)
-{
+        const std::vector<audio_port_handle_t> &ports, float volume, bool muted,
+        audio_io_handle_t output) {
     for (const auto& port : ports) {
         if (port == AUDIO_PORT_HANDLE_NONE) {
             return BAD_VALUE;
@@ -1697,12 +1720,12 @@ status_t AudioFlinger::setPortsVolume(
     audio_utils::lock_guard lock(mutex());
     IAfPlaybackThread *thread = checkPlaybackThread_l(output);
     if (thread != nullptr) {
-        return thread->setPortsVolume(ports, volume);
+        return thread->setPortsVolume(ports, volume, muted);
     }
     const sp<IAfMmapThread> mmapThread = checkMmapThread_l(output);
     if (mmapThread != nullptr && mmapThread->isOutput()) {
         IAfMmapPlaybackThread *mmapPlaybackThread = mmapThread->asIAfMmapPlaybackThread().get();
-        return mmapPlaybackThread->setPortsVolume(ports, volume);
+        return mmapPlaybackThread->setPortsVolume(ports, volume, muted);
     }
     return BAD_VALUE;
 }
@@ -4097,7 +4120,8 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
                                                        0ns /* timeout */,
                                                        frameCountToBeReady,
                                                        track->getSpeed(),
-                                                       1.f /* volume */);
+                                                       1.f /* volume */,
+                                                       false /* muted */);
         status = patchTrack->initCheck();
         if (status != NO_ERROR) {
             ALOGE("Secondary output patchTrack init failed: %d", status);
