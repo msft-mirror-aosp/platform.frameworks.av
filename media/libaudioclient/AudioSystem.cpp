@@ -2700,13 +2700,13 @@ status_t AudioSystem::setVibratorInfos(
     return af->setVibratorInfos(vibratorInfos);
 }
 
-status_t AudioSystem::getMmapPolicyInfos(
+status_t AudioSystem::getMmapPolicyInfo(
         AudioMMapPolicyType policyType, std::vector<AudioMMapPolicyInfo> *policyInfos) {
-    const sp<IAudioPolicyService> aps = get_audio_policy_service();
-    if (aps == nullptr) {
+    const sp<IAudioFlinger> af = get_audio_flinger();
+    if (af == nullptr) {
         return PERMISSION_DENIED;
     }
-    return statusTFromBinderStatus(aps->getMmapPolicyInfos(policyType, policyInfos));
+    return af->getMmapPolicyInfos(policyType, policyInfos);
 }
 
 int32_t AudioSystem::getAAudioMixerBurstCount() {
@@ -2801,18 +2801,6 @@ status_t AudioSystem::clearPreferredMixerAttributes(const audio_attributes_t *at
     int32_t portIdAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_port_handle_t_int32_t(portId));
     return statusTFromBinderStatus(
             aps->clearPreferredMixerAttributes(attrAidl, portIdAidl, uidAidl));
-}
-
-status_t AudioSystem::getMmapPolicyForDevice(AudioMMapPolicyType policyType,
-                                             audio_devices_t device,
-                                             AudioMMapPolicyInfo *policyInfo) {
-    const sp<IAudioPolicyService> aps = get_audio_policy_service();
-    if (aps == nullptr) {
-        return PERMISSION_DENIED;
-    }
-    policyInfo->device.type = VALUE_OR_RETURN_STATUS(
-            legacy2aidl_audio_devices_t_AudioDeviceDescription(device));
-    return statusTFromBinderStatus(aps->getMmapPolicyForDevice(policyType, policyInfo));
 }
 
 // ---------------------------------------------------------------------------
