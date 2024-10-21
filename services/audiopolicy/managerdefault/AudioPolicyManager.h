@@ -440,6 +440,13 @@ public:
 
         void onNewAudioModulesAvailable() override;
 
+        status_t getMmapPolicyInfos(
+                media::audio::common::AudioMMapPolicyType policyType,
+                std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
+        status_t getMmapPolicyForDevice(
+                media::audio::common::AudioMMapPolicyType policyType,
+                media::audio::common::AudioMMapPolicyInfo *policyInfo) override;
+
         status_t initialize();
 
 protected:
@@ -1413,9 +1420,17 @@ private:
                                                   int index,
                                                   const DeviceTypeSet &deviceTypes);
 
+        status_t updateMmapPolicyInfos(media::audio::common::AudioMMapPolicyType policyType);
+
         // Contains for devices that support absolute volume the audio attributes
         // corresponding to the streams that are driving the volume changes
         std::unordered_map<audio_devices_t, audio_attributes_t> mAbsoluteVolumeDrivingStreams;
+
+        std::map<media::audio::common::AudioMMapPolicyType,
+                const std::vector<media::audio::common::AudioMMapPolicyInfo>> mMmapPolicyInfos;
+        std::map<media::audio::common::AudioMMapPolicyType,
+                const std::map<media::audio::common::AudioDeviceDescription,
+                         media::audio::common::AudioMMapPolicy>> mMmapPolicyByDeviceType;
 };
 
 };

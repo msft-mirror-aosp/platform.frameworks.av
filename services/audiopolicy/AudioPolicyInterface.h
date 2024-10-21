@@ -19,6 +19,8 @@
 
 #include <android/media/DeviceConnectedState.h>
 #include <android/media/TrackInternalMuteInfo.h>
+#include <android/media/audio/common/AudioMMapPolicyInfo.h>
+#include <android/media/audio/common/AudioMMapPolicyType.h>
 #include <media/AudioCommonTypes.h>
 #include <media/AudioContainers.h>
 #include <media/AudioDeviceTypeAddr.h>
@@ -447,6 +449,13 @@ public:
     virtual status_t clearPreferredMixerAttributes(const audio_attributes_t* attr,
                                                    audio_port_handle_t portId,
                                                    uid_t uid) = 0;
+
+    virtual status_t getMmapPolicyInfos(
+            media::audio::common::AudioMMapPolicyType policyType,
+            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
+    virtual status_t getMmapPolicyForDevice(
+            media::audio::common::AudioMMapPolicyType policyType,
+            media::audio::common::AudioMMapPolicyInfo *policyInfo) = 0;
 };
 
 // Audio Policy client Interface
@@ -612,6 +621,10 @@ public:
 
     virtual status_t setTracksInternalMute(
             const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) = 0;
+
+    virtual status_t getMmapPolicyInfos(
+            media::audio::common::AudioMMapPolicyType policyType,
+            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
 };
 
     // These are the signatures of createAudioPolicyManager/destroyAudioPolicyManager
