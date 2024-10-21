@@ -22,6 +22,15 @@ flag {
     bug: "302323921"
 }
 
+flag {
+    name: "concurrent_audio_record_bypass_permission"
+    namespace: "media_audio"
+    description:
+       "New privileged permission to allow bypassing concurrent audio"
+       "capture rules."
+    bug: "374751406"
+}
+
 flag{
     name: "enable_ringtone_haptics_customization"
     namespace: "media_audio"
