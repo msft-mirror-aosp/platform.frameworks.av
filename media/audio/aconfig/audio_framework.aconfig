@@ -1,5 +1,6 @@
 # Top level framework (android.media) flags
 # Only add flags here which must be included in framework.jar
+# Flags used in both framework.jar and native can be added here
 #
 # Please add flags in alphabetical order.
 
@@ -20,6 +21,15 @@ flag {
         "Enable the automatic Bluetooth audio device type "
         "categorization based on BluetoothDevice class metadata."
     bug: "302323921"
+}
+
+flag {
+    name: "concurrent_audio_record_bypass_permission"
+    namespace: "media_audio"
+    description:
+       "New privileged permission to allow bypassing concurrent audio"
+       "capture rules."
+    bug: "374751406"
 }
 
 flag{
@@ -144,6 +154,14 @@ flag {
     is_fixed_read_only: true
 }
 
+flag {
+    name: "routed_device_ids"
+    namespace: "media_audio"
+    description:
+        "Enable Java and native functions to get"
+        "multiple routed device ids"
+    bug: "367816690"
+}
 
 # TODO remove
 flag {
