@@ -1121,6 +1121,9 @@ Status AudioPolicyService::releaseInput(int32_t portIdAidl)
 Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& deviceAidl,
                                                           bool enabled,
                                                           AudioStreamType streamToDriveAbsAidl) {
+    ALOGI("%s: deviceAidl %s, enabled %d, streamToDriveAbsAidl %d", __func__,
+          deviceAidl.toString().c_str(), enabled, streamToDriveAbsAidl);
+
     audio_stream_type_t streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
     audio_devices_t deviceType;
