@@ -44,25 +44,21 @@ class CameraOfflineSessionClient :
 {
 public:
     CameraOfflineSessionClient(
-            const sp<CameraService>& cameraService,
-            sp<CameraOfflineSessionBase> session,
+            const sp<CameraService>& cameraService, sp<CameraOfflineSessionBase> session,
             const KeyedVector<sp<IBinder>, sp<CompositeStream>>& offlineCompositeStreamMap,
             const sp<ICameraDeviceCallbacks>& remoteCallback,
             std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-            const std::string& clientPackageName,
-            const std::optional<std::string>& clientFeatureId,
-            const std::string& cameraIdStr, int cameraFacing, int sensorOrientation,
-            int clientPid, uid_t clientUid, int servicePid) :
-            CameraService::BasicClient(
-                    cameraService,
-                    IInterface::asBinder(remoteCallback),
-                    attributionAndPermissionUtils,
-                    // (v)ndk doesn't have offline session support
-                    clientPackageName, /*overridePackageName*/false, clientFeatureId,
-                    cameraIdStr, cameraFacing, sensorOrientation, clientPid, clientUid, servicePid,
-                    hardware::ICameraService::ROTATION_OVERRIDE_NONE),
-            mRemoteCallback(remoteCallback), mOfflineSession(session),
-            mCompositeStreamMap(offlineCompositeStreamMap) {}
+            const AttributionSourceState& clientAttribution, int callingPid,
+            const std::string& cameraIdStr, int cameraFacing, int sensorOrientation, int servicePid)
+        : CameraService::BasicClient(cameraService, IInterface::asBinder(remoteCallback),
+                                     attributionAndPermissionUtils,
+                                     // (v)ndk doesn't have offline session support
+                                     clientAttribution, callingPid, /*overridePackageName*/ false,
+                                     cameraIdStr, cameraFacing, sensorOrientation, servicePid,
+                                     hardware::ICameraService::ROTATION_OVERRIDE_NONE),
+        mRemoteCallback(remoteCallback),
+        mOfflineSession(session),
+        mCompositeStreamMap(offlineCompositeStreamMap) {}
 
     virtual ~CameraOfflineSessionClient() {}
 

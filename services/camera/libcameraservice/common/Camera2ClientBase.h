@@ -53,19 +53,10 @@ public:
                       const sp<TCamCallbacks>& remoteCallback,
                       std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
                       std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-                      const std::string& clientPackageName,
-                      bool systemNativeClient,
-                      const std::optional<std::string>& clientFeatureId,
-                      const std::string& cameraId,
-                      int api1CameraId,
-                      int cameraFacing,
-                      int sensorOrientation,
-                      int clientPid,
-                      uid_t clientUid,
-                      int servicePid,
-                      bool overrideForPerfClass,
-                      int rotationOverride,
-                      bool legacyClient = false);
+                      const AttributionSourceState& clientAttribution, int callingPid,
+                      bool systemNativeClient, const std::string& cameraId, int api1CameraId,
+                      int cameraFacing, int sensorOrientation, int servicePid,
+                      bool overrideForPerfClass, int rotationOverride, bool legacyClient = false);
     virtual ~Camera2ClientBase();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,
