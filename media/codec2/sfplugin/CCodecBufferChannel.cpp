@@ -38,6 +38,7 @@
 
 #include <android/hardware/cas/native/1.0/IDescrambler.h>
 #include <android/hardware/drm/1.0/types.h>
+#include <android/sysprop/MediaProperties.sysprop.h>
 #include <android-base/parseint.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
@@ -207,8 +208,18 @@ CCodecBufferChannel::CCodecBufferChannel(
         Mutexed<BlockPools>::Locked pools(mBlockPools);
         pools->outputPoolId = C2BlockPool::BASIC_LINEAR;
     }
-    std::string value = GetServerConfigurableFlag("media_native", "ccodec_rendering_depth", "3");
-    android::base::ParseInt(value, &mRenderingDepth);
+    if (android::media::codec::provider_->rendering_depth_removal()) {
+        constexpr int kAndroidApi202404 = 202404;
+        int vendorVersion = ::android::base::GetIntProperty("ro.vendor.api_level", -1);
+        using ::android::sysprop::MediaProperties::codec2_remove_rendering_depth;
+        if (vendorVersion > kAndroidApi202404 || codec2_remove_rendering_depth().value_or(false)) {
+            mRenderingDepth = 0;
+        }
+    } else {
+        std::string value = GetServerConfigurableFlag(
+                "media_native", "ccodec_rendering_depth", "3");
+        android::base::ParseInt(value, &mRenderingDepth);
+    }
     mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + mRenderingDepth;
 }
 
@@ -2052,6 +2063,14 @@ status_t CCodecBufferChannel::prepareInitialInputBuffers(
 
 status_t CCodecBufferChannel::requestInitialInputBuffers(
         std::map<size_t, sp<MediaCodecBuffer>> &&clientInputBuffers) {
+    std::optional<QueueGuard> guard;
+    if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
+        guard.emplace(mSync);
+        if (!guard->isRunning()) {
+            ALOGD("[%s] skip requestInitialInputBuffers when not running", mName);
+            return OK;
+        }
+    }
     C2StreamBufferTypeSetting::output oStreamFormat(0u);
     C2PrependHeaderModeSetting prepend(PREPEND_HEADER_TO_NONE);
     c2_status_t err = mComponent->query({ &oStreamFormat, &prepend }, {}, C2_DONT_BLOCK, nullptr);
