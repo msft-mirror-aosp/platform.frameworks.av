@@ -22,16 +22,17 @@
 #include <benchmark/benchmark.h>
 
 /*
- Pixel 8 Pro
+ Pixel 9 Pro XL
+ (tolerance is the amount of time a cached value is valid).
 ------------------------------------------------------------------------------------------
  Benchmark                            Time                      CPU             Iteration
 ------------------------------------------------------------------------------------------
 audio_powerstatscollector_benchmark:
-  #BM_StatsToleranceMs/0      1.2005660120994434E8 ns            2532739.72 ns          100
-  #BM_StatsToleranceMs/50        1281.095987079007 ns     346.0322183913503 ns      2022168
-  #BM_StatsToleranceMs/100       459.9668862534226 ns    189.47902626735942 ns      2891307
-  #BM_StatsToleranceMs/200       233.8438662484292 ns    149.84041813854736 ns      4407343
-  #BM_StatsToleranceMs/500      184.42197142314103 ns    144.86896036787098 ns      7295167
+  #BM_StatsToleranceMs/0      6.346578290999787E7 ns            2069264.56 ns          100
+  #BM_StatsToleranceMs/50      454.12461256065177 ns     203.1644161064639 ns      2615571
+  #BM_StatsToleranceMs/100     167.74983887731364 ns    101.99598388920647 ns      5436852
+  #BM_StatsToleranceMs/200     102.57950838168422 ns     79.40969988086803 ns      7600815
+  #BM_StatsToleranceMs/500      86.87348495571898 ns     75.24841434306252 ns      9789318
 */
 
 // We check how expensive it is to query stats depending

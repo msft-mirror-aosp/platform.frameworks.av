@@ -106,10 +106,10 @@ public:
             const std::string& deviceName,
             const AudioFormatDescription& encodedFormat) override;
     binder::Status setPhoneState(AudioMode state, int32_t uid) override;
-    binder::Status setForceUse(media::AudioPolicyForceUse usage,
-                               media::AudioPolicyForcedConfig config) override;
-    binder::Status getForceUse(media::AudioPolicyForceUse usage,
-                               media::AudioPolicyForcedConfig* _aidl_return) override;
+    binder::Status setForceUse(android::media::audio::common::AudioPolicyForceUse usage,
+            android::media::audio::common::AudioPolicyForcedConfig config) override;
+    binder::Status getForceUse(android::media::audio::common::AudioPolicyForceUse usage,
+            android::media::audio::common::AudioPolicyForcedConfig* _aidl_return) override;
     binder::Status getOutput(AudioStreamType stream, int32_t* _aidl_return) override;
     binder::Status getOutputForAttr(const media::audio::common::AudioAttributes& attr,
                                     int32_t session,
@@ -136,13 +136,13 @@ public:
                                     int32_t indexMax) override;
     binder::Status setStreamVolumeIndex(AudioStreamType stream,
                                         const AudioDeviceDescription& device,
-                                        int32_t index) override;
+                                        int32_t index, bool muted) override;
     binder::Status getStreamVolumeIndex(AudioStreamType stream,
                                         const AudioDeviceDescription& device,
                                         int32_t* _aidl_return) override;
     binder::Status setVolumeIndexForAttributes(const media::audio::common::AudioAttributes& attr,
                                                const AudioDeviceDescription& device,
-                                               int32_t index) override;
+                                               int32_t index, bool muted) override;
     binder::Status getVolumeIndexForAttributes(const media::audio::common::AudioAttributes& attr,
                                                const AudioDeviceDescription& device,
                                                int32_t* _aidl_return) override;
@@ -353,6 +353,7 @@ public:
 
     virtual status_t setStreamVolume(audio_stream_type_t stream,
                                      float volume,
+                                     bool muted,
                                      audio_io_handle_t output,
                                      int delayMs = 0);
 
@@ -364,12 +365,13 @@ public:
      *
      * @param ports to consider
      * @param volume to set
+     * @param muted to set
      * @param output to consider
      * @param delayMs to use
      * @return NO_ERROR if successful
      */
     virtual status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
-            audio_io_handle_t output, int delayMs = 0);
+            bool muted, audio_io_handle_t output, int delayMs = 0);
     virtual status_t setVoiceVolume(float volume, int delayMs = 0);
 
     void doOnNewAudioModulesAvailable();
@@ -625,10 +627,10 @@ private:
         virtual     bool        threadLoop();
 
                     void        exit();
-                    status_t    volumeCommand(audio_stream_type_t stream, float volume,
+                    status_t    volumeCommand(audio_stream_type_t stream, float volume, bool muted,
                                             audio_io_handle_t output, int delayMs = 0);
                     status_t    volumePortsCommand(const std::vector<audio_port_handle_t> &ports,
-                            float volume, audio_io_handle_t output, int delayMs = 0);
+                            float volume, bool muted, audio_io_handle_t output, int delayMs = 0);
                     status_t    parametersCommand(audio_io_handle_t ioHandle,
                                             const char *keyValuePairs, int delayMs = 0);
                     status_t    voiceVolumeCommand(float volume, int delayMs = 0);
@@ -700,6 +702,7 @@ private:
         public:
             audio_stream_type_t mStream;
             float mVolume;
+            bool mIsMuted;
             audio_io_handle_t mIO;
         };
 
@@ -707,13 +710,15 @@ private:
         public:
             std::vector<audio_port_handle_t> mPorts;
             float mVolume;
+            bool mMuted;
             audio_io_handle_t mIO;
             std::string dumpPorts() {
-                return std::string("volume ") + std::to_string(mVolume) + " on IO " +
-                        std::to_string(mIO) + " and ports " +
-                        std::accumulate(std::begin(mPorts), std::end(mPorts), std::string{},
-                                       [] (const std::string& ls, int rs) {
-                                return ls + std::to_string(rs) + " "; });
+                return std::string("volume ") + std::to_string(mVolume) + std::string("muted ") +
+                       std::to_string(mMuted) + " on IO " + std::to_string(mIO) + " and ports " +
+                       std::accumulate(std::begin(mPorts), std::end(mPorts), std::string{},
+                                       [](const std::string &ls, int rs) {
+                                           return ls + std::to_string(rs) + " ";
+                                       });
             }
         };
 
@@ -823,7 +828,7 @@ private:
                                     audio_config_base_t *mixerConfig,
                                     const sp<DeviceDescriptorBase>& device,
                                     uint32_t *latencyMs,
-                                    audio_output_flags_t flags,
+                                    audio_output_flags_t *flags,
                                     audio_attributes_t attributes);
         // creates a special output that is duplicated to the two outputs passed as arguments. The duplication is performed by
         // a special mixer thread in the AudioFlinger.
@@ -854,9 +859,10 @@ private:
         // misc control functions
         //
 
-        // set a stream volume for a particular output. For the same user setting, a given stream type can have different volumes
-        // for each output (destination device) it is attached to.
-        virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, audio_io_handle_t output, int delayMs = 0);
+        // set a stream volume for a particular output. For the same user setting, a given stream
+        // type can have different volumes for each output (destination device) it is attached to.
+        virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, bool muted,
+                audio_io_handle_t output, int delayMs = 0);
         /**
          * Set a volume on port(s) for a particular output. For the same user setting, a volume
          * group (and associated given port of the client's track) can have different volumes for
@@ -864,12 +870,13 @@ private:
          *
          * @param ports to consider
          * @param volume to set
+         * @param muted to set
          * @param output to consider
          * @param delayMs to use
          * @return NO_ERROR if successful
          */
         status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
-                audio_io_handle_t output, int delayMs = 0) override;
+                bool muted, audio_io_handle_t output, int delayMs = 0) override;
 
         // function enabling to send proprietary informations directly from audio policy manager to audio hardware interface.
         virtual void setParameters(audio_io_handle_t ioHandle, const String8& keyValuePairs, int delayMs = 0);

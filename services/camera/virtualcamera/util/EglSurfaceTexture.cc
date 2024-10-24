@@ -15,6 +15,8 @@
  */
 
 // #define LOG_NDEBUG 0
+#include <chrono>
+
 #include "utils/Timers.h"
 #define LOG_TAG "EglSurfaceTexture"
 
@@ -97,6 +99,10 @@ void EglSurfaceTexture::setFrameAvailableListener(
 bool EglSurfaceTexture::waitForNextFrame(const std::chrono::nanoseconds timeout) {
   return mSurface->waitForNextFrame(mGlConsumer->getFrameNumber(),
                                     static_cast<nsecs_t>(timeout.count()));
+}
+
+std::chrono::nanoseconds EglSurfaceTexture::getTimestamp() {
+  return std::chrono::nanoseconds(mGlConsumer->getTimestamp());
 }
 
 GLuint EglSurfaceTexture::updateTexture() {

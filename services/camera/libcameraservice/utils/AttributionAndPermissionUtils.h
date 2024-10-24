@@ -19,6 +19,7 @@
 #include <android/content/AttributionSourceState.h>
 #include <android/permission/PermissionChecker.h>
 #include <binder/BinderService.h>
+#include <binder/IPermissionController.h>
 #include <private/android_filesystem_config.h>
 
 namespace android {
@@ -34,12 +35,10 @@ using permission::PermissionChecker;
  */
 class AttributionAndPermissionUtils {
   public:
-    AttributionAndPermissionUtils() { }
+    AttributionAndPermissionUtils() {}
     virtual ~AttributionAndPermissionUtils() {}
 
-    void setCameraService(wp<CameraService> cameraService) {
-        mCameraService = cameraService;
-    }
+    void setCameraService(wp<CameraService> cameraService) { mCameraService = cameraService; }
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid) {
         AttributionSourceState attributionSource{};
@@ -49,17 +48,31 @@ class AttributionAndPermissionUtils {
     }
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid,
-            int32_t deviceId) {
+                                                         int32_t deviceId) {
         AttributionSourceState attributionSource = buildAttributionSource(callingPid, callingUid);
         attributionSource.deviceId = deviceId;
         return attributionSource;
     }
 
     // Utilities handling Binder calling identities (previously in CameraThreadState)
-    virtual int getCallingUid();
-    virtual int getCallingPid();
+    virtual int getCallingUid() const;
+    virtual int getCallingPid() const;
     virtual int64_t clearCallingIdentity();
     virtual void restoreCallingIdentity(int64_t token);
+
+    /**
+     * If flag::use_context_attribution_source() is enabled, check the calling attribution source
+     * and resolve its package name, or fill in the pid/uid/package name if necessary.
+     *
+     * @param resolvedAttributionSource The resolved attribution source.
+     * @param methodName The name of the method calling this function (for logging only).
+     * @param cameraIdMaybe The camera ID, if applicable.
+     * @return The status of the operation.
+     */
+    virtual binder::Status resolveAttributionSource(
+            /*inout*/ AttributionSourceState& resolvedAttributionSource,
+            const std::string& methodName,
+            const std::optional<std::string>& cameraIdMaybe = std::nullopt);
 
     /**
      * Pre-grants the permission if the attribution source uid is for an automotive
@@ -70,9 +83,10 @@ class AttributionAndPermissionUtils {
      * which is located outside of the vehicle body frame because camera located inside the vehicle
      * cabin would need user permission.
      */
-    virtual bool checkPermissionForPreflight(const std::string &cameraId,
-            const std::string &permission, const AttributionSourceState& attributionSource,
-            const std::string& message, int32_t attributedOpCode);
+    virtual bool checkPermissionForPreflight(const std::string& cameraId,
+                                             const std::string& permission,
+                                             const AttributionSourceState& attributionSource,
+                                             const std::string& message, int32_t attributedOpCode);
 
     // Can camera service trust the caller based on the calling UID?
     virtual bool isTrustedCallingUid(uid_t uid);
@@ -85,17 +99,27 @@ class AttributionAndPermissionUtils {
      */
     virtual bool isAutomotivePrivilegedClient(int32_t uid);
 
-    virtual status_t getUidForPackage(const std::string &packageName, int userId,
-            /*inout*/uid_t& uid, int err);
+    // In some cases the calling code has no access to the package it runs under.
+    // For example, NDK camera API.
+    // In this case we will get the packages for the calling UID and pick the first one
+    // for attributing the app op. This will work correctly for runtime permissions
+    // as for legacy apps we will toggle the app op for all packages in the UID.
+    // The caveat is that the operation may be attributed to the wrong package and
+    // stats based on app ops may be slightly off.
+    virtual std::string getPackageNameFromUid(int clientUid) const;
+
+    virtual status_t getUidForPackage(const std::string& packageName, int userId,
+                                      /*inout*/ uid_t& uid, int err);
     virtual bool isCallerCameraServerNotDelegating();
 
     // Utils for checking specific permissions
     virtual bool hasPermissionsForCamera(const std::string& cameraId,
-            const AttributionSourceState& attributionSource);
+                                         const AttributionSourceState& attributionSource);
     virtual bool hasPermissionsForSystemCamera(const std::string& cameraId,
-            const AttributionSourceState& attributionSource, bool checkCameraPermissions = true);
-    virtual bool hasPermissionsForCameraHeadlessSystemUser(const std::string& cameraId,
-            const AttributionSourceState& attributionSource);
+                                               const AttributionSourceState& attributionSource,
+                                               bool checkCameraPermissions = true);
+    virtual bool hasPermissionsForCameraHeadlessSystemUser(
+            const std::string& cameraId, const AttributionSourceState& attributionSource);
     virtual bool hasPermissionsForCameraPrivacyAllowlist(
             const AttributionSourceState& attributionSource);
     virtual bool hasPermissionsForOpenCloseListener(
@@ -114,10 +138,24 @@ class AttributionAndPermissionUtils {
   protected:
     wp<CameraService> mCameraService;
 
-    bool checkAutomotivePrivilegedClient(const std::string &cameraId,
-            const AttributionSourceState &attributionSource);
+    bool checkAutomotivePrivilegedClient(const std::string& cameraId,
+                                         const AttributionSourceState& attributionSource);
+
+    // If the package name is missing from the AttributionSource and a package name exists for the
+    // AttributionSource's uid, fills in the missing package name.
+    void resolveAttributionPackage(AttributionSourceState& resolvedAttributionSource);
+
+    virtual bool resolveClientUid(/*inout*/ int& clientUid);
+    virtual bool resolveClientPid(/*inout*/ int& clientPid);
+
+    virtual binder::Status errorNotTrusted(int clientPid, int clientUid,
+                                           const std::string& methodName,
+                                           const std::optional<std::string>& cameraIdMaybe,
+                                           const std::string& clientName, bool isPid) const;
 
   private:
+    virtual const sp<IPermissionController>& getPermissionController() const;
+
     std::unique_ptr<permission::PermissionChecker> mPermissionChecker =
             std::make_unique<permission::PermissionChecker>();
 };
@@ -128,39 +166,36 @@ class AttributionAndPermissionUtils {
  * in the encapsulating class's methods.
  */
 class AttributionAndPermissionUtilsEncapsulator {
-protected:
+  protected:
     std::shared_ptr<AttributionAndPermissionUtils> mAttributionAndPermissionUtils;
 
-public:
+  public:
     AttributionAndPermissionUtilsEncapsulator(
-        std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils)
-            : mAttributionAndPermissionUtils(attributionAndPermissionUtils) { }
+            std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils)
+        : mAttributionAndPermissionUtils(attributionAndPermissionUtils) {}
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid) {
         return AttributionAndPermissionUtils::buildAttributionSource(callingPid, callingUid);
     }
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid,
-            int32_t deviceId) {
-        return AttributionAndPermissionUtils::buildAttributionSource(
-                callingPid, callingUid, deviceId);
+                                                         int32_t deviceId) {
+        return AttributionAndPermissionUtils::buildAttributionSource(callingPid, callingUid,
+                                                                     deviceId);
     }
 
     static AttributionSourceState buildAttributionSource(int callingPid, int callingUid,
-            const std::string& packageName, int32_t deviceId) {
-        AttributionSourceState attributionSource = buildAttributionSource(callingPid, callingUid,
-                deviceId);
+                                                         const std::string& packageName,
+                                                         int32_t deviceId) {
+        AttributionSourceState attributionSource =
+                buildAttributionSource(callingPid, callingUid, deviceId);
         attributionSource.packageName = packageName;
         return attributionSource;
     }
 
-    int getCallingUid() const {
-        return mAttributionAndPermissionUtils->getCallingUid();
-    }
+    int getCallingUid() const { return mAttributionAndPermissionUtils->getCallingUid(); }
 
-    int getCallingPid() const {
-        return mAttributionAndPermissionUtils->getCallingPid();
-    }
+    int getCallingPid() const { return mAttributionAndPermissionUtils->getCallingPid(); }
 
     int64_t clearCallingIdentity() const {
         return mAttributionAndPermissionUtils->clearCallingIdentity();
@@ -170,48 +205,51 @@ public:
         mAttributionAndPermissionUtils->restoreCallingIdentity(token);
     }
 
+    binder::Status resolveAttributionSource(AttributionSourceState& resolvedAttributionSource,
+                                            const std::string& methodName,
+                                            const std::optional<std::string>& cameraIdMaybe) {
+        return mAttributionAndPermissionUtils->resolveAttributionSource(resolvedAttributionSource,
+                                                                        methodName, cameraIdMaybe);
+    }
+
     // The word 'System' here does not refer to callers only on the system
     // partition. They just need to have an android system uid.
-    bool callerHasSystemUid() const {
-        return (getCallingUid() < AID_APP_START);
-    }
+    bool callerHasSystemUid() const { return (getCallingUid() < AID_APP_START); }
 
     bool hasPermissionsForCamera(int callingPid, int callingUid, int32_t deviceId) const {
         return hasPermissionsForCamera(std::string(), callingPid, callingUid, deviceId);
     }
 
-    bool hasPermissionsForCamera(int callingPid, int callingUid,
-            const std::string& packageName, int32_t deviceId) const {
-        return hasPermissionsForCamera(std::string(), callingPid, callingUid, packageName,
-                deviceId);
-    }
-
-    bool hasPermissionsForCamera(const std::string& cameraId, int callingPid,
-            int callingUid, int32_t deviceId) const {
-        auto attributionSource = buildAttributionSource(callingPid, callingUid,
-                deviceId);
-        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, attributionSource);
+    bool hasPermissionsForCamera(int callingPid, int callingUid, const std::string& packageName,
+                                 int32_t deviceId) const {
+        auto attributionSource =
+                buildAttributionSource(callingPid, callingUid, packageName, deviceId);
+        return hasPermissionsForCamera(std::string(), attributionSource);
     }
 
     bool hasPermissionsForCamera(const std::string& cameraId, int callingPid, int callingUid,
-            const std::string& packageName, int32_t deviceId) const {
-        auto attributionSource = buildAttributionSource(callingPid, callingUid, packageName,
-                deviceId);
+                                 int32_t deviceId) const {
+        auto attributionSource = buildAttributionSource(callingPid, callingUid, deviceId);
         return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, attributionSource);
     }
 
+    bool hasPermissionsForCamera(const std::string& cameraId,
+                                 const AttributionSourceState& clientAttribution) const {
+        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution);
+    }
+
     bool hasPermissionsForSystemCamera(const std::string& cameraId, int callingPid, int callingUid,
-            bool checkCameraPermissions = true) const  {
+                                       bool checkCameraPermissions = true) const {
         auto attributionSource = buildAttributionSource(callingPid, callingUid);
         return mAttributionAndPermissionUtils->hasPermissionsForSystemCamera(
-                    cameraId, attributionSource, checkCameraPermissions);
+                cameraId, attributionSource, checkCameraPermissions);
     }
 
     bool hasPermissionsForCameraHeadlessSystemUser(const std::string& cameraId, int callingPid,
-            int callingUid) const {
+                                                   int callingUid) const {
         auto attributionSource = buildAttributionSource(callingPid, callingUid);
         return mAttributionAndPermissionUtils->hasPermissionsForCameraHeadlessSystemUser(
-                    cameraId, attributionSource);
+                cameraId, attributionSource);
     }
 
     bool hasPermissionsForCameraPrivacyAllowlist(int callingPid, int callingUid) const {
@@ -226,9 +264,7 @@ public:
                 attributionSource);
     }
 
-    bool isAutomotiveDevice() const {
-        return mAttributionAndPermissionUtils->isAutomotiveDevice();
-    }
+    bool isAutomotiveDevice() const { return mAttributionAndPermissionUtils->isAutomotiveDevice(); }
 
     bool isAutomotivePrivilegedClient(int32_t uid) const {
         return mAttributionAndPermissionUtils->isAutomotivePrivilegedClient(uid);
@@ -242,9 +278,13 @@ public:
         return mAttributionAndPermissionUtils->isHeadlessSystemUserMode();
     }
 
-    status_t getUidForPackage(const std::string &packageName, int userId,
-            /*inout*/uid_t& uid, int err) const {
+    status_t getUidForPackage(const std::string& packageName, int userId,
+                              /*inout*/ uid_t& uid, int err) const {
         return mAttributionAndPermissionUtils->getUidForPackage(packageName, userId, uid, err);
+    }
+
+    std::string getPackageNameFromUid(int clientUid) const {
+        return mAttributionAndPermissionUtils->getPackageNameFromUid(clientUid);
     }
 
     bool isCallerCameraServerNotDelegating() const {
@@ -254,4 +294,4 @@ public:
 
 } // namespace android
 
-#endif // ANDROID_SERVERS_CAMERA_ATTRIBUTION_AND_PERMISSION_UTILS_H
+#endif  // ANDROID_SERVERS_CAMERA_ATTRIBUTION_AND_PERMISSION_UTILS_H

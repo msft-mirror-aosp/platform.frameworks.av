@@ -29,7 +29,6 @@ cc_test {
         "libbase",
         "libbinder",
         "libcutils",
-        "libcutils",
         "libhidlbase",
         "liblog",
         "libmedia_helper",
@@ -41,6 +40,7 @@ cc_test {
     static_libs: [
         "android.media.audiopolicy-aconfig-cc",
         "audioclient-types-aidl-cpp",
+        "com.android.media.audio-aconfig-cc",
         "com.android.media.audioserver-aconfig-cc",
         "libaudiopolicycomponents",
         "libflagtest",
@@ -53,7 +53,10 @@ cc_test {
         "libaudiopolicymanager_interface_headers",
     ],
 
-    srcs: ["audiopolicymanager_tests.cpp"],
+    srcs: [
+        "audiopolicymanager_tests.cpp",
+        "test_execution_tracer.cpp",
+    ],
 
     data: [":audiopolicytest_configuration_files"],
 

@@ -194,11 +194,11 @@ static bool isCameraServiceDisabled() {
     return (strncmp(value, "0", 2) != 0 && strncasecmp(value, "false", 6) != 0);
 }
 
-bool CameraManagerGlobal::setupVendorTags() {
+bool CameraManagerGlobal::setupVendorTags(std::shared_ptr<ICameraService> &cameraService) {
     sp<VendorTagDescriptorCache> tagCache = new VendorTagDescriptorCache();
     Status status = Status::NO_ERROR;
     std::vector<ProviderIdAndVendorTagSections> providerIdsAndVts;
-    ScopedAStatus remoteRet = mCameraService->getCameraVendorTagSections(&providerIdsAndVts);
+    ScopedAStatus remoteRet = cameraService->getCameraVendorTagSections(&providerIdsAndVts);
 
     if (!remoteRet.isOk()) {
         if (remoteRet.getExceptionCode() == EX_SERVICE_SPECIFIC) {
@@ -261,15 +261,12 @@ std::shared_ptr<ICameraService> CameraManagerGlobal::getCameraService() {
         ALOGE("%s: Could not get ICameraService instance.", __FUNCTION__);
         return nullptr;
     }
-
     if (mDeathRecipient.get() == nullptr) {
         mDeathRecipient = ndk::ScopedAIBinder_DeathRecipient(
                 AIBinder_DeathRecipient_new(CameraManagerGlobal::binderDeathCallback));
+        AIBinder_linkToDeath(cameraService->asBinder().get(),
+                             mDeathRecipient.get(), /*cookie=*/ this);
     }
-    AIBinder_linkToDeath(cameraService->asBinder().get(),
-                         mDeathRecipient.get(), /*cookie=*/ this);
-
-    mCameraService = cameraService;
 
     // Setup looper thread to perform availability callbacks
     if (mCbLooper == nullptr) {
@@ -291,31 +288,23 @@ std::shared_ptr<ICameraService> CameraManagerGlobal::getCameraService() {
         mCbLooper->registerHandler(mHandler);
     }
 
+    std::vector<CameraStatusAndId> cameraStatuses;
     // register ICameraServiceListener
     if (mCameraServiceListener == nullptr) {
         mCameraServiceListener = ndk::SharedRefBase::make<CameraServiceListener>(weak_from_this());
-    }
-
-    std::vector<CameraStatusAndId> cameraStatuses;
-    Status status = Status::NO_ERROR;
-    ScopedAStatus remoteRet = mCameraService->addListener(mCameraServiceListener,
-                                                          &cameraStatuses);
-
-    if (!remoteRet.isOk()) {
-        if (remoteRet.getExceptionCode() == EX_SERVICE_SPECIFIC) {
-            Status errStatus = static_cast<Status>(remoteRet.getServiceSpecificError());
-            ALOGE("%s: Failed to add listener to camera service: %s", __FUNCTION__,
-                toString(errStatus).c_str());
-        } else {
-            ALOGE("%s: Transaction failed when adding listener to camera service: %d",
-                __FUNCTION__, remoteRet.getExceptionCode());
+        ScopedAStatus remoteRet = cameraService->addListener(mCameraServiceListener,
+                                                            &cameraStatuses);
+        if (!remoteRet.isOk()) {
+            if (remoteRet.getExceptionCode() == EX_SERVICE_SPECIFIC) {
+                Status errStatus = static_cast<Status>(remoteRet.getServiceSpecificError());
+                ALOGE("%s: Failed to add listener to camera service: %s", __FUNCTION__,
+                    toString(errStatus).c_str());
+            } else {
+                ALOGE("%s: Transaction failed when adding listener to camera service: %d",
+                    __FUNCTION__, remoteRet.getExceptionCode());
+            }
+            return nullptr;
         }
-    }
-
-    // Setup vendor tags
-    if (!setupVendorTags()) {
-        ALOGE("Unable to set up vendor tags");
-        return nullptr;
     }
 
     for (auto& csi: cameraStatuses){
@@ -326,6 +315,13 @@ std::shared_ptr<ICameraService> CameraManagerGlobal::getCameraService() {
                                   csi.cameraId, unavailablePhysicalId);
         }
     }
+
+   // Setup vendor tags
+    if (!setupVendorTags(cameraService)) {
+        ALOGE("Unable to set up vendor tags");
+        return nullptr;
+    }
+    mCameraService = cameraService;
     return mCameraService;
 }
 
@@ -346,6 +342,8 @@ void CameraManagerGlobal::binderDeathCallback(void* /*cookie*/) {
         instance->onStatusChangedLocked(deviceStatus, cameraId);
     }
     instance->mCameraService.reset();
+    instance->mDeathRecipient.release();
+    instance->mCameraServiceListener.reset();
     // TODO: consider adding re-connect call here?
 }
 

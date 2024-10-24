@@ -105,6 +105,8 @@ class CameraManagerGlobal final : public RefBase {
     template <class T>
     void registerAvailCallback(const DeviceContext& deviceContext, const T* callback);
 
+    bool setupVendorTags(sp<hardware::ICameraService> &cameraService);
+
     class DeathNotifier : public IBinder::DeathRecipient {
       public:
         explicit DeathNotifier(CameraManagerGlobal* cm) : mCameraManager(cm) {}

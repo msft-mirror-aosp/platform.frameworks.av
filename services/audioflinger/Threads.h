@@ -33,6 +33,7 @@
 #include <fastpath/FastMixer.h>
 #include <mediautils/Synchronization.h>
 #include <mediautils/ThreadSnapshot.h>
+#include <psh_utils/Token.h>
 #include <timing/MonotonicFrameCounter.h>
 #include <utils/Log.h>
 
@@ -575,6 +576,9 @@ public:
         return mThreadloopExecutor;
     }
 
+    // Used to print the header for the local log on a particular thread type
+    virtual std::string getLocalLogHeader() const { return {}; };
+
 protected:
 
                 // entry describing an effect being suspended in mSuspendedSessions keyed vector
@@ -622,7 +626,8 @@ protected:
      * ThreadBase_Mutex during this time.  No other mutex is held.
      */
 
-    void waitWhileThreadBusy_l(audio_utils::unique_lock& ul) final REQUIRES(mutex()) {
+    void waitWhileThreadBusy_l(audio_utils::unique_lock<audio_utils::mutex>& ul)
+            final REQUIRES(mutex()) {
         // the wait returns immediately if the predicate is satisfied.
         mThreadBusyCv.wait(ul, [&]{ return mThreadBusy == false;});
     }
@@ -725,6 +730,7 @@ protected:
                 char                    mThreadName[kThreadNameLength]; // guaranteed NUL-terminated
     sp<os::IPowerManager> mPowerManager GUARDED_BY(mutex());
     sp<IBinder> mWakeLockToken GUARDED_BY(mutex());
+    std::unique_ptr<media::psh_utils::Token> mThreadToken GUARDED_BY(mutex());
                 const sp<PMDeathRecipient> mDeathRecipient;
                 // list of suspended effects per session and per type. The first (outer) vector is
                 // keyed by session ID, the second (inner) by type UUID timeLow field
@@ -885,7 +891,7 @@ protected:
                     bool                mHasChanged = false;
                 };
 
-                SimpleLog mLocalLog;  // locked internally
+                SimpleLog mLocalLog {/* maxLogLines= */ 120};  // locked internally
 
     // mThreadloopExecutor contains deferred functors and object (dtors) to
     // be executed at the end of the processing period, without any
@@ -1014,11 +1020,12 @@ public:
     void setMasterVolume(float value) final;
     void setMasterBalance(float balance) override EXCLUDES_ThreadBase_Mutex;
     void setMasterMute(bool muted) final;
-    void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
+    void setStreamVolume(audio_stream_type_t stream, float value, bool muted) final
+            EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
-    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
-            final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+                            bool muted) final EXCLUDES_ThreadBase_Mutex;
 
     void setVolumeForOutput_l(float left, float right) const final;
 
@@ -1045,7 +1052,8 @@ public:
                                 bool isSpatialized,
                                 bool isBitPerfect,
                                 audio_output_flags_t* afTrackFlags,
-                                float volume) final
+                                float volume,
+                                bool muted) final
             REQUIRES(audio_utils::AudioFlinger_Mutex);
 
     bool isTrackActive(const sp<IAfTrack>& track) const final {
@@ -1227,6 +1235,9 @@ public:
             override EXCLUDES_ThreadBase_Mutex {
         // Do nothing. It is only used for bit perfect thread
     }
+
+    std::string getLocalLogHeader() const override;
+
 protected:
     // updated by readOutputParameters_l()
     size_t                          mNormalFrameCount;  // normal mixer and effects
@@ -2131,6 +2142,8 @@ public:
                             return !(mInput == nullptr || mInput->stream == nullptr);
                         }
 
+    std::string getLocalLogHeader() const override;
+
 protected:
     void dumpInternals_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
     void dumpTracks_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
@@ -2322,6 +2335,8 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
 
     bool isStreamInitialized() const override { return false; }
 
+    std::string getLocalLogHeader() const override;
+
     void setClientSilencedState_l(audio_port_handle_t portId, bool silenced) REQUIRES(mutex()) {
                                 mClientSilencedStates[portId] = silenced;
                             }
@@ -2392,11 +2407,13 @@ public:
     // Needs implementation?
     void setMasterBalance(float /* value */) final EXCLUDES_ThreadBase_Mutex {}
     void setMasterMute(bool muted) final EXCLUDES_ThreadBase_Mutex;
-    void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
+
+    void setStreamVolume(audio_stream_type_t stream, float value, bool muted) final
+            EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
-    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
-            final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+                            bool muted) final EXCLUDES_ThreadBase_Mutex;
 
     void setMasterMute_l(bool muted) REQUIRES(mutex()) { mMasterMute = muted; }
 

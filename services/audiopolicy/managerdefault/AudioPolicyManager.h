@@ -129,7 +129,8 @@ public:
                                   output_type_t *outputType,
                                   bool *isSpatialized,
                                   bool *isBitPerfect,
-                                  float *volume) override;
+                                  float *volume,
+                                  bool *muted) override;
         virtual status_t startOutput(audio_port_handle_t portId);
         virtual status_t stopOutput(audio_port_handle_t portId);
         virtual bool releaseOutput(audio_port_handle_t portId);
@@ -169,6 +170,7 @@ public:
         virtual void initStreamVolume(audio_stream_type_t stream, int indexMin, int indexMax);
         virtual status_t setStreamVolumeIndex(audio_stream_type_t stream,
                                               int index,
+                                              bool muted,
                                               audio_devices_t device);
         virtual status_t getStreamVolumeIndex(audio_stream_type_t stream,
                                               int *index,
@@ -176,6 +178,7 @@ public:
 
         virtual status_t setVolumeIndexForAttributes(const audio_attributes_t &attr,
                                                      int index,
+                                                     bool muted,
                                                      audio_devices_t device);
         virtual status_t getVolumeIndexForAttributes(const audio_attributes_t &attr,
                                                      int &index,
@@ -185,6 +188,7 @@ public:
         virtual status_t getMinVolumeIndexForAttributes(const audio_attributes_t &attr, int &index);
 
         status_t setVolumeCurveIndex(int index,
+                                     bool muted,
                                      audio_devices_t device,
                                      IVolumeCurves &volumeCurves);
 
@@ -650,7 +654,8 @@ protected:
                              DeviceTypeSet deviceTypes = DeviceTypeSet());
 
         /**
-         * @brief setVolumeSourceMute Mute or unmute the volume source on the specified output
+         * @brief setVolumeSourceMutedInternally Mute or unmute the volume source on the specified
+         * output
          * @param volumeSource to be muted/unmute (may host legacy streams or by extension set of
          * audio attributes)
          * @param on true to mute, false to umute
@@ -658,11 +663,11 @@ protected:
          * @param delayMs
          * @param device
          */
-        void setVolumeSourceMute(VolumeSource volumeSource,
-                                 bool on,
-                                 const sp<AudioOutputDescriptor>& outputDesc,
-                                 int delayMs = 0,
-                                 DeviceTypeSet deviceTypes = DeviceTypeSet());
+        void setVolumeSourceMutedInternally(VolumeSource volumeSource,
+                                            bool on,
+                                            const sp<AudioOutputDescriptor>& outputDesc,
+                                            int delayMs = 0,
+                                            DeviceTypeSet deviceTypes = DeviceTypeSet());
 
         audio_mode_t getPhoneState();
 
@@ -1109,8 +1114,8 @@ private:
         // It can give a chance to HAL implementer to retrieve dynamic capabilities associated
         // to this device for example.
         // TODO avoid opening stream to retrieve capabilities of a profile.
-        void broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
-                                            media::DeviceConnectedState state);
+        status_t broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
+                                                media::DeviceConnectedState state);
 
         // updates device caching and output for streams that can influence the
         //    routing of notifications
@@ -1365,6 +1370,11 @@ private:
         status_t getDevicesForAttributes(const audio_attributes_t &attr,
                                          DeviceVector &devices,
                                          bool forVolume);
+
+        // A helper method used by getDevicesForAttributes to retrieve input devices when
+        // capture preset is available in the given audio attributes parameter.
+        status_t getInputDevicesForAttributes(const audio_attributes_t &attr,
+                                              DeviceVector &devices);
 
         status_t getProfilesForDevices(const DeviceVector& devices,
                                        AudioProfileVector& audioProfiles,

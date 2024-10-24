@@ -35,6 +35,8 @@ class BundleContext final : public EffectContext {
     void deInit();
     lvm::BundleEffectType getBundleType() const { return mType; }
 
+    RetCode setCommon(const Parameter::Common& common) override;
+
     RetCode enable() override;
     RetCode enableOperatingMode();
     RetCode disable() override;

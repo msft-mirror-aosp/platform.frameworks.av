@@ -82,6 +82,10 @@ class EglSurfaceTexture {
   // See SurfaceTexture.getTransformMatrix for more details.
   std::array<float, 16> getTransformMatrix();
 
+  // Retrieves the timestamp associated with the texture image
+  // set by the most recent call to updateTexture.
+  std::chrono::nanoseconds getTimestamp();
+
  private:
 #if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<IGraphicBufferProducer> mBufferProducer;

@@ -27,7 +27,7 @@
 #include "MelReporter.h"
 #include "ResamplerBufferProvider.h"
 
-#include <afutils/DumpTryLock.h>
+#include <afutils/FallibleLockGuard.h>
 #include <afutils/Permission.h>
 #include <afutils/TypedLogger.h>
 #include <afutils/Vibrator.h>
@@ -81,6 +81,7 @@
 #include <powermanager/PowerManager.h>
 #include <private/android_filesystem_config.h>
 #include <private/media/AudioTrackShared.h>
+#include <psh_utils/AudioPowerManager.h>
 #include <system/audio_effects/effect_aec.h>
 #include <system/audio_effects/effect_downmix.h>
 #include <system/audio_effects/effect_ns.h>
@@ -1041,27 +1042,25 @@ String8 channelMaskToString(audio_channel_mask_t mask, bool output) {
 }
 
 void ThreadBase::dump(int fd, const Vector<String16>& args)
-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
 {
     dprintf(fd, "\n%s thread %p, name %s, tid %d, type %d (%s):\n", isOutput() ? "Output" : "Input",
             this, mThreadName, getTid(), type(), threadTypeToString(type()));
 
-    const bool locked = afutils::dumpTryLock(mutex());
-    if (!locked) {
-        dprintf(fd, "  Thread may be deadlocked\n");
-    }
-
-    dumpBase_l(fd, args);
-    dumpInternals_l(fd, args);
-    dumpTracks_l(fd, args);
-    dumpEffectChains_l(fd, args);
-
-    if (locked) {
-        mutex().unlock();
+    {
+        afutils::FallibleLockGuard l{mutex()};
+        if (!l) {
+            dprintf(fd, "  Thread may be deadlocked\n");
+        }
+        dumpBase_l(fd, args);
+        dumpInternals_l(fd, args);
+        dumpTracks_l(fd, args);
+        dumpEffectChains_l(fd, args);
     }
 
     dprintf(fd, "  Local log:\n");
-    mLocalLog.dump(fd, "   " /* prefix */, 40 /* lines */);
+    const auto logHeader = this->getLocalLogHeader();
+    write(fd, logHeader.data(), logHeader.length());
+    mLocalLog.dump(fd, "   " /* prefix */);
 
     // --all does the statistics
     bool dumpAll = false;
@@ -1218,6 +1217,10 @@ void ThreadBase::acquireWakeLock_l()
                     {} /* historyTag */);
         if (status.isOk()) {
             mWakeLockToken = binder;
+            if (media::psh_utils::AudioPowerManager::enabled()) {
+                mThreadToken = media::psh_utils::createAudioThreadToken(
+                        getTid(), String8(getWakeLockTag()).c_str());
+            }
         }
         ALOGV("acquireWakeLock_l() %s status %d", mThreadName, status.exceptionCode());
     }
@@ -1243,6 +1246,7 @@ void ThreadBase::releaseWakeLock_l()
         }
         mWakeLockToken.clear();
     }
+    mThreadToken.reset();
 }
 
 void ThreadBase::getPowerManager_l() {
@@ -2401,7 +2405,8 @@ sp<IAfTrack> PlaybackThread::createTrack_l(
         bool isSpatialized,
         bool isBitPerfect,
         audio_output_flags_t *afTrackFlags,
-        float volume)
+        float volume,
+        bool muted)
 {
     size_t frameCount = *pFrameCount;
     size_t notificationFrameCount = *pNotificationFrameCount;
@@ -2730,7 +2735,7 @@ sp<IAfTrack> PlaybackThread::createTrack_l(
                           nullptr /* buffer */, (size_t)0 /* bufferSize */, sharedBuffer,
                           sessionId, creatorPid, attributionSource, trackFlags,
                           IAfTrackBase::TYPE_DEFAULT, portId, SIZE_MAX /*frameCountToBeReady*/,
-                          speed, isSpatialized, isBitPerfect, volume);
+                          speed, isSpatialized, isBitPerfect, volume, muted);
 
         lStatus = track != 0 ? track->initCheck() : (status_t) NO_MEMORY;
         if (lStatus != NO_ERROR) {
@@ -2838,10 +2843,14 @@ void PlaybackThread::setMasterMute(bool muted)
     }
 }
 
-void PlaybackThread::setStreamVolume(audio_stream_type_t stream, float value)
+void PlaybackThread::setStreamVolume(audio_stream_type_t stream, float value, bool muted)
 {
+    ALOGV("%s: stream %d value %f muted %d", __func__, stream, value, muted);
     audio_utils::lock_guard _l(mutex());
     mStreamTypes[stream].volume = value;
+    if (com_android_media_audio_ring_my_car()) {
+        mStreamTypes[stream].mute = muted;
+    }
     broadcast_l();
 }
 
@@ -2859,13 +2868,14 @@ float PlaybackThread::streamVolume(audio_stream_type_t stream) const
 }
 
 status_t PlaybackThread::setPortsVolume(
-        const std::vector<audio_port_handle_t>& portIds, float volume) {
+        const std::vector<audio_port_handle_t>& portIds, float volume, bool muted) {
     audio_utils::lock_guard _l(mutex());
     for (const auto& portId : portIds) {
         for (size_t i = 0; i < mTracks.size(); i++) {
             sp<IAfTrack> track = mTracks[i].get();
             if (portId == track->portId()) {
                 track->setPortVolume(volume);
+                track->setPortMute(muted);
                 break;
             }
         }
@@ -3250,9 +3260,9 @@ NO_THREAD_SAFETY_ANALYSIS
 
     // Calculate size of normal sink buffer relative to the HAL output buffer size
     double multiplier = 1.0;
-    // Note: mType == SPATIALIZER does not support FastMixer.
-    if (mType == MIXER && (kUseFastMixer == FastMixer_Static ||
-            kUseFastMixer == FastMixer_Dynamic)) {
+    // Note: mType == SPATIALIZER does not support FastMixer and DEEP is by definition not "fast"
+    if ((mType == MIXER && !(mOutput->flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) &&
+            (kUseFastMixer == FastMixer_Static || kUseFastMixer == FastMixer_Dynamic)) {
         size_t minNormalFrameCount = (kMinNormalSinkBufferSizeMs * mSampleRate) / 1000;
         size_t maxNormalFrameCount = (kMaxNormalSinkBufferSizeMs * mSampleRate) / 1000;
 
@@ -4059,7 +4069,13 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
     // FIXME could this be made local to while loop?
     writeFrames = 0;
 
-    cacheParameters_l();
+    {
+        audio_utils::lock_guard l(mutex());
+
+        cacheParameters_l();
+        checkSilentMode_l();
+    }
+
     mSleepTimeUs = mIdleSleepTimeUs;
 
     if (mType == MIXER || mType == SPATIALIZER) {
@@ -4083,8 +4099,6 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
     // Estimated time for next buffer to be written to hal. This is used only on
     // suspended mode (for now) to help schedule the wait time until next iteration.
     nsecs_t timeLoopNextNs = 0;
-
-    checkSilentMode_l();
 
     audio_patch_handle_t lastDownstreamPatchHandle = AUDIO_PATCH_HANDLE_NONE;
 
@@ -5114,6 +5128,12 @@ void PlaybackThread::toAudioPortConfig(struct audio_port_config* config)
     }
 }
 
+std::string PlaybackThread::getLocalLogHeader() const {
+    using namespace std::literals;
+    static constexpr auto indent = "                             "
+                                   "                            "sv;
+    return std::string{indent}.append(IAfTrack::getLogHeader());
+}
 // ----------------------------------------------------------------------------
 
 /* static */
@@ -5177,7 +5197,16 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
             break;
         case FastMixer_Static:
         case FastMixer_Dynamic:
-            initFastMixer = mFrameCount < mNormalFrameCount;
+            if (mType == MIXER && (output->flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) {
+                /* Do not init fast mixer on deep buffer, warn if buffers are confed too small */
+                initFastMixer = false;
+                ALOGW_IF(mFrameCount * 1000 / mSampleRate < kMinNormalSinkBufferSizeMs,
+                         "HAL DEEP BUFFER Buffer (%zu ms) is smaller than set minimal buffer "
+                         "(%u ms), seems like a configuration error",
+                         mFrameCount * 1000 / mSampleRate, kMinNormalSinkBufferSizeMs);
+            } else {
+                initFastMixer = mFrameCount < mNormalFrameCount;
+            }
             break;
         }
         ALOGW_IF(initFastMixer == false && mFrameCount < mNormalFrameCount,
@@ -5266,7 +5295,10 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         mFastMixerNBLogWriter = afThreadCallback->newWriter_l(kFastMixerLogSize, "FastMixer");
         state->mNBLogWriter = mFastMixerNBLogWriter.get();
         sq->end();
-        sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+        {
+            audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+            sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+        }
 
         NBLog::thread_info_t info;
         info.id = mId;
@@ -5325,8 +5357,11 @@ MixerThread::~MixerThread()
         }
         state->mCommand = FastMixerState::EXIT;
         sq->end();
-        sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
-        mFastMixer->join();
+        {
+            audio_utils::mutex::scoped_join_wait_check queueWaitCheck(mFastMixer->getTid());
+            sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+            mFastMixer->join();
+        }
         // Though the fast mixer thread has exited, it's state queue is still valid.
         // We'll use that extract the final state which contains one remaining fast track
         // corresponding to our sub-mix.
@@ -5406,7 +5441,10 @@ ssize_t MixerThread::threadLoop_write()
                 FastThreadDumpState::kSamplingNforLowRamDevice : FastThreadDumpState::kSamplingN);
 #endif
             sq->end();
-            sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+            {
+                audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+                sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
+            }
             if (kUseFastMixer == FastMixer_Dynamic) {
                 mNormalSink = mPipeSink;
             }
@@ -5439,7 +5477,10 @@ void MixerThread::threadLoop_standby()
             mFastMixerFutex = 0;
             sq->end();
             // BLOCK_UNTIL_PUSHED would be insufficient, as we need it to stop doing I/O now
-            sq->push(FastMixerStateQueue::BLOCK_UNTIL_ACKED);
+            {
+                audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+                sq->push(FastMixerStateQueue::BLOCK_UNTIL_ACKED);
+            }
             if (kUseFastMixer == FastMixer_Dynamic) {
                 mNormalSink = mOutputSink;
             }
@@ -5824,7 +5865,7 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                         volume = masterVolume * mStreamTypes[track->streamType()].volume;
                     }
                 } else {
-                    if (track->isPlaybackRestricted()) {
+                    if (track->isPlaybackRestricted() || track->getPortMute()) {
                         volume = 0.f;
                     } else {
                         volume = masterVolume * track->getPortVolume();
@@ -5848,7 +5889,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                                            mStreamTypes[track->streamType()].mute,
                                            track->isPlaybackRestricted(),
                                            vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f});
+                                           vh == 0.f,
+                                           /*muteFromPortVolume=*/false});
                 } else {
                     track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
                             /*muteState=*/{masterVolume == 0.f,
@@ -5856,7 +5898,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                                            /* muteFromStreamMuted= */ false,
                                            track->isPlaybackRestricted(),
                                            vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f});
+                                           vh == 0.f,
+                                           track->getPortMute()});
                 }
                 vlf *= volume;
                 vrf *= volume;
@@ -6020,7 +6063,7 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 }
             } else {
                 v = masterVolume * track->getPortVolume();
-                if (track->isPlaybackRestricted()) {
+                if (track->isPlaybackRestricted() || track->getPortMute()) {
                     v = 0;
                 }
             }
@@ -6050,7 +6093,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                                            mStreamTypes[track->streamType()].mute,
                                            track->isPlaybackRestricted(),
                                            vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f});
+                                           vh == 0.f,
+                                           /*muteFromPortVolume=*/false});
                 } else {
                     track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
                             /*muteState=*/{masterVolume == 0.f,
@@ -6058,7 +6102,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                                            /* muteFromStreamMuted= */ false,
                                            track->isPlaybackRestricted(),
                                            vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f});
+                                           vh == 0.f,
+                                           track->getPortMute()});
                 }
                 // now apply the master volume and stream type volume and shaper volume
                 vlf *= v * vh;
@@ -6335,7 +6380,10 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
         //
         // This occurs with BT suspend when we idle the FastMixer with
         // active tracks, which may be added or removed.
-        sq->push(coldIdle ? FastMixerStateQueue::BLOCK_NEVER : block);
+        {
+            audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
+            sq->push(coldIdle ? FastMixerStateQueue::BLOCK_NEVER : block);
+        }
     }
 #ifdef AUDIO_WATCHDOG
     if (pauseAudioWatchdog && mAudioWatchdog != 0) {
@@ -6813,7 +6861,8 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
                                mStreamTypes[track->streamType()].mute,
                                track->isPlaybackRestricted(),
                                clientVolumeMute,
-                               shaperVolume == 0.f});
+                               shaperVolume == 0.f,
+                               /*muteFromPortVolume=*/false});
     } else {
         if (mMasterMute || track->isPlaybackRestricted()) {
             left = right = 0;
@@ -6841,7 +6890,8 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
                                /* muteFromStreamMuted= */ false,
                                track->isPlaybackRestricted(),
                                clientVolumeMute,
-                               shaperVolume == 0.f});
+                               shaperVolume == 0.f,
+                               track->getPortMute()});
     }
 
     if (lastTrack) {
@@ -7294,11 +7344,14 @@ void DirectOutputThread::flushHw_l()
 {
     PlaybackThread::flushHw_l();
     mOutput->flush();
-    mHwPaused = false;
     mFlushPending = false;
     mTimestampVerifier.discontinuity(discontinuityForStandbyOrFlush());
     mTimestamp.clear();
     mMonotonicFrameCounter.onFlush();
+    // We do not reset mHwPaused which is hidden from the Track client.
+    // Note: the client track in Tracks.cpp and AudioTrack.cpp
+    // has a FLUSHED state but the DirectOutputThread does not;
+    // those tracks will continue to show isStopped().
 }
 
 int64_t DirectOutputThread::computeWaitTimeNs_l() const {
@@ -7940,8 +7993,9 @@ void DuplicatingThread::addOutputTrack(IAfPlaybackThread* thread)
         return;
     }
     if (!audioserver_flags::portid_volume_management()) {
-        thread->setStreamVolume(AUDIO_STREAM_PATCH, 1.0f);
+        thread->setStreamVolume(AUDIO_STREAM_PATCH, /*volume=*/1.0f, /*muted=*/false);
     }
+
     mOutputTracks.add(outputTrack);
     ALOGV("addOutputTrack() track %p, on thread %p", outputTrack.get(), thread);
     updateWaitTime_l();
@@ -8308,8 +8362,10 @@ RecordThread::RecordThread(const sp<IAfThreadCallback>& afThreadCallback,
                 afThreadCallback->newWriter_l(kFastCaptureLogSize, "FastCapture");
         state->mNBLogWriter = mFastCaptureNBLogWriter.get();
         sq->end();
-        sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
-
+        {
+            audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastCapture->getTid());
+            sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
+        }
         // start the fast capture
         mFastCapture->run("FastCapture", ANDROID_PRIORITY_URGENT_AUDIO);
         pid_t tid = mFastCapture->getTid();
@@ -8343,8 +8399,11 @@ RecordThread::~RecordThread()
         }
         state->mCommand = FastCaptureState::EXIT;
         sq->end();
-        sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
-        mFastCapture->join();
+        {
+            audio_utils::mutex::scoped_join_wait_check queueWaitCheck(mFastCapture->getTid());
+            sq->push(FastCaptureStateQueue::BLOCK_UNTIL_PUSHED);
+            mFastCapture->join();
+        }
         mFastCapture.clear();
     }
     mAfThreadCallback->unregisterWriter(mFastCaptureNBLogWriter);
@@ -8977,7 +9036,11 @@ void RecordThread::inputStandBy()
             mFastCaptureFutex = 0;
             sq->end();
             // BLOCK_UNTIL_PUSHED would be insufficient, as we need it to stop doing I/O now
-            sq->push(FastCaptureStateQueue::BLOCK_UNTIL_ACKED);
+            {
+                audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastCapture->getTid());
+                sq->push(FastCaptureStateQueue::BLOCK_UNTIL_ACKED);
+            }
+
 #if 0
             if (kUseFastCapture == FastCapture_Dynamic) {
                 // FIXME
@@ -10210,6 +10273,13 @@ void RecordThread::toAudioPortConfig(struct audio_port_config* config)
     }
 }
 
+std::string RecordThread::getLocalLogHeader() const {
+    using namespace std::literals;
+    static constexpr auto indent = "                             "
+                                   "                            "sv;
+    return std::string{indent}.append(IAfRecordTrack::getLogHeader());
+}
+
 // ----------------------------------------------------------------------------
 //      Mmap
 // ----------------------------------------------------------------------------
@@ -10429,6 +10499,7 @@ status_t MmapThread::start(const AudioClient& client,
     const auto localSessionId = mSessionId;
     auto localAttr = mAttr;
     float volume = 0.0f;
+    bool muted = false;
     if (isOutput()) {
         audio_config_t config = AUDIO_CONFIG_INITIALIZER;
         config.sample_rate = mSampleRate;
@@ -10453,7 +10524,8 @@ status_t MmapThread::start(const AudioClient& client,
                                             &secondaryOutputs,
                                             &isSpatialized,
                                             &isBitPerfect,
-                                            &volume);
+                                            &volume,
+                                            &muted);
         mutex().lock();
         mAttr = localAttr;
         ALOGD_IF(!secondaryOutputs.empty(),
@@ -10523,7 +10595,7 @@ status_t MmapThread::start(const AudioClient& client,
                                         mChannelMask, mSessionId, isOutput(),
                                         client.attributionSource,
                                         IPCThreadState::self()->getCallingPid(), portId,
-                                        volume);
+                                        volume, muted);
     if (!isOutput()) {
         track->setSilenced_l(isClientSilenced_l(portId));
     }
@@ -11090,6 +11162,13 @@ void MmapThread::dumpTracks_l(int fd, const Vector<String16>& /* args */)
     write(fd, result.c_str(), result.size());
 }
 
+std::string MmapThread::getLocalLogHeader() const {
+    using namespace std::literals;
+    static constexpr auto indent = "                             "
+                                   "                            "sv;
+    return std::string{indent}.append(IAfMmapTrack::getLogHeader());
+}
+
 /* static */
 sp<IAfMmapPlaybackThread> IAfMmapPlaybackThread::create(
         const sp<IAfThreadCallback>& afThreadCallback, audio_io_handle_t id,
@@ -11174,10 +11253,14 @@ void MmapPlaybackThread::setMasterMute(bool muted)
     }
 }
 
-void MmapPlaybackThread::setStreamVolume(audio_stream_type_t stream, float value)
+void MmapPlaybackThread::setStreamVolume(audio_stream_type_t stream, float value, bool muted)
 {
+    ALOGV("%s: stream %d value %f muted %d", __func__, stream, value, muted);
     audio_utils::lock_guard _l(mutex());
     mStreamTypes[stream].volume = value;
+    if (com_android_media_audio_ring_my_car()) {
+        mStreamTypes[stream].mute = muted;
+    }
     if (stream == mStreamType) {
         broadcast_l();
     }
@@ -11199,12 +11282,13 @@ void MmapPlaybackThread::setStreamMute(audio_stream_type_t stream, bool muted)
 }
 
 status_t MmapPlaybackThread::setPortsVolume(
-        const std::vector<audio_port_handle_t>& portIds, float volume) {
+        const std::vector<audio_port_handle_t>& portIds, float volume, bool muted) {
     audio_utils::lock_guard _l(mutex());
     for (const auto& portId : portIds) {
         for (const sp<IAfMmapTrack>& track : mActiveTracks) {
             if (portId == track->portId()) {
                 track->setPortVolume(volume);
+                track->setPortMute(muted);
                 break;
             }
         }
@@ -11262,7 +11346,11 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
             // will be broadcasted to all tracks. Thus, take arbitrarily first track volume.
             size_t numtracks = mActiveTracks.size();
             if (numtracks) {
-                volume = mMasterVolume * mActiveTracks[0]->getPortVolume();
+                if (mActiveTracks[0]->getPortMute()) {
+                    volume = 0;
+                } else {
+                    volume = mMasterVolume * mActiveTracks[0]->getPortVolume();
+                }
             }
         }
     }
@@ -11306,7 +11394,8 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
                         // TODO(b/241533526): adjust logic to include mute from AppOps
                         false /*muteFromPlaybackRestricted*/,
                         false /*muteFromClientVolume*/,
-                        false /*muteFromVolumeShaper*/});
+                        false /*muteFromVolumeShaper*/,
+                        false /*muteFromPortVolume*/});
             } else {
                 track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
                     /*muteState=*/{mMasterMute,
@@ -11315,7 +11404,8 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
                                    // TODO(b/241533526): adjust logic to include mute from AppOps
                                    false /*muteFromPlaybackRestricted*/,
                                    false /*muteFromClientVolume*/,
-                                   false /*muteFromVolumeShaper*/});
+                                   false /*muteFromVolumeShaper*/,
+                                   track->getPortMute()});
                 }
         }
     }
@@ -11603,6 +11693,7 @@ void BitPerfectThread::threadLoop_mix() {
 
 void BitPerfectThread::setTracksInternalMute(
         std::map<audio_port_handle_t, bool>* tracksInternalMute) {
+    audio_utils::lock_guard _l(mutex());
     for (auto& track : mTracks) {
         if (auto it = tracksInternalMute->find(track->portId()); it != tracksInternalMute->end()) {
             track->setInternalMute(it->second);
@@ -11619,6 +11710,11 @@ sp<IAfTrack> BitPerfectThread::getTrackToStreamBitPerfectly_l() {
         // Return the bit perfect track if all other tracks are muted
         for (const auto& track : mActiveTracks) {
             if (track->isBitPerfect()) {
+                if (track->getInternalMute()) {
+                    // There can only be one bit-perfect client active. If it is mute internally,
+                    // there is no need to stream bit-perfectly.
+                    break;
+                }
                 bitPerfectTrack = track;
             } else if (track->getFinalVolume() != 0.f) {
                 allOtherTracksMuted = false;

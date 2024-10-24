@@ -79,6 +79,8 @@ using media::audio::common::AudioDeviceDescription;
 using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioMode;
 using media::audio::common::AudioOffloadInfo;
+using media::audio::common::AudioPolicyForceUse;
+using media::audio::common::AudioPolicyForcedConfig;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
 using media::audio::common::AudioUsage;
@@ -86,6 +88,10 @@ using media::audio::common::AudioUuid;
 using media::audio::common::Int;
 
 constexpr int kDefaultVirtualDeviceId = 0;
+namespace {
+constexpr auto PERMISSION_HARD_DENIED = permission::PermissionChecker::PERMISSION_HARD_DENIED;
+constexpr auto PERMISSION_GRANTED = permission::PermissionChecker::PERMISSION_GRANTED;
+}
 
 const std::vector<audio_usage_t>& SYSTEM_USAGES = {
     AUDIO_USAGE_CALL_ASSISTANT,
@@ -284,8 +290,8 @@ Status AudioPolicyService::getPhoneState(AudioMode* _aidl_return) {
     return Status::ok();
 }
 
-Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
-                                       media::AudioPolicyForcedConfig configAidl)
+Status AudioPolicyService::setForceUse(AudioPolicyForceUse usageAidl,
+                                       AudioPolicyForcedConfig configAidl)
 {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
@@ -316,8 +322,8 @@ Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
     return Status::ok();
 }
 
-Status AudioPolicyService::getForceUse(media::AudioPolicyForceUse usageAidl,
-                                       media::AudioPolicyForcedConfig* _aidl_return) {
+Status AudioPolicyService::getForceUse(AudioPolicyForceUse usageAidl,
+                                       AudioPolicyForcedConfig* _aidl_return) {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
 
@@ -424,6 +430,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
     bool isSpatialized = false;
     bool isBitPerfect = false;
     float volume;
+    bool muted;
     status_t result = mAudioPolicyManager->getOutputForAttr(&attr, &output, session,
                                                             &stream,
                                                             attributionSource,
@@ -433,7 +440,8 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
                                                             &outputType,
                                                             &isSpatialized,
                                                             &isBitPerfect,
-                                                            &volume);
+                                                            &volume,
+                                                            &muted);
 
     // FIXME: Introduce a way to check for the the telephony device before opening the output
     if (result == NO_ERROR) {
@@ -498,6 +506,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
         _aidl_return->attr = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_attributes_t_AudioAttributes(attr));
         _aidl_return->volume = volume;
+        _aidl_return->muted = muted;
     } else {
         _aidl_return->configBase.format = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_format_t_AudioFormatDescription(config.format));
@@ -900,13 +909,13 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
 
     std::stringstream msg;
     msg << "Audio recording on session " << client->session;
+    const auto permitted = startRecording(client->attributionSource, client->virtualDeviceId,
+            String16(msg.str().c_str()), client->attributes.source);
 
     // check calling permissions
-    if (!(startRecording(client->attributionSource, client->virtualDeviceId,
-                         String16(msg.str().c_str()), client->attributes.source)
-            || client->attributes.source == AUDIO_SOURCE_FM_TUNER
-            || client->attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX
-            || client->attributes.source == AUDIO_SOURCE_ECHO_REFERENCE)) {
+    if (permitted == PERMISSION_HARD_DENIED && client->attributes.source != AUDIO_SOURCE_FM_TUNER
+            && client->attributes.source != AUDIO_SOURCE_REMOTE_SUBMIX
+            && client->attributes.source != AUDIO_SOURCE_ECHO_REFERENCE) {
         ALOGE("%s permission denied: recording not allowed for attribution source %s",
                 __func__, client->attributionSource.toString().c_str());
         return binderStatusFromStatusT(PERMISSION_DENIED);
@@ -926,13 +935,17 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
         return binderStatusFromStatusT(INVALID_OPERATION);
     }
 
-    // Force the possibly silenced client to be unsilenced since we just called
-    // startRecording (i.e. we have assumed it is unsilenced).
-    // At this point in time, the client is inactive, so no calls to appops are sent in
-    // setAppState_l.
-    // This ensures existing clients have the same behavior as new clients (starting unsilenced).
+    // Force the possibly silenced client to match the state on the appops side
+    // following the call to startRecording (i.e. unsilenced iff call succeeded)
+    // At this point in time, the client is inactive, so no calls to appops are
+    // sent in setAppState_l. This ensures existing clients have the same
+    // behavior as new clients.
     // TODO(b/282076713)
-    setAppState_l(client, APP_STATE_TOP);
+    if (permitted == PERMISSION_GRANTED) {
+        setAppState_l(client, APP_STATE_TOP);
+    } else {
+        setAppState_l(client, APP_STATE_IDLE);
+    }
 
     client->active = true;
     client->startTimeNs = systemTime();
@@ -1018,8 +1031,10 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
         client->active = false;
         client->startTimeNs = 0;
         updateUidStates_l();
-        finishRecording(client->attributionSource, client->virtualDeviceId,
-                        client->attributes.source);
+        if (!client->silenced) {
+            finishRecording(client->attributionSource, client->virtualDeviceId,
+                    client->attributes.source);
+        }
     }
 
     return binderStatusFromStatusT(status);
@@ -1048,7 +1063,11 @@ Status AudioPolicyService::stopInput(int32_t portIdAidl)
     updateUidStates_l();
 
     // finish the recording app op
-    finishRecording(client->attributionSource, client->virtualDeviceId, client->attributes.source);
+    if (!client->silenced) {
+        finishRecording(client->attributionSource, client->virtualDeviceId,
+                client->attributes.source);
+    }
+
     AutoCallerClear acc;
     return binderStatusFromStatusT(mAudioPolicyManager->stopInput(portId));
 }
@@ -1102,8 +1121,15 @@ Status AudioPolicyService::releaseInput(int32_t portIdAidl)
 Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& deviceAidl,
                                                           bool enabled,
                                                           AudioStreamType streamToDriveAbsAidl) {
-    audio_stream_type_t streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
-            aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
+    ALOGI("%s: deviceAidl %s, enabled %d, streamToDriveAbsAidl %d", __func__,
+          deviceAidl.toString().c_str(), enabled, streamToDriveAbsAidl);
+
+    audio_stream_type_t streamToDriveAbs = AUDIO_STREAM_DEFAULT;
+    if (enabled) {
+        streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
+                aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
+    }
+
     audio_devices_t deviceType;
     std::string address;
     RETURN_BINDER_STATUS_IF_ERROR(
@@ -1117,9 +1143,7 @@ Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& dev
             : settingsAllowed())) {
         return binderStatusFromStatusT(PERMISSION_DENIED);
     }
-    if (uint32_t(streamToDriveAbs) >= AUDIO_STREAM_PUBLIC_CNT) {
-        return binderStatusFromStatusT(BAD_VALUE);
-    }
+
     audio_utils::lock_guard _l(mMutex);
     AutoCallerClear acc;
     return binderStatusFromStatusT(
@@ -1154,7 +1178,7 @@ Status AudioPolicyService::initStreamVolume(AudioStreamType streamAidl,
 
 Status AudioPolicyService::setStreamVolumeIndex(AudioStreamType streamAidl,
                                                 const AudioDeviceDescription& deviceAidl,
-                                                int32_t indexAidl) {
+                                                int32_t indexAidl, bool muted) {
     audio_stream_type_t stream = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioStreamType_audio_stream_type_t(streamAidl));
     int index = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int>(indexAidl));
@@ -1176,6 +1200,7 @@ Status AudioPolicyService::setStreamVolumeIndex(AudioStreamType streamAidl,
     AutoCallerClear acc;
     return binderStatusFromStatusT(mAudioPolicyManager->setStreamVolumeIndex(stream,
                                                                              index,
+                                                                             muted,
                                                                              device));
 }
 
@@ -1204,7 +1229,7 @@ Status AudioPolicyService::getStreamVolumeIndex(AudioStreamType streamAidl,
 
 Status AudioPolicyService::setVolumeIndexForAttributes(
         const media::audio::common::AudioAttributes& attrAidl,
-        const AudioDeviceDescription& deviceAidl, int32_t indexAidl) {
+        const AudioDeviceDescription& deviceAidl, int32_t indexAidl, bool muted) {
     audio_attributes_t attributes = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioAttributes_audio_attributes_t(attrAidl));
     int index = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int>(indexAidl));
@@ -1224,7 +1249,7 @@ Status AudioPolicyService::setVolumeIndexForAttributes(
     audio_utils::lock_guard _l(mMutex);
     AutoCallerClear acc;
     return binderStatusFromStatusT(
-            mAudioPolicyManager->setVolumeIndexForAttributes(attributes, index, device));
+            mAudioPolicyManager->setVolumeIndexForAttributes(attributes, index, muted, device));
 }
 
 Status AudioPolicyService::getVolumeIndexForAttributes(
@@ -1671,6 +1696,19 @@ Status AudioPolicyService::isDirectOutputSupported(
     return Status::ok();
 }
 
+template <typename Port>
+void anonymizePortBluetoothAddress(Port& port) {
+    if (port.type != AUDIO_PORT_TYPE_DEVICE) {
+        return;
+    }
+    if (!(audio_is_a2dp_device(port.ext.device.type)
+            || audio_is_ble_device(port.ext.device.type)
+            || audio_is_bluetooth_sco_device(port.ext.device.type)
+            || audio_is_hearing_aid_out_device(port.ext.device.type))) {
+        return;
+    }
+    anonymizeBluetoothAddress(port.ext.device.address);
+}
 
 Status AudioPolicyService::listAudioPorts(media::AudioPortRole roleAidl,
                                           media::AudioPortType typeAidl, Int* count,
@@ -1689,14 +1727,27 @@ Status AudioPolicyService::listAudioPorts(media::AudioPortRole roleAidl,
     std::unique_ptr<audio_port_v7[]> ports(new audio_port_v7[num_ports]);
     unsigned int generation;
 
-    audio_utils::lock_guard _l(mMutex);
-    if (mAudioPolicyManager == NULL) {
-        return binderStatusFromStatusT(NO_INIT);
-    }
+    const AttributionSourceState attributionSource = getCallingAttributionSource();
     AutoCallerClear acc;
-    RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
-            mAudioPolicyManager->listAudioPorts(role, type, &num_ports, ports.get(), &generation)));
-    numPortsReq = std::min(numPortsReq, num_ports);
+    {
+        audio_utils::lock_guard _l(mMutex);
+        if (mAudioPolicyManager == NULL) {
+            return binderStatusFromStatusT(NO_INIT);
+        }
+        // AudioPolicyManager->listAudioPorts makes a deep copy of port structs into ports
+        // so it is safe to access after releasing the mutex
+        RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
+                mAudioPolicyManager->listAudioPorts(
+                        role, type, &num_ports, ports.get(), &generation)));
+        numPortsReq = std::min(numPortsReq, num_ports);
+    }
+
+    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+        for (size_t i = 0; i < numPortsReq; ++i) {
+            anonymizePortBluetoothAddress(ports[i]);
+        }
+    }
+
     RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
             convertRange(ports.get(), ports.get() + numPortsReq, std::back_inserter(*portsAidl),
                          legacy2aidl_audio_port_v7_AudioPortFw)));
@@ -1719,12 +1770,24 @@ Status AudioPolicyService::listDeclaredDevicePorts(media::AudioPortRole role,
 Status AudioPolicyService::getAudioPort(int portId,
                                         media::AudioPortFw* _aidl_return) {
     audio_port_v7 port{ .id = portId };
-    audio_utils::lock_guard _l(mMutex);
-    if (mAudioPolicyManager == NULL) {
-        return binderStatusFromStatusT(NO_INIT);
-    }
+
+    const AttributionSourceState attributionSource = getCallingAttributionSource();
     AutoCallerClear acc;
-    RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(mAudioPolicyManager->getAudioPort(&port)));
+
+    {
+        audio_utils::lock_guard _l(mMutex);
+        if (mAudioPolicyManager == NULL) {
+            return binderStatusFromStatusT(NO_INIT);
+        }
+        // AudioPolicyManager->getAudioPort makes a deep copy of the port struct into port
+        // so it is safe to access after releasing the mutex
+        RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(mAudioPolicyManager->getAudioPort(&port)));
+    }
+
+    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+        anonymizePortBluetoothAddress(port);
+    }
+
     *_aidl_return = VALUE_OR_RETURN_BINDER_STATUS(legacy2aidl_audio_port_v7_AudioPortFw(port));
     return Status::ok();
 }
@@ -1786,14 +1849,32 @@ Status AudioPolicyService::listAudioPatches(Int* count,
     std::unique_ptr<audio_patch[]> patches(new audio_patch[num_patches]);
     unsigned int generation;
 
-    audio_utils::lock_guard _l(mMutex);
-    if (mAudioPolicyManager == NULL) {
-        return binderStatusFromStatusT(NO_INIT);
-    }
+    const AttributionSourceState attributionSource = getCallingAttributionSource();
     AutoCallerClear acc;
-    RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
-            mAudioPolicyManager->listAudioPatches(&num_patches, patches.get(), &generation)));
-    numPatchesReq = std::min(numPatchesReq, num_patches);
+
+    {
+        audio_utils::lock_guard _l(mMutex);
+        if (mAudioPolicyManager == NULL) {
+            return binderStatusFromStatusT(NO_INIT);
+        }
+        // AudioPolicyManager->listAudioPatches makes a deep copy of patches structs into patches
+        // so it is safe to access after releasing the mutex
+        RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
+                mAudioPolicyManager->listAudioPatches(&num_patches, patches.get(), &generation)));
+        numPatchesReq = std::min(numPatchesReq, num_patches);
+    }
+
+    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+        for (size_t i = 0; i < numPatchesReq; ++i) {
+            for (size_t j = 0; j < patches[i].num_sources; ++j) {
+                anonymizePortBluetoothAddress(patches[i].sources[j]);
+            }
+            for (size_t j = 0; j < patches[i].num_sinks; ++j) {
+                anonymizePortBluetoothAddress(patches[i].sinks[j]);
+            }
+        }
+    }
+
     RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
             convertRange(patches.get(), patches.get() + numPatchesReq,
                          std::back_inserter(*patchesAidl), legacy2aidl_audio_patch_AudioPatchFw)));

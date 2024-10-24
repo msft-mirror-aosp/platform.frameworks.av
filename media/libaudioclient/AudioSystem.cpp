@@ -60,6 +60,8 @@ using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioMMapPolicyInfo;
 using media::audio::common::AudioMMapPolicyType;
 using media::audio::common::AudioOffloadInfo;
+using media::audio::common::AudioPolicyForceUse;
+using media::audio::common::AudioPolicyForcedConfig;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
 using media::audio::common::AudioUsage;
@@ -306,11 +308,11 @@ status_t AudioSystem::getMasterMute(bool* mute) {
 }
 
 status_t AudioSystem::setStreamVolume(audio_stream_type_t stream, float value,
-                                      audio_io_handle_t output) {
+                                      bool muted, audio_io_handle_t output) {
     if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
     const sp<IAudioFlinger> af = get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
-    af->setStreamVolume(stream, value, output);
+    af->setStreamVolume(stream, value, muted, output);
     return NO_ERROR;
 }
 
@@ -323,14 +325,15 @@ status_t AudioSystem::setStreamMute(audio_stream_type_t stream, bool mute) {
 }
 
 status_t AudioSystem::setPortsVolume(
-        const std::vector<audio_port_handle_t>& portIds, float volume, audio_io_handle_t output) {
+        const std::vector<audio_port_handle_t>& portIds, float volume, bool muted,
+        audio_io_handle_t output) {
     const sp<IAudioFlinger> af = get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
     std::vector<int32_t> portIdsAidl = VALUE_OR_RETURN_STATUS(
             convertContainer<std::vector<int32_t>>(
                     portIds, legacy2aidl_audio_port_handle_t_int32_t));
     int32_t outputAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
-    af->setPortsVolume(portIdsAidl, volume, outputAidl);
+    af->setPortsVolume(portIdsAidl, volume, muted, outputAidl);
     return NO_ERROR;
 }
 
@@ -1054,9 +1057,9 @@ audio_policy_forced_cfg_t AudioSystem::getForceUse(audio_policy_force_use_t usag
     if (aps == 0) return AUDIO_POLICY_FORCE_NONE;
 
     auto result = [&]() -> ConversionResult<audio_policy_forced_cfg_t> {
-        media::AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
+        AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
                 legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(usage));
-        media::AudioPolicyForcedConfig configAidl;
+        AudioPolicyForcedConfig configAidl;
         RETURN_IF_ERROR(statusTFromBinderStatus(
                 aps->getForceUse(usageAidl, &configAidl)));
         return aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(configAidl);
@@ -1094,7 +1097,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
                                        std::vector<audio_io_handle_t>* secondaryOutputs,
                                        bool *isSpatialized,
                                        bool *isBitPerfect,
-                                       float *volume) {
+                                       float *volume,
+                                       bool *muted) {
     if (attr == nullptr) {
         ALOGE("%s NULL audio attributes", __func__);
         return BAD_VALUE;
@@ -1161,6 +1165,7 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
     *attr = VALUE_OR_RETURN_STATUS(
             aidl2legacy_AudioAttributes_audio_attributes_t(responseAidl.attr));
     *volume = responseAidl.volume;
+    *muted = responseAidl.muted;
 
     return OK;
 }
@@ -1324,6 +1329,7 @@ status_t AudioSystem::initStreamVolume(audio_stream_type_t stream,
 
 status_t AudioSystem::setStreamVolumeIndex(audio_stream_type_t stream,
                                            int index,
+                                           bool muted,
                                            audio_devices_t device) {
     const sp<IAudioPolicyService> aps = get_audio_policy_service();
     if (aps == 0) return PERMISSION_DENIED;
@@ -1334,7 +1340,7 @@ status_t AudioSystem::setStreamVolumeIndex(audio_stream_type_t stream,
     AudioDeviceDescription deviceAidl = VALUE_OR_RETURN_STATUS(
             legacy2aidl_audio_devices_t_AudioDeviceDescription(device));
     return statusTFromBinderStatus(
-            aps->setStreamVolumeIndex(streamAidl, deviceAidl, indexAidl));
+            aps->setStreamVolumeIndex(streamAidl, deviceAidl, indexAidl, muted));
 }
 
 status_t AudioSystem::getStreamVolumeIndex(audio_stream_type_t stream,
@@ -1358,6 +1364,7 @@ status_t AudioSystem::getStreamVolumeIndex(audio_stream_type_t stream,
 
 status_t AudioSystem::setVolumeIndexForAttributes(const audio_attributes_t& attr,
                                                   int index,
+                                                  bool muted,
                                                   audio_devices_t device) {
     const sp<IAudioPolicyService> aps = get_audio_policy_service();
     if (aps == 0) return PERMISSION_DENIED;
@@ -1368,7 +1375,7 @@ status_t AudioSystem::setVolumeIndexForAttributes(const audio_attributes_t& attr
     AudioDeviceDescription deviceAidl = VALUE_OR_RETURN_STATUS(
             legacy2aidl_audio_devices_t_AudioDeviceDescription(device));
     return statusTFromBinderStatus(
-            aps->setVolumeIndexForAttributes(attrAidl, deviceAidl, indexAidl));
+            aps->setVolumeIndexForAttributes(attrAidl, deviceAidl, indexAidl, muted));
 }
 
 status_t AudioSystem::getVolumeIndexForAttributes(const audio_attributes_t& attr,

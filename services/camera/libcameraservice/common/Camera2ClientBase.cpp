@@ -358,7 +358,7 @@ void Camera2ClientBase<TClientBase>::notifyPhysicalCameraChange(const std::strin
         bool landscapeSensor =  (orientation == 0 || orientation == 180);
         if (((TClientBase::mRotationOverride ==
                 ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT) && landscapeSensor) ||
-                        ((wm_flags::camera_compat_for_freeform() &&
+                        ((wm_flags::enable_camera_compat_for_desktop_windowing() &&
                                 TClientBase::mRotationOverride ==
                                 ICameraService::ROTATION_OVERRIDE_ROTATION_ONLY)
                                 && !landscapeSensor)) {

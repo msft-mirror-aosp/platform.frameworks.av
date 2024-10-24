@@ -303,7 +303,7 @@ status_t HidlCamera3Device::initialize(sp<CameraProviderManager> manager,
     }
     mNeedFixupMonochromeTags = (isMonochrome && deviceVersion < CAMERA_DEVICE_API_VERSION_3_5);
 
-    return initializeCommonLocked();
+    return initializeCommonLocked(manager);
 }
 
 hardware::Return<void> HidlCamera3Device::requestStreamBuffers(
@@ -929,7 +929,7 @@ status_t HidlCamera3Device::HidlHalInterface::configureStreams(
         switch (src->stream_type) {
             case CAMERA_STREAM_OUTPUT:
                 streamType = StreamType::OUTPUT;
-                if (flags::session_hal_buf_manager() && mUseHalBufManager) {
+                if (mUseHalBufManager) {
                     mHalBufManagedStreamIds.insert(streamId);
                 }
                 break;

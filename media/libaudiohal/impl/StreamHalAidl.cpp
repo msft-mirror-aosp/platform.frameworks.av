@@ -59,6 +59,16 @@ template<HalCommand::Tag cmd> HalCommand makeHalCommand() {
 template<HalCommand::Tag cmd, typename T> HalCommand makeHalCommand(T data) {
     return HalCommand::make<cmd>(data);
 }
+
+template <typename MQTypeError>
+auto fmqErrorHandler(const char* mqName) {
+    return [m = std::string(mqName)](MQTypeError fmqError, std::string&& errorMessage) {
+        mediautils::TimeCheck::signalAudioHals();
+        LOG_ALWAYS_FATAL_IF(fmqError != MQTypeError::NONE, "%s: %s",
+                m.c_str(), errorMessage.c_str());
+    };
+}
+
 }  // namespace
 
 // static
@@ -102,6 +112,17 @@ StreamHalAidl::StreamHalAidl(std::string_view className, bool isInput, const aud
             /* mStreamPowerLog.isUserDebugOrEngBuild() && */
             StreamHalAidl::getAudioProperties(&config) == NO_ERROR) {
         mStreamPowerLog.init(config.sample_rate, config.channel_mask, config.format);
+    }
+
+    if (mStream != nullptr) {
+        mContext.getCommandMQ()->setErrorHandler(
+                fmqErrorHandler<StreamContextAidl::CommandMQ::Error>("CommandMQ"));
+        mContext.getReplyMQ()->setErrorHandler(
+                fmqErrorHandler<StreamContextAidl::ReplyMQ::Error>("ReplyMQ"));
+        if (mContext.getDataMQ() != nullptr) {
+            mContext.getDataMQ()->setErrorHandler(
+                    fmqErrorHandler<StreamContextAidl::DataMQ::Error>("DataMQ"));
+        }
     }
 }
 
@@ -388,11 +409,8 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
             return INVALID_OPERATION;
         }
     }
-    StreamContextAidl::DataMQ::Error fmqError = StreamContextAidl::DataMQ::Error::NONE;
-    std::string fmqErrorMsg;
     if (!mIsInput) {
-        bytes = std::min(bytes,
-                mContext.getDataMQ()->availableToWrite(&fmqError, &fmqErrorMsg));
+        bytes = std::min(bytes, mContext.getDataMQ()->availableToWrite());
     }
     StreamDescriptor::Command burst =
             StreamDescriptor::Command::make<StreamDescriptor::Command::Tag::burst>(bytes);
@@ -409,14 +427,12 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
         LOG_ALWAYS_FATAL_IF(*transferred > bytes,
                 "%s: HAL module read %zu bytes, which exceeds requested count %zu",
                 __func__, *transferred, bytes);
-        if (auto toRead = mContext.getDataMQ()->availableToRead(&fmqError, &fmqErrorMsg);
+        if (auto toRead = mContext.getDataMQ()->availableToRead();
                 toRead != 0 && !mContext.getDataMQ()->read(static_cast<int8_t*>(buffer), toRead)) {
             AUGMENT_LOG(E, "failed to read %zu bytes to data MQ", toRead);
             return NOT_ENOUGH_DATA;
         }
     }
-    LOG_ALWAYS_FATAL_IF(fmqError != StreamContextAidl::DataMQ::Error::NONE,
-            "%s", fmqErrorMsg.c_str());
     mStreamPowerLog.log(buffer, *transferred);
     return OK;
 }
@@ -427,9 +443,29 @@ status_t StreamHalAidl::pause(StreamDescriptor::Reply* reply) {
     if (!mStream) return NO_INIT;
 
     if (const auto state = getState(); isInPlayOrRecordState(state)) {
-        return sendCommand(
-                makeHalCommand<HalCommand::Tag::pause>(), reply,
+        StreamDescriptor::Reply localReply{};
+        StreamDescriptor::Reply* innerReply = reply ?: &localReply;
+        auto status = sendCommand(
+                makeHalCommand<HalCommand::Tag::pause>(), innerReply,
                 true /*safeFromNonWorkerThread*/);  // The workers stops its I/O activity first.
+        if (status == STATUS_INVALID_OPERATION &&
+                !isInPlayOrRecordState(innerReply->state)) {
+            /**
+             * In case of transient states like DRAINING, the HAL may change its
+             * StreamDescriptor::State on its own and may not be in synchronization with client.
+             * Thus, client can send the unexpected command and HAL returns failure. such failure is
+             * natural. The client handles it gracefully.
+             * Example where HAL change its state,
+             * 1) DRAINING -> IDLE (on empty buffer)
+             * 2) DRAINING -> IDLE (on IStreamCallback::onDrainReady)
+             **/
+            AUGMENT_LOG(D,
+                        "HAL failed to handle the 'pause' command, but stream state is in one of"
+                        " the PAUSED kind of states, current state: %s",
+                        toString(state).c_str());
+            return OK;
+        }
+        return status;
     } else {
         AUGMENT_LOG(D, "already stream in one of the PAUSED kind of states, current state: %s",
                 toString(state).c_str());
@@ -457,13 +493,9 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
                 return INVALID_OPERATION;
             }
             return OK;
-        } else if (state == StreamDescriptor::State::PAUSED ||
-                   state == StreamDescriptor::State::TRANSFER_PAUSED ||
-                   state == StreamDescriptor::State::DRAIN_PAUSED) {
+        } else if (isInPausedState(state)) {
             return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
-        } else if (state == StreamDescriptor::State::ACTIVE ||
-                   state == StreamDescriptor::State::TRANSFERRING ||
-                   state == StreamDescriptor::State::DRAINING) {
+        } else if (isInPlayOrRecordState(state)) {
             AUGMENT_LOG(D, "already in stream state: %s", toString(state).c_str());
             return OK;
         } else {
@@ -512,7 +544,14 @@ status_t StreamHalAidl::exit() {
 }
 
 void StreamHalAidl::onAsyncTransferReady() {
-    if (auto state = getState(); state == StreamDescriptor::State::TRANSFERRING) {
+    StreamDescriptor::State state;
+    {
+        // Use 'mCommandReplyLock' to ensure that 'sendCommand' has finished updating the state
+        // after the reply from the 'burst' command.
+        std::lock_guard l(mCommandReplyLock);
+        state = getState();
+    }
+    if (state == StreamDescriptor::State::TRANSFERRING) {
         // Retrieve the current state together with position counters unconditionally
         // to ensure that the state on our side gets updated.
         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(),
@@ -523,7 +562,14 @@ void StreamHalAidl::onAsyncTransferReady() {
 }
 
 void StreamHalAidl::onAsyncDrainReady() {
-    if (auto state = getState(); state == StreamDescriptor::State::DRAINING) {
+    StreamDescriptor::State state;
+    {
+        // Use 'mCommandReplyLock' to ensure that 'sendCommand' has finished updating the state
+        // after the reply from the 'drain' command.
+        std::lock_guard l(mCommandReplyLock);
+        state = getState();
+    }
+    if (state == StreamDescriptor::State::DRAINING) {
         // Retrieve the current state together with position counters unconditionally
         // to ensure that the state on our side gets updated.
         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(), nullptr,

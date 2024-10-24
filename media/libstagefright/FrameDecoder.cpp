@@ -654,7 +654,9 @@ status_t FrameDecoder::extractInternalUsingBlockModel() {
     mReadOptions.clearSeekTo();
     if (err != OK) {
         ALOGW("Input Error: err=%d", err);
-        mediaBuffer->release();
+        if (mediaBuffer) {
+            mediaBuffer->release();
+        }
         return err;
     }
 

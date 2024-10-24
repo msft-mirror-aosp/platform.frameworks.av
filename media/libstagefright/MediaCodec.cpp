@@ -2018,6 +2018,7 @@ bool MediaCodec::discardDecodeOnlyOutputBuffer(size_t index) {
     int32_t flags;
     CHECK(buffer->meta()->findInt32("flags", &flags));
     if (flags & BUFFER_FLAG_DECODE_ONLY) {
+        ALOGV("discardDecodeOnlyOutputBuffer: mPortBuffers[out][%zu] NOT owned by client", index);
         info->mOwnedByClient = false;
         info->mData.clear();
         mBufferChannel->discardBuffer(buffer);
@@ -2462,7 +2463,12 @@ status_t MediaCodec::configure(
             mediametrics_setInt32(nextMetricsHandle, kCodecCrypto, 1);
         }
     } else if (mFlags & kFlagIsSecure) {
-        ALOGW("Crypto or descrambler should be given for secure codec");
+        if (android::media::codec::provider_->secure_codecs_require_crypto()) {
+            mErrorLog.log(LOG_TAG, "Crypto or descrambler must be given for secure codec");
+            return INVALID_OPERATION;
+        } else {
+            ALOGW("Crypto or descrambler should be given for secure codec");
+        }
     }
 
     if (mConfigureMsg != nullptr) {
@@ -4492,9 +4498,16 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                 {
                     /* size_t index = */updateBuffers(kPortIndexInput, msg);
 
-                    if (mState == FLUSHING
-                            || mState == STOPPING
-                            || mState == RELEASING) {
+                    bool inStateToReturnBuffers =
+                        mState == FLUSHING || mState == STOPPING || mState == RELEASING;
+                    if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
+                        // Late callbacks from the codec could arrive here
+                        // after the codec is already stopped or released.
+                        inStateToReturnBuffers = mState == FLUSHING ||
+                                                 mState == STOPPING || mState == INITIALIZED ||
+                                                 mState == RELEASING || mState == UNINITIALIZED;
+                    }
+                    if (inStateToReturnBuffers) {
                         returnBuffersToCodecOnPort(kPortIndexInput);
                         break;
                     }
@@ -4573,9 +4586,16 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
 
                     /* size_t index = */updateBuffers(kPortIndexOutput, msg);
 
-                    if (mState == FLUSHING
-                            || mState == STOPPING
-                            || mState == RELEASING) {
+                    bool inStateToReturnBuffers =
+                        mState == FLUSHING || mState == STOPPING || mState == RELEASING;
+                    if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
+                        // Late callbacks from the codec could arrive here
+                        // after the codec is already stopped or released.
+                        inStateToReturnBuffers = mState == FLUSHING ||
+                                                 mState == STOPPING || mState == INITIALIZED ||
+                                                 mState == RELEASING || mState == UNINITIALIZED;
+                    }
+                    if (inStateToReturnBuffers) {
                         returnBuffersToCodecOnPort(kPortIndexOutput);
                         break;
                     }
@@ -5941,7 +5961,7 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
     }
 
     updateHdrMetrics(false /* isConfig */);
- }
+}
 
 void MediaCodec::extractCSD(const sp<AMessage> &format) {
     mCSD.clear();
@@ -6020,7 +6040,6 @@ status_t MediaCodec::queueCSDInputBuffer(size_t bufferIndex) {
             return -EINVAL;
         }
         if (codecInputData->data() == NULL) {
-            ALOGV("Input buffer %zu is not properly allocated", bufferIndex);
             mErrorLog.log(LOG_TAG, base::StringPrintf(
                     "Fatal error: input buffer %zu is not properly allocated", bufferIndex));
             return -EINVAL;
@@ -6066,6 +6085,10 @@ void MediaCodec::setState(State newState) {
 
         mInputFormat.clear();
         mOutputFormat.clear();
+        if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
+            mCSD.clear();
+            mLeftover.clear();
+        }
         mFlags &= ~kFlagOutputFormatChanged;
         mFlags &= ~kFlagOutputBuffersChanged;
         mFlags &= ~kFlagStickyError;
@@ -6124,6 +6147,8 @@ void MediaCodec::returnBuffersToCodecOnPort(int32_t portIndex, bool isReclaim) {
                 ALOGD("port %d buffer %zu still owned by client when codec is reclaimed",
                         portIndex, i);
             } else {
+                ALOGV("returnBuffersToCodecOnPort: mPortBuffers[%s][%zu] NOT owned by client",
+                      portIndex == kPortIndexInput ? "in" : "out", i);
                 info->mOwnedByClient = false;
                 info->mData.clear();
             }
@@ -6476,6 +6501,7 @@ status_t MediaCodec::onQueueInputBuffer(const sp<AMessage> &msg) {
 
         // synchronization boundary for getBufferAndFormat
         Mutex::Autolock al(mBufferLock);
+        ALOGV("onQueueInputBuffer: mPortBuffers[in][%zu] NOT owned by client", index);
         info->mOwnedByClient = false;
         info->mData.clear();
 
@@ -6492,6 +6518,7 @@ status_t MediaCodec::handleLeftover(size_t index) {
     sp<AMessage> msg = mLeftover.front();
     mLeftover.pop_front();
     msg->setSize("index", index);
+    ALOGV("handleLeftover(%zu)", index);
     return onQueueInputBuffer(msg);
 }
 
@@ -6560,6 +6587,7 @@ status_t MediaCodec::onReleaseOutputBuffer(const sp<AMessage> &msg) {
     sp<MediaCodecBuffer> buffer;
     {
         Mutex::Autolock al(mBufferLock);
+        ALOGV("onReleaseOutputBuffer: mPortBuffers[out][%zu] NOT owned by client", index);
         info->mOwnedByClient = false;
         buffer = info->mData;
         info->mData.clear();
@@ -6672,6 +6700,8 @@ ssize_t MediaCodec::dequeuePortBuffer(int32_t portIndex) {
 
     {
         Mutex::Autolock al(mBufferLock);
+        ALOGV("dequeuePortBuffer: mPortBuffers[%s][%zu] checking if not owned by client",
+              portIndex == kPortIndexInput ? "in" : "out", index);
         CHECK(!info->mOwnedByClient);
         info->mOwnedByClient = true;
 

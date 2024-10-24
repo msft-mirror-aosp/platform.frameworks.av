@@ -205,6 +205,7 @@ int main(int argc __unused, char **argv)
                   __func__, status, policyInfos.size());
         }
         const auto endTime = std::chrono::steady_clock::now();
+        af->startupFinished();
         using FloatMillis = std::chrono::duration<float, std::milli>;
         const float timeTaken = std::chrono::duration_cast<FloatMillis>(
                 endTime - startTime).count();
