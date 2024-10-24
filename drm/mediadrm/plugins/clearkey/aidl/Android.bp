@@ -133,6 +133,7 @@ phony {
     required: [
         "com.android.hardware.drm.clearkey",
     ],
+    vendor: true,
 }
 
 cc_defaults {
