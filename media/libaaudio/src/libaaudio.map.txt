@@ -70,6 +70,8 @@ LIBAAUDIO {
     AAudioStream_getHardwareChannelCount; # introduced=UpsideDownCake
     AAudioStream_getHardwareFormat;       # introduced=UpsideDownCake
     AAudioStream_getHardwareSampleRate;   # introduced=UpsideDownCake
+    AAudio_getPlatformMMapPolicy; # introduced=36
+    AAudio_getPlatformMMapExclusivePolicy; #introduced=36
   local:
     *;
 };
