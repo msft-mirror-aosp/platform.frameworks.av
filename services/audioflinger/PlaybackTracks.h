@@ -229,7 +229,7 @@ public:
     void setPortVolume(float volume) override;
     void setPortMute(bool muted) override;
     float getPortVolume() const override { return mVolume; }
-    bool getPortMute() const override { return mMuteState.load().muteFromPortVolume; }
+    bool getPortMute() const override { return mMutedFromPort; }
 
 protected:
 
@@ -414,6 +414,7 @@ private:
     // access these two variables only when holding player thread lock.
     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
     std::atomic<mute_state_t> mMuteState;
+    std::atomic<bool>         mMutedFromPort;
     bool                      mInternalMute = false;
     std::atomic<float>        mVolume = 0.0f;
 };  // end of Track
