@@ -121,7 +121,7 @@ private:
     void init(std::string mediaType, std::vector<ProfileLevel> profLevs,
             const sp<AMessage> &format);
     void initWithPlatformLimits();
-    bool supports(int sampleRate, int inputChannels);
+    bool supports(std::optional<int> sampleRate, std::optional<int> inputChannels);
     void limitSampleRates(std::vector<int> rates);
     void createDiscreteSampleRates();
     void limitSampleRates(std::vector<Range<int>> rateRanges);
