@@ -59,6 +59,7 @@
 #include <media/stagefright/PersistentSurface.h>
 #include <media/MediaProfiles.h>
 #include <camera/CameraParameters.h>
+#include <gui/Flags.h>
 
 #include <utils/Errors.h>
 #include <sys/types.h>
@@ -1932,16 +1933,32 @@ status_t StagefrightRecorder::setupCameraSource(
             return BAD_VALUE;
         }
 
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+        sp<Surface> surface = new Surface(mPreviewSurface);
+        mCameraSourceTimeLapse = CameraSourceTimeLapse::CreateFromCamera(
+                mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
+                videoSize, mFrameRate, surface,
+                std::llround(1e6 / mCaptureFps));
+#else
         mCameraSourceTimeLapse = CameraSourceTimeLapse::CreateFromCamera(
                 mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
                 videoSize, mFrameRate, mPreviewSurface,
                 std::llround(1e6 / mCaptureFps));
+#endif
         *cameraSource = mCameraSourceTimeLapse;
     } else {
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+        sp<Surface> surface = new Surface(mPreviewSurface);
+        *cameraSource = CameraSource::CreateFromCamera(
+                mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
+                videoSize, mFrameRate,
+                surface);
+#else
         *cameraSource = CameraSource::CreateFromCamera(
                 mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
                 videoSize, mFrameRate,
                 mPreviewSurface);
+#endif
     }
     mCamera.clear();
     mCameraProxy.clear();

@@ -38,6 +38,7 @@
 
 #include <android/hardware/cas/native/1.0/IDescrambler.h>
 #include <android/hardware/drm/1.0/types.h>
+#include <android/sysprop/MediaProperties.sysprop.h>
 #include <android-base/parseint.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
@@ -207,8 +208,18 @@ CCodecBufferChannel::CCodecBufferChannel(
         Mutexed<BlockPools>::Locked pools(mBlockPools);
         pools->outputPoolId = C2BlockPool::BASIC_LINEAR;
     }
-    std::string value = GetServerConfigurableFlag("media_native", "ccodec_rendering_depth", "3");
-    android::base::ParseInt(value, &mRenderingDepth);
+    if (android::media::codec::provider_->rendering_depth_removal()) {
+        constexpr int kAndroidApi202404 = 202404;
+        int vendorVersion = ::android::base::GetIntProperty("ro.vendor.api_level", -1);
+        using ::android::sysprop::MediaProperties::codec2_remove_rendering_depth;
+        if (vendorVersion > kAndroidApi202404 || codec2_remove_rendering_depth().value_or(false)) {
+            mRenderingDepth = 0;
+        }
+    } else {
+        std::string value = GetServerConfigurableFlag(
+                "media_native", "ccodec_rendering_depth", "3");
+        android::base::ParseInt(value, &mRenderingDepth);
+    }
     mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + mRenderingDepth;
 }
 
