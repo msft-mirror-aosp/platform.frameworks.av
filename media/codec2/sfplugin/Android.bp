@@ -50,6 +50,7 @@ cc_library_shared {
     ],
 
     static_libs: [
+        "libPlatformProperties",
         "libSurfaceFlingerProperties",
         "aconfig_mediacodec_flags_c_lib",
         "android.media.codec-aconfig-cc",
