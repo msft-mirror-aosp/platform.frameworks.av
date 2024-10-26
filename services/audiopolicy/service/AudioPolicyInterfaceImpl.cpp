@@ -2818,4 +2818,24 @@ Status AudioPolicyService::getPermissionController(sp<INativePermissionControlle
     return Status::ok();
 }
 
+Status AudioPolicyService::getMmapPolicyInfos(
+        AudioMMapPolicyType policyType, std::vector<AudioMMapPolicyInfo> *_aidl_return) {
+    if (mAudioPolicyManager == nullptr) {
+        return binderStatusFromStatusT(NO_INIT);
+    }
+    audio_utils::lock_guard _l(mMutex);
+    return binderStatusFromStatusT(
+            mAudioPolicyManager->getMmapPolicyInfos(policyType, _aidl_return));
+}
+
+Status AudioPolicyService::getMmapPolicyForDevice(
+        AudioMMapPolicyType policyType, AudioMMapPolicyInfo *policyInfo) {
+    if (mAudioPolicyManager == nullptr) {
+        return binderStatusFromStatusT(NO_INIT);
+    }
+    audio_utils::lock_guard _l(mMutex);
+    return binderStatusFromStatusT(
+            mAudioPolicyManager->getMmapPolicyForDevice(policyType, policyInfo));
+}
+
 } // namespace android

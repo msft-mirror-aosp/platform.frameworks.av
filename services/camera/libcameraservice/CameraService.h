@@ -387,8 +387,11 @@ public:
         // Get the UID of the application client using this
         virtual uid_t getClientUid() const;
 
-        // Get the PID of the application client using this
-        virtual int getClientPid() const;
+        // Get the calling PID of the application client using this
+        virtual int getClientCallingPid() const;
+
+        // Get the attribution tag (previously featureId) of the application client using this
+        virtual const std::optional<std::string>& getClientAttributionTag() const;
 
         // Check what API level is used for this client. This is used to determine which
         // superclass this can be cast to.
@@ -451,19 +454,11 @@ public:
                 const hardware::camera2::impl::CameraMetadataNative& sessionParams) = 0;
 
     protected:
-        BasicClient(const sp<CameraService>& cameraService,
-                const sp<IBinder>& remoteCallback,
-                std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-                const std::string& clientPackageName,
-                bool nativeClient,
-                const std::optional<std::string>& clientFeatureId,
-                const std::string& cameraIdStr,
-                int cameraFacing,
-                int sensorOrientation,
-                int clientPid,
-                uid_t clientUid,
-                int servicePid,
-                int rotationOverride);
+        BasicClient(const sp<CameraService>& cameraService, const sp<IBinder>& remoteCallback,
+                    std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+                    const AttributionSourceState& clientAttribution, int callingPid,
+                    bool nativeClient, const std::string& cameraIdStr, int cameraFacing,
+                    int sensorOrientation, int servicePid, int rotationOverride);
 
         virtual ~BasicClient();
 
@@ -471,18 +466,16 @@ public:
         // the instance should not be accessed from callback.
         // CameraService's mClientLock should be acquired to access this.
         // - subclasses should set this to true in their destructors.
-        bool                            mDestructionStarted;
+        bool mDestructionStarted;
 
         // these are initialized in the constructor.
         static sp<CameraService>        sCameraService;
         const std::string               mCameraIdStr;
         const int                       mCameraFacing;
         const int                       mOrientation;
-        std::string                     mClientPackageName;
+        AttributionSourceState          mClientAttribution;
+        int                             mCallingPid;
         bool                            mSystemNativeClient;
-        std::optional<std::string>      mClientFeatureId;
-        pid_t                           mClientPid;
-        const uid_t                     mClientUid;
         const pid_t                     mServicePid;
         bool                            mDisconnected;
         bool                            mUidIsTrusted;
@@ -492,7 +485,7 @@ public:
         int32_t                         mAudioRestriction;
 
         // - The app-side Binder interface to receive callbacks from us
-        sp<IBinder>                     mRemoteBinder;   // immutable after constructor
+        sp<IBinder>                     mRemoteBinder; // immutable after constructor
 
         // Permissions management methods for camera lifecycle
 
@@ -565,19 +558,11 @@ public:
 
         // Interface used by CameraService
         Client(const sp<CameraService>& cameraService,
-                const sp<hardware::ICameraClient>& cameraClient,
-                std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-                const std::string& clientPackageName,
-                bool systemNativeClient,
-                const std::optional<std::string>& clientFeatureId,
-                const std::string& cameraIdStr,
-                int api1CameraId,
-                int cameraFacing,
-                int sensorOrientation,
-                int clientPid,
-                uid_t clientUid,
-                int servicePid,
-                int rotationOverride);
+               const sp<hardware::ICameraClient>& cameraClient,
+               std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+               const AttributionSourceState& clientAttribution, int callingPid,
+               bool systemNativeClient, const std::string& cameraIdStr, int api1CameraId,
+               int cameraFacing, int sensorOrientation, int servicePid, int rotationOverride);
         ~Client();
 
         // return our camera client
@@ -1467,14 +1452,16 @@ private:
     static std::string getFormattedCurrentTime();
 
     static binder::Status makeClient(const sp<CameraService>& cameraService,
-            const sp<IInterface>& cameraCb, const std::string& packageName,
-            bool systemNativeClient, const std::optional<std::string>& featureId,
-            const std::string& cameraId, int api1CameraId, int facing, int sensorOrientation,
-            int clientPid, uid_t clientUid, int servicePid,
-            std::pair<int, IPCTransport> deviceVersionAndIPCTransport, apiLevel effectiveApiLevel,
-            bool overrideForPerfClass, int rotationOverride, bool forceSlowJpegMode,
-            const std::string& originalCameraId,
-            /*out*/ sp<BasicClient>* client);
+                                     const sp<IInterface>& cameraCb,
+                                     const AttributionSourceState& clientAttribution,
+                                     int callingPid, bool systemNativeClient,
+                                     const std::string& cameraId, int api1CameraId, int facing,
+                                     int sensorOrientation, int servicePid,
+                                     std::pair<int, IPCTransport> deviceVersionAndIPCTransport,
+                                     apiLevel effectiveApiLevel, bool overrideForPerfClass,
+                                     int rotationOverride, bool forceSlowJpegMode,
+                                     const std::string& originalCameraId,
+                                     /*out*/ sp<BasicClient>* client);
 
     static std::string toString(std::set<userid_t> intSet);
     static int32_t mapToInterface(TorchModeStatus status);
