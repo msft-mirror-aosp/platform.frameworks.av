@@ -40,6 +40,7 @@
 #include <vector>
 
 #include <Serializer.h>
+#include <android/media/audio/common/AudioMMapPolicy.h>
 #include <android/media/audio/common/AudioPort.h>
 #include <com_android_media_audio.h>
 #include <android_media_audiopolicy.h>
@@ -64,6 +65,10 @@ namespace audio_flags = android::media::audiopolicy;
 
 using android::media::audio::common::AudioDevice;
 using android::media::audio::common::AudioDeviceAddress;
+using android::media::audio::common::AudioDeviceDescription;
+using android::media::audio::common::AudioMMapPolicy;
+using android::media::audio::common::AudioMMapPolicyInfo;
+using android::media::audio::common::AudioMMapPolicyType;
 using android::media::audio::common::AudioPortDeviceExt;
 using android::media::audio::common::AudioPortExt;
 using com::android::media::audioserver::fix_call_audio_patch;
@@ -4721,6 +4726,18 @@ void AudioPolicyManager::dump(String8 *dst) const
                           dumpDeviceTypes({it.first}).c_str(),
                           mEngine->getVolumeGroupForAttributes(it.second));
     }
+
+    // dump mmap policy by device
+    dst->appendFormat("\nMmap policy:\n");
+    for (const auto& [policyType, policyByDevice] : mMmapPolicyByDeviceType) {
+        std::stringstream ss;
+        ss << '{';
+        for (const auto& [deviceType, policy] : policyByDevice) {
+            ss << deviceType.toString() << ":" << toString(policy) << " ";
+        }
+        ss << '}';
+        dst->appendFormat(" - %s: %s\n", toString(policyType).c_str(), ss.str().c_str());
+    }
 }
 
 status_t AudioPolicyManager::dump(int fd)
@@ -9373,6 +9390,90 @@ void AudioPolicyManager::updateClientsInternalMute(
             ALOGE("%s, failed to update tracks internal mute, err=%d", __func__, status);
         }
     }
+}
+
+status_t AudioPolicyManager::getMmapPolicyInfos(AudioMMapPolicyType policyType,
+                                                std::vector<AudioMMapPolicyInfo> *policyInfos) {
+    if (policyType != AudioMMapPolicyType::DEFAULT &&
+        policyType != AudioMMapPolicyType::EXCLUSIVE) {
+        return BAD_VALUE;
+    }
+    if (mMmapPolicyByDeviceType.count(policyType) == 0) {
+        if (status_t status = updateMmapPolicyInfos(policyType); status != NO_ERROR) {
+            return status;
+        }
+    }
+    *policyInfos = mMmapPolicyInfos[policyType];
+    return NO_ERROR;
+}
+
+status_t AudioPolicyManager::getMmapPolicyForDevice(
+        AudioMMapPolicyType policyType, AudioMMapPolicyInfo *policyInfo) {
+    if (policyType != AudioMMapPolicyType::DEFAULT &&
+        policyType != AudioMMapPolicyType::EXCLUSIVE) {
+        return BAD_VALUE;
+    }
+    if (mMmapPolicyByDeviceType.count(policyType) == 0) {
+        if (status_t status = updateMmapPolicyInfos(policyType); status != NO_ERROR) {
+            return status;
+        }
+    }
+    auto it = mMmapPolicyByDeviceType[policyType].find(policyInfo->device.type);
+    policyInfo->mmapPolicy = it == mMmapPolicyByDeviceType[policyType].end()
+            ? AudioMMapPolicy::NEVER : it->second;
+    return NO_ERROR;
+}
+
+status_t AudioPolicyManager::updateMmapPolicyInfos(AudioMMapPolicyType policyType) {
+    std::vector<AudioMMapPolicyInfo> policyInfos;
+    if (status_t status = mpClientInterface->getMmapPolicyInfos(policyType, &policyInfos);
+        status != NO_ERROR) {
+        ALOGE("%s, failed, error = %d", __func__, status);
+        return status;
+    }
+    std::map<AudioDeviceDescription, AudioMMapPolicy> mmapPolicyByDeviceType;
+    if (policyInfos.size() == 1 && policyInfos[0].device == AudioDevice()) {
+        // When there is only one AudioMMapPolicyInfo instance and the device is a default value,
+        // it indicates the mmap policy is reported via system property. In that case, use the
+        // routing information to fill details for how mmap is supported for a particular device.
+        for (const auto &hwModule: mHwModules) {
+            for (const auto &profile: hwModule->getInputProfiles()) {
+                if ((profile->getFlags() & AUDIO_INPUT_FLAG_MMAP_NOIRQ)
+                    != AUDIO_INPUT_FLAG_MMAP_NOIRQ) {
+                    continue;
+                }
+                for (const auto &device: profile->getSupportedDevices()) {
+                    auto deviceDesc =
+                            legacy2aidl_audio_devices_t_AudioDeviceDescription(device->type());
+                    if (deviceDesc.ok()) {
+                        mmapPolicyByDeviceType.emplace(
+                                deviceDesc.value(), policyInfos[0].mmapPolicy);
+                    }
+                }
+            }
+            for (const auto &profile: hwModule->getOutputProfiles()) {
+                if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ)
+                    != AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
+                    continue;
+                }
+                for (const auto &device: profile->getSupportedDevices()) {
+                    auto deviceDesc =
+                            legacy2aidl_audio_devices_t_AudioDeviceDescription(device->type());
+                    if (deviceDesc.ok()) {
+                        mmapPolicyByDeviceType.emplace(
+                                deviceDesc.value(), policyInfos[0].mmapPolicy);
+                    }
+                }
+            }
+        }
+    } else {
+        for (const auto &info: policyInfos) {
+            mmapPolicyByDeviceType[info.device.type] = info.mmapPolicy;
+        }
+    }
+    mMmapPolicyByDeviceType.emplace(policyType, mmapPolicyByDeviceType);
+    mMmapPolicyInfos.emplace(policyType, policyInfos);
+    return NO_ERROR;
 }
 
 } // namespace android
