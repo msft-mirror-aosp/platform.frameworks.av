@@ -864,16 +864,14 @@ Track::Track(
 
     populateUsageAndContentTypeFromStreamType();
 
-    mute_state_t newMuteState = mMuteState.load();
-    newMuteState.muteFromPortVolume = muted;
+    mMutedFromPort = muted;
 
     // Audio patch and call assistant volume are always max
     if (mAttr.usage == AUDIO_USAGE_CALL_ASSISTANT
             || mAttr.usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
         mVolume = 1.0f;
-        newMuteState.muteFromPortVolume = false;
+        mMutedFromPort = false;
     }
-    mMuteState.store(newMuteState);
 
     mServerLatencySupported = checkServerLatencySupported(format, flags);
 #ifdef TEE_SINK
@@ -1630,12 +1628,10 @@ void Track::setPortVolume(float volume) {
 }
 
 void Track::setPortMute(bool muted) {
-    mute_state_t newMuteState = mMuteState.load();
-    if (newMuteState.muteFromPortVolume == muted) {
+    if (mMutedFromPort == muted) {
         return;
     }
-    newMuteState.muteFromPortVolume = muted;
-    mMuteState.store(newMuteState);
+    mMutedFromPort = muted;
     if (mType != TYPE_PATCH) {
         // Do not recursively propagate a PatchTrack setPortVolume to
         // downstream PatchTracks.
@@ -3201,6 +3197,14 @@ void RecordTrack::copyMetadataTo(MetadataInserter& backInserter) const
     *backInserter++ = metadata;
 }
 
+void RecordTrack::setSilenced(bool silenced) {
+    if (!isPatchTrack() && mSilenced != silenced) {
+        mSilenced = silenced;
+        ALOGD("%s: track with port id: %d, (%s)", __func__, mPortId,
+              mSilenced ? "silenced" : "unsilenced");
+    }
+}
+
 // ----------------------------------------------------------------------------
 #undef LOG_TAG
 #define LOG_TAG "AF::PatchRecord"
@@ -3591,14 +3595,14 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
         mUid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid))),
             mSilenced(false), mSilencedNotified(false), mVolume(volume)
 {
-    mMuteState.muteFromPortVolume = muted;
+    mMutedFromPort = muted;
     // Once this item is logged by the server, the client can add properties.
     mTrackMetrics.logConstructor(creatorPid, uid(), id());
     if (isOut && (attr.usage == AUDIO_USAGE_CALL_ASSISTANT
             || attr.usage == AUDIO_USAGE_VIRTUAL_SOURCE)) {
         // Audio patch and call assistant volume are always max
         mVolume = 1.0f;
-        mMuteState.muteFromPortVolume = false;
+        mMutedFromPort = false;
     }
 }
 
@@ -3696,7 +3700,7 @@ void MmapTrack::appendDump(String8& result, bool active __unused) const
     if (isOut()) {
         result.appendFormat("%4x %2x", mAttr.usage, mAttr.content_type);
         result.appendFormat("%11.2g", 20.0 * log10(mVolume));
-        result.appendFormat("%12s", mMuteState.muteFromPortVolume ? "true" : "false");
+        result.appendFormat("%12s", mMutedFromPort ? "true" : "false");
     } else {
         result.appendFormat("%7x", mAttr.source);
     }
