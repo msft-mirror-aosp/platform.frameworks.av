@@ -46,6 +46,8 @@ import android.media.audio.common.AudioConfigBase;
 import android.media.audio.common.AudioDevice;
 import android.media.audio.common.AudioDeviceDescription;
 import android.media.audio.common.AudioFormatDescription;
+import android.media.audio.common.AudioMMapPolicyInfo;
+import android.media.audio.common.AudioMMapPolicyType;
 import android.media.audio.common.AudioMode;
 import android.media.audio.common.AudioPolicyForcedConfig;
 import android.media.audio.common.AudioPolicyForceUse;
@@ -482,6 +484,17 @@ interface IAudioPolicyService {
      * required to control audio access.
      */
     INativePermissionController getPermissionController();
+
+    /**
+     * Query mmap policy information.
+     */
+    AudioMMapPolicyInfo[] getMmapPolicyInfos(AudioMMapPolicyType policyType);
+
+    /**
+     * Get all devices that support AAudio MMAP.
+     */
+    void getMmapPolicyForDevice(AudioMMapPolicyType policyType,
+                                inout AudioMMapPolicyInfo policyInfo);
     // When adding a new method, please review and update
     // AudioPolicyService.cpp AudioPolicyService::onTransact()
     // AudioPolicyService.cpp IAUDIOPOLICYSERVICE_BINDER_METHOD_MACRO_LIST

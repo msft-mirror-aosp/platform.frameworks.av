@@ -801,13 +801,17 @@ public:
 
     static status_t setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos);
 
-    static status_t getMmapPolicyInfo(
+    static status_t getMmapPolicyInfos(
             media::audio::common::AudioMMapPolicyType policyType,
             std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos);
 
     static int32_t getAAudioMixerBurstCount();
 
     static int32_t getAAudioHardwareBurstMinUsec();
+
+    static status_t getMmapPolicyForDevice(
+            media::audio::common::AudioMMapPolicyType policyType, audio_devices_t device,
+            media::audio::common::AudioMMapPolicyInfo *policyInfo);
 
     class AudioFlingerClient: public IBinder::DeathRecipient, public media::BnAudioFlingerClient
     {

@@ -1121,8 +1121,15 @@ Status AudioPolicyService::releaseInput(int32_t portIdAidl)
 Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& deviceAidl,
                                                           bool enabled,
                                                           AudioStreamType streamToDriveAbsAidl) {
-    audio_stream_type_t streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
-            aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
+    ALOGI("%s: deviceAidl %s, enabled %d, streamToDriveAbsAidl %d", __func__,
+          deviceAidl.toString().c_str(), enabled, streamToDriveAbsAidl);
+
+    audio_stream_type_t streamToDriveAbs = AUDIO_STREAM_DEFAULT;
+    if (enabled) {
+        streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
+                aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
+    }
+
     audio_devices_t deviceType;
     std::string address;
     RETURN_BINDER_STATUS_IF_ERROR(
@@ -1136,9 +1143,7 @@ Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& dev
             : settingsAllowed())) {
         return binderStatusFromStatusT(PERMISSION_DENIED);
     }
-    if (uint32_t(streamToDriveAbs) >= AUDIO_STREAM_PUBLIC_CNT) {
-        return binderStatusFromStatusT(BAD_VALUE);
-    }
+
     audio_utils::lock_guard _l(mMutex);
     AutoCallerClear acc;
     return binderStatusFromStatusT(
@@ -2811,6 +2816,26 @@ Status AudioPolicyService::clearPreferredMixerAttributes(
 Status AudioPolicyService::getPermissionController(sp<INativePermissionController>* out) {
     *out = mPermissionController;
     return Status::ok();
+}
+
+Status AudioPolicyService::getMmapPolicyInfos(
+        AudioMMapPolicyType policyType, std::vector<AudioMMapPolicyInfo> *_aidl_return) {
+    if (mAudioPolicyManager == nullptr) {
+        return binderStatusFromStatusT(NO_INIT);
+    }
+    audio_utils::lock_guard _l(mMutex);
+    return binderStatusFromStatusT(
+            mAudioPolicyManager->getMmapPolicyInfos(policyType, _aidl_return));
+}
+
+Status AudioPolicyService::getMmapPolicyForDevice(
+        AudioMMapPolicyType policyType, AudioMMapPolicyInfo *policyInfo) {
+    if (mAudioPolicyManager == nullptr) {
+        return binderStatusFromStatusT(NO_INIT);
+    }
+    audio_utils::lock_guard _l(mMutex);
+    return binderStatusFromStatusT(
+            mAudioPolicyManager->getMmapPolicyForDevice(policyType, policyInfo));
 }
 
 } // namespace android

@@ -48,20 +48,13 @@ struct CameraDeviceClientBase :
     }
 
 protected:
-    CameraDeviceClientBase(const sp<CameraService>& cameraService,
+    CameraDeviceClientBase(
+            const sp<CameraService>& cameraService,
             const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
             std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-            const std::string& clientPackageName,
-            bool systemNativeClient,
-            const std::optional<std::string>& clientFeatureId,
-            const std::string& cameraId,
-            int api1CameraId,
-            int cameraFacing,
-            int sensorOrientation,
-            int clientPid,
-            uid_t clientUid,
-            int servicePid,
-            int rotationOverride);
+            const AttributionSourceState& clientAttribution, int callingPid,
+            bool systemNativeClient, const std::string& cameraId, int api1CameraId,
+            int cameraFacing, int sensorOrientation, int servicePid, int rotationOverride);
 
     sp<hardware::camera2::ICameraDeviceCallbacks> mRemoteCallback;
 };
@@ -180,21 +173,13 @@ public:
      */
 
     CameraDeviceClient(const sp<CameraService>& cameraService,
-            const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
-            std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
-            std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-            const std::string& clientPackageName,
-            bool clientPackageOverride,
-            const std::optional<std::string>& clientFeatureId,
-            const std::string& cameraId,
-            int cameraFacing,
-            int sensorOrientation,
-            int clientPid,
-            uid_t clientUid,
-            int servicePid,
-            bool overrideForPerfClass,
-            int rotationOverride,
-            const std::string& originalCameraId);
+                       const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
+                       std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
+                       std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+                       const AttributionSourceState& clientAttribution, int callingPid,
+                       bool clientPackageOverride, const std::string& cameraId, int cameraFacing,
+                       int sensorOrientation, int servicePid, bool overrideForPerfClass,
+                       int rotationOverride, const std::string& originalCameraId);
     virtual ~CameraDeviceClient();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,

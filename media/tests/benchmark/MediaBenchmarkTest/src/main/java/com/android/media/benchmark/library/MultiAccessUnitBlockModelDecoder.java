@@ -72,8 +72,11 @@ public class MultiAccessUnitBlockModelDecoder extends BlockModelDecoder {
         final String mime = format.getString(MediaFormat.KEY_MIME);
         final int maxOutputSize = format.getNumber(
             MediaFormat.KEY_BUFFER_BATCH_MAX_OUTPUT_SIZE, 0).intValue();
-        final int maxInputSizeInBytes = format.getInteger(
-                MediaFormat.KEY_MAX_INPUT_SIZE);
+        int maxInputSizeInBytes = 0;
+        if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+            maxInputSizeInBytes = format.getNumber(
+                    MediaFormat.KEY_MAX_INPUT_SIZE, 0).intValue();
+        }
         mMaxInputSize = Math.max(maxInputSizeInBytes,
                 (int) (maxOutputSize * CodecUtils.getCompressionRatio(mime)));
     }
