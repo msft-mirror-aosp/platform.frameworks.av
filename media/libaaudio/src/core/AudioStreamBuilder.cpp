@@ -110,7 +110,7 @@ aaudio_result_t AudioStreamBuilder::build(AudioStream** streamPtr) {
     std::vector<AudioMMapPolicyInfo> policyInfos;
     aaudio_policy_t mmapPolicy = AudioGlobal_getMMapPolicy();
     ALOGD("%s, global mmap policy is %d", __func__, mmapPolicy);
-    if (status_t status = android::AudioSystem::getMmapPolicyInfo(
+    if (status_t status = android::AudioSystem::getMmapPolicyInfos(
             AudioMMapPolicyType::DEFAULT, &policyInfos); status == NO_ERROR) {
         aaudio_policy_t systemMmapPolicy = AAudio_getAAudioPolicy(
                 policyInfos, AAUDIO_MMAP_POLICY_DEFAULT_AIDL);
@@ -143,7 +143,7 @@ aaudio_result_t AudioStreamBuilder::build(AudioStream** streamPtr) {
 
     policyInfos.clear();
     aaudio_policy_t mmapExclusivePolicy = AAUDIO_UNSPECIFIED;
-    if (status_t status = android::AudioSystem::getMmapPolicyInfo(
+    if (status_t status = android::AudioSystem::getMmapPolicyInfos(
             AudioMMapPolicyType::EXCLUSIVE, &policyInfos); status == NO_ERROR) {
         mmapExclusivePolicy = AAudio_getAAudioPolicy(
                 policyInfos, AAUDIO_MMAP_EXCLUSIVE_POLICY_DEFAULT_AIDL);

@@ -94,30 +94,31 @@ void AudioCapabilities::initWithPlatformLimits() {
     mSampleRateRanges.push_back(Range<int>(minSampleRate, maxSampleRate));
 }
 
-bool AudioCapabilities::supports(int sampleRate, int inputChannels) {
+bool AudioCapabilities::supports(std::optional<int> sampleRate,
+        std::optional<int> inputChannels) {
     // channels and sample rates are checked orthogonally
-    if (inputChannels != 0
+    if (inputChannels
             && !std::any_of(mInputChannelRanges.begin(), mInputChannelRanges.end(),
-            [inputChannels](const Range<int> &a) { return a.contains(inputChannels); })) {
+            [inputChannels](const Range<int> &a) { return a.contains(inputChannels.value()); })) {
         return false;
     }
-    if (sampleRate != 0
+    if (sampleRate
             && !std::any_of(mSampleRateRanges.begin(), mSampleRateRanges.end(),
-            [sampleRate](const Range<int> &a) { return a.contains(sampleRate); })) {
+            [sampleRate](const Range<int> &a) { return a.contains(sampleRate.value()); })) {
         return false;
     }
     return true;
 }
 
 bool AudioCapabilities::isSampleRateSupported(int sampleRate) {
-    return supports(sampleRate, 0);
+    return supports(std::make_optional<int>(sampleRate), std::nullopt);
 }
 
 void AudioCapabilities::limitSampleRates(std::vector<int> rates) {
     std::vector<Range<int>> sampleRateRanges;
     std::sort(rates.begin(), rates.end());
     for (int rate : rates) {
-        if (supports(rate, 0 /* channels */)) {
+        if (supports(std::make_optional<int>(rate), std::nullopt /* channels */)) {
             sampleRateRanges.push_back(Range<int>(rate, rate));
         }
     }
@@ -372,10 +373,12 @@ void AudioCapabilities::getDefaultFormat(sp<AMessage> &format) {
 }
 
 bool AudioCapabilities::supportsFormat(const sp<AMessage> &format) {
-    int32_t sampleRate;
-    format->findInt32(KEY_SAMPLE_RATE, &sampleRate);
-    int32_t channels;
-    format->findInt32(KEY_CHANNEL_COUNT, &channels);
+    int32_t sampleRateValue;
+    std::optional<int> sampleRate = format->findInt32(KEY_SAMPLE_RATE, &sampleRateValue)
+            ? std::make_optional<int>(sampleRateValue) : std::nullopt;
+    int32_t channelsValue;
+    std::optional<int> channels = format->findInt32(KEY_CHANNEL_COUNT, &channelsValue)
+            ? std::make_optional<int>(channelsValue) : std::nullopt;
 
     if (!supports(sampleRate, channels)) {
         return false;
