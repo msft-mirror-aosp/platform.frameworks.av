@@ -40,6 +40,7 @@
 #include <vector>
 
 #include <Serializer.h>
+#include <android/media/audio/common/AudioMMapPolicy.h>
 #include <android/media/audio/common/AudioPort.h>
 #include <com_android_media_audio.h>
 #include <android_media_audiopolicy.h>
@@ -64,6 +65,10 @@ namespace audio_flags = android::media::audiopolicy;
 
 using android::media::audio::common::AudioDevice;
 using android::media::audio::common::AudioDeviceAddress;
+using android::media::audio::common::AudioDeviceDescription;
+using android::media::audio::common::AudioMMapPolicy;
+using android::media::audio::common::AudioMMapPolicyInfo;
+using android::media::audio::common::AudioMMapPolicyType;
 using android::media::audio::common::AudioPortDeviceExt;
 using android::media::audio::common::AudioPortExt;
 using com::android::media::audioserver::fix_call_audio_patch;
@@ -3556,6 +3561,9 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
                                                             bool enabled,
                                                             audio_stream_type_t streamToDriveAbs)
 {
+    ALOGI("%s: deviceType 0x%X, enabled %d, streamToDriveAbs %d", __func__, deviceType, enabled,
+          streamToDriveAbs);
+
     if (!enabled) {
         mAbsoluteVolumeDrivingStreams.erase(deviceType);
         return NO_ERROR;
@@ -4718,6 +4726,18 @@ void AudioPolicyManager::dump(String8 *dst) const
                           dumpDeviceTypes({it.first}).c_str(),
                           mEngine->getVolumeGroupForAttributes(it.second));
     }
+
+    // dump mmap policy by device
+    dst->appendFormat("\nMmap policy:\n");
+    for (const auto& [policyType, policyByDevice] : mMmapPolicyByDeviceType) {
+        std::stringstream ss;
+        ss << '{';
+        for (const auto& [deviceType, policy] : policyByDevice) {
+            ss << deviceType.toString() << ":" << toString(policy) << " ";
+        }
+        ss << '}';
+        dst->appendFormat(" - %s: %s\n", toString(policyType).c_str(), ss.str().c_str());
+    }
 }
 
 status_t AudioPolicyManager::dump(int fd)
@@ -5022,8 +5042,7 @@ status_t AudioPolicyManager::setPreferredMixerAttributes(
                             nullptr /*updatedFormat*/,
                             mixerAttributes->config.channel_mask,
                             nullptr /*updatedChannelMask*/,
-                            flags,
-                            false /*exactMatchRequiredForInputFlags*/)
+                            flags)
                             != IOProfile::NO_MATCH) {
                 profile = curProfile;
                 break;
@@ -8233,7 +8252,7 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
     const underlying_input_flag_t oriFlags = flags;
 
     for (;;) {
-        sp<IOProfile> firstInexact = nullptr;
+        sp<IOProfile> inexact = nullptr;
         uint32_t inexactSamplingRate = 0;
         audio_format_t inexactFormat = AUDIO_FORMAT_INVALID;
         audio_channel_mask_t inexactChannelMask = AUDIO_CHANNEL_INVALID;
@@ -8244,7 +8263,7 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
             for (const auto& profile : hwModule->getInputProfiles()) {
                 // profile->log();
                 //updatedFormat = format;
-                if (profile->getCompatibilityScore(
+                auto compatibleScore = profile->getCompatibilityScore(
                         DeviceVector(device),
                         samplingRate,
                         &updatedSamplingRate,
@@ -8253,27 +8272,16 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
                         channelMask,
                         &updatedChannelMask,
                         // FIXME ugly cast
-                        (audio_output_flags_t) flags,
-                        true /*exactMatchRequiredForInputFlags*/) == IOProfile::EXACT_MATCH) {
+                        (audio_output_flags_t) flags);
+                if (compatibleScore == IOProfile::EXACT_MATCH) {
                     samplingRate = updatedSamplingRate;
                     format = updatedFormat;
                     channelMask = updatedChannelMask;
                     return profile;
-                }
-                if (firstInexact == nullptr
-                        && profile->getCompatibilityScore(
-                                DeviceVector(device),
-                                samplingRate,
-                                &updatedSamplingRate,
-                                format,
-                                &updatedFormat,
-                                channelMask,
-                                &updatedChannelMask,
-                                // FIXME ugly cast
-                                (audio_output_flags_t) flags,
-                                false /*exactMatchRequiredForInputFlags*/)
-                                != IOProfile::NO_MATCH) {
-                    firstInexact = profile;
+                } else if ((flags != AUDIO_INPUT_FLAG_NONE
+                        && compatibleScore == IOProfile::PARTIAL_MATCH_WITH_FLAG)
+                    || (inexact == nullptr && compatibleScore != IOProfile::NO_MATCH)) {
+                    inexact = profile;
                     inexactSamplingRate = updatedSamplingRate;
                     inexactFormat = updatedFormat;
                     inexactChannelMask = updatedChannelMask;
@@ -8281,11 +8289,11 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
             }
         }
 
-        if (firstInexact != nullptr) {
+        if (inexact != nullptr) {
             samplingRate = inexactSamplingRate;
             format = inexactFormat;
             channelMask = inexactChannelMask;
-            return firstInexact;
+            return inexact;
         } else if (flags & AUDIO_INPUT_FLAG_RAW) {
             flags = (audio_input_flags_t) (flags & ~AUDIO_INPUT_FLAG_RAW); // retry
         } else if ((flags & mustMatchFlag) == AUDIO_INPUT_FLAG_NONE &&
@@ -8312,9 +8320,9 @@ float AudioPolicyManager::adjustDeviceAttenuationForAbsVolume(IVolumeCurves &cur
     float volumeDb = curves.volIndexToDb(deviceCategory, index);
 
     if (com_android_media_audio_abs_volume_index_fix()) {
-        if (mAbsoluteVolumeDrivingStreams.find(volumeDevice) !=
-            mAbsoluteVolumeDrivingStreams.end()) {
-            audio_attributes_t attributesToDriveAbs = mAbsoluteVolumeDrivingStreams[volumeDevice];
+        const auto it = mAbsoluteVolumeDrivingStreams.find(volumeDevice);
+        if (it != mAbsoluteVolumeDrivingStreams.end()) {
+            audio_attributes_t attributesToDriveAbs = it->second;
             auto groupToDriveAbs = mEngine->getVolumeGroupForAttributes(attributesToDriveAbs);
             if (groupToDriveAbs == VOLUME_GROUP_NONE) {
                 ALOGD("%s: no group matching with %s", __FUNCTION__,
@@ -9258,8 +9266,7 @@ status_t AudioPolicyManager::getProfilesForDevices(const DeviceVector& devices,
                                                  : hwModule->getOutputProfiles();
         for (const auto& profile : ioProfiles) {
             if (!profile->areAllDevicesSupported(devices) ||
-                    !profile->isCompatibleProfileForFlags(
-                            flags, false /*exactMatchRequiredForInputFlags*/)) {
+                    !profile->isCompatibleProfileForFlags(flags)) {
                 continue;
             }
             audioProfiles.addAllValidProfiles(profile->asAudioPort()->getAudioProfiles());
@@ -9383,6 +9390,90 @@ void AudioPolicyManager::updateClientsInternalMute(
             ALOGE("%s, failed to update tracks internal mute, err=%d", __func__, status);
         }
     }
+}
+
+status_t AudioPolicyManager::getMmapPolicyInfos(AudioMMapPolicyType policyType,
+                                                std::vector<AudioMMapPolicyInfo> *policyInfos) {
+    if (policyType != AudioMMapPolicyType::DEFAULT &&
+        policyType != AudioMMapPolicyType::EXCLUSIVE) {
+        return BAD_VALUE;
+    }
+    if (mMmapPolicyByDeviceType.count(policyType) == 0) {
+        if (status_t status = updateMmapPolicyInfos(policyType); status != NO_ERROR) {
+            return status;
+        }
+    }
+    *policyInfos = mMmapPolicyInfos[policyType];
+    return NO_ERROR;
+}
+
+status_t AudioPolicyManager::getMmapPolicyForDevice(
+        AudioMMapPolicyType policyType, AudioMMapPolicyInfo *policyInfo) {
+    if (policyType != AudioMMapPolicyType::DEFAULT &&
+        policyType != AudioMMapPolicyType::EXCLUSIVE) {
+        return BAD_VALUE;
+    }
+    if (mMmapPolicyByDeviceType.count(policyType) == 0) {
+        if (status_t status = updateMmapPolicyInfos(policyType); status != NO_ERROR) {
+            return status;
+        }
+    }
+    auto it = mMmapPolicyByDeviceType[policyType].find(policyInfo->device.type);
+    policyInfo->mmapPolicy = it == mMmapPolicyByDeviceType[policyType].end()
+            ? AudioMMapPolicy::NEVER : it->second;
+    return NO_ERROR;
+}
+
+status_t AudioPolicyManager::updateMmapPolicyInfos(AudioMMapPolicyType policyType) {
+    std::vector<AudioMMapPolicyInfo> policyInfos;
+    if (status_t status = mpClientInterface->getMmapPolicyInfos(policyType, &policyInfos);
+        status != NO_ERROR) {
+        ALOGE("%s, failed, error = %d", __func__, status);
+        return status;
+    }
+    std::map<AudioDeviceDescription, AudioMMapPolicy> mmapPolicyByDeviceType;
+    if (policyInfos.size() == 1 && policyInfos[0].device == AudioDevice()) {
+        // When there is only one AudioMMapPolicyInfo instance and the device is a default value,
+        // it indicates the mmap policy is reported via system property. In that case, use the
+        // routing information to fill details for how mmap is supported for a particular device.
+        for (const auto &hwModule: mHwModules) {
+            for (const auto &profile: hwModule->getInputProfiles()) {
+                if ((profile->getFlags() & AUDIO_INPUT_FLAG_MMAP_NOIRQ)
+                    != AUDIO_INPUT_FLAG_MMAP_NOIRQ) {
+                    continue;
+                }
+                for (const auto &device: profile->getSupportedDevices()) {
+                    auto deviceDesc =
+                            legacy2aidl_audio_devices_t_AudioDeviceDescription(device->type());
+                    if (deviceDesc.ok()) {
+                        mmapPolicyByDeviceType.emplace(
+                                deviceDesc.value(), policyInfos[0].mmapPolicy);
+                    }
+                }
+            }
+            for (const auto &profile: hwModule->getOutputProfiles()) {
+                if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ)
+                    != AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
+                    continue;
+                }
+                for (const auto &device: profile->getSupportedDevices()) {
+                    auto deviceDesc =
+                            legacy2aidl_audio_devices_t_AudioDeviceDescription(device->type());
+                    if (deviceDesc.ok()) {
+                        mmapPolicyByDeviceType.emplace(
+                                deviceDesc.value(), policyInfos[0].mmapPolicy);
+                    }
+                }
+            }
+        }
+    } else {
+        for (const auto &info: policyInfos) {
+            mmapPolicyByDeviceType[info.device.type] = info.mmapPolicy;
+        }
+    }
+    mMmapPolicyByDeviceType.emplace(policyType, mmapPolicyByDeviceType);
+    mMmapPolicyInfos.emplace(policyType, policyInfos);
+    return NO_ERROR;
 }
 
 } // namespace android
