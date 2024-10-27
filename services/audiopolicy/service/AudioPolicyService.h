@@ -58,6 +58,8 @@ using media::audio::common::AudioConfigBase;
 using media::audio::common::AudioDevice;
 using media::audio::common::AudioDeviceDescription;
 using media::audio::common::AudioFormatDescription;
+using media::audio::common::AudioMMapPolicyInfo;
+using media::audio::common::AudioMMapPolicyType;
 using media::audio::common::AudioMode;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
@@ -327,6 +329,13 @@ public:
 
     // Should only be called by AudioService to push permission data down to audioserver
     binder::Status getPermissionController(sp<INativePermissionController>* out) override;
+
+    binder::Status getMmapPolicyInfos(
+            AudioMMapPolicyType policyType,
+            std::vector<AudioMMapPolicyInfo>* _aidl_return) override;
+    binder::Status getMmapPolicyForDevice(
+            AudioMMapPolicyType policyType,
+            AudioMMapPolicyInfo* policyInfo) override;
 
     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
 
@@ -944,6 +953,10 @@ private:
 
         status_t setTracksInternalMute(
                 const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) override;
+
+        status_t getMmapPolicyInfos(
+                media::audio::common::AudioMMapPolicyType policyType,
+                std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
 
      private:
         AudioPolicyService *mAudioPolicyService;

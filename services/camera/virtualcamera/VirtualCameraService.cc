@@ -240,11 +240,16 @@ ndk::ScopedAStatus VirtualCameraService::registerCamera(
     const VirtualCameraConfiguration& configuration,
     const std::string& cameraId, const int32_t deviceId, bool* _aidl_return) {
   if (!mPermissionProxy.checkCallingPermission(kCreateVirtualDevicePermission)) {
-    ALOGE("%s: caller (pid %d, uid %d) doesn't hold %s permission", __func__,
-          getpid(), getuid(), kCreateVirtualDevicePermission);
     return ndk::ScopedAStatus::fromExceptionCode(EX_SECURITY);
   }
+  return registerCameraNoCheck(token, configuration, cameraId, deviceId,
+                               _aidl_return);
+}
 
+ndk::ScopedAStatus VirtualCameraService::registerCameraNoCheck(
+    const ::ndk::SpAIBinder& token,
+    const VirtualCameraConfiguration& configuration,
+    const std::string& cameraId, const int32_t deviceId, bool* _aidl_return) {
   if (_aidl_return == nullptr) {
     return ndk::ScopedAStatus::fromServiceSpecificError(
         Status::EX_ILLEGAL_ARGUMENT);
@@ -481,9 +486,10 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
   configuration.virtualCameraCallback =
       ndk::SharedRefBase::make<VirtualCameraTestInstance>(
           inputFps.value_or(kTestCameraDefaultInputFps));
-  registerCamera(mTestCameraToken, configuration,
-                 cameraId.value_or(std::to_string(sNextIdNumericalPortion++)),
-                 kDefaultDeviceId, &ret);
+  registerCameraNoCheck(
+      mTestCameraToken, configuration,
+      cameraId.value_or(std::to_string(sNextIdNumericalPortion++)),
+      kDefaultDeviceId, &ret);
   if (ret) {
     dprintf(out, "Successfully registered test camera %s\n",
             getCamera(mTestCameraToken)->getCameraName().c_str());

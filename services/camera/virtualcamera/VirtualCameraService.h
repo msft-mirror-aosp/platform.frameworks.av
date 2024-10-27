@@ -87,6 +87,15 @@ class VirtualCameraService
   // Disable and destroy test camera instance if there's one.
   void disableTestCameraCmd(int out);
 
+  // Register camera corresponding to the binder token without checking for
+  // caller permission.
+  ndk::ScopedAStatus registerCameraNoCheck(
+      const ::ndk::SpAIBinder& token,
+      const ::aidl::android::companion::virtualcamera::VirtualCameraConfiguration&
+          configuration,
+      const std::string& cameraId, int32_t deviceId, bool* _aidl_return)
+      EXCLUDES(mLock);
+
   std::shared_ptr<VirtualCameraProvider> mVirtualCameraProvider;
   bool mVerifyEglExtensions = true;
   const PermissionsProxy& mPermissionProxy;
