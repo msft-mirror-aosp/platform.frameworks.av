@@ -38,8 +38,10 @@
 
 #include <android/hardware/cas/native/1.0/IDescrambler.h>
 #include <android/hardware/drm/1.0/types.h>
+#include <android/sysprop/MediaProperties.sysprop.h>
 #include <android-base/parseint.h>
 #include <android-base/properties.h>
+#include <android-base/no_destructor.h>
 #include <android-base/stringprintf.h>
 #include <binder/MemoryBase.h>
 #include <binder/MemoryDealer.h>
@@ -113,6 +115,109 @@ static uint32_t convertFlags(uint32_t flags, bool toC2) {
                 }
             });
 }
+
+class SurfaceCallbackHandler {
+public:
+    enum callback_type_t {
+        ON_BUFFER_RELEASED = 0,
+        ON_BUFFER_ATTACHED
+    };
+
+    void post(callback_type_t callback,
+            std::shared_ptr<Codec2Client::Component> component,
+            uint32_t generation) {
+        if (!component) {
+            ALOGW("surface callback psoted for invalid component");
+        }
+        std::shared_ptr<SurfaceCallbackItem> item =
+                std::make_shared<SurfaceCallbackItem>(callback, component, generation);
+        std::unique_lock<std::mutex> lock(mMutex);
+        mItems.emplace_back(std::move(item));
+        mCv.notify_one();
+    }
+
+    ~SurfaceCallbackHandler() {
+        {
+            std::unique_lock<std::mutex> lock(mMutex);
+            mDone = true;
+            mCv.notify_all();
+        }
+        if (mThread.joinable()) {
+            mThread.join();
+        }
+    }
+
+    static SurfaceCallbackHandler& GetInstance() {
+        static base::NoDestructor<SurfaceCallbackHandler> sSurfaceCallbackHandler{};
+        return *sSurfaceCallbackHandler;
+    }
+
+private:
+    struct SurfaceCallbackItem {
+        callback_type_t mCallback;
+        std::weak_ptr<Codec2Client::Component> mComp;
+        uint32_t mGeneration;
+
+        SurfaceCallbackItem(
+                callback_type_t callback,
+                std::shared_ptr<Codec2Client::Component> comp,
+                uint32_t generation)
+                : mCallback(callback), mComp(comp), mGeneration(generation) {}
+    };
+
+    SurfaceCallbackHandler() { mThread = std::thread(&SurfaceCallbackHandler::run, this); }
+
+    void run() {
+        std::unique_lock<std::mutex> lock(mMutex);
+        while (!mDone) {
+            while (!mItems.empty()) {
+                std::deque<std::shared_ptr<SurfaceCallbackItem>> items = std::move(mItems);
+                mItems.clear();
+                lock.unlock();
+                handle(items);
+                lock.lock();
+            }
+            mCv.wait(lock);
+        }
+    }
+
+    void handle(std::deque<std::shared_ptr<SurfaceCallbackItem>> &items) {
+        while (!items.empty()) {
+            std::shared_ptr<SurfaceCallbackItem> item = items.front();
+            items.pop_front();
+            switch (item->mCallback) {
+                case ON_BUFFER_RELEASED: {
+                    std::shared_ptr<Codec2Client::Component> comp = item->mComp.lock();;
+                    if (comp) {
+                        comp->onBufferReleasedFromOutputSurface(item->mGeneration);
+                    }
+                    break;
+                }
+                case ON_BUFFER_ATTACHED: {
+                    std::shared_ptr<Codec2Client::Component> comp = item->mComp.lock();
+                    if (comp) {
+                        comp->onBufferAttachedToOutputSurface(item->mGeneration);
+                    }
+                    break;
+                }
+                default:
+                    ALOGE("Non defined surface callback message");
+                    break;
+            }
+        }
+    }
+
+    std::thread mThread;
+    bool mDone = false;
+    std::deque<std::shared_ptr<SurfaceCallbackItem>> mItems;
+    std::mutex mMutex;
+    std::condition_variable mCv;
+
+
+    friend class base::NoDestructor<SurfaceCallbackHandler>;
+
+    DISALLOW_EVIL_CONSTRUCTORS(SurfaceCallbackHandler);
+};
 
 }  // namespace
 
@@ -207,8 +312,18 @@ CCodecBufferChannel::CCodecBufferChannel(
         Mutexed<BlockPools>::Locked pools(mBlockPools);
         pools->outputPoolId = C2BlockPool::BASIC_LINEAR;
     }
-    std::string value = GetServerConfigurableFlag("media_native", "ccodec_rendering_depth", "3");
-    android::base::ParseInt(value, &mRenderingDepth);
+    if (android::media::codec::provider_->rendering_depth_removal()) {
+        constexpr int kAndroidApi202404 = 202404;
+        int vendorVersion = ::android::base::GetIntProperty("ro.vendor.api_level", -1);
+        using ::android::sysprop::MediaProperties::codec2_remove_rendering_depth;
+        if (vendorVersion > kAndroidApi202404 || codec2_remove_rendering_depth().value_or(false)) {
+            mRenderingDepth = 0;
+        }
+    } else {
+        std::string value = GetServerConfigurableFlag(
+                "media_native", "ccodec_rendering_depth", "3");
+        android::base::ParseInt(value, &mRenderingDepth);
+    }
     mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + mRenderingDepth;
 }
 
@@ -1492,7 +1607,8 @@ void CCodecBufferChannel::onBufferReleasedFromOutputSurface(uint32_t generation)
     // during this interface being executed.
     std::shared_ptr<Codec2Client::Component> comp = mComponent;
     if (comp) {
-        comp->onBufferReleasedFromOutputSurface(generation);
+      SurfaceCallbackHandler::GetInstance().post(
+                SurfaceCallbackHandler::ON_BUFFER_RELEASED, comp, generation);
     }
 }
 
@@ -1503,7 +1619,8 @@ void CCodecBufferChannel::onBufferAttachedToOutputSurface(uint32_t generation) {
     // during this interface being executed.
     std::shared_ptr<Codec2Client::Component> comp = mComponent;
     if (comp) {
-        comp->onBufferAttachedToOutputSurface(generation);
+      SurfaceCallbackHandler::GetInstance().post(
+                SurfaceCallbackHandler::ON_BUFFER_ATTACHED, comp, generation);
     }
 }
 
@@ -1790,6 +1907,7 @@ status_t CCodecBufferChannel::start(
             outputSurface = output->surface ?
                     output->surface->getIGraphicBufferProducer() : nullptr;
             if (outputSurface) {
+                (void)SurfaceCallbackHandler::GetInstance();
                 output->surface->setMaxDequeuedBufferCount(output->maxDequeueBuffers);
             }
             outputGeneration = output->generation;
@@ -2052,6 +2170,14 @@ status_t CCodecBufferChannel::prepareInitialInputBuffers(
 
 status_t CCodecBufferChannel::requestInitialInputBuffers(
         std::map<size_t, sp<MediaCodecBuffer>> &&clientInputBuffers) {
+    std::optional<QueueGuard> guard;
+    if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
+        guard.emplace(mSync);
+        if (!guard->isRunning()) {
+            ALOGD("[%s] skip requestInitialInputBuffers when not running", mName);
+            return OK;
+        }
+    }
     C2StreamBufferTypeSetting::output oStreamFormat(0u);
     C2PrependHeaderModeSetting prepend(PREPEND_HEADER_TO_NONE);
     c2_status_t err = mComponent->query({ &oStreamFormat, &prepend }, {}, C2_DONT_BLOCK, nullptr);
@@ -2708,6 +2834,7 @@ status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface,
         oldSurface = outputSurface->surface;
     }
     if (newSurface) {
+        (void)SurfaceCallbackHandler::GetInstance();
         newSurface->setScalingMode(NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW);
         newSurface->setDequeueTimeout(kDequeueTimeoutNs);
         newSurface->setMaxDequeuedBufferCount(maxDequeueCount);
