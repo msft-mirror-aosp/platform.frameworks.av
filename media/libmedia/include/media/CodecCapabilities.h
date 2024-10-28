@@ -34,7 +34,7 @@ namespace android {
 
 struct CodecCapabilities {
 
-    static bool SupportsBitrate(Range<int> bitrateRange,
+    static bool SupportsBitrate(Range<int32_t> bitrateRange,
             const sp<AMessage> &format);
 
     /**
