@@ -201,6 +201,17 @@ void Camera3StreamSplitter::setHalBufferManager(bool enabled) {
     mUseHalBufManager = enabled;
 }
 
+status_t Camera3StreamSplitter::setTransform(size_t surfaceId, int transform) {
+    Mutex::Autolock lock(mMutex);
+    if (!mOutputSurfaces.contains(surfaceId) || mOutputSurfaces[surfaceId] == nullptr) {
+        SP_LOGE("%s: No surface at id %zu", __FUNCTION__, surfaceId);
+        return BAD_VALUE;
+    }
+
+    mOutputTransforms[surfaceId] = transform;
+    return OK;
+}
+
 status_t Camera3StreamSplitter::addOutputLocked(size_t surfaceId, const sp<Surface>& outputQueue) {
     ATRACE_CALL();
     if (outputQueue == nullptr) {
@@ -374,7 +385,12 @@ status_t Camera3StreamSplitter::outputBufferLocked(const sp<Surface>& output,
     output->setBuffersDataSpace(static_cast<ui::Dataspace>(bufferItem.mDataSpace));
     output->setCrop(&bufferItem.mCrop);
     output->setScalingMode(bufferItem.mScalingMode);
-    output->setBuffersTransform(bufferItem.mTransform);
+
+    int transform = bufferItem.mTransform;
+    if (mOutputTransforms.contains(surfaceId)) {
+        transform = mOutputTransforms[surfaceId];
+    }
+    output->setBuffersTransform(transform);
 
     // In case the output BufferQueue has its own lock, if we hold splitter lock while calling
     // queueBuffer (which will try to acquire the output lock), the output could be holding its
