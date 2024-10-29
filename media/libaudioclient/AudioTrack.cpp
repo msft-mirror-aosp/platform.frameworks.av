@@ -2875,10 +2875,6 @@ status_t AudioTrack::restoreTrack_l(const char *from, bool forceRestore)
             __func__, mPortId, isOffloadedOrDirect_l() ? "Offloaded or Direct" : "PCM", from);
     ++mSequence;
 
-    // refresh the audio configuration cache in this process to make sure we get new
-    // output parameters and new IAudioFlinger in createTrack_l()
-    AudioSystem::clearAudioConfigCache();
-
     if (!forceRestore &&
         (isOffloadedOrDirect_l() || mDoNotReconnect)) {
         // FIXME re-creation of offloaded and direct tracks is not yet implemented;
@@ -2911,10 +2907,6 @@ status_t AudioTrack::restoreTrack_l(const char *from, bool forceRestore)
     const int INITIAL_RETRIES = 3;
     int retries = INITIAL_RETRIES;
 retry:
-    if (retries < INITIAL_RETRIES) {
-        // See the comment for clearAudioConfigCache at the start of the function.
-        AudioSystem::clearAudioConfigCache();
-    }
     mFlags = mOrigFlags;
 
     // If a new IAudioTrack is successfully created, createTrack_l() will modify the

@@ -372,69 +372,58 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
 
         // if SCO headset is connected and we are told to use it, play ringtone over
         // speaker and BT SCO
-        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()) {
-            DeviceVector devices2;
-            devices2 = availableOutputDevices.getFirstDevicesFromTypes({
+        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()
+                && audio_is_bluetooth_out_sco_device(getPreferredDeviceTypeForLegacyStrategy(
+                            availableOutputDevices, STRATEGY_PHONE))) {
+            DeviceVector devices2 = availableOutputDevices.getFirstDevicesFromTypes({
                     AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT, AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
                     AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
+            // devices2 cannot be empty at this point
             // Use ONLY Bluetooth SCO output when ringing in vibration mode
             if (!((getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) == AUDIO_POLICY_FORCE_SYSTEM_ENFORCED)
-                    && (strategy == STRATEGY_ENFORCED_AUDIBLE))) {
-                if (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
-                        == AUDIO_POLICY_FORCE_BT_SCO) {
-                    if (!devices2.isEmpty()) {
-                        devices = devices2;
-                        break;
-                    }
-                }
+                        && (strategy == STRATEGY_ENFORCED_AUDIBLE))
+                    && (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
+                        == AUDIO_POLICY_FORCE_BT_SCO)) {
+                devices = devices2;
+                break;
             }
             // Use both Bluetooth SCO and phone default output when ringing in normal mode
-            if (audio_is_bluetooth_out_sco_device(getPreferredDeviceTypeForLegacyStrategy(
-                    availableOutputDevices, STRATEGY_PHONE))) {
-                if (strategy == STRATEGY_SONIFICATION) {
-                    devices.replaceDevicesByType(
-                            AUDIO_DEVICE_OUT_SPEAKER,
-                            availableOutputDevices.getDevicesFromType(
-                                    AUDIO_DEVICE_OUT_SPEAKER_SAFE));
-                }
-                if (!devices2.isEmpty()) {
-                    devices.add(devices2);
-                    break;
-                }
+            if (strategy == STRATEGY_SONIFICATION) {
+                devices.replaceDevicesByType(
+                        AUDIO_DEVICE_OUT_SPEAKER,
+                        availableOutputDevices.getDevicesFromType(
+                                AUDIO_DEVICE_OUT_SPEAKER_SAFE));
             }
+            devices.add(devices2);
+            break;
         }
 
         // if LEA headset is connected and we are told to use it, play ringtone over
         // speaker and BT LEA
-        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllBleSet()).isEmpty()) {
+        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllBleSet()).isEmpty()
+                && audio_is_ble_out_device(getPreferredDeviceTypeForLegacyStrategy(
+                                       availableOutputDevices, STRATEGY_PHONE))) {
             DeviceVector devices2;
             devices2 = availableOutputDevices.getFirstDevicesFromTypes({
                     AUDIO_DEVICE_OUT_BLE_HEADSET, AUDIO_DEVICE_OUT_BLE_SPEAKER});
+            // devices2 cannot be empty at this point
             // Use ONLY Bluetooth LEA output when ringing in vibration mode
             if (!((getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) == AUDIO_POLICY_FORCE_SYSTEM_ENFORCED)
-                    && (strategy == STRATEGY_ENFORCED_AUDIBLE))) {
-                if (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
-                        == AUDIO_POLICY_FORCE_BT_BLE) {
-                    if (!devices2.isEmpty()) {
-                        devices = devices2;
-                        break;
-                    }
-                }
+                        && (strategy == STRATEGY_ENFORCED_AUDIBLE))
+                    && (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
+                                               == AUDIO_POLICY_FORCE_BT_BLE)) {
+                devices = devices2;
+                break;
             }
             // Use both Bluetooth LEA and phone default output when ringing in normal mode
-            if (audio_is_ble_out_device(getPreferredDeviceTypeForLegacyStrategy(
-                    availableOutputDevices, STRATEGY_PHONE))) {
-                if (strategy == STRATEGY_SONIFICATION) {
-                    devices.replaceDevicesByType(
-                            AUDIO_DEVICE_OUT_SPEAKER,
-                            availableOutputDevices.getDevicesFromType(
-                                    AUDIO_DEVICE_OUT_SPEAKER_SAFE));
-                }
-                if (!devices2.isEmpty()) {
-                    devices.add(devices2);
-                    break;
-                }
+            if (strategy == STRATEGY_SONIFICATION) {
+                devices.replaceDevicesByType(
+                        AUDIO_DEVICE_OUT_SPEAKER,
+                        availableOutputDevices.getDevicesFromType(
+                                AUDIO_DEVICE_OUT_SPEAKER_SAFE));
             }
+            devices.add(devices2);
+            break;
         }
 
         // The second device used for sonification is the same as the device used by media strategy

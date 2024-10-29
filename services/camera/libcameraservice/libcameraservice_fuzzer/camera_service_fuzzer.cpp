@@ -40,6 +40,7 @@
 #include <fakeservicemanager/FakeServiceManager.h>
 #include <fuzzbinder/random_binder.h>
 #include <gui/BufferItemConsumer.h>
+#include <gui/Flags.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
@@ -620,7 +621,11 @@ void CameraFuzzer::invokeCameraAPIs() {
 
             previewSurface = surfaceControl->getSurface();
             if (previewSurface.get()) {
-                cameraDevice->setPreviewTarget(previewSurface->getIGraphicBufferProducer());
+                cameraDevice->setPreviewTarget(previewSurface
+#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+                                                       ->getIGraphicBufferProducer()
+#endif
+                );
             }
         }
         cameraDevice->setPreviewCallbackFlag(CAMERA_FRAME_CALLBACK_FLAG_CAMCORDER);
@@ -675,7 +680,11 @@ void CameraFuzzer::invokeCameraAPIs() {
                         .apply();
                 sp<Surface> previewSurfaceVideo = surfaceControlVideo->getSurface();
                 if (previewSurfaceVideo.get()) {
-                    cameraDevice->setVideoTarget(previewSurfaceVideo->getIGraphicBufferProducer());
+                    cameraDevice->setVideoTarget(previewSurfaceVideo
+#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+                                                         ->getIGraphicBufferProducer()
+#endif
+                    );
                 }
             }
             cameraDevice->stopPreview();
