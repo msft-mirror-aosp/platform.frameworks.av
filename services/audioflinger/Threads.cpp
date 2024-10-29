@@ -7854,6 +7854,7 @@ void DuplicatingThread::threadLoop_sleepTime()
 
 ssize_t DuplicatingThread::threadLoop_write()
 {
+    ATRACE_BEGIN("write");
     for (size_t i = 0; i < outputTracks.size(); i++) {
         const ssize_t actualWritten = outputTracks[i]->write(mSinkBuffer, writeFrames);
 
@@ -7872,6 +7873,7 @@ ssize_t DuplicatingThread::threadLoop_write()
 
         // TODO: Report correction for the other output tracks and show in the dump.
     }
+    ATRACE_END();
     if (mStandby) {
         mThreadMetrics.logBeginInterval();
         mThreadSnapshot.onBegin();
