@@ -43,7 +43,7 @@ public:
     static bool isHeicCompositeStream(const sp<Surface> &surface);
     static bool isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo);
 
-    status_t createInternalStreams(const std::vector<sp<Surface>>& consumers,
+    status_t createInternalStreams(const std::vector<SurfaceHolder>& consumers,
             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
             camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
             const std::unordered_set<int32_t> &sensorPixelModesUsed,

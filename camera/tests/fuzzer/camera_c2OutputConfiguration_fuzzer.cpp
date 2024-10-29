@@ -120,7 +120,10 @@ void C2OutputConfigurationFuzzer::invokeC2OutputConfigFuzzer() {
                 [&]() { outputConfiguration->getColorSpace(); },
                 [&]() { outputConfiguration->getStreamUseCase(); },
                 [&]() { outputConfiguration->getTimestampBase(); },
-                [&]() { outputConfiguration->getMirrorMode(); },
+                [&]() {
+                    sp<IGraphicBufferProducer> gbp = createIGraphicBufferProducer();
+                    outputConfiguration->getMirrorMode(gbp);
+                },
                 [&]() { outputConfiguration->useReadoutTimestamp(); },
         });
         callC2OutputConfAPIs();
