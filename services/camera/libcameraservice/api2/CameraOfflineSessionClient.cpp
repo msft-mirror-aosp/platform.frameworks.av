@@ -34,8 +34,8 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
         return OK;
     }
 
-    // Verify ops permissions
-    auto res = startCameraOps();
+    // Verify ops permissions and/or open camera
+    auto res = notifyCameraOpening();
     if (res != OK) {
         return res;
     }
@@ -184,7 +184,7 @@ binder::Status CameraOfflineSessionClient::disconnect() {
     mFrameProcessor->requestExit();
     mFrameProcessor->join();
 
-    finishCameraOps();
+    notifyCameraClosing();
     ALOGI("%s: Disconnected client for offline camera %s for PID %d", __FUNCTION__,
             mCameraIdStr.c_str(), mCallingPid);
 
@@ -227,10 +227,10 @@ void CameraOfflineSessionClient::notifyError(int32_t errorCode,
     }
 }
 
-status_t CameraOfflineSessionClient::startCameraOps() {
+status_t CameraOfflineSessionClient::notifyCameraOpening() {
     ATRACE_CALL();
     {
-        ALOGV("%s: Start camera ops, package name = %s, client UID = %d", __FUNCTION__,
+        ALOGV("%s: Notify camera opening, package name = %s, client UID = %d", __FUNCTION__,
               getPackageName().c_str(), getClientUid());
     }
 
@@ -262,7 +262,7 @@ status_t CameraOfflineSessionClient::startCameraOps() {
         }
     }
 
-    mOpsActive = true;
+    mCameraOpen = true;
 
     // Transition device state to OPEN
     sCameraService->mUidPolicy->registerMonitorUid(getClientUid(), /*openCamera*/ true);
@@ -270,17 +270,17 @@ status_t CameraOfflineSessionClient::startCameraOps() {
     return OK;
 }
 
-status_t CameraOfflineSessionClient::finishCameraOps() {
+status_t CameraOfflineSessionClient::notifyCameraClosing() {
     ATRACE_CALL();
 
-    // Check if startCameraOps succeeded, and if so, finish the camera op
-    if (mOpsActive) {
+    // Check if notifyCameraOpening succeeded, and if so, finish the camera op if necessary
+    if (mCameraOpen) {
         // Notify app ops that the camera is available again
         if (mAppOpsManager != nullptr) {
             // TODO : possibly change this to OP_OFFLINE_CAMERA_SESSION
             mAppOpsManager->finishOp(AppOpsManager::OP_CAMERA, getClientUid(),
                                      toString16(getPackageName()));
-            mOpsActive = false;
+            mCameraOpen = false;
         }
     }
     // Always stop watching, even if no camera op is active

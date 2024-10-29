@@ -462,13 +462,13 @@ public:
 
         virtual ~BasicClient();
 
-        // the instance is in the middle of destruction. When this is set,
+        // The instance is in the middle of destruction. When this is set,
         // the instance should not be accessed from callback.
         // CameraService's mClientLock should be acquired to access this.
         // - subclasses should set this to true in their destructors.
         bool mDestructionStarted;
 
-        // these are initialized in the constructor.
+        // These are initialized in the constructor.
         static sp<CameraService>        sCameraService;
         const std::string               mCameraIdStr;
         const int                       mCameraFacing;
@@ -489,16 +489,18 @@ public:
 
         // Permissions management methods for camera lifecycle
 
-        // Notify rest of system/apps about camera opening, and check appops
-        virtual status_t                startCameraOps();
+        // Notify rest of system/apps about camera opening, and (legacy) check appops
+        virtual status_t                notifyCameraOpening();
         // Notify rest of system/apps about camera starting to stream data, and confirm appops
         virtual status_t                startCameraStreamingOps();
         // Notify rest of system/apps about camera stopping streaming data
         virtual status_t                finishCameraStreamingOps();
         // Notify rest of system/apps about camera closing
-        virtual status_t                finishCameraOps();
-        // Handle errors for start/checkOps
+        virtual status_t                notifyCameraClosing();
+        // Handle errors for start/checkOps, startDataDelivery
         virtual status_t                handleAppOpMode(int32_t mode);
+        virtual status_t                handlePermissionResult(
+                                                PermissionChecker::PermissionResult result);
         // Just notify camera appops to trigger unblocking dialog if sensor
         // privacy is enabled and camera mute is not supported
         virtual status_t                noteAppOp();
@@ -516,12 +518,10 @@ public:
         }; // class OpsCallback
 
         sp<OpsCallback> mOpsCallback;
-        // Track whether checkOps was called successfully, to avoid
-        // finishing what we didn't start, on camera open.
-        bool            mOpsActive;
-        // Track whether startOps was called successfully on start of
-        // camera streaming.
-        bool            mOpsStreaming;
+        // Track if the camera is currently active.
+        bool mCameraOpen;
+        // Track if the camera is currently streaming.
+        bool mCameraStreaming;
 
         // IAppOpsCallback interface, indirected through opListener
         virtual void opChanged(int32_t op, const String16& packageName);

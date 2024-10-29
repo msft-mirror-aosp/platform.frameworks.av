@@ -98,8 +98,8 @@ public:
     status_t setZoomOverride(int32_t zoomOverride) override;
 
     // permissions management
-    status_t startCameraOps() override;
-    status_t finishCameraOps() override;
+    status_t notifyCameraOpening() override;
+    status_t notifyCameraClosing() override;
 
     // FilteredResultListener API
     void onResultAvailable(const CaptureResult& result) override;
