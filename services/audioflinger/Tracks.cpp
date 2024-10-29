@@ -2651,6 +2651,7 @@ public:
     binder::Status setPreferredMicrophoneFieldDimension(float zoom) final;
     binder::Status shareAudioHistory(
             const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) final;
+    binder::Status setParameters(const ::std::string& keyValuePairs) final;
 
 private:
     const sp<IAfRecordTrack> mRecordTrack;
@@ -2718,6 +2719,11 @@ binder::Status RecordHandle::shareAudioHistory(
         const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) {
     return binderStatusFromStatusT(
             mRecordTrack->shareAudioHistory(sharedAudioPackageName, sharedAudioStartMs));
+}
+
+binder::Status RecordHandle::setParameters(const ::std::string& keyValuePairs) {
+    return binderStatusFromStatusT(mRecordTrack->setParameters(
+            String8(keyValuePairs.c_str())));
 }
 
 // ----------------------------------------------------------------------------
@@ -3113,6 +3119,18 @@ status_t RecordTrack::shareAudioHistory(
         return status;
     } else {
         return BAD_VALUE;
+    }
+}
+
+status_t RecordTrack::setParameters(const String8& keyValuePairs) {
+    const sp<IAfThreadBase> thread = mThread.promote();
+    if (thread == nullptr) {
+        ALOGE("%s(%d): thread is dead", __func__, mId);
+        return FAILED_TRANSACTION;
+    } else if (thread->type() == IAfThreadBase::DIRECT) {
+        return thread->setParameters(keyValuePairs);
+    } else {
+        return PERMISSION_DENIED;
     }
 }
 
