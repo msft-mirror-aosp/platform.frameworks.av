@@ -72,7 +72,7 @@ public:
     bool                       isMultiResolution() const;
     int64_t                    getStreamUseCase() const;
     int                        getTimestampBase() const;
-    int                        getMirrorMode() const;
+    int                        getMirrorMode(sp<IGraphicBufferProducer> surface) const;
     bool                       useReadoutTimestamp() const;
     int                        getFormat() const;
     int                        getDataspace() const;
@@ -125,6 +125,7 @@ public:
                 mStreamUseCase == other.mStreamUseCase &&
                 mTimestampBase == other.mTimestampBase &&
                 mMirrorMode == other.mMirrorMode &&
+                mirrorModesEqual(other) &&
                 mUseReadoutTimestamp == other.mUseReadoutTimestamp &&
                 mFormat == other.mFormat &&
                 mDataspace == other.mDataspace &&
@@ -180,6 +181,9 @@ public:
         if (mMirrorMode != other.mMirrorMode) {
             return mMirrorMode < other.mMirrorMode;
         }
+        if (!mirrorModesEqual(other)) {
+            return mirrorModesLessThan(other);
+        }
         if (mUseReadoutTimestamp != other.mUseReadoutTimestamp) {
             return mUseReadoutTimestamp < other.mUseReadoutTimestamp;
         }
@@ -204,6 +208,9 @@ public:
     bool sensorPixelModesUsedLessThan(const OutputConfiguration& other) const;
     bool gbpsLessThan(const OutputConfiguration& other) const;
     void addGraphicProducer(sp<IGraphicBufferProducer> gbp) {mGbps.push_back(gbp);}
+    bool mirrorModesEqual(const OutputConfiguration& other) const;
+    bool mirrorModesLessThan(const OutputConfiguration& other) const;
+    const std::vector<int32_t>& getMirrorModes() const {return mMirrorModeForProducers;}
 private:
     std::vector<sp<IGraphicBufferProducer>> mGbps;
     int                        mRotation;
@@ -221,6 +228,7 @@ private:
     int64_t                    mStreamUseCase;
     int                        mTimestampBase;
     int                        mMirrorMode;
+    std::vector<int>           mMirrorModeForProducers; // 1:1 mapped with mGbps
     bool                       mUseReadoutTimestamp;
     int                        mFormat;
     int                        mDataspace;

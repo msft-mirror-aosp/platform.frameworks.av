@@ -17,7 +17,7 @@
 #include "PowerStatsProvider.h"
 #include <aidl/android/hardware/power/stats/IPowerStats.h>
 #include <android-base/logging.h>
-#include <psh_utils/ServiceSingleton.h>
+#include <mediautils/ServiceSingleton.h>
 #include <unordered_map>
 
 using ::aidl::android::hardware::power::stats::IPowerStats;
@@ -25,7 +25,7 @@ using ::aidl::android::hardware::power::stats::IPowerStats;
 namespace android::media::psh_utils {
 
 static auto getPowerStatsService() {
-    return getServiceSingleton<IPowerStats>();
+    return mediautils::getService<IPowerStats>();
 }
 
 status_t RailEnergyDataProvider::fill(PowerStats *stat) const {

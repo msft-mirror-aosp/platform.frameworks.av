@@ -232,9 +232,6 @@ protected:
     virtual void          onResultAvailable(const CaptureResult& result);
     virtual void          detachDevice();
 
-    // Calculate the ANativeWindow transform from android.sensor.orientation
-    status_t              getRotationTransformLocked(int mirrorMode, /*out*/int32_t* transform);
-
     bool supportsUltraHighResolutionCapture(const std::string &cameraId);
 
     bool isSensorPixelModeConsistent(const std::list<int> &streamIdList,
@@ -290,10 +287,6 @@ private:
             const hardware::camera2::params::OutputConfiguration &outputConfiguration,
             bool isShared,
             int* newStreamId = NULL);
-
-    // Set the stream transform flags to automatically rotate the camera stream for preview use
-    // cases.
-    binder::Status setStreamTransformLocked(int streamId, int mirrorMode);
 
     // Utility method to insert the surface into SurfaceMap
     binder::Status insertGbpLocked(const sp<IGraphicBufferProducer>& gbp,

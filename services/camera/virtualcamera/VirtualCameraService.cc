@@ -395,7 +395,7 @@ binder_status_t VirtualCameraService::handleShellCommand(int, int out, int err,
       status = enableTestCameraCmd(out, err, cmd.optionToValueMap);
       break;
     case Command::DISABLE_TEST_CAMERA:
-      disableTestCameraCmd(out);
+      status = disableTestCameraCmd(out);
       break;
   }
 
@@ -490,21 +490,23 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
       mTestCameraToken, configuration,
       cameraId.value_or(std::to_string(sNextIdNumericalPortion++)),
       kDefaultDeviceId, &ret);
-  if (ret) {
-    dprintf(out, "Successfully registered test camera %s\n",
-            getCamera(mTestCameraToken)->getCameraName().c_str());
-  } else {
-    dprintf(err, "Failed to create test camera\n");
+  if (!ret) {
+    dprintf(err, "Failed to create test camera (error %d)\n", ret);
+    return ret;
   }
+
+  dprintf(out, "Successfully registered test camera %s\n",
+          getCamera(mTestCameraToken)->getCameraName().c_str());
   return STATUS_OK;
 }
 
-void VirtualCameraService::disableTestCameraCmd(const int out) {
+binder_status_t VirtualCameraService::disableTestCameraCmd(const int out) {
   if (mTestCameraToken == nullptr) {
     dprintf(out, "Test camera is not registered.");
   }
-  unregisterCamera(mTestCameraToken);
+  binder_status_t ret = unregisterCamera(mTestCameraToken).getStatus();
   mTestCameraToken.set(nullptr);
+  return ret;
 }
 
 }  // namespace virtualcamera

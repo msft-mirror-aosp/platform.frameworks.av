@@ -96,6 +96,7 @@ class Camera3StreamSplitter : public BufferItemConsumer::FrameAvailableListener 
 
     void setHalBufferManager(bool enabled);
 
+    status_t setTransform(size_t surfaceId, int transform);
 private:
     // From BufferItemConsumer::FrameAvailableListener
     //
@@ -236,6 +237,9 @@ private:
 
     //Map surface ids -> gbp outputs
     std::unordered_map<int, sp<Surface>> mOutputSurfaces;
+
+    // Map surface ids -> transform
+    std::unordered_map<int, int> mOutputTransforms;
 
     //Map surface ids -> consumer buffer count
     std::unordered_map<int, size_t > mConsumerBufferCount;
