@@ -299,7 +299,7 @@ public:
         return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
                         "  Format Chn mask  SRate "
                         "ST Usg CT "
-                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted"
+                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted "
                         "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
                         "   Latency\n"sv;
     }
