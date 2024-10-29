@@ -118,7 +118,7 @@ private:
     T upper_;
 };
 
-static const Range<int> POSITIVE_INTEGERS = Range<int>(1, INT_MAX);
+static const Range<int32_t> POSITIVE_INT32 = Range<int32_t>(1, INT32_MAX);
 
 // found stuff that is not supported by framework (=> this should not happen)
 constexpr int ERROR_CAPABILITIES_UNRECOGNIZED   = (1 << 0);
