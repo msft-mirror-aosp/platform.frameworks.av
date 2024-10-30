@@ -93,6 +93,14 @@ flag {
 }
 
 flag {
+    name: "hardening_permission_api"
+    is_exported: true
+    namespace: "media_audio"
+    description: "API flag for additional appop/perm constructs for hardening."
+    bug: "376480814"
+}
+
+flag {
     name: "loudness_configurator_api"
     is_exported: true
     namespace: "media_audio"
