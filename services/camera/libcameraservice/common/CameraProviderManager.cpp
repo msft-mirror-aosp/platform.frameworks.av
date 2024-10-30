@@ -63,6 +63,7 @@ using android::hardware::camera::common::V1_0::Status;
 using namespace camera3::SessionConfigurationUtils;
 using std::literals::chrono_literals::operator""s;
 using hardware::camera2::utils::CameraIdAndSessionConfiguration;
+using hardware::camera2::params::OutputConfiguration;
 
 namespace flags = com::android::internal::camera::flags;
 namespace vd_flags = android::companion::virtualdevice::flags;
@@ -2078,6 +2079,75 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQuery
     }
     res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
     mSessionConfigQueryVersion = versionCode;
+    return res;
+}
+
+bool CameraProviderManager::ProviderInfo::DeviceInfo3::isAutomotiveDevice() {
+    // Checks the property ro.hardware.type and returns true if it is
+    // automotive.
+    char value[PROPERTY_VALUE_MAX] = {0};
+    property_get("ro.hardware.type", value, "");
+    return strncmp(value, "automotive", PROPERTY_VALUE_MAX) == 0;
+}
+
+status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfigurationTags() {
+    status_t res = OK;
+    if (flags::camera_multi_client()) {
+        const int32_t sharedColorSpaceTag = ANDROID_SHARED_SESSION_COLOR_SPACE;
+        const int32_t sharedOutputConfigurationsTag = ANDROID_SHARED_SESSION_OUTPUT_CONFIGURATIONS;
+        auto& c = mCameraCharacteristics;
+        uint8_t colorSpace = 0;
+
+        res = c.update(sharedColorSpaceTag, &colorSpace, 1);
+
+        // ToDo: b/372321187 Hardcoding the shared session configuration. Update the code to
+        // take these values from XML instead.
+        std::vector<int64_t> sharedOutputConfigEntries;
+        int64_t surfaceType1 =  OutputConfiguration::SURFACE_TYPE_IMAGE_READER;
+        int64_t width = 1280;
+        int64_t height = 800;
+        int64_t format1 = HAL_PIXEL_FORMAT_RGBA_8888;
+        int64_t mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO;
+        int64_t timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT;
+        int64_t usage1 = 3;
+        int64_t dataspace = 0;
+        int64_t useReadoutTimestamp = 0;
+        int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
+        int64_t physicalCamIdLen = 0;
+
+        // Stream 1 configuration hardcoded
+        sharedOutputConfigEntries.push_back(surfaceType1);
+        sharedOutputConfigEntries.push_back(width);
+        sharedOutputConfigEntries.push_back(height);
+        sharedOutputConfigEntries.push_back(format1);
+        sharedOutputConfigEntries.push_back(mirrorMode);
+        sharedOutputConfigEntries.push_back(useReadoutTimestamp);
+        sharedOutputConfigEntries.push_back(timestampBase);
+        sharedOutputConfigEntries.push_back(dataspace);
+        sharedOutputConfigEntries.push_back(usage1);
+        sharedOutputConfigEntries.push_back(streamUseCase);
+        sharedOutputConfigEntries.push_back(physicalCamIdLen);
+
+        // Stream 2 configuration hardcoded
+        int64_t surfaceType2 =  OutputConfiguration::SURFACE_TYPE_SURFACE_VIEW;
+        int64_t format2 = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
+        int64_t usage2 = 0;
+
+        sharedOutputConfigEntries.push_back(surfaceType2);
+        sharedOutputConfigEntries.push_back(width);
+        sharedOutputConfigEntries.push_back(height);
+        sharedOutputConfigEntries.push_back(format2);
+        sharedOutputConfigEntries.push_back(mirrorMode);
+        sharedOutputConfigEntries.push_back(useReadoutTimestamp);
+        sharedOutputConfigEntries.push_back(timestampBase);
+        sharedOutputConfigEntries.push_back(dataspace);
+        sharedOutputConfigEntries.push_back(usage2);
+        sharedOutputConfigEntries.push_back(streamUseCase);
+        sharedOutputConfigEntries.push_back(physicalCamIdLen);
+
+        res = c.update(sharedOutputConfigurationsTag, sharedOutputConfigEntries.data(),
+                sharedOutputConfigEntries.size());
+    }
     return res;
 }
 

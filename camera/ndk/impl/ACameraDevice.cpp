@@ -26,6 +26,9 @@
 #include "ACameraMetadata.h"
 #include "ACaptureRequest.h"
 #include "ACameraCaptureSession.h"
+#include <com_android_internal_camera_flags.h>
+
+namespace flags = com::android::internal::camera::flags;
 
 ACameraDevice::~ACameraDevice() {
     mDevice->stopLooperAndDisconnect();
@@ -57,12 +60,13 @@ CameraDevice::CameraDevice(
         const char* id,
         ACameraDevice_StateCallbacks* cb,
         sp<ACameraMetadata> chars,
-        ACameraDevice* wrapper) :
+        ACameraDevice* wrapper, bool sharedMode) :
         mCameraId(id),
         mAppCallbacks(*cb),
         mChars(chars),
         mServiceCallback(new ServiceCallback(this)),
         mWrapper(wrapper),
+        mSharedMode(sharedMode),
         mInError(false),
         mError(ACAMERA_OK),
         mIdle(true),
@@ -970,6 +974,7 @@ void CameraDevice::CallbackHandler::onMessageReceived(
         case kWhatCaptureSeqAbort:
         case kWhatCaptureBufferLost:
         case kWhatPreparedCb:
+        case kWhatClientSharedAccessPriorityChanged:
             ALOGV("%s: Received msg %d", __FUNCTION__, msg->what());
             break;
         case kWhatCleanUpSessions:
@@ -1007,6 +1012,32 @@ void CameraDevice::CallbackHandler::onMessageReceived(
             (*onDisconnected)(context, dev);
             break;
         }
+
+        case kWhatClientSharedAccessPriorityChanged:
+        {
+            if (!flags::camera_multi_client()) {
+                break;
+            }
+            ACameraDevice* dev;
+            found = msg->findPointer(kDeviceKey, (void**) &dev);
+            if (!found || dev == nullptr) {
+                ALOGE("%s: Cannot find device pointer!", __FUNCTION__);
+                return;
+            }
+            ACameraDevice_ClientSharedAccessPriorityChangedCallback
+                    onClientSharedAccessPriorityChanged;
+            found = msg->findPointer(kCallbackFpKey, (void**) &onClientSharedAccessPriorityChanged);
+            if (!found) {
+                ALOGE("%s: Cannot find onClientSharedAccessPriorityChanged!", __FUNCTION__);
+                return;
+            }
+            if (onClientSharedAccessPriorityChanged == nullptr) {
+                return;
+            }
+            (*onClientSharedAccessPriorityChanged)(context, dev, dev->isPrimaryClient());
+            break;
+        }
+
         case kWhatOnError:
         {
             ACameraDevice* dev;
@@ -1621,6 +1652,31 @@ CameraDevice::ServiceCallback::onDeviceError(
             break;
     }
     return ret;
+}
+
+binder::Status
+CameraDevice::ServiceCallback::onClientSharedAccessPriorityChanged(bool primaryClient) {
+    ALOGV("onClientSharedAccessPriorityChanged received. primaryClient = %d", primaryClient);
+    binder::Status ret = binder::Status::ok();
+    if (!flags::camera_multi_client()) {
+        return ret;
+    }
+    sp<CameraDevice> dev = mDevice.promote();
+    if (dev == nullptr) {
+        return ret; // device has been closed
+    }
+    Mutex::Autolock _l(dev->mDeviceLock);
+    if (dev->isClosed() || dev->mRemote == nullptr) {
+        return ret;
+    }
+    dev->setPrimaryClient(primaryClient);
+    sp<AMessage> msg = new AMessage(kWhatClientSharedAccessPriorityChanged, dev->mHandler);
+    msg->setPointer(kContextKey, dev->mAppCallbacks.context);
+    msg->setPointer(kDeviceKey, (void*) dev->getWrapper());
+    msg->setPointer(kCallbackFpKey, (void*) dev->mAppCallbacks.onClientSharedAccessPriorityChanged);
+    msg->post();
+
+    return binder::Status::ok();
 }
 
 binder::Status
