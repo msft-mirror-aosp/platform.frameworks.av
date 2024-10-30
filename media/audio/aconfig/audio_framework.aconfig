@@ -32,6 +32,17 @@ flag {
     bug: "374751406"
 }
 
+flag {
+    name: "enable_multichannel_group_device"
+    namespace: "media_audio"
+    description:
+        "Enable new audio device type for wireless connected speaker group"
+        "supporting multichannel content."
+    is_exported: true
+    is_fixed_read_only: true
+    bug: "344031109"
+}
+
 flag{
     name: "enable_ringtone_haptics_customization"
     namespace: "media_audio"
