@@ -129,7 +129,6 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     request.getConfiguration().setUsage(getUsage());
     request.getConfiguration().setContentType(getContentType());
-    request.getConfiguration().setTags(getTags());
     request.getConfiguration().setSpatializationBehavior(getSpatializationBehavior());
     request.getConfiguration().setIsContentSpatialized(isContentSpatialized());
     request.getConfiguration().setInputPreset(getInputPreset());
@@ -186,7 +185,6 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     setUsage(configurationOutput.getUsage());
     setContentType(configurationOutput.getContentType());
-    setTags(configurationOutput.getTags());
     setSpatializationBehavior(configurationOutput.getSpatializationBehavior());
     setIsContentSpatialized(configurationOutput.isContentSpatialized());
     setInputPreset(configurationOutput.getInputPreset());
