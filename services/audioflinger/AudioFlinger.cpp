@@ -630,16 +630,22 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         bool isBitPerfect;
         float volume;
         bool muted;
+        DeviceIdVector selectedDeviceIds;
+        if (*deviceId != AUDIO_PORT_HANDLE_NONE) {
+            selectedDeviceIds.push_back(*deviceId);
+        }
         ret = AudioSystem::getOutputForAttr(&localAttr, &io,
                                             actualSessionId,
                                             &streamType, adjAttributionSource,
                                             &fullConfig,
                                             (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ |
                                                     AUDIO_OUTPUT_FLAG_DIRECT),
-                                            deviceId, &portId, &secondaryOutputs, &isSpatialized,
+                                            &selectedDeviceIds, &portId, &secondaryOutputs,
+                                            &isSpatialized,
                                             &isBitPerfect,
                                             &volume,
                                             &muted);
+        *deviceId = getFirstDeviceId(selectedDeviceIds);
         if (ret != NO_ERROR) {
             config->sample_rate = fullConfig.sample_rate;
             config->channel_mask = fullConfig.channel_mask;
@@ -1166,6 +1172,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
         adjAttributionSource = std::move(validatedAttrSource).unwrapInto();
     }
 
+    DeviceIdVector selectedDeviceIds;
     audio_session_t sessionId = input.sessionId;
     if (sessionId == AUDIO_SESSION_ALLOCATE) {
         sessionId = (audio_session_t) newAudioUniqueId(AUDIO_UNIQUE_ID_USE_SESSION);
@@ -1176,11 +1183,14 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
 
     output.sessionId = sessionId;
     output.outputId = AUDIO_IO_HANDLE_NONE;
-    output.selectedDeviceId = input.selectedDeviceId;
+    if (input.selectedDeviceId != AUDIO_PORT_HANDLE_NONE) {
+        selectedDeviceIds.push_back(input.selectedDeviceId);
+    }
     lStatus = AudioSystem::getOutputForAttr(&localAttr, &output.outputId, sessionId, &streamType,
                                             adjAttributionSource, &input.config, input.flags,
-                                            &output.selectedDeviceId, &portId, &secondaryOutputs,
+                                            &selectedDeviceIds, &portId, &secondaryOutputs,
                                             &isSpatialized, &isBitPerfect, &volume, &muted);
+    output.selectedDeviceId = getFirstDeviceId(selectedDeviceIds);
 
     if (lStatus != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
         ALOGE("createTrack() getOutputForAttr() return error %d or invalid output handle", lStatus);
