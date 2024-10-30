@@ -85,7 +85,7 @@ class VirtualCameraService
   binder_status_t enableTestCameraCmd(
       int out, int err, const std::map<std::string, std::string>& options);
   // Disable and destroy test camera instance if there's one.
-  void disableTestCameraCmd(int out);
+  binder_status_t disableTestCameraCmd(int out);
 
   // Register camera corresponding to the binder token without checking for
   // caller permission.

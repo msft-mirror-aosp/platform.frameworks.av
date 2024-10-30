@@ -29,6 +29,37 @@ class CameraService;
 using content::AttributionSourceState;
 using permission::PermissionChecker;
 
+class AttrSourceItr {
+  public:
+    using value_type = AttributionSourceState;
+    using pointer = const value_type*;
+    using reference = const value_type&;
+
+    AttrSourceItr() : mAttr(nullptr) {}
+
+    AttrSourceItr(const AttributionSourceState& attr) : mAttr(&attr) {}
+
+    reference operator*() const { return *mAttr; }
+    pointer operator->() const { return mAttr; }
+
+    AttrSourceItr& operator++() {
+        mAttr = !mAttr->next.empty() ? mAttr->next.data() : nullptr;
+        return *this;
+    }
+
+    AttrSourceItr operator++(int) {
+        AttrSourceItr tmp = *this;
+        ++(*this);
+        return tmp;
+    }
+
+    friend bool operator==(const AttrSourceItr& a, const AttrSourceItr& b) = default;
+
+    static AttrSourceItr end() { return AttrSourceItr{}; }
+private:
+    const AttributionSourceState * mAttr;
+};
+
 /**
  * Utility class consolidating methods/data for verifying permissions and the identity of the
  * caller.
@@ -87,6 +118,15 @@ class AttributionAndPermissionUtils {
                                              const std::string& permission,
                                              const AttributionSourceState& attributionSource,
                                              const std::string& message, int32_t attributedOpCode);
+    virtual bool checkPermissionForDataDelivery(const std::string& cameraId,
+                                                const std::string& permission,
+                                                const AttributionSourceState& attributionSource,
+                                                const std::string& message,
+                                                int32_t attributedOpCode);
+    virtual PermissionChecker::PermissionResult checkPermissionForStartDataDelivery(
+            const std::string& cameraId, const std::string& permission,
+            const AttributionSourceState& attributionSource, const std::string& message,
+            int32_t attributedOpCode);
 
     // Can camera service trust the caller based on the calling UID?
     virtual bool isTrustedCallingUid(uid_t uid);
@@ -114,7 +154,14 @@ class AttributionAndPermissionUtils {
 
     // Utils for checking specific permissions
     virtual bool hasPermissionsForCamera(const std::string& cameraId,
-                                         const AttributionSourceState& attributionSource);
+                                         const AttributionSourceState& attributionSource,
+                                         bool forDataDelivery = false, bool checkAutomotive = true);
+    virtual PermissionChecker::PermissionResult checkPermissionsForCameraForPreflight(
+            const std::string& cameraId, const AttributionSourceState& attributionSource);
+    virtual PermissionChecker::PermissionResult checkPermissionsForCameraForDataDelivery(
+            const std::string& cameraId, const AttributionSourceState& attributionSource);
+    virtual PermissionChecker::PermissionResult checkPermissionsForCameraForStartDataDelivery(
+            const std::string& cameraId, const AttributionSourceState& attributionSource);
     virtual bool hasPermissionsForSystemCamera(const std::string& cameraId,
                                                const AttributionSourceState& attributionSource,
                                                bool checkCameraPermissions = true);
@@ -124,6 +171,8 @@ class AttributionAndPermissionUtils {
             const AttributionSourceState& attributionSource);
     virtual bool hasPermissionsForOpenCloseListener(
             const AttributionSourceState& attributionSource);
+
+    virtual void finishDataDelivery(const AttributionSourceState& attributionSource);
 
     static const std::string sDumpPermission;
     static const std::string sManageCameraPermission;
@@ -155,6 +204,12 @@ class AttributionAndPermissionUtils {
 
   private:
     virtual const sp<IPermissionController>& getPermissionController() const;
+
+    virtual PermissionChecker::PermissionResult checkPermission(
+            const std::string& cameraId, const std::string& permission,
+            const AttributionSourceState& attributionSource, const std::string& message,
+            int32_t attributedOpCode, bool forDataDelivery, bool startDataDelivery,
+            bool checkAutomotive);
 
     std::unique_ptr<permission::PermissionChecker> mPermissionChecker =
             std::make_unique<permission::PermissionChecker>();
@@ -230,12 +285,39 @@ class AttributionAndPermissionUtilsEncapsulator {
     bool hasPermissionsForCamera(const std::string& cameraId, int callingPid, int callingUid,
                                  int32_t deviceId) const {
         auto attributionSource = buildAttributionSource(callingPid, callingUid, deviceId);
-        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, attributionSource);
+        return hasPermissionsForCamera(cameraId, attributionSource);
     }
 
     bool hasPermissionsForCamera(const std::string& cameraId,
                                  const AttributionSourceState& clientAttribution) const {
-        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution);
+        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution,
+                                                                       /* forDataDelivery */ false,
+                                                                       /* checkAutomotive */ true);
+    }
+
+    bool hasPermissionsForCameraForDataDelivery(
+            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
+        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution,
+                                                                       /* forDataDelivery */ true,
+                                                                       /* checkAutomotive */ false);
+    }
+
+    PermissionChecker::PermissionResult checkPermissionsForCameraForPreflight(
+            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
+        return mAttributionAndPermissionUtils->checkPermissionsForCameraForPreflight(
+                cameraId, clientAttribution);
+    }
+
+    PermissionChecker::PermissionResult checkPermissionsForCameraForDataDelivery(
+            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
+        return mAttributionAndPermissionUtils->checkPermissionsForCameraForDataDelivery(
+                cameraId, clientAttribution);
+    }
+
+    PermissionChecker::PermissionResult checkPermissionsForCameraForStartDataDelivery(
+            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
+        return mAttributionAndPermissionUtils->checkPermissionsForCameraForStartDataDelivery(
+                cameraId, clientAttribution);
     }
 
     bool hasPermissionsForSystemCamera(const std::string& cameraId, int callingPid, int callingUid,
@@ -262,6 +344,10 @@ class AttributionAndPermissionUtilsEncapsulator {
         auto attributionSource = buildAttributionSource(callingPid, callingUid);
         return mAttributionAndPermissionUtils->hasPermissionsForOpenCloseListener(
                 attributionSource);
+    }
+
+    void finishDataDelivery(const AttributionSourceState& attributionSource) {
+        mAttributionAndPermissionUtils->finishDataDelivery(attributionSource);
     }
 
     bool isAutomotiveDevice() const { return mAttributionAndPermissionUtils->isAutomotiveDevice(); }
