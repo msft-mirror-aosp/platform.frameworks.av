@@ -86,6 +86,9 @@ class EglSurfaceTexture {
   // set by the most recent call to updateTexture.
   std::chrono::nanoseconds getTimestamp();
 
+  // Returns true is a frame has ever been drawn on this surface.
+  bool isFirstFrameDrawn();
+
  private:
 #if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<IGraphicBufferProducer> mBufferProducer;
