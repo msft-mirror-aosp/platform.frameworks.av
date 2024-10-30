@@ -1577,11 +1577,6 @@ status_t AudioRecord::restoreRecord_l(const char *from)
     const int INITIAL_RETRIES = 3;
     int retries = INITIAL_RETRIES;
 retry:
-    if (retries < INITIAL_RETRIES) {
-        // refresh the audio configuration cache in this process to make sure we get new
-        // input parameters and new IAudioRecord in createRecord_l()
-        AudioSystem::clearAudioConfigCache();
-    }
     mFlags = mOrigFlags;
 
     // if the new IAudioRecord is created, createRecord_l() will modify the

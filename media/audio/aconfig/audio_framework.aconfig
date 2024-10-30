@@ -163,6 +163,13 @@ flag {
     bug: "367816690"
 }
 
+flag {
+    name: "speaker_cleanup_usage"
+    namespace: "media_audio"
+    description: "Support new AudioAttributes usage for speaker cleanup"
+    bug: "355050846"
+}
+
 # TODO remove
 flag {
     name: "volume_ringer_api_hardening"

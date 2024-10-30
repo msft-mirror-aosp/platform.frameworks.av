@@ -26,7 +26,7 @@
 
 namespace android {
 
-const Range<int>& AudioCapabilities::getBitrateRange() const {
+const Range<int32_t>& AudioCapabilities::getBitrateRange() const {
     return mBitrateRange;
 }
 
@@ -86,7 +86,7 @@ void AudioCapabilities::init(std::string mediaType, std::vector<ProfileLevel> pr
 }
 
 void AudioCapabilities::initWithPlatformLimits() {
-    mBitrateRange = Range<int>(0, INT_MAX);
+    mBitrateRange = Range<int>(0, INT32_MAX);
     mInputChannelRanges.push_back(Range<int>(1, MAX_INPUT_CHANNEL_COUNT));
 
     const int minSampleRate = base::GetIntProperty("ro.mediacodec.min_sample_rate", 7350);
@@ -281,7 +281,7 @@ void AudioCapabilities::applyLevelLimits() {
 
 void AudioCapabilities::applyLimits(
         const std::vector<Range<int>> &inputChannels,
-        const std::optional<Range<int>> &bitRates) {
+        const std::optional<Range<int32_t>> &bitRates) {
     // clamp & make a local copy
     std::vector<Range<int>> inputChannelsCopy(inputChannels.size());
     for (int i = 0; i < inputChannels.size(); i++) {
@@ -302,7 +302,7 @@ void AudioCapabilities::applyLimits(
 void AudioCapabilities::parseFromInfo(const sp<AMessage> &format) {
     int maxInputChannels = MAX_INPUT_CHANNEL_COUNT;
     std::vector<Range<int>> channels = { Range<int>(1, maxInputChannels) };
-    std::optional<Range<int>> bitRates = POSITIVE_INTEGERS;
+    std::optional<Range<int32_t>> bitRates = POSITIVE_INT32;
 
     AString rateAString;
     if (format->findString("sample-rate-ranges", &rateAString)) {
@@ -349,7 +349,7 @@ void AudioCapabilities::parseFromInfo(const sp<AMessage> &format) {
     }
 
     if (format->findString("bitrate-range", &valueStr)) {
-        std::optional<Range<int>> parsedBitrate = ParseIntRange(valueStr.c_str());
+        std::optional<Range<int32_t>> parsedBitrate = ParseIntRange(valueStr.c_str());
         if (parsedBitrate) {
             bitRates = bitRates.value().intersect(parsedBitrate.value());
         }
