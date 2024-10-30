@@ -18,7 +18,6 @@
 #define LOG_TAG "AAudioStreamParameters"
 #include <utils/Log.h>
 #include <system/audio.h>
-#include <system/aaudio/AAudio.h>
 
 #include "AAudioStreamParameters.h"
 
@@ -35,7 +34,6 @@ void AAudioStreamParameters::copyFrom(const AAudioStreamParameters &other) {
     mBufferCapacity       = other.mBufferCapacity;
     mUsage                = other.mUsage;
     mContentType          = other.mContentType;
-    mTags                 = other.mTags;
     mSpatializationBehavior = other.mSpatializationBehavior;
     mIsContentSpatialized = other.mIsContentSpatialized;
     mInputPreset          = other.mInputPreset;
@@ -201,10 +199,6 @@ aaudio_result_t AAudioStreamParameters::validate() const {
             // break;
     }
 
-    if (mTags.has_value() && mTags->size() >= AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE) {
-        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
-    }
-
     return validateChannelMask();
 }
 
@@ -307,7 +301,6 @@ void AAudioStreamParameters::dump() const {
     ALOGD("mBufferCapacity       = %6d", mBufferCapacity);
     ALOGD("mUsage                = %6d", mUsage);
     ALOGD("mContentType          = %6d", mContentType);
-    ALOGD("mTags                 = %s",  mTags.has_value() ? mTags.value().c_str() : "");
     ALOGD("mSpatializationBehavior = %6d", mSpatializationBehavior);
     ALOGD("mIsContentSpatialized = %s", mIsContentSpatialized ? "true" : "false");
     ALOGD("mInputPreset          = %6d", mInputPreset);

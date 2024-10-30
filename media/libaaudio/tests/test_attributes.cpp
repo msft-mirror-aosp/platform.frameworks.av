@@ -26,8 +26,6 @@
 
 #include <aaudio/AAudio.h>
 #include <gtest/gtest.h>
-#include <system/audio.h>
-#include <system/aaudio/AAudio.h>
 
 constexpr int64_t kNanosPerSecond = 1000000000;
 constexpr int kNumFrames = 256;
@@ -38,7 +36,6 @@ constexpr int32_t DONT_SET = -1000;
 static void checkAttributes(aaudio_performance_mode_t perfMode,
                             aaudio_usage_t usage,
                             aaudio_content_type_t contentType,
-                            const char * tags = nullptr,
                             aaudio_input_preset_t preset = DONT_SET,
                             aaudio_allowed_capture_policy_t capturePolicy = DONT_SET,
                             int privacyMode = DONT_SET,
@@ -48,7 +45,6 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
 
     AAudioStreamBuilder *aaudioBuilder = nullptr;
     AAudioStream *aaudioStream = nullptr;
-    aaudio_result_t expectedSetTagsResult = AAUDIO_OK;
 
     // Use an AAudioStreamBuilder to contain requested parameters.
     ASSERT_EQ(AAUDIO_OK, AAudio_createStreamBuilder(&aaudioBuilder));
@@ -63,12 +59,6 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
     }
     if (contentType != DONT_SET) {
         AAudioStreamBuilder_setContentType(aaudioBuilder, contentType);
-    }
-    if (tags != nullptr) {
-        aaudio_result_t result = AAudioStreamBuilder_setTags(aaudioBuilder, tags);
-        expectedSetTagsResult =  (strlen(tags) >= AUDIO_ATTRIBUTES_TAGS_MAX_SIZE) ?
-                AAUDIO_ERROR_ILLEGAL_ARGUMENT : AAUDIO_OK;
-        EXPECT_EQ(result, expectedSetTagsResult);
     }
     if (preset != DONT_SET) {
         AAudioStreamBuilder_setInputPreset(aaudioBuilder, preset);
@@ -96,20 +86,6 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
             ? AAUDIO_CONTENT_TYPE_MUSIC // default
             : contentType;
     EXPECT_EQ(expectedContentType, AAudioStream_getContentType(aaudioStream));
-
-    char readTags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE] = {};
-    EXPECT_EQ(AAUDIO_OK, AAudioStream_getTags(aaudioStream, readTags))
-            << "Expected tags=" << (tags != nullptr ? tags : "null") << ", got tags=" << readTags;;
-    EXPECT_LT(strlen(readTags), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE)
-            << "expected tags len " << strlen(readTags) << " less than "
-            << AUDIO_ATTRIBUTES_TAGS_MAX_SIZE;
-
-    // Null tags or failed to set, empty tags expected (default initializer)
-    const char * expectedTags = tags == nullptr ?
-                "" : (expectedSetTagsResult != AAUDIO_OK ? "" : tags);
-    // Oversized tags will be discarded
-    EXPECT_TRUE(std::strcmp(expectedTags, readTags) == 0)
-                << "Expected tags=" << expectedTags << ", got tags=" << readTags;
 
     aaudio_input_preset_t expectedPreset =
             (preset == DONT_SET || preset == AAUDIO_UNSPECIFIED)
@@ -163,21 +139,6 @@ static const aaudio_usage_t sUsages[] = {
     // Note that the AAUDIO_SYSTEM_USAGE_* values requires special permission.
 };
 
-static const std::string oversizedTags2 = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE + 1, 'A');
-static const std::string oversizedTags = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE, 'B');
-static const std::string maxSizeTags = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1, 'C');
-
-static const char * const sTags[] = {
-    nullptr,
-    "",
-    "oem=routing_extension",
-    "VX_OEM_ROUTING_EXTENSION",
-    maxSizeTags.c_str(),
-    // intentionnaly use oversized tags
-    oversizedTags.c_str(),
-    oversizedTags2.c_str()
-};
-
 static const aaudio_content_type_t sContentypes[] = {
     DONT_SET,
     AAUDIO_UNSPECIFIED,
@@ -224,18 +185,11 @@ static void checkAttributesContentType(aaudio_performance_mode_t perfMode) {
     }
 }
 
-static void checkAttributesTags(aaudio_performance_mode_t perfMode) {
-    for (const char * const tags : sTags) {
-        checkAttributes(perfMode, DONT_SET, DONT_SET, tags);
-    }
-}
-
 static void checkAttributesInputPreset(aaudio_performance_mode_t perfMode) {
     for (aaudio_input_preset_t inputPreset : sInputPresets) {
         checkAttributes(perfMode,
                         DONT_SET,
                         DONT_SET,
-                        nullptr,
                         inputPreset,
                         DONT_SET,
                         DONT_SET,
@@ -248,7 +202,6 @@ static void checkAttributesAllowedCapturePolicy(aaudio_performance_mode_t perfMo
         checkAttributes(perfMode,
                         DONT_SET,
                         DONT_SET,
-                        nullptr,
                         DONT_SET,
                         policy,
                         AAUDIO_DIRECTION_INPUT);
@@ -260,7 +213,6 @@ static void checkAttributesPrivacySensitive(aaudio_performance_mode_t perfMode) 
         checkAttributes(perfMode,
                         DONT_SET,
                         DONT_SET,
-                        nullptr,
                         DONT_SET,
                         DONT_SET,
                         privacyMode,
@@ -274,10 +226,6 @@ TEST(test_attributes, aaudio_usage_perfnone) {
 
 TEST(test_attributes, aaudio_content_type_perfnone) {
     checkAttributesContentType(AAUDIO_PERFORMANCE_MODE_NONE);
-}
-
-TEST(test_attributes, aaudio_tags_perfnone) {
-    checkAttributesTags(AAUDIO_PERFORMANCE_MODE_NONE);
 }
 
 TEST(test_attributes, aaudio_input_preset_perfnone) {
@@ -294,10 +242,6 @@ TEST(test_attributes, aaudio_usage_lowlat) {
 
 TEST(test_attributes, aaudio_content_type_lowlat) {
     checkAttributesContentType(AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-}
-
-TEST(test_attributes, aaudio_tags_lowlat) {
-    checkAttributesTags(AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
 }
 
 TEST(test_attributes, aaudio_input_preset_lowlat) {
