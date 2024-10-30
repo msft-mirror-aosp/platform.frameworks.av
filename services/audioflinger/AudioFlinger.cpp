@@ -541,7 +541,7 @@ status_t MmapStreamInterface::openMmapStream(MmapStreamInterface::stream_directi
                                              const audio_attributes_t *attr,
                                              audio_config_base_t *config,
                                              const AudioClient& client,
-                                             audio_port_handle_t *deviceId,
+                                             DeviceIdVector *deviceIds,
                                              audio_session_t *sessionId,
                                              const sp<MmapStreamCallback>& callback,
                                              sp<MmapStreamInterface>& interface,
@@ -553,7 +553,7 @@ status_t MmapStreamInterface::openMmapStream(MmapStreamInterface::stream_directi
     status_t ret = NO_INIT;
     if (af != 0) {
         ret = af->openMmapStream(
-                direction, attr, config, client, deviceId,
+                direction, attr, config, client, deviceIds,
                 sessionId, callback, interface, handle);
     }
     return ret;
@@ -563,7 +563,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
                                       const audio_attributes_t *attr,
                                       audio_config_base_t *config,
                                       const AudioClient& client,
-                                      audio_port_handle_t *deviceId,
+                                      DeviceIdVector *deviceIds,
                                       audio_session_t *sessionId,
                                       const sp<MmapStreamCallback>& callback,
                                       sp<MmapStreamInterface>& interface,
@@ -630,22 +630,17 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         bool isBitPerfect;
         float volume;
         bool muted;
-        DeviceIdVector selectedDeviceIds;
-        if (*deviceId != AUDIO_PORT_HANDLE_NONE) {
-            selectedDeviceIds.push_back(*deviceId);
-        }
         ret = AudioSystem::getOutputForAttr(&localAttr, &io,
                                             actualSessionId,
                                             &streamType, adjAttributionSource,
                                             &fullConfig,
                                             (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ |
                                                     AUDIO_OUTPUT_FLAG_DIRECT),
-                                            &selectedDeviceIds, &portId, &secondaryOutputs,
+                                            deviceIds, &portId, &secondaryOutputs,
                                             &isSpatialized,
                                             &isBitPerfect,
                                             &volume,
                                             &muted);
-        *deviceId = getFirstDeviceId(selectedDeviceIds);
         if (ret != NO_ERROR) {
             config->sample_rate = fullConfig.sample_rate;
             config->channel_mask = fullConfig.channel_mask;
@@ -654,12 +649,17 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         ALOGW_IF(!secondaryOutputs.empty(),
                  "%s does not support secondary outputs, ignoring them", __func__);
     } else {
+        audio_port_handle_t deviceId = getFirstDeviceId(*deviceIds);
         ret = AudioSystem::getInputForAttr(&localAttr, &io,
                                               RECORD_RIID_INVALID,
                                               actualSessionId,
                                               adjAttributionSource,
                                               config,
-                                              AUDIO_INPUT_FLAG_MMAP_NOIRQ, deviceId, &portId);
+                                              AUDIO_INPUT_FLAG_MMAP_NOIRQ, &deviceId, &portId);
+        deviceIds->clear();
+        if (deviceId != AUDIO_PORT_HANDLE_NONE) {
+            deviceIds->push_back(deviceId);
+        }
     }
     if (ret != NO_ERROR) {
         return ret;
@@ -673,7 +673,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
     const sp<IAfMmapThread> thread = mMmapThreads.valueFor(io);
     if (thread != 0) {
         interface = IAfMmapThread::createMmapStreamInterfaceAdapter(thread);
-        thread->configure(&localAttr, streamType, actualSessionId, callback, *deviceId, portId);
+        thread->configure(&localAttr, streamType, actualSessionId, callback, *deviceIds, portId);
         *handle = portId;
         *sessionId = actualSessionId;
         config->sample_rate = thread->sampleRate();
