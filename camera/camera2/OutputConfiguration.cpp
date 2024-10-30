@@ -102,6 +102,12 @@ int OutputConfiguration::getMirrorMode(sp<IGraphicBufferProducer> surface) const
         return mMirrorMode;
     }
 
+    if (mGbps.size() != mMirrorModeForProducers.size()) {
+        ALOGE("%s: mGbps size doesn't match mMirrorModeForProducers: %zu vs %zu",
+                __FUNCTION__, mGbps.size(), mMirrorModeForProducers.size());
+        return mMirrorMode;
+    }
+
     // Use per-producer mirror mode if available.
     for (size_t i = 0; i < mGbps.size(); i++) {
         if (mGbps[i] == surface) {
@@ -350,6 +356,7 @@ OutputConfiguration::OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int ro
     mStreamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
     mTimestampBase = TIMESTAMP_BASE_DEFAULT;
     mMirrorMode = MIRROR_MODE_AUTO;
+    mMirrorModeForProducers.push_back(mMirrorMode);
     mUseReadoutTimestamp = false;
     mFormat = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
     mDataspace = 0;
@@ -367,9 +374,9 @@ OutputConfiguration::OutputConfiguration(
     mColorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED),
     mStreamUseCase(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT),
     mTimestampBase(TIMESTAMP_BASE_DEFAULT),
-    mMirrorMode(MIRROR_MODE_AUTO), mUseReadoutTimestamp(false),
-    mFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED), mDataspace(0),
-    mUsage(0) { }
+    mMirrorMode(MIRROR_MODE_AUTO), mMirrorModeForProducers(gbps.size(), mMirrorMode),
+    mUseReadoutTimestamp(false), mFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED),
+    mDataspace(0), mUsage(0) { }
 
 status_t OutputConfiguration::writeToParcel(android::Parcel* parcel) const {
 
