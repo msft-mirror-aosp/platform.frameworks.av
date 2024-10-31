@@ -182,6 +182,21 @@ status_t Camera3InputStream::returnInputBufferLocked(
                                  /*output*/false, /*transform*/ -1);
 }
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+status_t Camera3InputStream::getInputSurfaceLocked(sp<Surface> *surface) {
+    ATRACE_CALL();
+
+    if (surface == NULL) {
+        return BAD_VALUE;
+    } else if (mSurface == NULL) {
+        ALOGE("%s: No input stream is configured", __FUNCTION__);
+        return INVALID_OPERATION;
+    }
+
+    *surface = mSurface;
+    return OK;
+}
+#else
 status_t Camera3InputStream::getInputBufferProducerLocked(
             sp<IGraphicBufferProducer> *producer) {
     ATRACE_CALL();
@@ -196,6 +211,7 @@ status_t Camera3InputStream::getInputBufferProducerLocked(
     *producer = mProducer;
     return OK;
 }
+#endif
 
 status_t Camera3InputStream::disconnectLocked() {
 
@@ -284,7 +300,12 @@ status_t Camera3InputStream::configureQueueLocked() {
         mConsumer->setName(String8::format("Camera3-InputStream-%d", mId));
         mConsumer->setMaxAcquiredBufferCount(mTotalBufferCount);
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+        mSurface = mConsumer->getSurface();
+#else
         mProducer = mConsumer->getSurface()->getIGraphicBufferProducer();
+#endif // WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+
 #else
         mConsumer = new BufferItemConsumer(consumer, mUsage,
                                            mTotalBufferCount);
