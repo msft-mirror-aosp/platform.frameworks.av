@@ -25,6 +25,7 @@ cc_defaults {
         "libEGL",
         "libGLESv2",
         "libGLESv3",
+        "android.companion.virtualdevice.flags-aconfig-cc",
     ],
     static_libs: [
         "android.hardware.camera.common@1.0-helper",

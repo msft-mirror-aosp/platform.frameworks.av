@@ -1816,8 +1816,6 @@ MediaPlayerService::AudioOutput::AudioOutput(audio_session_t sessionId,
         const sp<AudioSystem::AudioDeviceCallback>& deviceCallback)
     : mCachedPlayerIId(PLAYER_PIID_INVALID),
       mCallback(NULL),
-      mCallbackCookie(NULL),
-      mCallbackData(NULL),
       mStreamType(AUDIO_STREAM_MUSIC),
       mLeftVolume(1.0),
       mRightVolume(1.0),
@@ -2085,7 +2083,7 @@ void MediaPlayerService::AudioOutput::close_l()
 status_t MediaPlayerService::AudioOutput::open(
         uint32_t sampleRate, int channelCount, audio_channel_mask_t channelMask,
         audio_format_t format, int bufferCount,
-        AudioCallback cb, void *cookie,
+        AudioCallback cb, const wp<RefBase>& cookie,
         audio_output_flags_t flags,
         const audio_offload_info_t *offloadInfo,
         bool doNotReconnect,
@@ -2514,6 +2512,15 @@ void MediaPlayerService::AudioOutput::close()
     {
         Mutex::Autolock lock(mLock);
         track = mTrack;
+    }
+
+    // do not hold lock while joining.
+    if (track) {
+        track->stopAndJoinCallbacks();
+    }
+
+    {
+        Mutex::Autolock lock(mLock);
         close_l(); // clears mTrack
     }
     // destruction of the track occurs outside of mutex.
@@ -2705,7 +2712,7 @@ size_t MediaPlayerService::AudioOutput::CallbackData::onMoreData(const AudioTrac
         return 0;
     }
     size_t actualSize = (*me->mCallback)(
-            me.get(), buffer.data(), buffer.size(), me->mCallbackCookie,
+            me, buffer.data(), buffer.size(), me->mCallbackCookie,
             CB_EVENT_FILL_BUFFER);
 
     // Log when no data is returned from the callback.
@@ -2730,7 +2737,7 @@ void MediaPlayerService::AudioOutput::CallbackData::onStreamEnd() {
         return;
     }
     ALOGV("callbackwrapper: deliver EVENT_STREAM_END");
-    (*me->mCallback)(me.get(), NULL /* buffer */, 0 /* size */,
+    (*me->mCallback)(me, nullptr /* buffer */, 0 /* size */,
             me->mCallbackCookie, CB_EVENT_STREAM_END);
     unlock();
 }
@@ -2744,7 +2751,7 @@ void MediaPlayerService::AudioOutput::CallbackData::onNewIAudioTrack() {
         return;
     }
     ALOGV("callbackwrapper: deliver EVENT_TEAR_DOWN");
-    (*me->mCallback)(me.get(),  NULL /* buffer */, 0 /* size */,
+    (*me->mCallback)(me, nullptr /* buffer */, 0 /* size */,
             me->mCallbackCookie, CB_EVENT_TEAR_DOWN);
     unlock();
 }
@@ -2794,7 +2801,7 @@ int64_t MediaPlayerService::AudioOutput::getBufferDurationInUs() const
 struct CallbackThread : public Thread {
     CallbackThread(const wp<MediaPlayerBase::AudioSink> &sink,
                    MediaPlayerBase::AudioSink::AudioCallback cb,
-                   void *cookie);
+                   const wp<RefBase>& cookie);
 
 protected:
     virtual ~CallbackThread();
@@ -2804,7 +2811,7 @@ protected:
 private:
     wp<MediaPlayerBase::AudioSink> mSink;
     MediaPlayerBase::AudioSink::AudioCallback mCallback;
-    void *mCookie;
+    wp<RefBase> mCookie;
     void *mBuffer;
     size_t mBufferSize;
 
@@ -2815,7 +2822,7 @@ private:
 CallbackThread::CallbackThread(
         const wp<MediaPlayerBase::AudioSink> &sink,
         MediaPlayerBase::AudioSink::AudioCallback cb,
-        void *cookie)
+        const wp<RefBase>& cookie)
     : mSink(sink),
       mCallback(cb),
       mCookie(cookie),
@@ -2842,7 +2849,7 @@ bool CallbackThread::threadLoop() {
     }
 
     size_t actualSize =
-        (*mCallback)(sink.get(), mBuffer, mBufferSize, mCookie,
+        (*mCallback)(sink, mBuffer, mBufferSize, mCookie,
                 MediaPlayerBase::AudioSink::CB_EVENT_FILL_BUFFER);
 
     if (actualSize > 0) {
