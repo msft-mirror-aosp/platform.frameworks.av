@@ -105,6 +105,10 @@ std::chrono::nanoseconds EglSurfaceTexture::getTimestamp() {
   return std::chrono::nanoseconds(mGlConsumer->getTimestamp());
 }
 
+bool EglSurfaceTexture::isFirstFrameDrawn() {
+  return mGlConsumer->getFrameNumber() > 0;
+}
+
 GLuint EglSurfaceTexture::updateTexture() {
   int previousFrameId;
   int framesAdvance = 0;

@@ -25,7 +25,7 @@
 
 namespace android {
 
-bool CodecCapabilities::SupportsBitrate(Range<int> bitrateRange,
+bool CodecCapabilities::SupportsBitrate(Range<int32_t> bitrateRange,
         const sp<AMessage> &format) {
     // consider max bitrate over average bitrate for support
     int32_t maxBitrate = 0;

@@ -53,6 +53,8 @@
 #include <media/esds/ESDS.h>
 #include "include/HevcUtils.h"
 
+#include <com_android_media_editing_flags.h>
+
 #ifndef __predict_false
 #define __predict_false(exp) __builtin_expect((exp) != 0, 0)
 #endif
@@ -4944,6 +4946,8 @@ void MPEG4Writer::Track::writeEdtsBox() {
             // Track with start offset.
             ALOGV("Tracks starting > 0");
             int32_t editDurationTicks = 0;
+            int32_t trackStartOffsetBFramesUs = getMinCttsOffsetTimeUs() - kMaxCttsOffsetTimeUs;
+            ALOGV("trackStartOffsetBFramesUs:%" PRId32, trackStartOffsetBFramesUs);
             if (mMinCttsOffsetTicks == mMaxCttsOffsetTicks) {
                 // Video with no B frame or non-video track.
                 editDurationTicks =
@@ -4952,8 +4956,6 @@ void MPEG4Writer::Track::writeEdtsBox() {
                 ALOGV("editDuration:%" PRId64 "us", (trackStartOffsetUs + movieStartOffsetBFramesUs));
             } else {
                 // Track with B frame.
-                int32_t trackStartOffsetBFramesUs = getMinCttsOffsetTimeUs() - kMaxCttsOffsetTimeUs;
-                ALOGV("trackStartOffsetBFramesUs:%" PRId32, trackStartOffsetBFramesUs);
                 editDurationTicks =
                         ((trackStartOffsetUs + movieStartOffsetBFramesUs +
                           trackStartOffsetBFramesUs) * mvhdTimeScale + 5E5) / 1E6;
@@ -4967,7 +4969,15 @@ void MPEG4Writer::Track::writeEdtsBox() {
             } else if (editDurationTicks < 0) {
                 // Only video tracks with B Frames would hit this case.
                 ALOGV("Edit list entry to negate start offset by B frames in other tracks");
-                addOneElstTableEntry(tkhdDurationTicks, std::abs(editDurationTicks), 1, 0);
+                if (com::android::media::editing::flags::
+                        stagefrightrecorder_enable_b_frames()) {
+                    int32_t mediaTimeTicks =
+                            ((trackStartOffsetUs + movieStartOffsetBFramesUs +
+                              trackStartOffsetBFramesUs) * mTimeScale - 5E5) / 1E6;
+                    addOneElstTableEntry(tkhdDurationTicks, std::abs(mediaTimeTicks), 1, 0);
+                } else {
+                    addOneElstTableEntry(tkhdDurationTicks, std::abs(editDurationTicks), 1, 0);
+                }
             } else {
                 ALOGV("No edit list entry needed for this track");
             }
