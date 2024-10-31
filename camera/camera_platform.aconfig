@@ -186,3 +186,12 @@ flag {
     description: "Support setting and getting mirror mode for shared surfaces"
     bug: "298899993"
 }
+
+flag {
+    namespace: "camera_platform"
+    is_exported: true
+    name: "multiresolution_imagereader_usage_public"
+    description: "Make constructor for MultiResolutionImageReader with usage public"
+    bug: "338621560"
+}
+
