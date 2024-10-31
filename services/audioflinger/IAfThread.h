@@ -163,6 +163,7 @@ public:
     virtual audio_channel_mask_t mixerChannelMask() const = 0;
     virtual audio_format_t format() const = 0;
     virtual uint32_t channelCount() const = 0;
+    virtual std::string flagsAsString() const = 0;
 
     // Called by AudioFlinger::frameCount(audio_io_handle_t output) and effects,
     // and returns the [normal mix] buffer's frame count.
