@@ -1,5 +1,6 @@
 # Top level framework (android.media) flags
 # Only add flags here which must be included in framework.jar
+# Flags used in both framework.jar and native can be added here
 #
 # Please add flags in alphabetical order.
 
@@ -23,6 +24,33 @@ flag {
 }
 
 flag {
+    name: "concurrent_audio_record_bypass_permission"
+    namespace: "media_audio"
+    description:
+       "New privileged permission to allow bypassing concurrent audio"
+       "capture rules."
+    bug: "374751406"
+}
+
+flag {
+    name: "enable_multichannel_group_device"
+    namespace: "media_audio"
+    description:
+        "Enable new audio device type for wireless connected speaker group"
+        "supporting multichannel content."
+    is_exported: true
+    is_fixed_read_only: true
+    bug: "344031109"
+}
+
+flag{
+    name: "enable_ringtone_haptics_customization"
+    namespace: "media_audio"
+    description: "Enables haptic customization for playing ringtone."
+    bug: "351974934"
+}
+
+flag {
     name: "feature_spatial_audio_headtracking_low_latency"
     is_exported: true
     namespace: "media_audio"
@@ -38,6 +66,14 @@ flag {
         "Audio focus GAIN_TRANSIENT_EXCLUSIVE only mutes"
         "notifications when the focus owner is also recording"
     bug: "316414750"
+}
+
+flag {
+    name: "dolby_ac4_level4_encoding_api"
+    namespace: "media_audio"
+    description: "Feature flag for Dolby AC-4 level 4 AudioFormat encoding."
+    is_fixed_read_only: true
+    bug: "266537650"
 }
 
 # TODO remove
@@ -86,6 +122,13 @@ flag {
 }
 
 flag {
+    name: "muted_by_port_volume_api"
+    namespace: "media_audio"
+    description: "Playback monitoring flag used when player muted by port volume"
+    bug: "319515324"
+}
+
+flag {
     name: "sco_managed_by_audio"
     is_exported: true
     namespace: "media_audio"
@@ -122,6 +165,21 @@ flag {
     is_fixed_read_only: true
 }
 
+flag {
+    name: "routed_device_ids"
+    namespace: "media_audio"
+    description:
+        "Enable Java and native functions to get"
+        "multiple routed device ids"
+    bug: "367816690"
+}
+
+flag {
+    name: "speaker_cleanup_usage"
+    namespace: "media_audio"
+    description: "Support new AudioAttributes usage for speaker cleanup"
+    bug: "355050846"
+}
 
 # TODO remove
 flag {

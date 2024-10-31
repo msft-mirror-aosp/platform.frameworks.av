@@ -76,6 +76,8 @@ using media::audio::common::AudioMode;
 using media::audio::common::AudioOffloadInfo;
 using media::audio::common::AudioOutputFlags;
 using media::audio::common::AudioPlaybackRate;
+using media::audio::common::AudioPolicyForcedConfig;
+using media::audio::common::AudioPolicyForceUse;
 using media::audio::common::AudioPort;
 using media::audio::common::AudioPortConfig;
 using media::audio::common::AudioPortDeviceExt;
@@ -739,6 +741,8 @@ const detail::AudioFormatPairs& getAudioFormatPairs() {
             {// Note: not in the IANA registry.
              AUDIO_FORMAT_APTX_HD, make_AudioFormatDescription("audio/vnd.qcom.aptx.hd")},
             {AUDIO_FORMAT_AC4, make_AudioFormatDescription(::android::MEDIA_MIMETYPE_AUDIO_AC4)},
+            {AUDIO_FORMAT_AC4_L4, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_AC4) + ";version=02.01.04")},
             {// Note: not in the IANA registry.
              AUDIO_FORMAT_LDAC, make_AudioFormatDescription("audio/vnd.sony.ldac")},
             {AUDIO_FORMAT_MAT,
@@ -1053,6 +1057,14 @@ AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& de
     return OK;
 }
 
+namespace {
+    // Use '01' for LSB bits 0 and 1 as Bluetooth MAC addresses are never multicast
+    // and universaly administered
+    constexpr std::array<uint8_t, 4> BTANON_PREFIX {0xFD, 0xFF, 0xFF, 0xFF};
+    // Keep sync with ServiceUtilities.cpp mustAnonymizeBluetoothAddress
+    constexpr const char * BTANON_PREFIX_STR = "XX:XX:XX:XX:";
+}
+
 ::android::status_t aidl2legacy_AudioDevice_audio_device(
         const AudioDevice& aidl,
         audio_devices_t* legacyType, std::string* legacyAddress) {
@@ -1067,8 +1079,16 @@ AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& de
         case Tag::mac: {
             const std::vector<uint8_t>& mac = aidl.address.get<AudioDeviceAddress::mac>();
             if (mac.size() != 6) return BAD_VALUE;
-            snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
-                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            if (std::equal(BTANON_PREFIX.begin(), BTANON_PREFIX.end(), mac.begin())) {
+                // special case for anonymized mac address:
+                // change anonymized bytes back from FD:FF:FF:FF: to XX:XX:XX:XX:
+                snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN,
+                        "%s%02X:%02X", BTANON_PREFIX_STR, mac[4], mac[5]);
+            } else {
+                snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN,
+                        "%02X:%02X:%02X:%02X:%02X:%02X",
+                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            }
         } break;
         case Tag::ipv4: {
             const std::vector<uint8_t>& ipv4 = aidl.address.get<AudioDeviceAddress::ipv4>();
@@ -1130,8 +1150,20 @@ legacy2aidl_audio_device_AudioDevice(
         switch (suggestDeviceAddressTag(aidl.type)) {
             case Tag::mac: {
                 std::vector<uint8_t> mac(6);
-                int status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
-                        &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+                int status;
+                // special case for anonymized mac address:
+                // change anonymized bytes so that they can be scanned as HEX bytes
+                if (legacyAddress.starts_with(BTANON_PREFIX_STR)) {
+                    std::copy(BTANON_PREFIX.begin(), BTANON_PREFIX.end(), mac.begin());
+                    LOG_ALWAYS_FATAL_IF(legacyAddress.length() <= strlen(BTANON_PREFIX_STR));
+                    status = sscanf(legacyAddress.c_str() + strlen(BTANON_PREFIX_STR),
+                                        "%hhX:%hhX",
+                                        &mac[4], &mac[5]);
+                    status += 4;
+                } else {
+                    status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
+                            &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+                }
                 if (status != mac.size()) {
                     ALOGE("%s: malformed MAC address: \"%s\"", __func__, legacyAddress.c_str());
                     return unexpected(BAD_VALUE);
@@ -1765,6 +1797,8 @@ aidl2legacy_AudioUsage_audio_usage_t(AudioUsage aidl) {
             return AUDIO_USAGE_VEHICLE_STATUS;
         case AudioUsage::ANNOUNCEMENT:
             return AUDIO_USAGE_ANNOUNCEMENT;
+        case AudioUsage::SPEAKER_CLEANUP:
+            return AUDIO_USAGE_SPEAKER_CLEANUP;
     }
     return unexpected(BAD_VALUE);
 }
@@ -1816,6 +1850,8 @@ legacy2aidl_audio_usage_t_AudioUsage(audio_usage_t legacy) {
             return AudioUsage::VEHICLE_STATUS;
         case AUDIO_USAGE_ANNOUNCEMENT:
             return AudioUsage::ANNOUNCEMENT;
+        case AUDIO_USAGE_SPEAKER_CLEANUP:
+            return AudioUsage::SPEAKER_CLEANUP;
     }
     return unexpected(BAD_VALUE);
 }
@@ -3299,6 +3335,138 @@ legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfos(
                         legacy.channel_mapping[i]));
     }
     return OK;
+}
+
+ConversionResult<audio_policy_force_use_t>
+aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(AudioPolicyForceUse aidl) {
+    switch (aidl) {
+        case AudioPolicyForceUse::COMMUNICATION:
+            return AUDIO_POLICY_FORCE_FOR_COMMUNICATION;
+        case AudioPolicyForceUse::MEDIA:
+            return AUDIO_POLICY_FORCE_FOR_MEDIA;
+        case AudioPolicyForceUse::RECORD:
+            return AUDIO_POLICY_FORCE_FOR_RECORD;
+        case AudioPolicyForceUse::DOCK:
+            return AUDIO_POLICY_FORCE_FOR_DOCK;
+        case AudioPolicyForceUse::SYSTEM:
+            return AUDIO_POLICY_FORCE_FOR_SYSTEM;
+        case AudioPolicyForceUse::HDMI_SYSTEM_AUDIO:
+            return AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO;
+        case AudioPolicyForceUse::ENCODED_SURROUND:
+            return AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND;
+        case AudioPolicyForceUse::VIBRATE_RINGING:
+            return AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING;
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<AudioPolicyForceUse>
+legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(audio_policy_force_use_t legacy) {
+    switch (legacy) {
+        case AUDIO_POLICY_FORCE_FOR_COMMUNICATION:
+            return AudioPolicyForceUse::COMMUNICATION;
+        case AUDIO_POLICY_FORCE_FOR_MEDIA:
+            return AudioPolicyForceUse::MEDIA;
+        case AUDIO_POLICY_FORCE_FOR_RECORD:
+            return AudioPolicyForceUse::RECORD;
+        case AUDIO_POLICY_FORCE_FOR_DOCK:
+            return AudioPolicyForceUse::DOCK;
+        case AUDIO_POLICY_FORCE_FOR_SYSTEM:
+            return AudioPolicyForceUse::SYSTEM;
+        case AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO:
+            return AudioPolicyForceUse::HDMI_SYSTEM_AUDIO;
+        case AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND:
+            return AudioPolicyForceUse::ENCODED_SURROUND;
+        case AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING:
+            return AudioPolicyForceUse::VIBRATE_RINGING;
+        case AUDIO_POLICY_FORCE_USE_CNT:
+            break;
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<audio_policy_forced_cfg_t>
+aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(AudioPolicyForcedConfig aidl) {
+    switch (aidl) {
+        case AudioPolicyForcedConfig::NONE:
+            return AUDIO_POLICY_FORCE_NONE;
+        case AudioPolicyForcedConfig::SPEAKER:
+            return AUDIO_POLICY_FORCE_SPEAKER;
+        case AudioPolicyForcedConfig::HEADPHONES:
+            return AUDIO_POLICY_FORCE_HEADPHONES;
+        case AudioPolicyForcedConfig::BT_SCO:
+            return AUDIO_POLICY_FORCE_BT_SCO;
+        case AudioPolicyForcedConfig::BT_A2DP:
+            return AUDIO_POLICY_FORCE_BT_A2DP;
+        case AudioPolicyForcedConfig::WIRED_ACCESSORY:
+            return AUDIO_POLICY_FORCE_WIRED_ACCESSORY;
+        case AudioPolicyForcedConfig::BT_CAR_DOCK:
+            return AUDIO_POLICY_FORCE_BT_CAR_DOCK;
+        case AudioPolicyForcedConfig::BT_DESK_DOCK:
+            return AUDIO_POLICY_FORCE_BT_DESK_DOCK;
+        case AudioPolicyForcedConfig::ANALOG_DOCK:
+            return AUDIO_POLICY_FORCE_ANALOG_DOCK;
+        case AudioPolicyForcedConfig::DIGITAL_DOCK:
+            return AUDIO_POLICY_FORCE_DIGITAL_DOCK;
+        case AudioPolicyForcedConfig::NO_BT_A2DP:
+            return AUDIO_POLICY_FORCE_NO_BT_A2DP;
+        case AudioPolicyForcedConfig::SYSTEM_ENFORCED:
+            return AUDIO_POLICY_FORCE_SYSTEM_ENFORCED;
+        case AudioPolicyForcedConfig::HDMI_SYSTEM_AUDIO_ENFORCED:
+            return AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED;
+        case AudioPolicyForcedConfig::ENCODED_SURROUND_NEVER:
+            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER;
+        case AudioPolicyForcedConfig::ENCODED_SURROUND_ALWAYS:
+            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS;
+        case AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL:
+            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL;
+        case AudioPolicyForcedConfig::BT_BLE:
+            return AUDIO_POLICY_FORCE_BT_BLE;
+    }
+    return unexpected(BAD_VALUE);
+}
+
+ConversionResult<AudioPolicyForcedConfig>
+legacy2aidl_audio_policy_forced_cfg_t_AudioPolicyForcedConfig(audio_policy_forced_cfg_t legacy) {
+    switch (legacy) {
+        case AUDIO_POLICY_FORCE_NONE:
+            return AudioPolicyForcedConfig::NONE;
+        case AUDIO_POLICY_FORCE_SPEAKER:
+            return AudioPolicyForcedConfig::SPEAKER;
+        case AUDIO_POLICY_FORCE_HEADPHONES:
+            return AudioPolicyForcedConfig::HEADPHONES;
+        case AUDIO_POLICY_FORCE_BT_SCO:
+            return AudioPolicyForcedConfig::BT_SCO;
+        case AUDIO_POLICY_FORCE_BT_A2DP:
+            return AudioPolicyForcedConfig::BT_A2DP;
+        case AUDIO_POLICY_FORCE_WIRED_ACCESSORY:
+            return AudioPolicyForcedConfig::WIRED_ACCESSORY;
+        case AUDIO_POLICY_FORCE_BT_CAR_DOCK:
+            return AudioPolicyForcedConfig::BT_CAR_DOCK;
+        case AUDIO_POLICY_FORCE_BT_DESK_DOCK:
+            return AudioPolicyForcedConfig::BT_DESK_DOCK;
+        case AUDIO_POLICY_FORCE_ANALOG_DOCK:
+            return AudioPolicyForcedConfig::ANALOG_DOCK;
+        case AUDIO_POLICY_FORCE_DIGITAL_DOCK:
+            return AudioPolicyForcedConfig::DIGITAL_DOCK;
+        case AUDIO_POLICY_FORCE_NO_BT_A2DP:
+            return AudioPolicyForcedConfig::NO_BT_A2DP;
+        case AUDIO_POLICY_FORCE_SYSTEM_ENFORCED:
+            return AudioPolicyForcedConfig::SYSTEM_ENFORCED;
+        case AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED:
+            return AudioPolicyForcedConfig::HDMI_SYSTEM_AUDIO_ENFORCED;
+        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER:
+            return AudioPolicyForcedConfig::ENCODED_SURROUND_NEVER;
+        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS:
+            return AudioPolicyForcedConfig::ENCODED_SURROUND_ALWAYS;
+        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL:
+            return AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL;
+        case AUDIO_POLICY_FORCE_BT_BLE:
+            return AudioPolicyForcedConfig::BT_BLE;
+        case AUDIO_POLICY_FORCE_CFG_CNT:
+            break;
+    }
+    return unexpected(BAD_VALUE);
 }
 
 }  // namespace android
