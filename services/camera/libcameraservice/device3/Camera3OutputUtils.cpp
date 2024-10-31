@@ -894,8 +894,7 @@ void collectReturnableOutputBuffers(
 
         if (outputBuffers[i].buffer == nullptr) {
             if (!useHalBufManager &&
-                    !(flags::session_hal_buf_manager() &&
-                            contains(halBufferManagedStreams, streamId))) {
+                    !contains(halBufferManagedStreams, streamId)) {
                 // With HAL buffer management API, HAL sometimes will have to return buffers that
                 // has not got a output buffer handle filled yet. This is though illegal if HAL
                 // buffer management API is not being used.

@@ -291,7 +291,18 @@ public:
             float speed = 1.0f,
             bool isSpatialized = false,
             bool isBitPerfect = false,
-            float volume = 0.0f);
+            float volume = 0.0f,
+            bool muted = false);
+
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
+                        "  Format Chn mask  SRate "
+                        "ST Usg CT "
+                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted "
+                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
+                        "   Latency\n"sv;
+    }
 
     virtual void pause() = 0;
     virtual void flush() = 0;
@@ -466,7 +477,14 @@ public:
             const android::content::AttributionSourceState& attributionSource,
             pid_t creatorPid,
             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
-            float volume = 0.0f);
+            float volume = 0.0f,
+            bool muted = false);
+
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Client(pid/uid) Session Port Id"
+                "   Format Chn mask  SRate Flags Usg/Src PortVol dB PortMuted\n"sv;
+    };
 
     // protected by MMapThread::mLock
     virtual void setSilenced_l(bool silenced) = 0;
@@ -510,6 +528,13 @@ public:
             track_type type,
             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
             int32_t startFrames = -1);
+
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Active     Id Client(pid/uid) Session Port Id  S  Flags  "
+                        " Format Chn mask  SRate Source  "
+                        " Server FrmCnt FrmRdy Sil   Latency\n"sv;
+    }
 
     // clear the buffer overflow flag
     virtual void clearOverflow() = 0;
@@ -587,7 +612,8 @@ public:
                                              *  the lowest possible latency
                                              *  even if it might glitch. */
             float speed = 1.0f,
-            float volume = 1.0f);
+            float volume = 1.0f,
+            bool muted = false);
 };
 
 class IAfPatchRecord : public virtual IAfRecordTrack, public virtual IAfPatchTrackBase {

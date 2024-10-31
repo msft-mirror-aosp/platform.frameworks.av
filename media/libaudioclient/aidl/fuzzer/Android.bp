@@ -30,6 +30,7 @@ cc_defaults {
         "libjsoncpp",
         "libmediametricsservice",
         "libprocessgroup",
+        "libprocessgroup_util",
         "shared-file-region-aidl-cpp",
     ],
     shared_libs: [

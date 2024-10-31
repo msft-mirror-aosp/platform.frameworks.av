@@ -391,7 +391,21 @@ private:
     };
     Mutexed<BlockPools> mBlockPools;
 
-    Mutexed<std::shared_ptr<InputSurfaceWrapper>> mInputSurface;
+    std::atomic_bool mHasInputSurface;
+    struct InputSurface {
+        std::shared_ptr<InputSurfaceWrapper> surface;
+        // This variable tracks the number of buffers processing
+        // in the input surface and codec by counting the # of buffers to
+        // be filled in and queued from the input surface and the # of
+        // buffers generated from the codec.
+        //
+        // Note that this variable can go below 0, because it does not take
+        // account the number of buffers initially in the buffer queue at
+        // start. This is okay, as we only track how many more we allow
+        // from the initial state.
+        int64_t numProcessingBuffersBalance;
+    };
+    Mutexed<InputSurface> mInputSurface;
 
     MetaMode mMetaMode;
 
