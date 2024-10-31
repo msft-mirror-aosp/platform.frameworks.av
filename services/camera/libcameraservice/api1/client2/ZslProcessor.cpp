@@ -142,8 +142,12 @@ ZslProcessor::ZslProcessor(
         mHasFocuser(false),
         mInputBuffer(nullptr),
         mProducer(nullptr),
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+        mInputSurface(nullptr),
+#else
         mInputProducer(nullptr),
         mInputProducerSlot(-1),
+#endif
         mBuffersToDetach(0) {
     // Initialize buffer queue and frame list based on pipeline max depth.
     size_t pipelineMaxDepth = kDefaultMaxPipelineDepth;
@@ -331,10 +335,17 @@ status_t ZslProcessor::deleteStream() {
         mInputStreamId = NO_STREAM;
     }
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    if (nullptr != mInputSurface.get()) {
+        // The surface destructor calls disconnect
+        mInputSurface.clear();
+    }
+#else
     if (nullptr != mInputProducer.get()) {
         mInputProducer->disconnect(NATIVE_WINDOW_API_CPU);
         mInputProducer.clear();
     }
+#endif
 
     return OK;
 }
@@ -393,11 +404,19 @@ void ZslProcessor::notifyInputReleased() {
 
 void ZslProcessor::doNotifyInputReleasedLocked() {
     assert(nullptr != mInputBuffer.get());
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    assert(nullptr != mInputSurface.get());
+#else
     assert(nullptr != mInputProducer.get());
+#endif
 
     sp<GraphicBuffer> gb;
     sp<Fence> fence;
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    auto rc = mInputSurface->detachNextBuffer(&gb, &fence);
+#else
     auto rc = mInputProducer->detachNextBuffer(&gb, &fence);
+#endif
     if (NO_ERROR != rc) {
         ALOGE("%s: Failed to detach buffer from input producer: %d",
             __FUNCTION__, rc);
@@ -456,9 +475,15 @@ status_t ZslProcessor::pushToReprocess(int32_t requestId) {
             __FUNCTION__, (unsigned int) metadataIdx);
     }
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    if (nullptr == mInputSurface.get()) {
+        res = client->getCameraDevice()->getInputSurface(
+            &mInputSurface);
+#else
     if (nullptr == mInputProducer.get()) {
         res = client->getCameraDevice()->getInputBufferProducer(
             &mInputProducer);
+#endif
         if (res != OK) {
             ALOGE("%s: Camera %d: Unable to retrieve input producer: "
                     "%s (%d)", __FUNCTION__, client->getCameraId(),
@@ -466,9 +491,14 @@ status_t ZslProcessor::pushToReprocess(int32_t requestId) {
             return res;
         }
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+        res = mInputSurface->connect(NATIVE_WINDOW_API_CPU, new InputProducerListener(this),
+            false);
+#else
         IGraphicBufferProducer::QueueBufferOutput output;
         res = mInputProducer->connect(new InputProducerListener(this),
             NATIVE_WINDOW_API_CPU, false, &output);
+#endif
         if (res != OK) {
             ALOGE("%s: Camera %d: Unable to connect to input producer: "
                     "%s (%d)", __FUNCTION__, client->getCameraId(),
@@ -629,19 +659,32 @@ status_t ZslProcessor::enqueueInputBufferByTimestamp(
     }
 
     BufferItem &item = mInputBuffer->getBufferItem();
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    auto rc = mInputSurface->attachBuffer(item.mGraphicBuffer->getNativeBuffer());
+#else
     auto rc = mInputProducer->attachBuffer(&mInputProducerSlot,
         item.mGraphicBuffer);
+#endif
     if (OK != rc) {
         ALOGE("%s: Failed to attach input ZSL buffer to producer: %d",
             __FUNCTION__, rc);
         return rc;
     }
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    mInputSurface->setBuffersTimestamp(item.mTimestamp);
+    mInputSurface->setBuffersDataSpace(static_cast<ui::Dataspace>(item.mDataSpace));
+    mInputSurface->setCrop(&item.mCrop);
+    mInputSurface->setScalingMode(item.mScalingMode);
+    mInputSurface->setBuffersTransform(item.mTransform);
+    rc = mInputSurface->queueBuffer(item.mGraphicBuffer, item.mFence);
+#else
     IGraphicBufferProducer::QueueBufferOutput output;
     IGraphicBufferProducer::QueueBufferInput input(item.mTimestamp,
             item.mIsAutoTimestamp, item.mDataSpace, item.mCrop,
             item.mScalingMode, item.mTransform, item.mFence);
     rc = mInputProducer->queueBuffer(mInputProducerSlot, input, &output);
+#endif
     if (OK != rc) {
         ALOGE("%s: Failed to queue ZSL buffer to producer: %d",
             __FUNCTION__, rc);

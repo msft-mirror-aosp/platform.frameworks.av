@@ -59,6 +59,7 @@
 #include <media/stagefright/PersistentSurface.h>
 #include <media/MediaProfiles.h>
 #include <camera/CameraParameters.h>
+#include <gui/Flags.h>
 
 #include <utils/Errors.h>
 #include <sys/types.h>
@@ -68,6 +69,7 @@
 #include <system/audio.h>
 
 #include <media/stagefright/rtsp/ARTPWriter.h>
+#include <com_android_media_editing_flags.h>
 
 namespace android {
 
@@ -1931,16 +1933,32 @@ status_t StagefrightRecorder::setupCameraSource(
             return BAD_VALUE;
         }
 
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+        sp<Surface> surface = new Surface(mPreviewSurface);
+        mCameraSourceTimeLapse = CameraSourceTimeLapse::CreateFromCamera(
+                mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
+                videoSize, mFrameRate, surface,
+                std::llround(1e6 / mCaptureFps));
+#else
         mCameraSourceTimeLapse = CameraSourceTimeLapse::CreateFromCamera(
                 mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
                 videoSize, mFrameRate, mPreviewSurface,
                 std::llround(1e6 / mCaptureFps));
+#endif
         *cameraSource = mCameraSourceTimeLapse;
     } else {
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+        sp<Surface> surface = new Surface(mPreviewSurface);
+        *cameraSource = CameraSource::CreateFromCamera(
+                mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
+                videoSize, mFrameRate,
+                surface);
+#else
         *cameraSource = CameraSource::CreateFromCamera(
                 mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
                 videoSize, mFrameRate,
                 mPreviewSurface);
+#endif
     }
     mCamera.clear();
     mCameraProxy.clear();
@@ -2121,7 +2139,8 @@ status_t StagefrightRecorder::setupVideoEncoder(
         uint32_t bLayers = std::min(2u, tsLayers - 1); // use up-to 2 B-layers
         // TODO(b/341121900): Remove this once B frames are handled correctly in screen recorder
         // use case in case of mic only
-        if (mAudioSource == AUDIO_SOURCE_MIC && mVideoSource == VIDEO_SOURCE_SURFACE) {
+        if (!com::android::media::editing::flags::stagefrightrecorder_enable_b_frames()
+                && mAudioSource == AUDIO_SOURCE_MIC && mVideoSource == VIDEO_SOURCE_SURFACE) {
             bLayers = 0;
         }
         uint32_t pLayers = tsLayers - bLayers;
