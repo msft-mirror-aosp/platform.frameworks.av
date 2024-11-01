@@ -146,14 +146,14 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
                                                             builder.isContentSpatialized(),
                                                             flags);
 
-    const audio_attributes_t attributes = {
-            .content_type = contentType,
-            .usage = usage,
-            .source = AUDIO_SOURCE_DEFAULT, // only used for recording
-            .flags = attributesFlags,
-            .tags = ""
-    };
-
+    const std::optional<std::string> tags = builder.getTags();
+    audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
+    attributes.content_type = contentType;
+    attributes.usage = usage;
+    attributes.flags = attributesFlags;
+    if (tags.has_value() && !tags.value().empty()) {
+        strcpy(attributes.tags, tags.value().c_str());
+    }
     mAudioTrack = new AudioTrack();
     // TODO b/182392769: use attribution source util
     mAudioTrack->set(

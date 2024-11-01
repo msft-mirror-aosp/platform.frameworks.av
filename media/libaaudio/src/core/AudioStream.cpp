@@ -93,6 +93,7 @@ aaudio_result_t AudioStream::open(const AudioStreamBuilder& builder)
     if (mContentType == AAUDIO_UNSPECIFIED) {
         mContentType = AAUDIO_CONTENT_TYPE_MUSIC;
     }
+    mTags = builder.getTags();
     mSpatializationBehavior = builder.getSpatializationBehavior();
     // for consistency with other properties, note UNSPECIFIED is the same as AUTO
     if (mSpatializationBehavior == AAUDIO_UNSPECIFIED) {

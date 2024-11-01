@@ -524,16 +524,18 @@ std::chrono::nanoseconds VirtualCameraRenderThread::getSurfaceTimestamp(
     std::chrono::nanoseconds timeSinceLastFrame) {
   std::chrono::nanoseconds surfaceTimestamp = mEglSurfaceTexture->getTimestamp();
   uint64_t lastSurfaceTimestamp = mLastSurfaceTimestampNanoseconds.load();
-  if (surfaceTimestamp.count() < 0 ||
-      surfaceTimestamp.count() == lastSurfaceTimestamp) {
-    if (lastSurfaceTimestamp > 0) {
-      // The timestamps were provided by the producer but we are
-      // repeating the last frame, so we increase the previous timestamp by
-      // the elapsed time sinced its capture, otherwise the camera framework
-      // will discard the frame.
-      surfaceTimestamp = std::chrono::nanoseconds(lastSurfaceTimestamp +
-                                                  timeSinceLastFrame.count());
-    }
+  if (lastSurfaceTimestamp > 0 &&
+      surfaceTimestamp.count() <= lastSurfaceTimestamp) {
+    // The timestamps were provided by the producer but we are
+    // repeating the last frame, so we increase the previous timestamp by
+    // the elapsed time sinced its capture, otherwise the camera framework
+    // will discard the frame.
+    surfaceTimestamp = std::chrono::nanoseconds(lastSurfaceTimestamp +
+                                                timeSinceLastFrame.count());
+    ALOGI(
+        "Surface's timestamp is stall. Artificially increasing the surface "
+        "timestamp by %lld",
+        timeSinceLastFrame.count());
   }
   mLastSurfaceTimestampNanoseconds.store(surfaceTimestamp.count(),
                                          std::memory_order_relaxed);
