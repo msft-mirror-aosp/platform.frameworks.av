@@ -195,3 +195,10 @@ flag {
     bug: "338621560"
 }
 
+flag {
+    namespace: "camera_platform"
+    name: "color_temperature"
+    description: "Add keys to manually set color temperature and color tint"
+    bug: "359409044"
+}
+
