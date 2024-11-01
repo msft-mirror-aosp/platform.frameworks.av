@@ -44,7 +44,6 @@ cc_library {
 
     shared_libs: [
         "libbase",
-        "libcgrouprc#29",
     ],
 
     header_libs: [
