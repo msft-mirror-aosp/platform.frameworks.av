@@ -33,6 +33,14 @@ flag {
 }
 
 flag {
+    name: "deprecate_stream_bt_sco"
+    namespace: "media_audio"
+    description: "Deprecate STREAM_BLUETOOTH_SCO"
+    is_exported: true
+    bug: "376756660"
+}
+
+flag {
     name: "enable_multichannel_group_device"
     namespace: "media_audio"
     description:
