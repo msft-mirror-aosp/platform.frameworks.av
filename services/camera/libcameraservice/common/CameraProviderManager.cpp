@@ -1833,6 +1833,67 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addReadoutTimestampTa
     return res;
 }
 
+status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addColorCorrectionAvailableModesTag(
+            CameraMetadata& c) {
+    status_t res = OK;
+
+    // The COLOR_CORRECTION_AVAILABLE_MODES key advertises the
+    // supported color correction modes. Previously, if color correction was
+    // supported (COLOR_CORRECTION_MODE was not null), it was assumed
+    // that all existing options, TRANSFORM_MATRIX, FAST, and HIGH_QUALITY, were supported.
+    // However, a new optional mode, CCT, has been introduced. To indicate
+    // whether CCT is supported, the camera device must now explicitly list all
+    // available modes using the COLOR_CORRECTION_AVAILABLE_MODES key.
+    // If the camera device doesn't set COLOR_CORRECTION_AVAILABLE_MODES,
+    // this code falls back to checking for the COLOR_CORRECTION_MODE key.
+    // If present, this adds the required supported modes TRANSFORM_MATRIX,
+    // FAST, HIGH_QUALITY.
+    auto entry = c.find(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES);
+    if (entry.count != 0) {
+        return res;
+    }
+
+    auto reqKeys = c.find(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS);
+    if (reqKeys.count == 0) {
+        ALOGE("%s: No supported camera request keys!", __FUNCTION__);
+        return BAD_VALUE;
+    }
+
+    bool colorCorrectionModeAvailable = false;
+    for (size_t i = 0; i < reqKeys.count; i++) {
+        if (reqKeys.data.i32[i] == ANDROID_COLOR_CORRECTION_MODE) {
+            colorCorrectionModeAvailable = true;
+            break;
+        }
+    }
+
+    if (!colorCorrectionModeAvailable) {
+        return res;
+    }
+
+    std::vector<int32_t> supportedChTags;
+    auto chTags = c.find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
+    if (chTags.count == 0) {
+        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
+        return BAD_VALUE;
+    }
+
+    std::vector<uint8_t> colorCorrectionAvailableModes = {
+            ANDROID_COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
+            ANDROID_COLOR_CORRECTION_MODE_FAST,
+            ANDROID_COLOR_CORRECTION_MODE_HIGH_QUALITY };
+    supportedChTags.reserve(chTags.count + 1);
+    supportedChTags.insert(supportedChTags.end(), chTags.data.i32,
+            chTags.data.i32 + chTags.count);
+    supportedChTags.push_back(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES);
+    c.update(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES,
+            colorCorrectionAvailableModes.data(), colorCorrectionAvailableModes.size());
+    c.update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
+             supportedChTags.size());
+
+    return res;
+}
+
 status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQueryVersionTag() {
     sp<ProviderInfo> parentProvider = mParentProvider.promote();
     if (parentProvider == nullptr) {
