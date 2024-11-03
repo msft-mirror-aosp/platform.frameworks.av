@@ -480,6 +480,11 @@ const detail::AudioDevicePairs& getAudioDevicePairs() {
                         AudioDeviceType::OUT_BROADCAST,
                         GET_DEVICE_DESC_CONNECTION(BT_LE))
             },
+            {
+                AUDIO_DEVICE_OUT_MULTICHANNEL_GROUP, make_AudioDeviceDescription(
+                        AudioDeviceType::OUT_MULTICHANNEL_GROUP,
+                        GET_DEVICE_DESC_CONNECTION(VIRTUAL))
+            },
             // AUDIO_DEVICE_IN_AMBIENT and IN_COMMUNICATION are removed since they were deprecated.
             {
                 AUDIO_DEVICE_IN_BUILTIN_MIC, make_AudioDeviceDescription(

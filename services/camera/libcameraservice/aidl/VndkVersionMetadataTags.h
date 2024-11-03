@@ -93,6 +93,10 @@ std::map<int, std::vector<camera_metadata_tag>> static_api_level_to_keys{
           ANDROID_FLASH_TORCH_STRENGTH_MAX_LEVEL,
           ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION,
         } },
+      {36, {
+          ANDROID_COLOR_CORRECTION_AVAILABLE_MODES,
+          ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE,
+        } },
 };
 
 /**
@@ -124,5 +128,9 @@ std::map<int, std::vector<camera_metadata_tag>> dynamic_api_level_to_keys{
           ANDROID_LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION,
           ANDROID_STATISTICS_LENS_INTRINSIC_SAMPLES,
           ANDROID_STATISTICS_LENS_INTRINSIC_TIMESTAMPS,
+        }  },
+      {36, {
+          ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE,
+          ANDROID_COLOR_CORRECTION_COLOR_TINT,
         }  },
 };
