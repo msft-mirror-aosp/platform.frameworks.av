@@ -2254,9 +2254,12 @@ Status CameraService::connectDevice(
     int callingPid = getCallingPid();
     int callingUid = getCallingUid();
     bool systemNativeClient = false;
+    AttributionSourceState resolvedClientAttribution(clientAttribution);
     if (callerHasSystemUid() && (clientPackageNameMaybe.size() == 0)) {
         std::string systemClient = fmt::sprintf("client.pid<%d>", callingPid);
         clientPackageNameMaybe = systemClient;
+        // Pass in packageName since AttributionAndPermissionUtils can't resolve vndk clients.
+        resolvedClientAttribution.packageName = clientPackageNameMaybe;
         systemNativeClient = true;
     }
 
@@ -2272,10 +2275,10 @@ Status CameraService::connectDevice(
 
     bool isNonSystemNdk = clientPackageNameMaybe.size() == 0;
 
-    AttributionSourceState resolvedClientAttribution(clientAttribution);
     if (!flags::use_context_attribution_source()) {
         resolvedClientAttribution.pid = USE_CALLING_PID;
     }
+
     ret = resolveAttributionSource(resolvedClientAttribution, __FUNCTION__, cameraId);
     if (!ret.isOk()) {
         logRejected(cameraId, getCallingPid(), clientAttribution.packageName.value_or(""),
