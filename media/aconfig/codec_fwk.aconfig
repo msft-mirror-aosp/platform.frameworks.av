@@ -13,6 +13,14 @@ flag {
 }
 
 flag {
+  name: "apv_support"
+  is_exported: true
+  namespace: "codec_fwk"
+  description: "Feature flag for Android support for APV Content"
+  bug: "375464302"
+}
+
+flag {
   name: "codec_buffer_state_cleanup"
   namespace: "codec_fwk"
   description: "Bugfix flag for more buffer state cleanup in MediaCodec"
@@ -100,6 +108,14 @@ flag {
   namespace: "codec_fwk"
   description: "Feature flag for null output Surface support"
   bug: "325550522"
+}
+
+flag {
+  name: "p210_format_support"
+  is_exported: true
+  namespace: "codec_fwk"
+  description: "Feature flag for Android support for P210 YCbCr format"
+  bug: "368395888"
 }
 
 flag {
