@@ -123,7 +123,7 @@ bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
     return ((format == HAL_PIXEL_FORMAT_BLOB) && (dataspace == HAL_DATASPACE_HEIF));
 }
 
-status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface>>& consumers,
+status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHolder>& consumers,
         bool /*hasDeferredConsumer*/, uint32_t width, uint32_t height, int format,
         camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
         const std::unordered_set<int32_t> &sensorPixelModesUsed,
@@ -228,7 +228,7 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface
         return res;
     }
 
-    mOutputSurface = consumers[0];
+    mOutputSurface = consumers[0].mSurface;
     res = registerCompositeStreamListener(mMainImageStreamId);
     if (res != OK) {
         ALOGE("%s: Failed to register HAL main image stream: %s (%d)", __FUNCTION__,

@@ -131,10 +131,10 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
         return NO_INIT;
     }
 
-    // Verify ops permissions
-    res = TClientBase::startCameraOps();
+    // Notify camera opening (check op if check_full_attribution_source_chain flag is off).
+    res = TClientBase::notifyCameraOpening();
     if (res != OK) {
-        TClientBase::finishCameraOps();
+        TClientBase::notifyCameraClosing();
         return res;
     }
 
@@ -142,7 +142,7 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
     if (res != OK) {
         ALOGE("%s: Camera %s: unable to initialize device: %s (%d)",
                 __FUNCTION__, TClientBase::mCameraIdStr.c_str(), strerror(-res), res);
-        TClientBase::finishCameraOps();
+        TClientBase::notifyCameraClosing();
         return res;
     }
 
