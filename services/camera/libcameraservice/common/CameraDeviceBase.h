@@ -68,6 +68,7 @@ enum {
 using camera3::camera_request_template_t;;
 using camera3::camera_stream_configuration_mode_t;
 using camera3::camera_stream_rotation_t;
+using camera3::SurfaceHolder;
 
 class CameraProviderManager;
 
@@ -200,7 +201,7 @@ class CameraDeviceBase : public virtual FrameProducer {
      * For HAL_PIXEL_FORMAT_BLOB formats, the width and height should be the
      * logical dimensions of the buffer, not the number of bytes.
      */
-    virtual status_t createStream(const std::vector<sp<Surface>>& consumers,
+    virtual status_t createStream(const std::vector<SurfaceHolder>& consumers,
             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
             const std::string& physicalCameraId,
@@ -212,7 +213,6 @@ class CameraDeviceBase : public virtual FrameProducer {
             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
             int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
             bool useReadoutTimestamp = false)
             = 0;
@@ -404,12 +404,12 @@ class CameraDeviceBase : public virtual FrameProducer {
      * Set the deferred consumer surface and finish the rest of the stream configuration.
      */
     virtual status_t setConsumerSurfaces(int streamId,
-            const std::vector<sp<Surface>>& consumers, std::vector<int> *surfaceIds /*out*/) = 0;
+            const std::vector<SurfaceHolder>& consumers, std::vector<int> *surfaceIds /*out*/) = 0;
 
     /**
      * Update a given stream.
      */
-    virtual status_t updateStream(int streamId, const std::vector<sp<Surface>> &newSurfaces,
+    virtual status_t updateStream(int streamId, const std::vector<SurfaceHolder> &newSurfaces,
             const std::vector<android::camera3::OutputStreamInfo> &outputInfo,
             const std::vector<size_t> &removedSurfaceIds,
             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/) = 0;

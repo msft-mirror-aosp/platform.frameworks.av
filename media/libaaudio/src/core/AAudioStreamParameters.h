@@ -97,6 +97,14 @@ public:
         mContentType = contentType;
     }
 
+    void setTags(const std::optional<std::string>& tags) {
+        mTags = tags;
+    }
+
+    const std::optional<std::string> getTags() const {
+        return mTags;
+    }
+
     aaudio_spatialization_behavior_t getSpatializationBehavior() const {
         return mSpatializationBehavior;
     }
@@ -223,6 +231,7 @@ private:
     aaudio_direction_t              mDirection            = AAUDIO_DIRECTION_OUTPUT;
     aaudio_usage_t                  mUsage                = AAUDIO_UNSPECIFIED;
     aaudio_content_type_t           mContentType          = AAUDIO_UNSPECIFIED;
+    std::optional<std::string>      mTags                 = {};
     aaudio_spatialization_behavior_t mSpatializationBehavior
                                                           = AAUDIO_UNSPECIFIED;
     bool                            mIsContentSpatialized = false;

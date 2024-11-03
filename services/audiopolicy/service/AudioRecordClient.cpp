@@ -19,6 +19,7 @@
 #include "AudioRecordClient.h"
 #include "AudioPolicyService.h"
 #include "binder/AppOpsManager.h"
+#include "mediautils/ServiceUtilities.h"
 #include <android_media_audiopolicy.h>
 
 #include <algorithm>
@@ -118,16 +119,20 @@ OpRecordAudioMonitor::createIfNeeded(
     }
 
     return new OpRecordAudioMonitor(attributionSource, virtualDeviceId, attr,
-                                    getOpForSource(attr.source), commandThread);
+                                    getOpForSource(attr.source),
+                                    isRecordOpRequired(attr.source),
+                                    commandThread);
 }
 
 OpRecordAudioMonitor::OpRecordAudioMonitor(
         const AttributionSourceState &attributionSource,
         const uint32_t virtualDeviceId, const audio_attributes_t &attr,
         int32_t appOp,
+        bool shouldMonitorRecord,
         wp<AudioPolicyService::AudioCommandThread> commandThread) :
         mHasOp(true), mAttributionSource(attributionSource),
         mVirtualDeviceId(virtualDeviceId), mAttr(attr), mAppOp(appOp),
+        mShouldMonitorRecord(shouldMonitorRecord),
         mCommandThread(commandThread) {
 }
 
@@ -160,7 +165,7 @@ void OpRecordAudioMonitor::onFirstRef()
                       });
     };
     reg(mAppOp);
-    if (mAppOp != AppOpsManager::OP_RECORD_AUDIO) {
+    if (mAppOp != AppOpsManager::OP_RECORD_AUDIO && mShouldMonitorRecord) {
         reg(AppOpsManager::OP_RECORD_AUDIO);
     }
 }
@@ -186,7 +191,7 @@ void OpRecordAudioMonitor::checkOp(bool updateUidStates) {
                 });
     };
     bool hasIt = check(mAppOp);
-    if (mAppOp != AppOpsManager::OP_RECORD_AUDIO) {
+    if (mAppOp != AppOpsManager::OP_RECORD_AUDIO && mShouldMonitorRecord) {
         hasIt = hasIt && check(AppOpsManager::OP_RECORD_AUDIO);
     }
 

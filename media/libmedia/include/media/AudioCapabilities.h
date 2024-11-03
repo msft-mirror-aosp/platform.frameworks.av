@@ -37,7 +37,7 @@ struct AudioCapabilities {
     /**
      * Returns the range of supported bitrates in bits/second.
      */
-    const Range<int>& getBitrateRange() const;
+    const Range<int32_t>& getBitrateRange() const;
 
     /**
      * Returns the array of supported sample rates if the codec
@@ -110,7 +110,7 @@ private:
     std::string mMediaType;
     std::vector<ProfileLevel> mProfileLevels;
 
-    Range<int> mBitrateRange;
+    Range<int32_t> mBitrateRange;
 
     std::vector<int> mSampleRates;
     std::vector<Range<int>> mSampleRateRanges;
@@ -127,7 +127,7 @@ private:
     void limitSampleRates(std::vector<Range<int>> rateRanges);
     void applyLevelLimits();
     void applyLimits(const std::vector<Range<int>> &inputChannels,
-            const std::optional<Range<int>> &bitRates);
+            const std::optional<Range<int32_t>> &bitRates);
     void parseFromInfo(const sp<AMessage> &format);
 
     friend struct CodecCapabilities;
