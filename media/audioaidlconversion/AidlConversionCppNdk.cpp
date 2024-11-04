@@ -1802,6 +1802,8 @@ aidl2legacy_AudioUsage_audio_usage_t(AudioUsage aidl) {
             return AUDIO_USAGE_VEHICLE_STATUS;
         case AudioUsage::ANNOUNCEMENT:
             return AUDIO_USAGE_ANNOUNCEMENT;
+        case AudioUsage::SPEAKER_CLEANUP:
+            return AUDIO_USAGE_SPEAKER_CLEANUP;
     }
     return unexpected(BAD_VALUE);
 }
@@ -1853,6 +1855,8 @@ legacy2aidl_audio_usage_t_AudioUsage(audio_usage_t legacy) {
             return AudioUsage::VEHICLE_STATUS;
         case AUDIO_USAGE_ANNOUNCEMENT:
             return AudioUsage::ANNOUNCEMENT;
+        case AUDIO_USAGE_SPEAKER_CLEANUP:
+            return AudioUsage::SPEAKER_CLEANUP;
     }
     return unexpected(BAD_VALUE);
 }
