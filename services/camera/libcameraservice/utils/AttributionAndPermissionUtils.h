@@ -263,8 +263,20 @@ class AttributionAndPermissionUtilsEncapsulator {
     binder::Status resolveAttributionSource(AttributionSourceState& resolvedAttributionSource,
                                             const std::string& methodName,
                                             const std::optional<std::string>& cameraIdMaybe) {
-        return mAttributionAndPermissionUtils->resolveAttributionSource(resolvedAttributionSource,
-                                                                        methodName, cameraIdMaybe);
+        std::string passedPackageName;
+        if (resolvedAttributionSource.packageName.has_value()) {
+            passedPackageName = resolvedAttributionSource.packageName.value();
+        }
+        auto ret = mAttributionAndPermissionUtils->resolveAttributionSource(
+                resolvedAttributionSource, methodName, cameraIdMaybe);
+        if (!ret.isOk()) {
+            return ret;
+        }
+        // Fix up package name
+        if (passedPackageName.size() != 0) {
+            resolvedAttributionSource.packageName = std::move(passedPackageName);
+        }
+        return ret;
     }
 
     // The word 'System' here does not refer to callers only on the system
