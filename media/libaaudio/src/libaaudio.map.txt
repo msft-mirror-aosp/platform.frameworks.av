@@ -72,6 +72,7 @@ LIBAAUDIO {
     AAudioStream_getHardwareSampleRate;   # introduced=UpsideDownCake
     AAudio_getPlatformMMapPolicy; # introduced=36
     AAudio_getPlatformMMapExclusivePolicy; #introduced=36
+    AAudioStream_getDeviceIds; # introduced=36
 
     AAudioStreamBuilder_setTags; # systemapi
     AAudioStream_getTags; # systemapi
