@@ -10,7 +10,7 @@ package {
 // libraries that are included whole_static for test apps
 ndk_libs = [
     "android.hardware.health-V3-ndk",
-    "android.hardware.power.stats-V1-ndk",
+    "android.hardware.power.stats-V1-cpp",
 ]
 
 // Power, System, Health utils
@@ -19,18 +19,24 @@ cc_library {
     local_include_dirs: ["include"],
     export_include_dirs: ["include"],
     srcs: [
+        "AudioPowerManager.cpp",
+        "AudioToken.cpp",
         "HealthStats.cpp",
         "HealthStatsProvider.cpp",
+        "PowerClientStats.cpp",
         "PowerStats.cpp",
         "PowerStatsCollector.cpp",
         "PowerStatsProvider.cpp",
     ],
     shared_libs: [
+        "com.android.media.audio-aconfig-cc",
         "libaudioutils",
         "libbase",
+        "libbinder",
         "libbinder_ndk",
         "libcutils",
         "liblog",
+        "libmediautils",
         "libutils",
     ],
     cflags: [

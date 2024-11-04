@@ -188,7 +188,7 @@ class CameraManagerGlobal final: public std::enable_shared_from_this<CameraManag
                          const std::string &physicalCameraId);
     void onStatusChangedLocked(const CameraDeviceStatus &status, const std::string &cameraId,
                                const std::string &physicalCameraId);
-    bool setupVendorTags();
+    bool setupVendorTags(std::shared_ptr<ICameraService> &cameraService);
 
     // Utils for status
     static bool validStatus(CameraDeviceStatus status);

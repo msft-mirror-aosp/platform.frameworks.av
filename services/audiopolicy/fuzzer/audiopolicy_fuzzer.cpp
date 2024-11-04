@@ -266,6 +266,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
     bool isSpatialized;
     bool isBitPerfect;
     float volume;
+    bool muted;
 
     // TODO b/182392769: use attribution source util
     AttributionSourceState attributionSource;
@@ -273,7 +274,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
     attributionSource.token = sp<BBinder>::make();
     if (mManager->getOutputForAttr(&attr, output, AUDIO_SESSION_NONE, &stream, attributionSource,
             &config, &flags, selectedDeviceId, portId, {}, &outputType, &isSpatialized,
-            &isBitPerfect, &volume) != OK) {
+            &isBitPerfect, &volume, &muted) != OK) {
         return false;
     }
     if (*output == AUDIO_IO_HANDLE_NONE || *portId == AUDIO_PORT_HANDLE_NONE) {

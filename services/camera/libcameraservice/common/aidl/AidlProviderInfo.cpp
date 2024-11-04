@@ -109,11 +109,8 @@ status_t AidlProviderInfo::initializeAidlProvider(
         std::shared_ptr<ICameraProvider>& interface, int64_t currentDeviceState) {
 
     using aidl::android::hardware::camera::provider::ICameraProvider;
-    std::string parsedProviderName = mProviderName;
-    if (flags::lazy_aidl_wait_for_service()) {
-        parsedProviderName =
+    std::string parsedProviderName =
                 mProviderName.substr(std::string(ICameraProvider::descriptor).size() + 1);
-    }
 
     status_t res = parseProviderName(parsedProviderName, &mType, &mId);
     if (res != OK) {
@@ -529,13 +526,11 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
                 __FUNCTION__, strerror(-res), res);
         return;
     }
-    if (flags::camera_manual_flash_strength_control()) {
-        res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
-        if (OK != res) {
-            ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-            return;
-        }
+    res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
+    if (OK != res) {
+        ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+        return;
     }
 
     auto stat = addDynamicDepthTags();
@@ -599,6 +594,14 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
     if (OK != res) {
         ALOGE("%s: Unable to add sensorReadoutTimestamp tag: %s (%d)",
                 __FUNCTION__, strerror(-res), res);
+    }
+
+    if (flags::color_temperature()) {
+        res = addColorCorrectionAvailableModesTag(mCameraCharacteristics);
+        if (OK != res) {
+            ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
+                    __FUNCTION__, strerror(-res), res);
+        }
     }
 
     camera_metadata_entry flashAvailable =
@@ -682,12 +685,18 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
                         __FUNCTION__, strerror(-res), res);
             }
 
-            if (flags::camera_manual_flash_strength_control()) {
-                res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            if (OK != res) {
+                ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                        __FUNCTION__, strerror(-res), res);
+                return;
+            }
+
+            if (flags::color_temperature()) {
+                res = addColorCorrectionAvailableModesTag(mPhysicalCameraCharacteristics[id]);
                 if (OK != res) {
-                    ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                    ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
                             __FUNCTION__, strerror(-res), res);
-                    return;
                 }
             }
         }

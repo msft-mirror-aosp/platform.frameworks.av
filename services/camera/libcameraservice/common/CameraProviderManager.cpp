@@ -149,11 +149,7 @@ CameraProviderManager::AidlServiceInteractionProxyImpl::getService(
     using aidl::android::hardware::camera::provider::ICameraProvider;
 
     AIBinder* binder = nullptr;
-    if (flags::lazy_aidl_wait_for_service()) {
-        binder = AServiceManager_waitForService(serviceName.c_str());
-    } else {
-        binder = AServiceManager_checkService(serviceName.c_str());
-    }
+    binder = AServiceManager_waitForService(serviceName.c_str());
 
     if (binder == nullptr) {
         ALOGE("%s: AIDL Camera provider HAL '%s' is not actually available, despite waiting "
@@ -471,10 +467,6 @@ status_t  CameraProviderManager::createDefaultRequest(const std::string& cameraI
 status_t CameraProviderManager::getSessionCharacteristics(
         const std::string& id, const SessionConfiguration& configuration, bool overrideForPerfClass,
         int rotationOverride, CameraMetadata* sessionCharacteristics /*out*/) const {
-    if (!flags::feature_combination_query()) {
-        return INVALID_OPERATION;
-    }
-
     std::lock_guard<std::mutex> lock(mInterfaceMutex);
     auto deviceInfo = findDeviceInfoLocked(id);
     if (deviceInfo == nullptr) {
@@ -1841,6 +1833,67 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addReadoutTimestampTa
     return res;
 }
 
+status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addColorCorrectionAvailableModesTag(
+            CameraMetadata& c) {
+    status_t res = OK;
+
+    // The COLOR_CORRECTION_AVAILABLE_MODES key advertises the
+    // supported color correction modes. Previously, if color correction was
+    // supported (COLOR_CORRECTION_MODE was not null), it was assumed
+    // that all existing options, TRANSFORM_MATRIX, FAST, and HIGH_QUALITY, were supported.
+    // However, a new optional mode, CCT, has been introduced. To indicate
+    // whether CCT is supported, the camera device must now explicitly list all
+    // available modes using the COLOR_CORRECTION_AVAILABLE_MODES key.
+    // If the camera device doesn't set COLOR_CORRECTION_AVAILABLE_MODES,
+    // this code falls back to checking for the COLOR_CORRECTION_MODE key.
+    // If present, this adds the required supported modes TRANSFORM_MATRIX,
+    // FAST, HIGH_QUALITY.
+    auto entry = c.find(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES);
+    if (entry.count != 0) {
+        return res;
+    }
+
+    auto reqKeys = c.find(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS);
+    if (reqKeys.count == 0) {
+        ALOGE("%s: No supported camera request keys!", __FUNCTION__);
+        return BAD_VALUE;
+    }
+
+    bool colorCorrectionModeAvailable = false;
+    for (size_t i = 0; i < reqKeys.count; i++) {
+        if (reqKeys.data.i32[i] == ANDROID_COLOR_CORRECTION_MODE) {
+            colorCorrectionModeAvailable = true;
+            break;
+        }
+    }
+
+    if (!colorCorrectionModeAvailable) {
+        return res;
+    }
+
+    std::vector<int32_t> supportedChTags;
+    auto chTags = c.find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
+    if (chTags.count == 0) {
+        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
+        return BAD_VALUE;
+    }
+
+    std::vector<uint8_t> colorCorrectionAvailableModes = {
+            ANDROID_COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
+            ANDROID_COLOR_CORRECTION_MODE_FAST,
+            ANDROID_COLOR_CORRECTION_MODE_HIGH_QUALITY };
+    supportedChTags.reserve(chTags.count + 1);
+    supportedChTags.insert(supportedChTags.end(), chTags.data.i32,
+            chTags.data.i32 + chTags.count);
+    supportedChTags.push_back(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES);
+    c.update(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES,
+            colorCorrectionAvailableModes.data(), colorCorrectionAvailableModes.size());
+    c.update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
+             supportedChTags.size());
+
+    return res;
+}
+
 status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQueryVersionTag() {
     sp<ProviderInfo> parentProvider = mParentProvider.promote();
     if (parentProvider == nullptr) {
@@ -2120,14 +2173,8 @@ status_t CameraProviderManager::tryToInitializeAidlProviderLocked(
         const std::string& providerName, const sp<ProviderInfo>& providerInfo) {
     using aidl::android::hardware::camera::provider::ICameraProvider;
 
-    std::shared_ptr<ICameraProvider> interface;
-    if (flags::delay_lazy_hal_instantiation()) {
-        // Only get remote instance if already running. Lazy Providers will be
-        // woken up later.
-        interface = mAidlServiceProxy->tryGetService(providerName);
-    } else {
-        interface = mAidlServiceProxy->getService(providerName);
-    }
+    // Only get remote instance if already running. Lazy Providers will be woken up later.
+    std::shared_ptr<ICameraProvider> interface = mAidlServiceProxy->tryGetService(providerName);
 
     if (interface == nullptr) {
         ALOGW("%s: AIDL Camera provider HAL '%s' is not actually available", __FUNCTION__,
@@ -2192,14 +2239,11 @@ status_t CameraProviderManager::addAidlProviderLocked(const std::string& newProv
     bool preexisting =
             (mAidlProviderWithBinders.find(newProvider) != mAidlProviderWithBinders.end());
     using aidl::android::hardware::camera::provider::ICameraProvider;
-    std::string providerNameUsed  =
-            newProvider.substr(std::string(ICameraProvider::descriptor).size() + 1);
-    if (flags::lazy_aidl_wait_for_service()) {
-        // 'newProvider' has the fully qualified name of the provider service in case of AIDL.
-        // ProviderInfo::mProviderName also has the fully qualified name - so we just compare them
-        // here.
-        providerNameUsed = newProvider;
-    }
+
+    // 'newProvider' has the fully qualified name of the provider service in case of AIDL.
+    // ProviderInfo::mProviderName also has the fully qualified name - so we just compare them
+    // here.
+    std::string providerNameUsed = newProvider;
 
     for (const auto& providerInfo : mProviders) {
         if (providerInfo->mProviderName == providerNameUsed) {
@@ -2305,15 +2349,11 @@ status_t CameraProviderManager::removeProvider(const std::string& provider) {
         for (const auto& providerInfo : mProviders) {
             if (providerInfo->mProviderName == removedProviderName) {
                 IPCTransport providerTransport = providerInfo->getIPCTransport();
-                std::string removedAidlProviderName = getFullAidlProviderName(removedProviderName);
-                if (flags::lazy_aidl_wait_for_service()) {
-                    removedAidlProviderName = removedProviderName;
-                }
                 switch(providerTransport) {
                     case IPCTransport::HIDL:
                         return tryToInitializeHidlProviderLocked(removedProviderName, providerInfo);
                     case IPCTransport::AIDL:
-                        return tryToInitializeAidlProviderLocked(removedAidlProviderName,
+                        return tryToInitializeAidlProviderLocked(removedProviderName,
                                 providerInfo);
                     default:
                         ALOGE("%s Unsupported Transport %d", __FUNCTION__, eToI(providerTransport));
@@ -2479,7 +2519,7 @@ void CameraProviderManager::ProviderInfo::removeAllDevices() {
 
 bool CameraProviderManager::ProviderInfo::isExternalLazyHAL() const {
     std::string providerName = mProviderName;
-    if (flags::lazy_aidl_wait_for_service() && getIPCTransport() == IPCTransport::AIDL) {
+    if (getIPCTransport() == IPCTransport::AIDL) {
         using aidl::android::hardware::camera::provider::ICameraProvider;
         providerName =
                 mProviderName.substr(std::string(ICameraProvider::descriptor).size() + 1);
@@ -2821,7 +2861,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::getCameraInfo(
         hardware::CameraInfo *info) const {
     if (info == nullptr) return BAD_VALUE;
 
-    bool freeform_compat_enabled = wm_flags::camera_compat_for_freeform();
+    bool freeform_compat_enabled = wm_flags::enable_camera_compat_for_desktop_windowing();
     if (!freeform_compat_enabled &&
             rotationOverride > hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT) {
         ALOGW("Camera compat freeform flag disabled but rotation override is %d", rotationOverride);
