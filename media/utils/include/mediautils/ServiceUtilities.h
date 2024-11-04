@@ -118,6 +118,7 @@ bool mustAnonymizeBluetoothAddress(
         const AttributionSourceState& attributionSource, const String16& caller);
 void anonymizeBluetoothAddress(char *address);
 
+bool isRecordOpRequired(audio_source_t source);
 int32_t getOpForSource(audio_source_t source);
 
 AttributionSourceState getCallingAttributionSource();

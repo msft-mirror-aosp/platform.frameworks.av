@@ -425,6 +425,17 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
         }
     }
 
+    //TODO this permission check should extend to all system usages
+    if (attr.usage == AUDIO_USAGE_SPEAKER_CLEANUP) {
+        if (!(audioserver_permissions() ?
+              CHECK_PERM(MODIFY_AUDIO_ROUTING, attributionSource.uid)
+              : modifyAudioRoutingAllowed())) {
+            ALOGE("%s: permission denied: SPEAKER_CLEANUP not allowed for uid %d pid %d",
+                    __func__, attributionSource.uid, attributionSource.pid);
+            return binderStatusFromStatusT(PERMISSION_DENIED);
+        }
+    }
+
     AutoCallerClear acc;
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized = false;
@@ -909,13 +920,12 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
 
     std::stringstream msg;
     msg << "Audio recording on session " << client->session;
+
     const auto permitted = startRecording(client->attributionSource, client->virtualDeviceId,
             String16(msg.str().c_str()), client->attributes.source);
 
     // check calling permissions
-    if (permitted == PERMISSION_HARD_DENIED && client->attributes.source != AUDIO_SOURCE_FM_TUNER
-            && client->attributes.source != AUDIO_SOURCE_REMOTE_SUBMIX
-            && client->attributes.source != AUDIO_SOURCE_ECHO_REFERENCE) {
+    if (permitted == PERMISSION_HARD_DENIED) {
         ALOGE("%s permission denied: recording not allowed for attribution source %s",
                 __func__, client->attributionSource.toString().c_str());
         return binderStatusFromStatusT(PERMISSION_DENIED);
