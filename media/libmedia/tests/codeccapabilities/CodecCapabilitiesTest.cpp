@@ -64,7 +64,7 @@ protected:
 };
 
 TEST_F(AudioCapsAacTest, AudioCaps_Aac_Bitrate) {
-    const Range<int>& bitrateRange = audioCaps->getBitrateRange();
+    const Range<int32_t>& bitrateRange = audioCaps->getBitrateRange();
     EXPECT_EQ(bitrateRange.lower(), 8000) << "bitrate range1 does not match. lower: "
             << bitrateRange.lower();
     EXPECT_EQ(bitrateRange.upper(), 510000) << "bitrate range1 does not match. upper: "
@@ -114,7 +114,7 @@ protected:
 };
 
 TEST_F(AudioCapsRawTest, AudioCaps_Raw_Bitrate) {
-    const Range<int>& bitrateRange = audioCaps->getBitrateRange();
+    const Range<int32_t>& bitrateRange = audioCaps->getBitrateRange();
     EXPECT_EQ(bitrateRange.lower(), 1);
     EXPECT_EQ(bitrateRange.upper(), 10000000);
 }

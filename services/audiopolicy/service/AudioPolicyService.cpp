@@ -170,6 +170,8 @@ BINDER_METHOD_ENTRY(getPreferredMixerAttributes) \
 BINDER_METHOD_ENTRY(clearPreferredMixerAttributes) \
 BINDER_METHOD_ENTRY(getRegisteredPolicyMixes) \
 BINDER_METHOD_ENTRY(getPermissionController) \
+BINDER_METHOD_ENTRY(getMmapPolicyInfos) \
+BINDER_METHOD_ENTRY(getMmapPolicyForDevice) \
                                                      \
 // singleton for Binder Method Statistics for IAudioPolicyService
 static auto& getIAudioPolicyServiceStatistics() {
@@ -1041,6 +1043,9 @@ void AudioPolicyService::updateUidStates_l()
             current->attributionSource.uid == topSensitiveActive->attributionSource.uid;
         bool isTopOrLatestAssistant = latestActiveAssistant == nullptr ? false :
             current->attributionSource.uid == latestActiveAssistant->attributionSource.uid;
+        bool isActiveAssistant =
+                (useActiveAssistantList && mUidPolicy->isActiveAssistantUid(currentUid))
+                    || mUidPolicy->isAssistantUid(currentUid);
 
         // TODO: b/339112720
         // Refine this logic when we have the correct phone state owner UID. The current issue is
@@ -1069,7 +1074,7 @@ void AudioPolicyService::updateUidStates_l()
         const bool allowSensitiveCapture =
             !isSensitiveActive || isTopOrLatestSensitive || current->canCaptureOutput;
         bool allowCapture = false;
-        if (!isAssistantOnTop) {
+        if (!isAssistantOnTop || isActiveAssistant) {
             allowCapture = (isTopOrLatestActive || isTopOrLatestSensitive) &&
                            allowSensitiveCapture && canCaptureIfInCallOrCommunication;
         } else {
@@ -1817,6 +1822,7 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                     ul.unlock();
                     command->mStatus = AudioSystem::setStreamVolume(data->mStream,
                                                                     data->mVolume,
+                                                                    data->mIsMuted,
                                                                     data->mIO);
                     ul.lock();
                     }break;
@@ -1827,6 +1833,7 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                     ul.unlock();
                     command->mStatus = AudioSystem::setPortsVolume(data->mPorts,
                                                                    data->mVolume,
+                                                                   data->mMuted,
                                                                    data->mIO);
                     ul.lock();
                     } break;
@@ -2147,6 +2154,7 @@ NO_THREAD_SAFETY_ANALYSIS  // trylock
 
 status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type_t stream,
                                                                float volume,
+                                                               bool muted,
                                                                audio_io_handle_t output,
                                                                int delayMs)
 {
@@ -2155,6 +2163,7 @@ status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type
     sp<VolumeData> data = new VolumeData();
     data->mStream = stream;
     data->mVolume = volume;
+    data->mIsMuted = muted;
     data->mIO = output;
     command->mParam = data;
     command->mWaitStatus = true;
@@ -2164,14 +2173,15 @@ status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type
 }
 
 status_t AudioPolicyService::AudioCommandThread::volumePortsCommand(
-        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output,
-        int delayMs)
+        const std::vector<audio_port_handle_t> &ports, float volume, bool muted,
+        audio_io_handle_t output, int delayMs)
 {
     sp<AudioCommand> command = new AudioCommand();
     command->mCommand = SET_PORTS_VOLUME;
     sp<VolumePortsData> data = new VolumePortsData();
     data->mPorts = ports;
     data->mVolume = volume;
+    data->mMuted = muted;
     data->mIO = output;
     command->mParam = data;
     command->mWaitStatus = true;
@@ -2675,17 +2685,18 @@ void AudioPolicyService::setParameters(audio_io_handle_t ioHandle,
 
 int AudioPolicyService::setStreamVolume(audio_stream_type_t stream,
                                         float volume,
+                                        bool muted,
                                         audio_io_handle_t output,
                                         int delayMs)
 {
-    return (int)mAudioCommandThread->volumeCommand(stream, volume,
+    return (int)mAudioCommandThread->volumeCommand(stream, volume, muted,
                                                    output, delayMs);
 }
 
 int AudioPolicyService::setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
-                                       audio_io_handle_t output, int delayMs)
+                                       bool muted, audio_io_handle_t output, int delayMs)
 {
-    return (int)mAudioCommandThread->volumePortsCommand(ports, volume, output, delayMs);
+    return (int)mAudioCommandThread->volumePortsCommand(ports, volume, muted, output, delayMs);
 }
 
 int AudioPolicyService::setVoiceVolume(float volume, int delayMs)

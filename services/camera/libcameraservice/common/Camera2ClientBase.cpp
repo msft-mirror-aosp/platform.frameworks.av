@@ -50,34 +50,24 @@ namespace wm_flags = com::android::window::flags;
 
 template <typename TClientBase>
 Camera2ClientBase<TClientBase>::Camera2ClientBase(
-        const sp<CameraService>& cameraService,
-        const sp<TCamCallbacks>& remoteCallback,
+        const sp<CameraService>& cameraService, const sp<TCamCallbacks>& remoteCallback,
         std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-        const std::string& clientPackageName,
-        bool systemNativeClient,
-        const std::optional<std::string>& clientFeatureId,
-        const std::string& cameraId,
-        int api1CameraId,
-        int cameraFacing,
-        int sensorOrientation,
-        int clientPid,
-        uid_t clientUid,
-        int servicePid,
-        bool overrideForPerfClass,
-        int rotationOverride,
-        bool legacyClient):
-        TClientBase(cameraService, remoteCallback, attributionAndPermissionUtils, clientPackageName,
-                systemNativeClient, clientFeatureId, cameraId, api1CameraId, cameraFacing,
-                sensorOrientation, clientPid, clientUid, servicePid, rotationOverride),
-        mSharedCameraCallbacks(remoteCallback),
-        mCameraServiceProxyWrapper(cameraServiceProxyWrapper),
-        mDeviceActive(false), mApi1CameraId(api1CameraId)
-{
+        const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
+        const std::string& cameraId, int api1CameraId, int cameraFacing, int sensorOrientation,
+        int servicePid, bool overrideForPerfClass, int rotationOverride, bool legacyClient)
+    : TClientBase(cameraService, remoteCallback, attributionAndPermissionUtils, clientAttribution,
+                  callingPid, systemNativeClient, cameraId, api1CameraId, cameraFacing,
+                  sensorOrientation, servicePid, rotationOverride),
+      mSharedCameraCallbacks(remoteCallback),
+      mCameraServiceProxyWrapper(cameraServiceProxyWrapper),
+      mDeviceActive(false),
+      mApi1CameraId(api1CameraId) {
     ALOGI("Camera %s: Opened. Client: %s (PID %d, UID %d)", cameraId.c_str(),
-            clientPackageName.c_str(), clientPid, clientUid);
+          TClientBase::getPackageName().c_str(), TClientBase::mCallingPid,
+          TClientBase::getClientUid());
 
-    mInitialClientPid = clientPid;
+    mInitialClientPid = TClientBase::mCallingPid;
     mOverrideForPerfClass = overrideForPerfClass;
     mLegacyClient = legacyClient;
 }
@@ -87,10 +77,10 @@ status_t Camera2ClientBase<TClientBase>::checkPid(const char* checkLocation)
         const {
 
     int callingPid = TClientBase::getCallingPid();
-    if (callingPid == TClientBase::mClientPid) return NO_ERROR;
+    if (callingPid == TClientBase::mCallingPid) return NO_ERROR;
 
     ALOGE("%s: attempt to use a locked camera from a different process"
-            " (old pid %d, new pid %d)", checkLocation, TClientBase::mClientPid, callingPid);
+            " (old pid %d, new pid %d)", checkLocation, TClientBase::mCallingPid, callingPid);
     return PERMISSION_DENIED;
 }
 
@@ -141,10 +131,10 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
         return NO_INIT;
     }
 
-    // Verify ops permissions
-    res = TClientBase::startCameraOps();
+    // Notify camera opening (check op if check_full_attribution_source_chain flag is off).
+    res = TClientBase::notifyCameraOpening();
     if (res != OK) {
-        TClientBase::finishCameraOps();
+        TClientBase::notifyCameraClosing();
         return res;
     }
 
@@ -152,7 +142,7 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
     if (res != OK) {
         ALOGE("%s: Camera %s: unable to initialize device: %s (%d)",
                 __FUNCTION__, TClientBase::mCameraIdStr.c_str(), strerror(-res), res);
-        TClientBase::finishCameraOps();
+        TClientBase::notifyCameraClosing();
         return res;
     }
 
@@ -176,9 +166,8 @@ Camera2ClientBase<TClientBase>::~Camera2ClientBase() {
     disconnect();
 
     ALOGI("%s: Client object's dtor for Camera Id %s completed. Client was: %s (PID %d, UID %u)",
-            __FUNCTION__, TClientBase::mCameraIdStr.c_str(),
-            TClientBase::mClientPackageName.c_str(),
-            mInitialClientPid, TClientBase::mClientUid);
+          __FUNCTION__, TClientBase::mCameraIdStr.c_str(), TClientBase::getPackageName().c_str(),
+          mInitialClientPid, TClientBase::getClientUid());
 }
 
 template <typename TClientBase>
@@ -189,7 +178,7 @@ status_t Camera2ClientBase<TClientBase>::dumpClient(int fd,
             TClientBase::mCameraIdStr.c_str(),
             (TClientBase::getRemoteCallback() != NULL ?
                     (void *)IInterface::asBinder(TClientBase::getRemoteCallback()).get() : NULL),
-            TClientBase::mClientPid);
+            TClientBase::mCallingPid);
     result += "  State: ";
 
     write(fd, result.c_str(), result.size());
@@ -274,7 +263,7 @@ binder::Status Camera2ClientBase<TClientBase>::disconnectImpl() {
     binder::Status res = binder::Status::ok();
     // Allow both client and the media server to disconnect at all times
     int callingPid = TClientBase::getCallingPid();
-    if (callingPid != TClientBase::mClientPid &&
+    if (callingPid != TClientBase::mCallingPid &&
         callingPid != TClientBase::mServicePid) return res;
 
     ALOGD("Camera %s: Shutting down", TClientBase::mCameraIdStr.c_str());
@@ -311,19 +300,19 @@ status_t Camera2ClientBase<TClientBase>::connect(
     ALOGV("%s: E", __FUNCTION__);
     Mutex::Autolock icl(mBinderSerializationLock);
 
-    if (TClientBase::mClientPid != 0 &&
-        TClientBase::getCallingPid() != TClientBase::mClientPid) {
+    if (TClientBase::mCallingPid != 0 &&
+        TClientBase::getCallingPid() != TClientBase::mCallingPid) {
 
         ALOGE("%s: Camera %s: Connection attempt from pid %d; "
                 "current locked to pid %d",
                 __FUNCTION__,
                 TClientBase::mCameraIdStr.c_str(),
                 TClientBase::getCallingPid(),
-                TClientBase::mClientPid);
+                TClientBase::mCallingPid);
         return BAD_VALUE;
     }
 
-    TClientBase::mClientPid = TClientBase::getCallingPid();
+    TClientBase::mCallingPid = TClientBase::getCallingPid();
 
     TClientBase::mRemoteCallback = client;
     mSharedCameraCallbacks = client;

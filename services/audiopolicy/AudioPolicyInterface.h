@@ -19,6 +19,8 @@
 
 #include <android/media/DeviceConnectedState.h>
 #include <android/media/TrackInternalMuteInfo.h>
+#include <android/media/audio/common/AudioMMapPolicyInfo.h>
+#include <android/media/audio/common/AudioMMapPolicyType.h>
 #include <media/AudioCommonTypes.h>
 #include <media/AudioContainers.h>
 #include <media/AudioDeviceTypeAddr.h>
@@ -148,7 +150,8 @@ public:
                                       output_type_t *outputType,
                                       bool *isSpatialized,
                                       bool *isBitPerfect,
-                                      float *volume) = 0;
+                                      float *volume,
+                                      bool *muted) = 0;
     // indicates to the audio policy manager that the output starts being used by corresponding
     // stream.
     virtual status_t startOutput(audio_port_handle_t portId) = 0;
@@ -197,6 +200,7 @@ public:
     // setting volume for all devices
     virtual status_t setStreamVolumeIndex(audio_stream_type_t stream,
                                           int index,
+                                          bool muted,
                                           audio_devices_t device) = 0;
 
     // retrieve current volume index for the specified stream and the
@@ -208,6 +212,7 @@ public:
 
     virtual status_t setVolumeIndexForAttributes(const audio_attributes_t &attr,
                                                  int index,
+                                                 bool muted,
                                                  audio_devices_t device) = 0;
     virtual status_t getVolumeIndexForAttributes(const audio_attributes_t &attr,
                                                  int &index,
@@ -444,6 +449,13 @@ public:
     virtual status_t clearPreferredMixerAttributes(const audio_attributes_t* attr,
                                                    audio_port_handle_t portId,
                                                    uid_t uid) = 0;
+
+    virtual status_t getMmapPolicyInfos(
+            media::audio::common::AudioMMapPolicyType policyType,
+            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
+    virtual status_t getMmapPolicyForDevice(
+            media::audio::common::AudioMMapPolicyType policyType,
+            media::audio::common::AudioMMapPolicyInfo *policyInfo) = 0;
 };
 
 // Audio Policy client Interface
@@ -514,7 +526,7 @@ public:
     // set a stream volume for a particular output. For the same user setting, a given stream type
     // can have different volumes
     // for each output (destination device) it is attached to.
-    virtual status_t setStreamVolume(audio_stream_type_t stream, float volume,
+    virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, bool muted,
                                      audio_io_handle_t output, int delayMs = 0) = 0;
     /**
      * Set volume for given AudioTrack port ids for a particular output.
@@ -522,12 +534,13 @@ public:
      * can have different volumes for each output (destination device) it is attached to.
      * @param ports to consider
      * @param volume to apply
+     * @param muted to apply
      * @param output to consider
      * @param delayMs to use
      * @return NO_ERROR if successful
      */
     virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& ports, float volume,
-            audio_io_handle_t output, int delayMs = 0) = 0;
+            bool muted, audio_io_handle_t output, int delayMs = 0) = 0;
 
     // function enabling to send proprietary informations directly from audio policy manager to
     // audio hardware interface.
@@ -608,6 +621,10 @@ public:
 
     virtual status_t setTracksInternalMute(
             const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) = 0;
+
+    virtual status_t getMmapPolicyInfos(
+            media::audio::common::AudioMMapPolicyType policyType,
+            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
 };
 
     // These are the signatures of createAudioPolicyManager/destroyAudioPolicyManager

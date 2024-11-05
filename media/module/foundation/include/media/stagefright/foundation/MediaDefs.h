@@ -27,6 +27,7 @@ extern const char *MEDIA_MIMETYPE_IMAGE_AVIF;
 extern const char *MEDIA_MIMETYPE_VIDEO_VP8;
 extern const char *MEDIA_MIMETYPE_VIDEO_VP9;
 extern const char *MEDIA_MIMETYPE_VIDEO_AV1;
+extern const char *MEDIA_MIMETYPE_VIDEO_APV;
 extern const char *MEDIA_MIMETYPE_VIDEO_AVC;
 extern const char *MEDIA_MIMETYPE_VIDEO_HEVC;
 extern const char *MEDIA_MIMETYPE_VIDEO_MPEG4;

@@ -48,20 +48,13 @@ struct CameraDeviceClientBase :
     }
 
 protected:
-    CameraDeviceClientBase(const sp<CameraService>& cameraService,
+    CameraDeviceClientBase(
+            const sp<CameraService>& cameraService,
             const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
             std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-            const std::string& clientPackageName,
-            bool systemNativeClient,
-            const std::optional<std::string>& clientFeatureId,
-            const std::string& cameraId,
-            int api1CameraId,
-            int cameraFacing,
-            int sensorOrientation,
-            int clientPid,
-            uid_t clientUid,
-            int servicePid,
-            int rotationOverride);
+            const AttributionSourceState& clientAttribution, int callingPid,
+            bool systemNativeClient, const std::string& cameraId, int api1CameraId,
+            int cameraFacing, int sensorOrientation, int servicePid, int rotationOverride);
 
     sp<hardware::camera2::ICameraDeviceCallbacks> mRemoteCallback;
 };
@@ -180,21 +173,13 @@ public:
      */
 
     CameraDeviceClient(const sp<CameraService>& cameraService,
-            const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
-            std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
-            std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-            const std::string& clientPackageName,
-            bool clientPackageOverride,
-            const std::optional<std::string>& clientFeatureId,
-            const std::string& cameraId,
-            int cameraFacing,
-            int sensorOrientation,
-            int clientPid,
-            uid_t clientUid,
-            int servicePid,
-            bool overrideForPerfClass,
-            int rotationOverride,
-            const std::string& originalCameraId);
+                       const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
+                       std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
+                       std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+                       const AttributionSourceState& clientAttribution, int callingPid,
+                       bool clientPackageOverride, const std::string& cameraId, int cameraFacing,
+                       int sensorOrientation, int servicePid, bool overrideForPerfClass,
+                       int rotationOverride, const std::string& originalCameraId);
     virtual ~CameraDeviceClient();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,
@@ -246,9 +231,6 @@ protected:
     /** FilteredListener implementation **/
     virtual void          onResultAvailable(const CaptureResult& result);
     virtual void          detachDevice();
-
-    // Calculate the ANativeWindow transform from android.sensor.orientation
-    status_t              getRotationTransformLocked(int mirrorMode, /*out*/int32_t* transform);
 
     bool supportsUltraHighResolutionCapture(const std::string &cameraId);
 
@@ -305,10 +287,6 @@ private:
             const hardware::camera2::params::OutputConfiguration &outputConfiguration,
             bool isShared,
             int* newStreamId = NULL);
-
-    // Set the stream transform flags to automatically rotate the camera stream for preview use
-    // cases.
-    binder::Status setStreamTransformLocked(int streamId, int mirrorMode);
 
     // Utility method to insert the surface into SurfaceMap
     binder::Status insertGbpLocked(const sp<IGraphicBufferProducer>& gbp,

@@ -164,3 +164,42 @@ flag {
     description: "Enable stream reconfiguration for unchanged streams"
     bug: "341740105"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "use_context_attribution_source"
+    description: "Use the context-provided AttributionSource when checking for client permissions"
+    bug: "190657833"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "check_full_attribution_source_chain"
+    description: "Pass the full AttributionSource chain to PermissionChecker"
+    bug: "190657833"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "mirror_mode_shared_surfaces"
+    is_exported: true
+    description: "Support setting and getting mirror mode for shared surfaces"
+    bug: "298899993"
+}
+
+flag {
+    namespace: "camera_platform"
+    is_exported: true
+    name: "multiresolution_imagereader_usage_public"
+    description: "Make constructor for MultiResolutionImageReader with usage public"
+    bug: "338621560"
+}
+
+flag {
+    namespace: "camera_platform"
+    is_exported: true
+    name: "color_temperature"
+    description: "Add keys to manually set color temperature and color tint"
+    bug: "359409044"
+}
+

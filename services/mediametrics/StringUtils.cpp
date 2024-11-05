@@ -80,33 +80,40 @@ std::vector<std::pair<std::string, std::string>> getDeviceAddressPairs(const std
 {
     std::vector<std::pair<std::string, std::string>> result;
 
-    // Currently, the device format is EXACTLY
-    // (device1, addr1)|(device2, addr2)|...
+    // Currently, the device format is
+    //
+    // devices = device_addr OR device_addr|devices
+    // device_addr = device OR (device, addr)
+    //
+    // EXAMPLE:
+    // device1|(device2, addr2)|...
 
     static constexpr char delim[] = "()|,";
     for (auto it = devices.begin(); ; ) {
-        auto token = tokenizer(it, devices.end(), delim);
-        if (token != "(") return result;
+        std::string address;
+        std::string device = tokenizer(it, devices.end(), delim);
+        if (device.empty()) return result;
+        if (device == "(") {  // it is a pair otherwise we consider it a device
+            device = tokenizer(it, devices.end(), delim); // get actual device
+            auto token = tokenizer(it, devices.end(), delim);
+            if (token != ",") return result;  // malformed, must have a comma
 
-        auto device = tokenizer(it, devices.end(), delim);
-        if (device.empty() || !std::isalnum(device[0])) return result;
-
-        token = tokenizer(it, devices.end(), delim);
-        if (token != ",") return result;
-
-        // special handling here for empty addresses
-        auto address = tokenizer(it, devices.end(), delim);
-        if (address.empty() || !std::isalnum(device[0])) return result;
-        if (address == ")") {  // no address, just the ")"
-            address.clear();
-        } else {
-            token = tokenizer(it, devices.end(), delim);
-            if (token != ")") return result;
+            // special handling here for empty addresses
+            address = tokenizer(it, devices.end(), delim);
+            if (address.empty()) return result;
+            if (address == ")") {  // no address, just the ")"
+                address.clear();
+            } else {
+                token = tokenizer(it, devices.end(), delim);
+                if (token != ")") return result;
+            }
         }
+        // misaligned token, device must start alphanumeric.
+        if (!std::isalnum(device[0])) return result;
 
         result.emplace_back(std::move(device), std::move(address));
 
-        token = tokenizer(it, devices.end(), delim);
+        auto token = tokenizer(it, devices.end(), delim);
         if (token != "|") return result;  // this includes end of string detection
     }
 }
