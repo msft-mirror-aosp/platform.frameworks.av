@@ -963,6 +963,31 @@ TEST(mediametrics_tests, device_parsing) {
     ASSERT_EQ("B", devaddr[0].second);
     ASSERT_EQ("C", devaddr[1].first);
     ASSERT_EQ("D2", devaddr[1].second);
+
+    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+            " Z  ");
+    ASSERT_EQ((size_t)1, devaddr.size());
+    ASSERT_EQ("Z", devaddr[0].first);
+
+    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+            "  A | B|C  ");
+    ASSERT_EQ((size_t)3, devaddr.size());
+    ASSERT_EQ("A", devaddr[0].first);
+    ASSERT_EQ("", devaddr[0].second);
+    ASSERT_EQ("B", devaddr[1].first);
+    ASSERT_EQ("", devaddr[1].second);
+    ASSERT_EQ("C", devaddr[2].first);
+    ASSERT_EQ("", devaddr[2].second);
+
+    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+            "  A | (B1, 10) |C  ");
+    ASSERT_EQ((size_t)3, devaddr.size());
+    ASSERT_EQ("A", devaddr[0].first);
+    ASSERT_EQ("", devaddr[0].second);
+    ASSERT_EQ("B1", devaddr[1].first);
+    ASSERT_EQ("10", devaddr[1].second);
+    ASSERT_EQ("C", devaddr[2].first);
+    ASSERT_EQ("", devaddr[2].second);
 }
 
 TEST(mediametrics_tests, timed_action) {
