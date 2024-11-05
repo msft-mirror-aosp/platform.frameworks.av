@@ -616,13 +616,12 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
                 __FUNCTION__, strerror(-res), res);
         return;
     }
-    if (flags::camera_manual_flash_strength_control()) {
-        res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
-        if (OK != res) {
-            ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-            return;
-        }
+
+    res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
+    if (OK != res) {
+        ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+        return;
     }
 
     auto stat = addDynamicDepthTags();
@@ -675,6 +674,13 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
     if (OK != res) {
         ALOGE("%s: Unable to add sensorReadoutTimestamp tag: %s (%d)",
                 __FUNCTION__, strerror(-res), res);
+    }
+    if (flags::color_temperature()) {
+        res = addColorCorrectionAvailableModesTag(mCameraCharacteristics);
+        if (OK != res) {
+            ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
+                    __FUNCTION__, strerror(-res), res);
+        }
     }
 
     camera_metadata_entry flashAvailable =
@@ -780,12 +786,18 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
                         __FUNCTION__, strerror(-res), res);
             }
 
-            if (flags::camera_manual_flash_strength_control()) {
-                res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            if (OK != res) {
+                ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                        __FUNCTION__, strerror(-res), res);
+                return;
+            }
+
+            if (flags::color_temperature()) {
+                res = addColorCorrectionAvailableModesTag(mPhysicalCameraCharacteristics[id]);
                 if (OK != res) {
-                    ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                    ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
                             __FUNCTION__, strerror(-res), res);
-                    return;
                 }
             }
         }

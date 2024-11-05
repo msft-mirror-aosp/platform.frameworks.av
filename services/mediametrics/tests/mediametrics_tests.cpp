@@ -850,14 +850,14 @@ TEST(mediametrics_tests, audio_analytics_permission) {
 
   // TODO: Verify contents of AudioAnalytics.
   // Currently there is no getter API in AudioAnalytics besides dump.
-  ASSERT_EQ(10, audioAnalytics.dump(1000).second /* lines */);
+  ASSERT_EQ(10, audioAnalytics.dump(true /* details */, 1000).second /* lines */);
 
   ASSERT_EQ(NO_ERROR, audioAnalytics.submit(item, true /* isTrusted */));
   // untrusted entities can add to an existing key
   ASSERT_EQ(NO_ERROR, audioAnalytics.submit(item2, false /* isTrusted */));
 
   // Check that we have some info in the dump.
-  ASSERT_LT(9, audioAnalytics.dump(1000).second /* lines */);
+  ASSERT_LT(9, audioAnalytics.dump(true /* details */, 1000).second /* lines */);
 }
 
 TEST(mediametrics_tests, audio_analytics_permission2) {
@@ -888,14 +888,14 @@ TEST(mediametrics_tests, audio_analytics_permission2) {
 
   // TODO: Verify contents of AudioAnalytics.
   // Currently there is no getter API in AudioAnalytics besides dump.
-  ASSERT_EQ(10, audioAnalytics.dump(1000).second /* lines */);
+  ASSERT_EQ(10, audioAnalytics.dump(true /* details */, 1000).second /* lines */);
 
   ASSERT_EQ(NO_ERROR, audioAnalytics.submit(item, true /* isTrusted */));
   // untrusted entities can add to an existing key
   ASSERT_EQ(NO_ERROR, audioAnalytics.submit(item2, false /* isTrusted */));
 
   // Check that we have some info in the dump.
-  ASSERT_LT(9, audioAnalytics.dump(1000).second /* lines */);
+  ASSERT_LT(9, audioAnalytics.dump(true /* details */, 1000).second /* lines */);
 }
 
 TEST(mediametrics_tests, audio_analytics_dump) {
@@ -922,13 +922,13 @@ TEST(mediametrics_tests, audio_analytics_dump) {
   ASSERT_EQ(NO_ERROR, audioAnalytics.submit(item3, true /* isTrusted */));
 
   // find out how many lines we have.
-  auto [string, lines] = audioAnalytics.dump(1000);
+  auto [string, lines] = audioAnalytics.dump(true /* details */, 1000);
   ASSERT_EQ(lines, (int32_t) countNewlines(string.c_str()));
 
   printf("AudioAnalytics: %s", string.c_str());
   // ensure that dump operates over those lines.
   for (int32_t ll = 0; ll < lines; ++ll) {
-      auto [s, l] = audioAnalytics.dump(ll);
+      auto [s, l] = audioAnalytics.dump(true /* details */, ll);
       ASSERT_EQ(ll, l);
       ASSERT_EQ(ll, (int32_t) countNewlines(s.c_str()));
   }
@@ -963,6 +963,31 @@ TEST(mediametrics_tests, device_parsing) {
     ASSERT_EQ("B", devaddr[0].second);
     ASSERT_EQ("C", devaddr[1].first);
     ASSERT_EQ("D2", devaddr[1].second);
+
+    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+            " Z  ");
+    ASSERT_EQ((size_t)1, devaddr.size());
+    ASSERT_EQ("Z", devaddr[0].first);
+
+    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+            "  A | B|C  ");
+    ASSERT_EQ((size_t)3, devaddr.size());
+    ASSERT_EQ("A", devaddr[0].first);
+    ASSERT_EQ("", devaddr[0].second);
+    ASSERT_EQ("B", devaddr[1].first);
+    ASSERT_EQ("", devaddr[1].second);
+    ASSERT_EQ("C", devaddr[2].first);
+    ASSERT_EQ("", devaddr[2].second);
+
+    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+            "  A | (B1, 10) |C  ");
+    ASSERT_EQ((size_t)3, devaddr.size());
+    ASSERT_EQ("A", devaddr[0].first);
+    ASSERT_EQ("", devaddr[0].second);
+    ASSERT_EQ("B1", devaddr[1].first);
+    ASSERT_EQ("10", devaddr[1].second);
+    ASSERT_EQ("C", devaddr[2].first);
+    ASSERT_EQ("", devaddr[2].second);
 }
 
 TEST(mediametrics_tests, timed_action) {

@@ -130,6 +130,27 @@ std::string dumpMixerBehaviors(const MixerBehaviorSet& mixerBehaviors) {
     return ss.str();
 }
 
+std::string toString(const DeviceIdSet& deviceIds) {
+    if (deviceIds.empty()) {
+        return "AUDIO_PORT_HANDLE_NONE";
+    }
+    std::stringstream ss;
+    for (auto it = deviceIds.begin(); it != deviceIds.end(); ++it) {
+        if (it != deviceIds.begin()) {
+            ss << ", ";
+        }
+        ss << *it;
+    }
+    return ss.str();
+}
+
+audio_port_handle_t getFirstDeviceId(const DeviceIdSet& deviceIds) {
+    if (deviceIds.empty()) {
+        return AUDIO_PORT_HANDLE_NONE;
+    }
+    return *(deviceIds.begin());
+}
+
 AudioProfileAttributesMultimap createAudioProfilesAttrMap(audio_profile profiles[],
                                                           uint32_t first,
                                                           uint32_t last) {

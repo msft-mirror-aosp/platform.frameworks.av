@@ -3,6 +3,14 @@ container: "system"
 
 flag {
     namespace: "camera_platform"
+    name: "camera_heif_gainmap"
+    is_exported: true
+    description: "Extend HEIC/HEIF still capture with HDR gainmap"
+    bug: "362608343"
+}
+
+flag {
+    namespace: "camera_platform"
     name: "camera_hsum_permission"
     is_exported: true
     description: "Camera access by headless system user"
@@ -35,13 +43,6 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "session_hal_buf_manager"
-    description: "Enable or disable HAL buffer manager as requested by the camera HAL"
-    bug: "311263114"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "inject_session_params"
     description: "Enable session parameter injection via reconfiguration"
     bug: "308984721"
@@ -64,24 +65,10 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "use_ro_board_api_level_for_vndk_version"
-    description: "Enable using ro.board.api_level instead of ro.vndk.version to get VNDK version"
-    bug: "312315580"
-}
-
-flag {
-    namespace: "camera_platform"
     name: "camera_extensions_characteristics_get"
     is_exported: true
     description: "Enable get extension specific camera characteristics API"
     bug: "280649914"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "delay_lazy_hal_instantiation"
-    description: "Only trigger lazy HAL instantiation when the HAL is needed for an operation."
-    bug: "319735068"
 }
 
 flag {
@@ -127,67 +114,9 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "surface_leak_fix"
-    description: "Address Surface release leaks in CaptureRequest"
-    bug: "324071855"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "concert_mode_api"
-    description: "Covers the eyes free videography public facing API"
-    bug: "297083874"
-}
-
-
-flag {
-    namespace: "camera_platform"
-    name: "cache_permission_services"
-    description: "Cache IPermissionController and IPermissionChecker in CameraService to reduce query latency."
-    bug: "326139956"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "check_session_support_before_session_char"
-    description: "Validate that a SessionConfiguration is supported before fetching SessionCharacteristics."
-    bug: "327008530"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "calculate_perf_override_during_session_support"
-    description: "Dynamically calulate whether perf class override should be set in isSessionConfigurationWithParametersSupported."
-    bug: "332975108"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-flag {
-    namespace: "camera_platform"
     name: "analytics_24q3"
     description: "Miscellaneous camera platform metrics for 24Q3"
     bug: "332557570"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "use_system_api_for_vndk_version"
-    description: "ro.board.api_level isn't reliable. Use system api to replace ro.vndk.version"
-    bug: "312315580"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
 }
 
 flag {
@@ -236,3 +165,49 @@ flag {
     description: "Enable CameraServiceWatchdog to abort camera HAL to generate HAL tombstones"
     bug: "349652177"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "enable_stream_reconfiguration_for_unchanged_streams"
+    description: "Enable stream reconfiguration for unchanged streams"
+    bug: "341740105"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "use_context_attribution_source"
+    description: "Use the context-provided AttributionSource when checking for client permissions"
+    bug: "190657833"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "check_full_attribution_source_chain"
+    description: "Pass the full AttributionSource chain to PermissionChecker"
+    bug: "190657833"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "mirror_mode_shared_surfaces"
+    is_exported: true
+    description: "Support setting and getting mirror mode for shared surfaces"
+    bug: "298899993"
+}
+
+flag {
+    namespace: "camera_platform"
+    is_exported: true
+    name: "multiresolution_imagereader_usage_public"
+    description: "Make constructor for MultiResolutionImageReader with usage public"
+    bug: "338621560"
+}
+
+flag {
+    namespace: "camera_platform"
+    is_exported: true
+    name: "color_temperature"
+    description: "Add keys to manually set color temperature and color tint"
+    bug: "359409044"
+}
+

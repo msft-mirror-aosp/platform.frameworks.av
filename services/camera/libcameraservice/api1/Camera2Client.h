@@ -17,12 +17,14 @@
 #ifndef ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
 #define ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
 
-#include "CameraService.h"
-#include "common/CameraDeviceBase.h"
-#include "common/Camera2ClientBase.h"
-#include "api1/client2/Parameters.h"
-#include "api1/client2/FrameProcessor.h"
+#include <gui/Flags.h>
+#include <gui/view/Surface.h>
 #include <media/RingBuffer.h>
+#include "CameraService.h"
+#include "api1/client2/FrameProcessor.h"
+#include "api1/client2/Parameters.h"
+#include "common/Camera2ClientBase.h"
+#include "common/CameraDeviceBase.h"
 
 namespace android {
 
@@ -53,11 +55,9 @@ public:
     virtual status_t        connect(const sp<hardware::ICameraClient>& client);
     virtual status_t        lock();
     virtual status_t        unlock();
-    virtual status_t        setPreviewTarget(
-        const sp<IGraphicBufferProducer>& bufferProducer);
+    virtual status_t        setPreviewTarget(const sp<SurfaceType>& target);
     virtual void            setPreviewCallbackFlag(int flag);
-    virtual status_t        setPreviewCallbackTarget(
-        const sp<IGraphicBufferProducer>& callbackProducer);
+    virtual status_t        setPreviewCallbackTarget(const sp<SurfaceType>& target);
 
     virtual status_t        startPreview();
     virtual void            stopPreview();
@@ -78,7 +78,7 @@ public:
     virtual status_t        sendCommand(int32_t cmd, int32_t arg1, int32_t arg2);
     virtual void            notifyError(int32_t errorCode,
                                         const CaptureResultExtras& resultExtras);
-    virtual status_t        setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer);
+    virtual status_t        setVideoTarget(const sp<SurfaceType>& target);
     virtual status_t        setAudioRestriction(int mode);
     virtual int32_t         getGlobalAudioRestriction();
     virtual status_t        setRotateAndCropOverride(uint8_t rotateAndCrop, bool fromHal = false);
@@ -101,21 +101,13 @@ public:
      */
 
     Camera2Client(const sp<CameraService>& cameraService,
-            const sp<hardware::ICameraClient>& cameraClient,
-            std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
-            std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-            const std::string& clientPackageName,
-            const std::optional<std::string>& clientFeatureId,
-            const std::string& cameraDeviceId,
-            int api1CameraId,
-            int cameraFacing,
-            int sensorOrientation,
-            int clientPid,
-            uid_t clientUid,
-            int servicePid,
-            bool overrideForPerfClass,
-            int rotationOverride,
-            bool forceSlowJpegMode);
+                  const sp<hardware::ICameraClient>& cameraClient,
+                  std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
+                  std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+                  const AttributionSourceState& clientAttribution, int callingPid,
+                  const std::string& cameraDeviceId, int api1CameraId, int cameraFacing,
+                  int sensorOrientation, int servicePid, bool overrideForPerfClass,
+                  int rotationOverride, bool forceSlowJpegMode);
 
     virtual ~Camera2Client();
 
@@ -183,8 +175,12 @@ private:
     /** ICamera interface-related private members */
     typedef camera2::Parameters Parameters;
 
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+    status_t setPreviewWindowL(const view::Surface& viewSurface, const sp<Surface>& window);
+#else
     status_t setPreviewWindowL(const sp<IBinder>& binder,
             const sp<Surface>& window);
+#endif
     status_t startPreviewL(Parameters &params, bool restart);
     void     stopPreviewL();
     status_t startRecordingL(Parameters &params, bool restart);
@@ -221,8 +217,13 @@ private:
 
     /* Preview/Recording related members */
 
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+    uint64_t mPreviewViewSurfaceID;
+    uint64_t mVideoSurfaceID;
+#else
     sp<IBinder> mPreviewSurface;
     sp<IBinder> mVideoSurface;
+#endif
     sp<camera2::StreamingProcessor> mStreamingProcessor;
 
     /** Preview callback related members */

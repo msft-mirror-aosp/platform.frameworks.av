@@ -310,11 +310,13 @@ void AudioPolicyManagerTest::getOutputForAttr(
     bool isSpatialized;
     bool isBitPerfectInternal;
     float volume;
+    bool muted;
     AttributionSourceState attributionSource = createAttributionSourceState(uid);
     ASSERT_EQ(OK, mManager->getOutputForAttr(
                     &attr, output, session, &stream, attributionSource, &config, &flags,
                     selectedDeviceId, portId, {}, &outputType, &isSpatialized,
-                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect, &volume));
+                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect, &volume,
+                    &muted));
     ASSERT_NE(AUDIO_PORT_HANDLE_NONE, *portId);
     ASSERT_NE(AUDIO_IO_HANDLE_NONE, *output);
 }
@@ -500,6 +502,9 @@ INSTANTIATE_TEST_CASE_P(
 void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
     // TODO: Consider using Serializer to load part of the config from a string.
     ASSERT_NO_FATAL_FAILURE(AudioPolicyManagerTest::SetUpManagerConfig());
+    mConfig->getHwModules().getModuleFromName(
+            AUDIO_HARDWARE_MODULE_ID_PRIMARY)->setHalVersion(3, 0);
+
     mMsdOutputDevice = new DeviceDescriptor(AUDIO_DEVICE_OUT_BUS);
     sp<AudioProfile> pcmOutputProfile = new AudioProfile(
             AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO, k48000SamplingRate);
@@ -531,7 +536,7 @@ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
                 addOutputProfile(spdifOutputProfile);
     }
 
-    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 2 /*halVersionMajor*/);
+    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 3 /*halVersionMajor*/);
     HwModuleCollection modules = mConfig->getHwModules();
     modules.add(msdModule);
     mConfig->setHwModules(modules);
@@ -1242,6 +1247,60 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, SetDeviceConnectionStateClos
                                                            AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
                                                            "", "", AUDIO_FORMAT_DEFAULT));
     EXPECT_EQ(streamCountBefore, mClient->getOpenedInputsCount());
+}
+
+TEST_F(AudioPolicyManagerTestWithConfigurationFile, UpdateConfigFromInexactProfile) {
+    const audio_format_t expectedFormat = AUDIO_FORMAT_PCM_16_BIT;
+    const uint32_t expectedSampleRate = 48000;
+    const audio_channel_mask_t expectedChannelMask = AUDIO_CHANNEL_IN_STEREO;
+    const std::string expectedIOProfile = "primary input";
+
+    auto devices = mManager->getAvailableInputDevices();
+    sp<DeviceDescriptor> mic = nullptr;
+    for (auto device : devices) {
+        if (device->type() == AUDIO_DEVICE_IN_BUILTIN_MIC) {
+            mic = device;
+            break;
+        }
+    }
+    EXPECT_NE(nullptr, mic);
+
+    audio_format_t requestedFormat = AUDIO_FORMAT_PCM_16_BIT;
+    uint32_t requestedSampleRate = 44100;
+    audio_channel_mask_t requestedChannelMask = AUDIO_CHANNEL_IN_STEREO;
+    auto profile = mManager->getInputProfile(
+            mic, requestedSampleRate, requestedFormat, requestedChannelMask, AUDIO_INPUT_FLAG_NONE);
+    EXPECT_EQ(expectedIOProfile, profile->getName());
+    EXPECT_EQ(expectedFormat, requestedFormat);
+    EXPECT_EQ(expectedSampleRate, requestedSampleRate);
+    EXPECT_EQ(expectedChannelMask, requestedChannelMask);
+}
+
+TEST_F(AudioPolicyManagerTestWithConfigurationFile, MatchesMoreInputFlagsWhenPossible) {
+    const audio_format_t expectedFormat = AUDIO_FORMAT_PCM_16_BIT;
+    const uint32_t expectedSampleRate = 48000;
+    const audio_channel_mask_t expectedChannelMask = AUDIO_CHANNEL_IN_STEREO;
+    const std::string expectedIOProfile = "mixport_fast_input";
+
+    auto devices = mManager->getAvailableInputDevices();
+    sp<DeviceDescriptor> mic = nullptr;
+    for (auto device : devices) {
+        if (device->type() == AUDIO_DEVICE_IN_BUILTIN_MIC) {
+            mic = device;
+        break;
+        }
+    }
+    EXPECT_NE(nullptr, mic);
+
+    audio_format_t requestedFormat = AUDIO_FORMAT_PCM_24_BIT_PACKED;
+    uint32_t requestedSampleRate = 48000;
+    audio_channel_mask_t requestedChannelMask = AUDIO_CHANNEL_IN_STEREO;
+    auto profile = mManager->getInputProfile(
+            mic, requestedSampleRate, requestedFormat, requestedChannelMask, AUDIO_INPUT_FLAG_FAST);
+    EXPECT_EQ(expectedIOProfile, profile->getName());
+    EXPECT_EQ(expectedFormat, requestedFormat);
+    EXPECT_EQ(expectedSampleRate, requestedSampleRate);
+    EXPECT_EQ(expectedChannelMask, requestedChannelMask);
 }
 
 class AudioPolicyManagerTestDynamicPolicy : public AudioPolicyManagerTestWithConfigurationFile {
@@ -2077,6 +2136,7 @@ class AudioPolicyManagerTestMMapPlaybackRerouting
     bool mIsSpatialized;
     bool mIsBitPerfect;
     float mVolume;
+    bool mMuted;
 };
 
 TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLoopbackDapMixFails) {
@@ -2095,7 +2155,8 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLo
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
+                                         &mMuted));
 }
 
 TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
@@ -2114,7 +2175,8 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
+                                         &mMuted));
 }
 
 TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
@@ -2145,7 +2207,8 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
+                                         &mMuted));
     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
     auto outputDesc = mManager->getOutputs().valueFor(mOutput);
     ASSERT_NE(nullptr, outputDesc);
@@ -2161,7 +2224,8 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
+                                         &mMuted));
     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
     outputDesc = mManager->getOutputs().valueFor(mOutput);
     ASSERT_NE(nullptr, outputDesc);
@@ -2190,7 +2254,8 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
+                                         &mMuted));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -2520,7 +2585,7 @@ class AudioPolicyManagerTestClientOpenFails : public AudioPolicyManagerTestClien
                         audio_config_base_t * mixerConfig,
                         const sp<DeviceDescriptorBase>& device,
                         uint32_t * latencyMs,
-                        audio_output_flags_t flags,
+                        audio_output_flags_t *flags,
                         audio_attributes_t attributes) override {
         return mSimulateFailure ? BAD_VALUE :
                 AudioPolicyManagerTestClient::openOutput(
@@ -2542,8 +2607,29 @@ class AudioPolicyManagerTestClientOpenFails : public AudioPolicyManagerTestClien
 
     void setSimulateFailure(bool simulateFailure) { mSimulateFailure = simulateFailure; }
 
+    void setSimulateBroadcastDeviceStatus(audio_devices_t device, status_t status) {
+        if (status != NO_ERROR) {
+            // simulate device connect status
+            mSimulateBroadcastDeviceStatus[device] = status;
+        } else {
+            // remove device connection fixed status
+            mSimulateBroadcastDeviceStatus.erase(device);
+        }
+    }
+
+    status_t setDeviceConnectedState(const struct audio_port_v7* port,
+                                     media::DeviceConnectedState state) override {
+        if (mSimulateBroadcastDeviceStatus.find(port->ext.device.type) !=
+            mSimulateBroadcastDeviceStatus.end()) {
+            // If a simulated status exists, return a status value
+            return mSimulateBroadcastDeviceStatus[port->ext.device.type];
+        }
+        return AudioPolicyManagerTestClient::setDeviceConnectedState(port, state);
+    }
+
   private:
     bool mSimulateFailure = false;
+    std::map<audio_devices_t, status_t> mSimulateBroadcastDeviceStatus;
 };
 
 }  // namespace
@@ -2563,6 +2649,9 @@ class AudioPolicyManagerTestDeviceConnectionFailed :
     }
     void setSimulateOpenFailure(bool simulateFailure) {
         mFullClient->setSimulateFailure(simulateFailure); }
+
+    void setSimulateBroadcastDeviceStatus(audio_devices_t device, status_t status) {
+        mFullClient->setSimulateBroadcastDeviceStatus(device, status); }
 
     static const std::string sBluetoothConfig;
 
@@ -2605,6 +2694,30 @@ TEST_P(AudioPolicyManagerTestDeviceConnectionFailed, SetDeviceConnectedStateHasA
         EXPECT_EQ(0, strncmp(port->ext.device.address, address.c_str(),
                         AUDIO_DEVICE_MAX_ADDRESS_LEN)) << "\"" << port->ext.device.address << "\"";
     }
+}
+
+TEST_P(AudioPolicyManagerTestDeviceConnectionFailed, BroadcastDeviceFailure) {
+    const audio_devices_t type = std::get<0>(GetParam());
+    const std::string name = std::get<1>(GetParam());
+    const std::string address = std::get<2>(GetParam());
+    const audio_format_t format = std::get<3>(GetParam());
+
+    // simulate broadcastDeviceConnectionState return failure
+    setSimulateBroadcastDeviceStatus(type, INVALID_OPERATION);
+    ASSERT_EQ(INVALID_OPERATION, mManager->setDeviceConnectionState(
+            type, AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+            address.c_str(), name.c_str(), format));
+
+    // if broadcast is fail, device should not be added to available devices list
+    if (audio_is_output_device(type)) {
+        auto availableDevices = mManager->getAvailableOutputDevices();
+        EXPECT_FALSE(availableDevices.containsDeviceWithType(type));
+    } else if (audio_is_input_device(type)) {
+        auto availableDevices = mManager->getAvailableInputDevices();
+        EXPECT_FALSE(availableDevices.containsDeviceWithType(type));
+    }
+
+    setSimulateBroadcastDeviceStatus(type, NO_ERROR);
 }
 
 INSTANTIATE_TEST_CASE_P(
@@ -3900,11 +4013,12 @@ void AudioPolicyManagerTestBitPerfectBase::getBitPerfectOutput(status_t expected
     bool isSpatialized;
     bool isBitPerfect;
     float volume;
+    bool muted;
     EXPECT_EQ(expected,
               mManager->getOutputForAttr(&sMediaAttr, &mBitPerfectOutput, AUDIO_SESSION_NONE,
                                          &stream, attributionSource, &config, &flags,
                                          &mSelectedDeviceId, &mBitPerfectPortId, {}, &outputType,
-                                         &isSpatialized, &isBitPerfect, &volume));
+                                         &isSpatialized, &isBitPerfect, &volume, &muted));
 }
 
 class AudioPolicyManagerTestBitPerfect : public AudioPolicyManagerTestBitPerfectBase {

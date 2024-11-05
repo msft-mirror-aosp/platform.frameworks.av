@@ -22,6 +22,7 @@
 #include <aidl/android/hardware/audio/core/BnStreamCallback.h>
 #include <aidl/android/hardware/audio/core/BnStreamOutEventCallback.h>
 #include <aidl/android/hardware/audio/core/StreamDescriptor.h>
+#include <android/binder_ibinder_platform.h>
 #include <error/expected_utils.h>
 #include <media/AidlConversionCppNdk.h>
 #include <media/AidlConversionNdk.h>
@@ -29,6 +30,8 @@
 #include <media/AidlConversionUtil.h>
 #include <mediautils/TimeCheck.h>
 #include <system/audio.h>
+#include <system/thread_defs.h>
+
 #include <Utils.h>
 #include <utils/Log.h>
 
@@ -504,8 +507,15 @@ status_t DeviceHalAidl::openOutputStream(
     std::shared_ptr<OutputStreamCallbackAidl> streamCb;
     if (isOffload) {
         streamCb = ndk::SharedRefBase::make<OutputStreamCallbackAidl>(this);
+        ndk::SpAIBinder binder = streamCb->asBinder();
+        AIBinder_setMinSchedulerPolicy(binder.get(), SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+        AIBinder_setInheritRt(binder.get(), true);
     }
     auto eventCb = ndk::SharedRefBase::make<OutputStreamEventCallbackAidl>(this);
+    ndk::SpAIBinder binder = eventCb->asBinder();
+    AIBinder_setMinSchedulerPolicy(binder.get(), SCHED_NORMAL, ANDROID_PRIORITY_AUDIO);
+    AIBinder_setInheritRt(binder.get(), true);
+
     if (isOffload || isHwAvSync) {
         args.offloadInfo = aidlConfig.offloadInfo;
     }

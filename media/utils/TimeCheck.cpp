@@ -184,6 +184,22 @@ std::vector<pid_t> TimeCheck::getAudioHalPids() {
 }
 
 /* static */
+std::string TimeCheck::signalAudioHals() {
+    std::vector<pid_t> pids = getAudioHalPids();
+    std::string halPids;
+    if (pids.size() != 0) {
+        for (const auto& pid : pids) {
+            ALOGI("requesting tombstone for pid: %d", pid);
+            halPids.append(std::to_string(pid)).append(" ");
+            signalAudioHAL(pid);
+        }
+        // Allow time to complete, usually the caller is forcing restart afterwards.
+        sleep(1);
+    }
+    return halPids;
+}
+
+/* static */
 TimerThread& TimeCheck::getTimeCheckThread() {
     static TimerThread sTimeCheckThread{};
     return sTimeCheckThread;
@@ -302,21 +318,14 @@ void TimeCheck::TimeCheckHandler::onTimeout(TimerThread::Handle timerHandle) con
     // HAL processes which can affect thread behavior.
     const auto snapshotAnalysis = getTimeCheckThread().getSnapshotAnalysis(4 /* retiredCount */);
 
-    // Generate audio HAL processes tombstones and allow time to complete
-    // before forcing restart
-    std::vector<pid_t> pids = TimeCheck::getAudioHalPids();
-    std::string halPids = "HAL pids [ ";
-    if (pids.size() != 0) {
-        for (const auto& pid : pids) {
-            ALOGI("requesting tombstone for pid: %d", pid);
-            halPids.append(std::to_string(pid)).append(" ");
-            signalAudioHAL(pid);
-        }
-        sleep(1);
+    // Generate audio HAL processes tombstones.
+    std::string halPids = signalAudioHals();
+    if (!halPids.empty()) {
+        halPids = "HAL pids [ " + halPids + "]";
     } else {
-        ALOGI("No HAL process pid available, skipping tombstones");
+        halPids = "No HAL process pids available";
+        ALOGI("%s", (halPids + ", skipping tombstones").c_str());
     }
-    halPids.append("]");
 
     LOG_EVENT_STRING(LOGTAG_AUDIO_BINDER_TIMEOUT, tag.c_str());
 

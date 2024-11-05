@@ -5,6 +5,7 @@ import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.os.Build;
 import java.util.ArrayList;
+import java.util.List;
 
 public class CodecUtils {
     private CodecUtils() {}
@@ -15,7 +16,7 @@ public class CodecUtils {
      * @param isEncoder Specifies encoder or decoder
      * @return ArrayList of codec names
      */
-    public static ArrayList<String> selectCodecs(String mimeType, boolean isEncoder) {
+    public static List<String> selectCodecs(String mimeType, boolean isEncoder) {
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         MediaCodecInfo[] codecInfos = codecList.getCodecInfos();
         ArrayList<String> supportedCodecs = new ArrayList<>();
@@ -76,5 +77,22 @@ public class CodecUtils {
             }
         }
         return null;
+    }
+    /**
+     * Returns compression ratio for a given mediaType.
+     * @param mediaType mime type for which compression ratio is to be returned.
+     */
+    public static float getCompressionRatio(String mediaType) {
+        switch (mediaType) {
+            case MediaFormat.MIMETYPE_AUDIO_FLAC:
+                return 0.7f;
+            case MediaFormat.MIMETYPE_AUDIO_G711_MLAW:
+            case MediaFormat.MIMETYPE_AUDIO_G711_ALAW:
+            case MediaFormat.MIMETYPE_AUDIO_MSGSM:
+                return 0.5f;
+            case MediaFormat.MIMETYPE_AUDIO_RAW:
+                return 1.0f;
+        }
+        return 0.1f;
     }
 }

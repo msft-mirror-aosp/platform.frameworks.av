@@ -517,6 +517,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     mCompositeJpegRDisabled = mCameraCharacteristics.exists(
             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS);
+    mCompositeHeicUltraHDRDisabled = mCameraCharacteristics.exists(
+            ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS);
 
     mSystemCameraKind = getSystemCameraKind();
 
@@ -526,13 +528,11 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
                 __FUNCTION__, strerror(-res), res);
         return;
     }
-    if (flags::camera_manual_flash_strength_control()) {
-        res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
-        if (OK != res) {
-            ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-            return;
-        }
+    res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
+    if (OK != res) {
+        ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+        return;
     }
 
     auto stat = addDynamicDepthTags();
@@ -548,6 +548,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
     res = deriveJpegRTags();
     if (OK != res) {
         ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+    }
+    res = deriveHeicUltraHDRTags();
+    if (OK != res) {
+        ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
+                "media capabilities: %s (%d)",
                 __FUNCTION__, strerror(-res), res);
     }
     using camera3::SessionConfigurationUtils::supportsUltraHighResolutionCapture;
@@ -568,6 +574,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         if (OK != status) {
             ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities for"
                     "maximum resolution mode: %s (%d)", __FUNCTION__, strerror(-status), status);
+        }
+        status = deriveHeicUltraHDRTags(/*maxResolution*/true);
+        if (OK != status) {
+            ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
+                    "media capabilities: %s (%d)",
+                    __FUNCTION__, strerror(-status), status);
         }
     }
 
@@ -596,6 +608,14 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
     if (OK != res) {
         ALOGE("%s: Unable to add sensorReadoutTimestamp tag: %s (%d)",
                 __FUNCTION__, strerror(-res), res);
+    }
+
+    if (flags::color_temperature()) {
+        res = addColorCorrectionAvailableModesTag(mCameraCharacteristics);
+        if (OK != res) {
+            ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
+                    __FUNCTION__, strerror(-res), res);
+        }
     }
 
     camera_metadata_entry flashAvailable =
@@ -679,12 +699,18 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
                         __FUNCTION__, strerror(-res), res);
             }
 
-            if (flags::camera_manual_flash_strength_control()) {
-                res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            if (OK != res) {
+                ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                        __FUNCTION__, strerror(-res), res);
+                return;
+            }
+
+            if (flags::color_temperature()) {
+                res = addColorCorrectionAvailableModesTag(mPhysicalCameraCharacteristics[id]);
                 if (OK != res) {
-                    ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                    ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
                             __FUNCTION__, strerror(-res), res);
-                    return;
                 }
             }
         }

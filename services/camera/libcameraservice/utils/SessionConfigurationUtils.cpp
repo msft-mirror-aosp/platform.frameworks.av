@@ -17,6 +17,7 @@
 #include <cutils/properties.h>
 
 #include "SessionConfigurationUtils.h"
+#include <android/data_space.h>
 #include "../api2/DepthCompositeStream.h"
 #include "../api2/HeicCompositeStream.h"
 #include "aidl/android/hardware/graphics/common/Dataspace.h"
@@ -167,11 +168,16 @@ bool roundBufferDimensionNearest(int32_t width, int32_t height,
             getAppropriateModeTag(ANDROID_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS, maxResolution);
     const int32_t jpegRSizesTag = getAppropriateModeTag(
             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS, maxResolution);
+    const int32_t heicUltraHDRSizesTag = getAppropriateModeTag(
+            ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS, maxResolution);
 
     bool isJpegRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R));
+    bool isHeicUltraHDRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
+                ADATASPACE_HEIF_ULTRAHDR));
     camera_metadata_ro_entry streamConfigs =
             (isJpegRDataSpace) ? info.find(jpegRSizesTag) :
+            (isHeicUltraHDRDataSpace) ? info.find(heicUltraHDRSizesTag) :
             (dataSpace == HAL_DATASPACE_DEPTH) ? info.find(depthSizesTag) :
             (dataSpace == static_cast<android_dataspace>(HAL_DATASPACE_HEIF)) ?
             info.find(heicSizesTag) :
@@ -231,6 +237,8 @@ bool is10bitCompatibleFormat(int32_t format, android_dataspace_t dataSpace) {
         case HAL_PIXEL_FORMAT_BLOB:
             if (dataSpace == static_cast<android_dataspace_t>(
                         ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
+                return true;
+            } else if (dataSpace == static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) {
                 return true;
             }
 
@@ -341,6 +349,9 @@ bool isColorSpaceSupported(int32_t colorSpace, int32_t format, android_dataspace
             static_cast<android_dataspace>(
                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
         format64 = static_cast<int64_t>(PublicFormat::JPEG_R);
+    } else if (format == HAL_PIXEL_FORMAT_BLOB && dataSpace ==
+            static_cast<android_dataspace>(ADATASPACE_HEIF_ULTRAHDR)) {
+        format64 = static_cast<int64_t>(HEIC_ULTRAHDR);
     }
 
     camera_metadata_ro_entry_t entry =
@@ -602,7 +613,6 @@ binder::Status createSurfaceFromGbp(
         streamInfo.dynamicRangeProfile = dynamicRangeProfile;
         streamInfo.streamUseCase = streamUseCase;
         streamInfo.timestampBase = timestampBase;
-        streamInfo.mirrorMode = mirrorMode;
         streamInfo.colorSpace = colorSpace;
         return binder::Status::ok();
     }
@@ -848,7 +858,6 @@ convertToHALStreamCombination(
 
         int64_t streamUseCase = it.getStreamUseCase();
         int timestampBase = it.getTimestampBase();
-        int mirrorMode = it.getMirrorMode();
         // If the configuration is a deferred consumer, or a not yet completed
         // configuration with no buffer producers attached.
         if (deferredConsumer || (!isConfigurationComplete && numBufferProducers == 0)) {
@@ -908,6 +917,7 @@ convertToHALStreamCombination(
         }
 
         for (auto& bufferProducer : bufferProducers) {
+            int mirrorMode = it.getMirrorMode(bufferProducer);
             sp<Surface> surface;
             res = createSurfaceFromGbp(streamInfo, isStreamInfoValid, surface, bufferProducer,
                     logicalCameraId, metadataChosen, sensorPixelModesUsed, dynamicRangeProfile,
