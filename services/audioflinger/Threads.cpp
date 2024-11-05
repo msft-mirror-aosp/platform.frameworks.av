@@ -338,28 +338,32 @@ std::string IAfThreadBase::formatToString(audio_format_t format) {
 // under  #ifdef __cplusplus #endif
 static std::string patchSinksToString(const struct audio_patch *patch)
 {
-    std::stringstream ss;
+    std::string s;
     for (size_t i = 0; i < patch->num_sinks; ++i) {
-        if (i > 0) {
-            ss << "|";
+        if (i > 0) s.append("|");
+        if (patch->sinks[i].ext.device.address[0]) {
+            s.append("(").append(toString(patch->sinks[i].ext.device.type))
+                    .append(", ").append(patch->sinks[i].ext.device.address).append(")");
+        } else {
+            s.append(toString(patch->sinks[i].ext.device.type));
         }
-        ss << "(" << toString(patch->sinks[i].ext.device.type)
-            << ", " << patch->sinks[i].ext.device.address << ")";
     }
-    return ss.str();
+    return s;
 }
 
 static std::string patchSourcesToString(const struct audio_patch *patch)
 {
-    std::stringstream ss;
+    std::string s;
     for (size_t i = 0; i < patch->num_sources; ++i) {
-        if (i > 0) {
-            ss << "|";
+        if (i > 0) s.append("|");
+        if (patch->sources[i].ext.device.address[0]) {
+            s.append("(").append(toString(patch->sources[i].ext.device.type))
+                    .append(", ").append(patch->sources[i].ext.device.address).append(")");
+        } else {
+            s.append(toString(patch->sources[i].ext.device.type));
         }
-        ss << "(" << toString(patch->sources[i].ext.device.type)
-            << ", " << patch->sources[i].ext.device.address << ")";
     }
-    return ss.str();
+    return s;
 }
 
 static std::string toString(audio_latency_mode_t mode) {
