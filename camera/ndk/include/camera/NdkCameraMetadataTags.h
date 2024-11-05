@@ -563,7 +563,9 @@ typedef enum acamera_metadata_tag {
      * application's selected exposure time, sensor sensitivity,
      * and frame duration (ACAMERA_SENSOR_EXPOSURE_TIME,
      * ACAMERA_SENSOR_SENSITIVITY, and
-     * ACAMERA_SENSOR_FRAME_DURATION). If one of the FLASH modes
+     * ACAMERA_SENSOR_FRAME_DURATION). If ACAMERA_CONTROL_AE_PRIORITY_MODE is
+     * enabled, the relevant priority CaptureRequest settings will not be overridden.
+     * See ACAMERA_CONTROL_AE_PRIORITY_MODE for more details. If one of the FLASH modes
      * is selected, the camera device's flash unit controls are
      * also overridden.</p>
      * <p>The FLASH modes are only available if the camera device
@@ -583,6 +585,7 @@ typedef enum acamera_metadata_tag {
      * different ACAMERA_FLASH_STRENGTH_LEVEL.</p>
      *
      * @see ACAMERA_CONTROL_AE_MODE
+     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
      * @see ACAMERA_CONTROL_MODE
      * @see ACAMERA_FLASH_INFO_AVAILABLE
      * @see ACAMERA_FLASH_MODE
@@ -2435,6 +2438,61 @@ typedef enum acamera_metadata_tag {
      */
     ACAMERA_CONTROL_ZOOM_METHOD =                               // byte (acamera_metadata_enum_android_control_zoom_method_t)
             ACAMERA_CONTROL_START + 60,
+    /**
+     * <p>Turn on AE priority mode.</p>
+     *
+     * <p>Type: byte (acamera_metadata_enum_android_control_ae_priority_mode_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
+     *   <li>ACaptureRequest</li>
+     * </ul></p>
+     *
+     * <p>This control is only effective if ACAMERA_CONTROL_MODE is
+     * AUTO and ACAMERA_CONTROL_AE_MODE is set to one of its
+     * ON modes, with the exception of ON_LOW_LIGHT_BOOST_BRIGHTNESS_PRIORITY.</p>
+     * <p>When a priority mode is enabled, the camera device's
+     * auto-exposure routine will maintain the application's
+     * selected parameters relevant to the priority mode while overriding
+     * the remaining exposure parameters
+     * (ACAMERA_SENSOR_EXPOSURE_TIME, ACAMERA_SENSOR_SENSITIVITY, and
+     * ACAMERA_SENSOR_FRAME_DURATION). For example, if
+     * SENSOR_SENSITIVITY_PRIORITY mode is enabled, the camera device will
+     * maintain the application-selected ACAMERA_SENSOR_SENSITIVITY
+     * while adjusting ACAMERA_SENSOR_EXPOSURE_TIME
+     * and ACAMERA_SENSOR_FRAME_DURATION. The overridden fields for a
+     * given capture will be available in its CaptureResult.</p>
+     *
+     * @see ACAMERA_CONTROL_AE_MODE
+     * @see ACAMERA_CONTROL_MODE
+     * @see ACAMERA_SENSOR_EXPOSURE_TIME
+     * @see ACAMERA_SENSOR_FRAME_DURATION
+     * @see ACAMERA_SENSOR_SENSITIVITY
+     */
+    ACAMERA_CONTROL_AE_PRIORITY_MODE =                          // byte (acamera_metadata_enum_android_control_ae_priority_mode_t)
+            ACAMERA_CONTROL_START + 61,
+    /**
+     * <p>List of auto-exposure priority modes for ACAMERA_CONTROL_AE_PRIORITY_MODE
+     * that are supported by this camera device.</p>
+     *
+     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
+     *
+     * <p>Type: byte[n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>This entry lists the valid modes for
+     * ACAMERA_CONTROL_AE_PRIORITY_MODE for this camera device.
+     * If no AE priority modes are available for a device, this will only list OFF.</p>
+     *
+     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
+     */
+    ACAMERA_CONTROL_AE_AVAILABLE_PRIORITY_MODES =               // byte[n]
+            ACAMERA_CONTROL_START + 62,
     ACAMERA_CONTROL_END,
 
     /**
@@ -4921,9 +4979,12 @@ typedef enum acamera_metadata_tag {
      * duration exposed to the nearest possible value (rather than expose longer).
      * The final exposure time used will be available in the output capture result.</p>
      * <p>This control is only effective if ACAMERA_CONTROL_AE_MODE or ACAMERA_CONTROL_MODE is set to
-     * OFF; otherwise the auto-exposure algorithm will override this value.</p>
+     * OFF; otherwise the auto-exposure algorithm will override this value. However, in the
+     * case that ACAMERA_CONTROL_AE_PRIORITY_MODE is set to SENSOR_EXPOSURE_TIME_PRIORITY, this
+     * control will be effective and not controlled by the auto-exposure algorithm.</p>
      *
      * @see ACAMERA_CONTROL_AE_MODE
+     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
      * @see ACAMERA_CONTROL_MODE
      */
     ACAMERA_SENSOR_EXPOSURE_TIME =                              // int64
@@ -5032,7 +5093,9 @@ typedef enum acamera_metadata_tag {
      * value. The final sensitivity used will be available in the
      * output capture result.</p>
      * <p>This control is only effective if ACAMERA_CONTROL_AE_MODE or ACAMERA_CONTROL_MODE is set to
-     * OFF; otherwise the auto-exposure algorithm will override this value.</p>
+     * OFF; otherwise the auto-exposure algorithm will override this value. However, in the
+     * case that ACAMERA_CONTROL_AE_PRIORITY_MODE is set to SENSOR_SENSITIVITY_PRIORITY, this
+     * control will be effective and not controlled by the auto-exposure algorithm.</p>
      * <p>Note that for devices supporting postRawSensitivityBoost, the total sensitivity applied
      * to the final processed image is the combination of ACAMERA_SENSOR_SENSITIVITY and
      * ACAMERA_CONTROL_POST_RAW_SENSITIVITY_BOOST. In case the application uses the sensor
@@ -5041,6 +5104,7 @@ typedef enum acamera_metadata_tag {
      * set postRawSensitivityBoost.</p>
      *
      * @see ACAMERA_CONTROL_AE_MODE
+     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
      * @see ACAMERA_CONTROL_MODE
      * @see ACAMERA_CONTROL_POST_RAW_SENSITIVITY_BOOST
      * @see ACAMERA_SENSOR_INFO_SENSITIVITY_RANGE
@@ -9685,6 +9749,42 @@ typedef enum acamera_metadata_enum_acamera_control_low_light_boost_state {
     ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE_ACTIVE                     = 1,
 
 } acamera_metadata_enum_android_control_low_light_boost_state_t;
+
+// ACAMERA_CONTROL_AE_PRIORITY_MODE
+typedef enum acamera_metadata_enum_acamera_control_ae_priority_mode {
+    /**
+     * <p>Disable AE priority mode. This is the default value.</p>
+     */
+    ACAMERA_CONTROL_AE_PRIORITY_MODE_OFF                             = 0,
+
+    /**
+     * <p>The camera device's auto-exposure routine is active and
+     * prioritizes the application-selected ISO (ACAMERA_SENSOR_SENSITIVITY).</p>
+     * <p>The application has control over ACAMERA_SENSOR_SENSITIVITY while
+     * the application's values for ACAMERA_SENSOR_EXPOSURE_TIME and
+     * ACAMERA_SENSOR_FRAME_DURATION are ignored.</p>
+     *
+     * @see ACAMERA_SENSOR_EXPOSURE_TIME
+     * @see ACAMERA_SENSOR_FRAME_DURATION
+     * @see ACAMERA_SENSOR_SENSITIVITY
+     */
+    ACAMERA_CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY     = 1,
+
+    /**
+     * <p>The camera device's auto-exposure routine is active and
+     * prioritizes the application-selected exposure time
+     * (ACAMERA_SENSOR_EXPOSURE_TIME).</p>
+     * <p>The application has control over ACAMERA_SENSOR_EXPOSURE_TIME while
+     * the application's values for ACAMERA_SENSOR_SENSITIVITY and
+     * ACAMERA_SENSOR_FRAME_DURATION are ignored.</p>
+     *
+     * @see ACAMERA_SENSOR_EXPOSURE_TIME
+     * @see ACAMERA_SENSOR_FRAME_DURATION
+     * @see ACAMERA_SENSOR_SENSITIVITY
+     */
+    ACAMERA_CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY   = 2,
+
+} acamera_metadata_enum_android_control_ae_priority_mode_t;
 
 
 
