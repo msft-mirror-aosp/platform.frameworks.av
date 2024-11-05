@@ -8,7 +8,7 @@ flag {
     name: "extractor_sniff_midi_optimizations"
     is_exported: true
     is_fixed_read_only: true
-    namespace: "media_extractor"
+    namespace: "media_solutions"
     description: "Enable SniffMidi optimizations."
     bug: "359920208"
 }
