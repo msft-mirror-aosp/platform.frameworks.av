@@ -8723,8 +8723,12 @@ void AudioPolicyManager::setVolumeSourceMutedInternally(VolumeSource volumeSourc
 
 bool AudioPolicyManager::isValidAttributes(const audio_attributes_t *paa)
 {
+    if ((paa->flags & AUDIO_FLAG_SCO) != 0) {
+        ALOGW("%s: deprecated use of AUDIO_FLAG_SCO in attributes flags %d", __func__, paa->flags);
+    }
+
     // has flags that map to a stream type?
-    if ((paa->flags & (AUDIO_FLAG_AUDIBILITY_ENFORCED | AUDIO_FLAG_SCO | AUDIO_FLAG_BEACON)) != 0) {
+    if ((paa->flags & (AUDIO_FLAG_AUDIBILITY_ENFORCED | AUDIO_FLAG_BEACON)) != 0) {
         return true;
     }
 
