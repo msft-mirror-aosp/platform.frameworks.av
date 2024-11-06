@@ -205,6 +205,13 @@ flag {
     bug: "355050846"
 }
 
+flag {
+    name: "speaker_layout_api"
+    namespace: "media_audio"
+    description: "Surface new API method for returning speaker layout channel mask for devices"
+    bug: "337522902"
+}
+
 # TODO remove
 flag {
     name: "volume_ringer_api_hardening"
