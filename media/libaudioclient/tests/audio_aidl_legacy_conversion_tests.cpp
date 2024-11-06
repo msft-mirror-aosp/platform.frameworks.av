@@ -689,6 +689,25 @@ INSTANTIATE_TEST_SUITE_P(AudioEncapsulationMetadataType,
                                          AudioEncapsulationMetadataType::FRAMEWORK_TUNER,
                                          AudioEncapsulationMetadataType::DVB_AD_DESCRIPTOR));
 
+TEST(AudioPortDeviceExt_speakerLayoutRoundTripTest, Aidl2Legacy2Aidl_layoutMask) {
+    AudioPortDeviceExt initial{};
+    initial.speakerLayout = make_ACL_Stereo();
+    auto conv = aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(initial);
+    ASSERT_TRUE(conv.ok());
+    auto convBack = legacy2aidl_audio_port_config_device_ext_AudioPortDeviceExt(conv.value());
+    ASSERT_TRUE(convBack.ok());
+    EXPECT_EQ(initial, convBack.value());
+}
+
+TEST(AudioPortDeviceExt_speakerLayoutRoundTripTest, Aidl2Legacy2Aidl_null) {
+    const AudioPortDeviceExt initial{};  // speakerLayout is null
+    auto conv = aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(initial);
+    ASSERT_TRUE(conv.ok());
+    auto convBack = legacy2aidl_audio_port_config_device_ext_AudioPortDeviceExt(conv.value());
+    ASSERT_TRUE(convBack.ok());
+    EXPECT_EQ(initial, convBack.value());
+}
+
 class AudioGainModeRoundTripTest : public testing::TestWithParam<AudioGainMode> {};
 TEST_P(AudioGainModeRoundTripTest, Aidl2Legacy2Aidl) {
     const auto initial = GetParam();
