@@ -116,6 +116,8 @@ aaudio_result_t AudioStream::open(const AudioStreamBuilder& builder)
     mErrorCallbackProc = builder.getErrorCallbackProc();
     mDataCallbackUserData = builder.getDataCallbackUserData();
     mErrorCallbackUserData = builder.getErrorCallbackUserData();
+    setPresentationEndCallbackUserData(builder.getPresentationEndCallbackUserData());
+    setPresentationEndCallbackProc(builder.getPresentationEndCallbackProc());
 
     return AAUDIO_OK;
 }
@@ -285,6 +287,10 @@ aaudio_result_t AudioStream::safeFlush() {
 
 aaudio_result_t AudioStream::systemStopInternal() {
     std::lock_guard<std::mutex> lock(mStreamLock);
+    return systemStopInternal_l();
+}
+
+aaudio_result_t AudioStream::systemStopInternal_l() {
     aaudio_result_t result = safeStop_l();
     if (result == AAUDIO_OK) {
         // We only call this for logging in "dumpsys audio". So ignore return code.

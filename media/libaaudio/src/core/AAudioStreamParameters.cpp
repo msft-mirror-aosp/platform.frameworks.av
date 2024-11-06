@@ -58,6 +58,13 @@ static aaudio_result_t isFormatValid(audio_format_t format) {
         case AUDIO_FORMAT_PCM_24_BIT_PACKED:
         case AUDIO_FORMAT_PCM_8_24_BIT:
         case AUDIO_FORMAT_IEC61937:
+        case AUDIO_FORMAT_MP3:
+        case AUDIO_FORMAT_AAC_LC:
+        case AUDIO_FORMAT_AAC_HE_V1:
+        case AUDIO_FORMAT_AAC_HE_V2:
+        case AUDIO_FORMAT_AAC_ELD:
+        case AUDIO_FORMAT_AAC_XHE:
+        case AUDIO_FORMAT_OPUS:
             break; // valid
         default:
             ALOGD("audioFormat not valid, audio_format_t = 0x%08x", format);
