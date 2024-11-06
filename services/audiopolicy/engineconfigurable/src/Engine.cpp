@@ -405,8 +405,9 @@ DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t ps) const
         auto defaultDevice = getApmObserver()->getDefaultOutputDevice();
         ALOG_ASSERT(defaultDevice != nullptr, "no valid default device defined");
         selectedDevices = DeviceVector(defaultDevice);
-    } else if (/*device_distinguishes_on_address(*deviceTypes.begin())*/ isSingleDeviceType(
-            deviceTypes, AUDIO_DEVICE_OUT_BUS)) {
+    } else if (/*device_distinguishes_on_address(*deviceTypes.begin())*/
+            isSingleDeviceType(deviceTypes, AUDIO_DEVICE_OUT_BUS) ||
+            isSingleDeviceType(deviceTypes, AUDIO_DEVICE_OUT_SPEAKER)) {
         // We do expect only one device for these types of devices
         // Criterion device address garantee this one is available
         // If this criterion is not wished, need to ensure this device is available
