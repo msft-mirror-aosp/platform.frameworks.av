@@ -44,6 +44,7 @@
 
 #include <utility>
 
+#include <android/data_space.h>
 #include <android-base/stringprintf.h>
 #include <sched.h>
 #include <utils/Log.h>
@@ -2560,6 +2561,8 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
             size_t k = i + ((mInputStream != nullptr) ? 1 : 0); // Input stream if present should
                                                                 // always occupy the initial entry.
             if ((outputStream->data_space == HAL_DATASPACE_V0_JFIF) ||
+                    (outputStream->data_space ==
+                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
                     (outputStream->data_space ==
                      static_cast<android_dataspace_t>(
                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R))) {

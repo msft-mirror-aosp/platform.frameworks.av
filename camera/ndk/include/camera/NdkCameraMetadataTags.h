@@ -7959,6 +7959,145 @@ typedef enum acamera_metadata_tag {
     ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS_MAXIMUM_RESOLUTION = 
                                                                 // int64[4*n]
             ACAMERA_HEIC_START + 5,
+    /**
+     * <p>The available HEIC (ISO/IEC 23008-12/24) UltraHDR stream
+     * configurations that this camera device supports
+     * (i.e. format, width, height, output/input stream).</p>
+     *
+     * <p>Type: int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>The configurations are listed as <code>(format, width, height, input?)</code> tuples.</p>
+     * <p>All the static, control, and dynamic metadata tags related to JPEG apply to HEIC formats.
+     * Configuring JPEG and HEIC streams at the same time is not supported.</p>
+     * <p>All the configuration tuples <code>(format, width, height, input?)</code> will contain
+     * AIMAGE_FORMAT_HEIC format as OUTPUT only.</p>
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS = 
+                                                                // int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t)
+            ACAMERA_HEIC_START + 6,
+    /**
+     * <p>This lists the minimum frame duration for each
+     * format/size combination for HEIC UltraHDR output formats.</p>
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>This should correspond to the frame duration when only that
+     * stream is active, with all processing (typically in android.*.mode)
+     * set to either OFF or FAST.</p>
+     * <p>When multiple streams are used in a request, the minimum frame
+     * duration will be max(individual stream min durations).</p>
+     * <p>See ACAMERA_SENSOR_FRAME_DURATION and
+     * ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS for more details about
+     * calculating the max frame rate.</p>
+     *
+     * @see ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS
+     * @see ACAMERA_SENSOR_FRAME_DURATION
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS = // int64[4*n]
+            ACAMERA_HEIC_START + 7,
+    /**
+     * <p>This lists the maximum stall duration for each
+     * output format/size combination for HEIC UltraHDR streams.</p>
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>A stall duration is how much extra time would get added
+     * to the normal minimum frame duration for a repeating request
+     * that has streams with non-zero stall.</p>
+     * <p>This functions similarly to
+     * ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS for HEIC UltraHDR
+     * streams.</p>
+     * <p>All HEIC output stream formats may have a nonzero stall
+     * duration.</p>
+     *
+     * @see ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS =     // int64[4*n]
+            ACAMERA_HEIC_START + 8,
+    /**
+     * <p>The available HEIC (ISO/IEC 23008-12/24) UltraHDR stream
+     * configurations that this camera device supports
+     * (i.e. format, width, height, output/input stream) for CaptureRequests where
+     * ACAMERA_SENSOR_PIXEL_MODE is set to
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+     *
+     * @see ACAMERA_SENSOR_PIXEL_MODE
+     *
+     * <p>Type: int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS for details.</p>
+     * <p>All the configuration tuples <code>(format, width, height, input?)</code> will contain
+     * AIMAGE_FORMAT_HEIC format as OUTPUT only.</p>
+     *
+     * @see ACAMERA_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION = 
+                                                                // int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t)
+            ACAMERA_HEIC_START + 9,
+    /**
+     * <p>This lists the minimum frame duration for each
+     * format/size combination for HEIC UltraHDR output formats for CaptureRequests where
+     * ACAMERA_SENSOR_PIXEL_MODE is set to
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+     *
+     * @see ACAMERA_SENSOR_PIXEL_MODE
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_MIN_FRAME_DURATIONS for details.</p>
+     *
+     * @see ACAMERA_HEIC_AVAILABLE_HEIC_MIN_FRAME_DURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS_MAXIMUM_RESOLUTION = 
+                                                                // int64[4*n]
+            ACAMERA_HEIC_START + 10,
+    /**
+     * <p>This lists the maximum stall duration for each
+     * output format/size combination for HEIC UltraHDR streams for CaptureRequests where
+     * ACAMERA_SENSOR_PIXEL_MODE is set to
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+     *
+     * @see ACAMERA_SENSOR_PIXEL_MODE
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS for details.</p>
+     *
+     * @see ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS_MAXIMUM_RESOLUTION = 
+                                                                // int64[4*n]
+            ACAMERA_HEIC_START + 11,
     ACAMERA_HEIC_END,
 
     /**
@@ -11525,6 +11664,26 @@ typedef enum acamera_metadata_enum_acamera_heic_available_heic_stream_configurat
                                                                       = 1,
 
 } acamera_metadata_enum_android_heic_available_heic_stream_configurations_maximum_resolution_t;
+
+// ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS
+typedef enum acamera_metadata_enum_acamera_heic_available_heic_ultra_hdr_stream_configurations {
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_OUTPUT
+                                                                      = 0,
+
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_INPUT
+                                                                      = 1,
+
+} acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t;
+
+// ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION
+typedef enum acamera_metadata_enum_acamera_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution {
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION_OUTPUT
+                                                                      = 0,
+
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION_INPUT
+                                                                      = 1,
+
+} acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t;
 
 
 
