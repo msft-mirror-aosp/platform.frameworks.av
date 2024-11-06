@@ -517,6 +517,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     mCompositeJpegRDisabled = mCameraCharacteristics.exists(
             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS);
+    mCompositeHeicUltraHDRDisabled = mCameraCharacteristics.exists(
+            ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS);
 
     mSystemCameraKind = getSystemCameraKind();
 
@@ -548,6 +550,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities: %s (%d)",
                 __FUNCTION__, strerror(-res), res);
     }
+    res = deriveHeicUltraHDRTags();
+    if (OK != res) {
+        ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
+                "media capabilities: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+    }
     using camera3::SessionConfigurationUtils::supportsUltraHighResolutionCapture;
     if (supportsUltraHighResolutionCapture(mCameraCharacteristics)) {
         status_t status = addDynamicDepthTags(/*maxResolution*/true);
@@ -566,6 +574,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         if (OK != status) {
             ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities for"
                     "maximum resolution mode: %s (%d)", __FUNCTION__, strerror(-status), status);
+        }
+        status = deriveHeicUltraHDRTags(/*maxResolution*/true);
+        if (OK != status) {
+            ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
+                    "media capabilities: %s (%d)",
+                    __FUNCTION__, strerror(-status), status);
         }
     }
 

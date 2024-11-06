@@ -132,7 +132,7 @@ std::string dumpMixerBehaviors(const MixerBehaviorSet& mixerBehaviors) {
 
 std::string toString(const DeviceIdSet& deviceIds) {
     if (deviceIds.empty()) {
-        return "Empty device ids";
+        return "AUDIO_PORT_HANDLE_NONE";
     }
     std::stringstream ss;
     for (auto it = deviceIds.begin(); it != deviceIds.end(); ++it) {
