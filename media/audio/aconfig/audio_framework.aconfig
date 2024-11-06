@@ -120,6 +120,14 @@ flag {
 }
 
 flag {
+    name: "iamf_definitions_api"
+    is_exported: true
+    namespace: "media_audio"
+    description: "API definitions for the IAMF format"
+    bug: "337522902"
+}
+
+flag {
     name: "loudness_configurator_api"
     is_exported: true
     namespace: "media_audio"
