@@ -3,6 +3,14 @@ container: "system"
 
 flag {
     namespace: "camera_platform"
+    name: "camera_heif_gainmap"
+    is_exported: true
+    description: "Extend HEIC/HEIF still capture with HDR gainmap"
+    bug: "362608343"
+}
+
+flag {
+    namespace: "camera_platform"
     name: "camera_hsum_permission"
     is_exported: true
     description: "Camera access by headless system user"

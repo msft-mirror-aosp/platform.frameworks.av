@@ -470,6 +470,9 @@ public:
 
     static const float kDepthARTolerance;
     static const bool kFrameworkJpegRDisabled;
+    static const bool kFrameworkHeicUltraHDRDisabled;
+    static const bool kFrameworkHeicAllowSWCodecs;
+
 private:
     // All private members, unless otherwise noted, expect mInterfaceMutex to be locked before use
     mutable std::mutex mInterfaceMutex;
@@ -629,6 +632,7 @@ private:
             bool hasFlashUnit() const { return mHasFlashUnit; }
             bool supportNativeZoomRatio() const { return mSupportNativeZoomRatio; }
             bool isCompositeJpegRDisabled() const { return mCompositeJpegRDisabled; }
+            bool isCompositeHeicUltraHDRDisabled() const { return mCompositeHeicUltraHDRDisabled; }
             virtual status_t setTorchMode(bool enabled) = 0;
             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
             virtual status_t getTorchStrengthLevel(int32_t *torchStrength) = 0;
@@ -685,14 +689,15 @@ private:
                     mParentProvider(parentProvider), mTorchStrengthLevel(0),
                     mTorchMaximumStrengthLevel(0), mTorchDefaultStrengthLevel(0),
                     mHasFlashUnit(false), mSupportNativeZoomRatio(false),
-                    mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false) {}
+                    mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false),
+                    mCompositeHeicUltraHDRDisabled(false) {}
             virtual ~DeviceInfo() {}
         protected:
 
             bool mHasFlashUnit; // const after constructor
             bool mSupportNativeZoomRatio; // const after constructor
             const std::vector<std::string>& mPublicCameraIds;
-            bool mCompositeJpegRDisabled;
+            bool mCompositeJpegRDisabled, mCompositeHeicUltraHDRDisabled;
         };
         std::vector<std::unique_ptr<DeviceInfo>> mDevices;
         std::unordered_set<std::string> mUniqueCameraIds;
@@ -757,6 +762,18 @@ private:
             status_t addDynamicDepthTags(bool maxResolution = false);
             status_t deriveHeicTags(bool maxResolution = false);
             status_t deriveJpegRTags(bool maxResolution = false);
+            status_t deriveHeicUltraHDRTags(bool maxResolution = false);
+            status_t deriveBlobDurationEntries(
+                    const CameraMetadata& c, bool maxResolution,
+                    const std::vector<std::tuple<size_t, size_t>>& filteredSizes,
+                    std::vector<int64_t>* filteredStallDurations /*out*/,
+                    std::vector<int64_t>* filteredMinDurations /*out*/);
+            status_t insertStreamConfigTags(int32_t sizeTag, int32_t minFrameDurationTag,
+                                            int32_t stallDurationTag,
+                                            const std::vector<int32_t>& sizeEntries,
+                                            const std::vector<int64_t>& minFrameDurationEntries,
+                                            const std::vector<int64_t>& stallDurationEntries,
+                                            CameraMetadata* c /*out*/);
             status_t addRotateCropTags();
             status_t addAutoframingTags();
             status_t addPreCorrectionActiveArraySize();
