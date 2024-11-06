@@ -422,9 +422,17 @@ aaudio_result_t AAudioServiceEndpointMMAP::getFreeRunningPosition(int64_t *posit
         return AAUDIO_ERROR_NULL;
     }
     struct audio_mmap_position position;
-    const status_t status = mMmapStream->getMmapPosition(&position);
+    status_t status = mMmapStream->getMmapPosition(&position);
     ALOGV("%s() status= %d, pos = %d, nanos = %lld\n",
           __func__, status, position.position_frames, (long long) position.time_nanoseconds);
+    if (status == INVALID_OPERATION) {
+        // The HAL can return INVALID_OPERATION when the position is UNKNOWN.
+        // That can cause SHARED MMAP to break. So coerce it to NOT_ENOUGH_DATA.
+        // That will get converted to AAUDIO_ERROR_UNAVAILABLE.
+        ALOGW("%s(): change INVALID_OPERATION to NOT_ENOUGH_DATA", __func__);
+        status = NOT_ENOUGH_DATA; // see b/376467258
+    }
+
     const aaudio_result_t result = AAudioConvert_androidToAAudioResult(status);
     if (result == AAUDIO_ERROR_UNAVAILABLE) {
         ALOGW("%s(): getMmapPosition() has no position data available", __func__);
