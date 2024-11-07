@@ -76,6 +76,22 @@ flag {
 }
 
 flag {
+    name: "hardening_impl"
+    is_exported: true
+    namespace: "media_audio"
+    description: "Flag for overall implementation of hardening"
+    bug: "376480814"
+}
+
+flag {
+    name: "hardening_strict"
+    is_exported: true
+    namespace: "media_audio"
+    description: "Flag for strict enforcement (deny access) of hardening"
+    bug: "376480814"
+}
+
+flag {
     name: "music_fx_edge_to_edge"
     namespace: "media_audio"
     description: "Enable Edge-to-edge feature for MusicFx and handle insets"
