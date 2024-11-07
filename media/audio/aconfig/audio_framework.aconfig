@@ -199,6 +199,13 @@ flag {
 }
 
 flag {
+    name: "spatializer_capabilities"
+    namespace: "media_audio"
+    description: "spatializer reports effective channel masks"
+    bug: "377582613"
+}
+
+flag {
     name: "speaker_cleanup_usage"
     namespace: "media_audio"
     description: "Support new AudioAttributes usage for speaker cleanup"
