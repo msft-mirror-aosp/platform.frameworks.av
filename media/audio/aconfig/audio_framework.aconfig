@@ -199,6 +199,13 @@ flag {
 }
 
 flag {
+    name: "spatial_audio_settings_versioning"
+    namespace: "media_audio"
+    description: "introduce versioning of spatial audio settings"
+    bug: "377977731"
+}
+
+flag {
     name: "spatializer_capabilities"
     namespace: "media_audio"
     description: "spatializer reports effective channel masks"
