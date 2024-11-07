@@ -3782,7 +3782,7 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
         if (isVolumeConsistentForCalls(vs, {mCallRxSourceClient->sinkDevice()->type()},
                 isVoiceVolSrc, isBtScoVolSrc, __func__)
                 && (isVoiceVolSrc || isBtScoVolSrc)) {
-            bool voiceVolumeManagedByHost = isVoiceVolSrc &&
+            bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
                     !audio_is_ble_out_device(mCallRxSourceClient->sinkDevice()->type());
             setVoiceVolume(index, curves, voiceVolumeManagedByHost, 0);
         }
@@ -8588,7 +8588,7 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
             deviceTypes, delayMs, force, isVoiceVolSrc);
 
     if (outputDesc == mPrimaryOutput && (isVoiceVolSrc || isBtScoVolSrc)) {
-        bool voiceVolumeManagedByHost = isVoiceVolSrc &&
+        bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
                 !isSingleDeviceType(deviceTypes, audio_is_ble_out_device);
         setVoiceVolume(index, curves, voiceVolumeManagedByHost, delayMs);
     }
