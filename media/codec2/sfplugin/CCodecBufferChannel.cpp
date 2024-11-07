@@ -29,6 +29,7 @@
 #include <chrono>
 
 #include <android_media_codec.h>
+#include <android_media_tv_flags.h>
 
 #include <C2AllocatorGralloc.h>
 #include <C2PlatformSupport.h>
@@ -61,6 +62,7 @@
 #include <mediadrm/ICrypto.h>
 #include <server_configurable_flags/get_flags.h>
 #include <system/window.h>
+#include <ui/PictureProfileHandle.h>
 
 #include "CCodecBufferChannel.h"
 #include "Codec2Buffer.h"
@@ -1456,6 +1458,14 @@ status_t CCodecBufferChannel::renderOutputBuffer(
 
     qbi.setSurfaceDamage(Region::INVALID_REGION); // we don't have dirty regions
     qbi.getFrameTimestamps = true; // we need to know when a frame is rendered
+
+    int64_t pictureProfileHandle;
+    if (android::media::tv::flags::apply_picture_profiles() &&
+                buffer->format()->findInt64(KEY_PICTURE_PROFILE_HANDLE, &pictureProfileHandle)) {
+        PictureProfileHandle handle(static_cast<PictureProfileId>(pictureProfileHandle));
+        qbi.setPictureProfileHandle(handle);
+    }
+
     IGraphicBufferProducer::QueueBufferOutput qbo;
     status_t result = std::atomic_load(&mComponent)->queueToOutputSurface(block, qbi, &qbo);
     if (result != OK) {
