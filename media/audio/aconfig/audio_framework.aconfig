@@ -120,6 +120,14 @@ flag {
 }
 
 flag {
+    name: "iamf_definitions_api"
+    is_exported: true
+    namespace: "media_audio"
+    description: "API definitions for the IAMF format"
+    bug: "337522902"
+}
+
+flag {
     name: "loudness_configurator_api"
     is_exported: true
     namespace: "media_audio"
@@ -195,6 +203,13 @@ flag {
     namespace: "media_audio"
     description: "Support new AudioAttributes usage for speaker cleanup"
     bug: "355050846"
+}
+
+flag {
+    name: "speaker_layout_api"
+    namespace: "media_audio"
+    description: "Surface new API method for returning speaker layout channel mask for devices"
+    bug: "337522902"
 }
 
 # TODO remove
