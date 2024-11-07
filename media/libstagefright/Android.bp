@@ -317,6 +317,7 @@ cc_library {
         "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
         "aconfig_mediacodec_flags_c_lib",
+        "camera_platform_flags_c_lib",
     ],
 
     static_libs: [
