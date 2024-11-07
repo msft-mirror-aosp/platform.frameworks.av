@@ -10496,7 +10496,12 @@ status_t MmapThread::start(const AudioClient& client,
         audio_stream_type_t stream = streamType_l();
         audio_output_flags_t flags =
                 (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_DIRECT);
-        audio_port_handle_t deviceId = mDeviceId;
+        DeviceIdVector deviceIds;
+        if (mDeviceId != AUDIO_PORT_HANDLE_NONE) {
+            deviceIds.push_back(mDeviceId);
+        } else {
+            ALOGW("%s no device id set", __func__);
+        }
         std::vector<audio_io_handle_t> secondaryOutputs;
         bool isSpatialized;
         bool isBitPerfect;
@@ -10507,7 +10512,7 @@ status_t MmapThread::start(const AudioClient& client,
                                             adjAttributionSource,
                                             &config,
                                             flags,
-                                            &deviceId,
+                                            &deviceIds,
                                             &portId,
                                             &secondaryOutputs,
                                             &isSpatialized,
