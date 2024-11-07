@@ -181,6 +181,13 @@ flag {
 }
 
 flag {
+  name: "subsession_metrics"
+  namespace: "codec_fwk"
+  description: "Feature flag for subsession codec metrics"
+  bug: "363382811"
+}
+
+flag {
   name: "teamfood"
   namespace: "codec_fwk"
   description: "Feature flag to track teamfood population"
