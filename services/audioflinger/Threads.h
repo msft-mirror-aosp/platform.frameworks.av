@@ -2243,17 +2243,17 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
                                       audio_stream_type_t streamType,
                                       audio_session_t sessionId,
                                       const sp<MmapStreamCallback>& callback,
-                                      audio_port_handle_t deviceId,
+                                      const DeviceIdVector& deviceIds,
             audio_port_handle_t portId) override EXCLUDES_ThreadBase_Mutex {
         audio_utils::lock_guard l(mutex());
-        configure_l(attr, streamType, sessionId, callback, deviceId, portId);
+        configure_l(attr, streamType, sessionId, callback, deviceIds, portId);
     }
 
     void configure_l(const audio_attributes_t* attr,
             audio_stream_type_t streamType,
             audio_session_t sessionId,
             const sp<MmapStreamCallback>& callback,
-            audio_port_handle_t deviceId,
+            const DeviceIdVector& deviceIds,
             audio_port_handle_t portId) REQUIRES(mutex());
 
     void disconnect() final EXCLUDES_ThreadBase_Mutex;
@@ -2363,9 +2363,9 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
     void dumpTracks_l(int fd, const Vector<String16>& args) final REQUIRES(mutex());
 
                 /**
-                 * @brief mDeviceId  current device port unique identifier
+                 * @brief mDeviceIds current device port unique identifiers
                  */
-    audio_port_handle_t mDeviceId GUARDED_BY(mutex()) = AUDIO_PORT_HANDLE_NONE;
+    DeviceIdVector mDeviceIds GUARDED_BY(mutex());
 
     audio_attributes_t mAttr GUARDED_BY(mutex());
     audio_session_t mSessionId GUARDED_BY(mutex());
@@ -2397,7 +2397,7 @@ public:
                                       audio_stream_type_t streamType,
                                       audio_session_t sessionId,
                                       const sp<MmapStreamCallback>& callback,
-                                      audio_port_handle_t deviceId,
+                                      const DeviceIdVector& deviceIds,
             audio_port_handle_t portId) final EXCLUDES_ThreadBase_Mutex;
 
     AudioStreamOut* clearOutput() final EXCLUDES_ThreadBase_Mutex;

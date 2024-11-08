@@ -111,6 +111,13 @@ flag {
 }
 
 flag {
+  name: "num_input_slots"
+  namespace: "codec_fwk"
+  description: "Feature flag for exposing number of input slots"
+  bug: "159891571"
+}
+
+flag {
   name: "p210_format_support"
   is_exported: true
   namespace: "codec_fwk"
@@ -178,6 +185,13 @@ flag {
   metadata {
     purpose: PURPOSE_BUGFIX
   }
+}
+
+flag {
+  name: "subsession_metrics"
+  namespace: "codec_fwk"
+  description: "Feature flag for subsession codec metrics"
+  bug: "363382811"
 }
 
 flag {
