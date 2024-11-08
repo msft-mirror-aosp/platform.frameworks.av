@@ -18,6 +18,8 @@
 #define LOG_TAG "C2SoftApvEnc"
 #include <log/log.h>
 
+#include <android_media_swcodec_flags.h>
+
 #include <media/hardware/VideoAPI.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MediaErrors.h>
@@ -1267,6 +1269,10 @@ class C2SoftApvEncFactory : public C2ComponentFactory {
 }  // namespace android
 
 __attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* CreateCodec2Factory() {
+    if (!android::media::swcodec::flags::apv_software_codec()) {
+        ALOGV("APV SW Codec is not enabled");
+        return nullptr;
+    }
     return new ::android::C2SoftApvEncFactory();
 }
 
