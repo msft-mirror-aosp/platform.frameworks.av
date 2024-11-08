@@ -31,11 +31,11 @@ namespace android {
 #define APV_QP_MIN 1
 #define APV_QP_MAX 51
 
-struct C2SoftApvEnc : public SimpleC2Component {
+struct C2SoftApvEnc final : public SimpleC2Component {
     class IntfImpl;
 
     C2SoftApvEnc(const char* name, c2_node_id_t id, const std::shared_ptr<IntfImpl>& intfImpl);
-    ~C2SoftApvEnc();
+    virtual ~C2SoftApvEnc();
 
     // From SimpleC2Component
     c2_status_t onInit() override;

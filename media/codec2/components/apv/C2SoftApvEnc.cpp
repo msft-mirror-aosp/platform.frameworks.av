@@ -505,6 +505,8 @@ c2_status_t C2SoftApvEnc::reset() {
     mReceivedFrames = 0;
     mReceivedFirstFrame = false;
     mColorFormat = OAPV_CF_PLANAR2;
+    memset(&mInputFrames, 0, sizeof(mInputFrames));
+    memset(&mReconFrames, 0, sizeof(mReconFrames));
     return C2_OK;
 }
 
@@ -512,6 +514,7 @@ c2_status_t C2SoftApvEnc::releaseEncoder() {
     for (int32_t i = 0; i < MAX_NUM_FRMS; i++) {
         if (mInputFrames.frm[i].imgb != nullptr) {
             imgb_release(mInputFrames.frm[i].imgb);
+            mInputFrames.frm[i].imgb = nullptr;
         }
     }
 
