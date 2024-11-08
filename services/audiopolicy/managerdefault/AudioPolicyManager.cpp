@@ -8341,7 +8341,9 @@ float AudioPolicyManager::adjustDeviceAttenuationForAbsVolume(IVolumeCurves &cur
             VolumeSource vsToDriveAbs = toVolumeSource(groupToDriveAbs);
             if (vsToDriveAbs == volumeSource) {
                 // attenuation is applied by the abs volume controller
-                return (index != 0) ? volumeDbMax : volumeDb;
+                // do not mute LE broadcast to allow the secondary device to continue playing
+                return (index != 0 || volumeDevice == AUDIO_DEVICE_OUT_BLE_BROADCAST) ? volumeDbMax
+                                                                                      : volumeDb;
             } else {
                 IVolumeCurves &curvesAbs = getVolumeCurves(vsToDriveAbs);
                 int indexAbs = curvesAbs.getVolumeIndex({volumeDevice});
