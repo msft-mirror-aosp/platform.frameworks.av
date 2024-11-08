@@ -1311,11 +1311,15 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveHeicUltraHDRTag
         int32_t height = std::get<1>(it);
         int32_t gainmapWidth = std::get<0>(it) / HeicCompositeStream::kGainmapScale;
         int32_t gainmapHeight = std::get<1>(it) / HeicCompositeStream::kGainmapScale;
-        if (camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(width, height,
-                &useHeic, &useGrid, &stall, nullptr /*hevcName*/, kFrameworkHeicAllowSWCodecs) &&
-               camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(gainmapWidth,
-                   gainmapHeight, &useHeic, &useGrid, &stall, nullptr /*hevcName*/,
-                   kFrameworkHeicAllowSWCodecs) ) {
+        // Support gainmap sizes that are sufficiently aligned so CPU specific copy
+        // optimizations can be utilized without side effects.
+        if (((gainmapWidth % 64) == 0) && ((gainmapHeight % 2) == 0) &&
+                camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(width, height,
+                    &useHeic, &useGrid, &stall, nullptr /*hevcName*/,
+                    kFrameworkHeicAllowSWCodecs) &&
+                camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(gainmapWidth,
+                    gainmapHeight, &useHeic, &useGrid, &stall, nullptr /*hevcName*/,
+                    kFrameworkHeicAllowSWCodecs)) {
             int32_t entry[4] = {HAL_PIXEL_FORMAT_BLOB, static_cast<int32_t> (std::get<0>(it)),
                     static_cast<int32_t> (std::get<1>(it)),
                     ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_OUTPUT };
