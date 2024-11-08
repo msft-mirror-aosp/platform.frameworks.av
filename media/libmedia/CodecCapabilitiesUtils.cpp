@@ -30,24 +30,5 @@
 
 namespace android {
 
-std::optional<Range<int>> ParseIntRange(const std::string &str) {
-    if (str.empty()) {
-        ALOGW("could not parse empty integer range");
-        return std::nullopt;
-    }
-    int lower, upper;
-    std::regex regex("([0-9]+)-([0-9]+)");
-    std::smatch match;
-    if (std::regex_match(str, match, regex)) {
-        lower = std::atoi(match[1].str().c_str());
-        upper = std::atoi(match[2].str().c_str());
-    } else if (std::atoi(str.c_str()) != 0) {
-        lower = upper = std::atoi(str.c_str());
-    } else {
-        ALOGW("could not parse integer range: %s", str.c_str());
-        return std::nullopt;
-    }
-    return std::make_optional<Range<int>>(lower, upper);
-}
 
 }  // namespace android
