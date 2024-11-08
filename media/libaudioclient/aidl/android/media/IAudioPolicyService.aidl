@@ -94,7 +94,7 @@ interface IAudioPolicyService {
                                               in AttributionSourceState attributionSource,
                                               in AudioConfig config,
                                               int /* Bitmask, indexed by AudioOutputFlags */ flags,
-                                              int /* audio_port_handle_t */ selectedDeviceId);
+                                              in int[] /* audio_port_handle_t */ selectedDeviceIds);
 
     void startOutput(int /* audio_port_handle_t */ portId);
 

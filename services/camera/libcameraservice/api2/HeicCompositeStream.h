@@ -197,11 +197,23 @@ private:
         std::unique_ptr<uint8_t[]> gainmapChroma;
         std::vector<uint8_t> isoGainmapMetadata;
 
-        InputFrame() : orientation(0), quality(kDefaultJpegQuality), error(false),
-                       exifError(false), timestamp(-1), requestId(-1), fenceFd(-1),
-                       fileFd(-1), trackIndex(-1), anb(nullptr), appSegmentWritten(false),
-                       pendingOutputTiles(0), gainmapPendingOutputTiles(0),
-                       codecInputCounter(0), gainmapCodecInputCounter(0) { }
+        InputFrame()
+            : orientation(0),
+              quality(kDefaultJpegQuality),
+              error(false),
+              exifError(false),
+              timestamp(-1),
+              requestId(-1),
+              fenceFd(-1),
+              fileFd(-1),
+              trackIndex(-1),
+              gainmapTrackIndex(-1),
+              anb(nullptr),
+              appSegmentWritten(false),
+              pendingOutputTiles(0),
+              gainmapPendingOutputTiles(0),
+              codecInputCounter(0),
+              gainmapCodecInputCounter(0) {}
     };
 
     void compilePendingInputLocked();
