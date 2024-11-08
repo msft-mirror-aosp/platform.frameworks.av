@@ -10397,13 +10397,13 @@ void MmapThread::configure_l(const audio_attributes_t* attr,
                                                 audio_stream_type_t streamType __unused,
                                                 audio_session_t sessionId,
                                                 const sp<MmapStreamCallback>& callback,
-                                                audio_port_handle_t deviceId,
+                                                const DeviceIdVector& deviceIds,
                                                 audio_port_handle_t portId)
 {
     mAttr = *attr;
     mSessionId = sessionId;
     mCallback = callback;
-    mDeviceId = deviceId;
+    mDeviceIds = deviceIds;
     mPortId = portId;
 }
 
@@ -10496,7 +10496,7 @@ status_t MmapThread::start(const AudioClient& client,
         audio_stream_type_t stream = streamType_l();
         audio_output_flags_t flags =
                 (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_DIRECT);
-        audio_port_handle_t deviceId = mDeviceId;
+        DeviceIdVector deviceIds = mDeviceIds;
         std::vector<audio_io_handle_t> secondaryOutputs;
         bool isSpatialized;
         bool isBitPerfect;
@@ -10507,7 +10507,7 @@ status_t MmapThread::start(const AudioClient& client,
                                             adjAttributionSource,
                                             &config,
                                             flags,
-                                            &deviceId,
+                                            &deviceIds,
                                             &portId,
                                             &secondaryOutputs,
                                             &isSpatialized,
@@ -10523,7 +10523,7 @@ status_t MmapThread::start(const AudioClient& client,
         config.sample_rate = mSampleRate;
         config.channel_mask = mChannelMask;
         config.format = mFormat;
-        audio_port_handle_t deviceId = mDeviceId;
+        audio_port_handle_t deviceId = getFirstDeviceId(mDeviceIds);
         mutex().unlock();
         ret = AudioSystem::getInputForAttr(&localAttr, &io,
                                               RECORD_RIID_INVALID,
@@ -10876,7 +10876,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
 
     // store new device and send to effects
     audio_devices_t type = AUDIO_DEVICE_NONE;
-    audio_port_handle_t deviceId;
+    DeviceIdVector deviceIds;
     AudioDeviceTypeAddrVector sinkDeviceTypeAddrs;
     AudioDeviceTypeAddr sourceDeviceTypeAddr;
     uint32_t numDevices = 0;
@@ -10890,12 +10890,12 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
             type = static_cast<audio_devices_t>(type | patch->sinks[i].ext.device.type);
             sinkDeviceTypeAddrs.emplace_back(patch->sinks[i].ext.device.type,
                     patch->sinks[i].ext.device.address);
+            deviceIds.push_back(patch->sinks[i].id);
         }
-        deviceId = patch->sinks[0].id;
         numDevices = mPatch.num_sinks;
     } else {
         type = patch->sources[0].ext.device.type;
-        deviceId = patch->sources[0].id;
+        deviceIds.push_back(patch->sources[0].id);
         numDevices = mPatch.num_sources;
         sourceDeviceTypeAddr.mType = patch->sources[0].ext.device.type;
         sourceDeviceTypeAddr.setAddress(patch->sources[0].ext.device.address);
@@ -10921,11 +10921,11 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
 
     // For mmap streams, once the routing has changed, they will be disconnected. It should be
     // okay to notify the client earlier before the new patch creation.
-    if (mDeviceId != deviceId) {
+    if (mDeviceIds != deviceIds) {
         if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
             // The aaudioservice handle the routing changed event asynchronously. In that case,
             // it is safe to hold the lock here.
-            callback->onRoutingChanged(deviceId);
+            callback->onRoutingChanged(deviceIds);
         }
     }
 
@@ -10945,7 +10945,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
         *handle = AUDIO_PATCH_HANDLE_NONE;
     }
 
-    if (numDevices == 0 || mDeviceId != deviceId) {
+    if (numDevices == 0 || mDeviceIds != deviceIds) {
         if (isOutput()) {
             sendIoConfigEvent_l(AUDIO_OUTPUT_CONFIG_CHANGED);
             mOutDeviceTypeAddrs = sinkDeviceTypeAddrs;
@@ -10955,7 +10955,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
             mInDeviceTypeAddr = sourceDeviceTypeAddr;
         }
         mPatch = *patch;
-        mDeviceId = deviceId;
+        mDeviceIds = deviceIds;
     }
     // Force meteadata update after a route change
     mActiveTracks.setHasChanged();
@@ -11110,7 +11110,8 @@ void MmapThread::checkInvalidTracks_l()
             if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
                 // The aaudioservice handle the routing changed event asynchronously. In that case,
                 // it is safe to hold the lock here.
-                callback->onRoutingChanged(AUDIO_PORT_HANDLE_NONE);
+                DeviceIdVector emptyDeviceIdVector;
+                callback->onRoutingChanged(emptyDeviceIdVector);
             } else if (mNoCallbackWarningCount < kMaxNoCallbackWarnings) {
                 ALOGW("Could not notify MMAP stream tear down: no onRoutingChanged callback!");
                 mNoCallbackWarningCount++;
@@ -11202,11 +11203,11 @@ void MmapPlaybackThread::configure(const audio_attributes_t* attr,
                                                 audio_stream_type_t streamType,
                                                 audio_session_t sessionId,
                                                 const sp<MmapStreamCallback>& callback,
-                                                audio_port_handle_t deviceId,
+                                                const DeviceIdVector& deviceIds,
                                                 audio_port_handle_t portId)
 {
     audio_utils::lock_guard l(mutex());
-    MmapThread::configure_l(attr, streamType, sessionId, callback, deviceId, portId);
+    MmapThread::configure_l(attr, streamType, sessionId, callback, deviceIds, portId);
     mStreamType = streamType;
 }
 

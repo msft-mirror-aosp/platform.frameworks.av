@@ -661,7 +661,7 @@ public:
             audio_stream_type_t streamType,
             audio_session_t sessionId,
             const sp<MmapStreamCallback>& callback,
-            audio_port_handle_t deviceId,
+            const DeviceIdVector& deviceIds,
             audio_port_handle_t portId) EXCLUDES_ThreadBase_Mutex = 0;
     virtual void disconnect() EXCLUDES_ThreadBase_Mutex = 0;
 
