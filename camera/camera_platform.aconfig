@@ -229,3 +229,9 @@ flag {
     bug: "359944765"
 }
 
+flag {
+    namespace: "camera_platform"
+    name: "feature_combination_baklava"
+    description: "Add new feature combination query version for Baklava"
+    bug: "370778206"
+}
