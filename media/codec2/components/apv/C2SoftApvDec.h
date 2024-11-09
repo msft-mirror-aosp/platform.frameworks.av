@@ -66,7 +66,7 @@ typedef struct {
 
 namespace android {
 
-struct C2SoftApvDec : public SimpleC2Component {
+struct C2SoftApvDec final : public SimpleC2Component {
     class IntfImpl;
 
     C2SoftApvDec(const char* name, c2_node_id_t id, const std::shared_ptr<IntfImpl>& intfImpl);
