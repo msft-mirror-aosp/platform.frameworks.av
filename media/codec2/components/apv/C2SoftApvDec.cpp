@@ -1231,6 +1231,10 @@ class C2SoftApvDecFactory : public C2ComponentFactory {
 }  // namespace android
 
 __attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* CreateCodec2Factory() {
+    if (!android::media::swcodec::flags::apv_software_codec()) {
+        ALOGV("APV SW Codec is not enabled");
+        return nullptr;
+    }
     return new ::android::C2SoftApvDecFactory();
 }
 

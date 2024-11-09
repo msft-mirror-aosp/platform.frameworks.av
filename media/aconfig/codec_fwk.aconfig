@@ -21,6 +21,13 @@ flag {
 }
 
 flag {
+  name: "codec_availability"
+  namespace: "codec_fwk"
+  description: "Feature flag for codec availability HAL API support"
+  bug: "363282971"
+}
+
+flag {
   name: "codec_buffer_state_cleanup"
   namespace: "codec_fwk"
   description: "Bugfix flag for more buffer state cleanup in MediaCodec"
