@@ -2894,7 +2894,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
     res = mInFlightMap.add(frameNumber, InFlightRequest(numBuffers, resultExtras, hasInput,
             hasAppCallback, minExpectedDuration, maxExpectedDuration, isFixedFps, physicalCameraIds,
             isStillCapture, isZslCapture, rotateAndCropAuto, autoframingAuto, cameraIdsWithZoom,
-            useZoomRatio, requestTimeNs, outputSurfaces));
+            requestTimeNs, useZoomRatio, outputSurfaces));
     if (res < 0) return res;
 
     if (mInFlightMap.size() == 1) {
