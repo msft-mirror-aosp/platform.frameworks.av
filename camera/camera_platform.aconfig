@@ -3,6 +3,14 @@ container: "system"
 
 flag {
     namespace: "camera_platform"
+    name: "camera_heif_gainmap"
+    is_exported: true
+    description: "Extend HEIC/HEIF still capture with HDR gainmap"
+    bug: "362608343"
+}
+
+flag {
+    namespace: "camera_platform"
     name: "camera_hsum_permission"
     is_exported: true
     description: "Camera access by headless system user"
@@ -203,3 +211,18 @@ flag {
     bug: "359409044"
 }
 
+flag {
+    namespace: "camera_platform"
+    name: "night_mode_indicator"
+    is_exported: true
+    description: "Indicates when to activate Night Mode Camera Extension"
+    bug: "335902696"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "zoom_method"
+    is_exported: true
+    description: "Gives apps explicit control on reflects zoom via ZOOM_RATIO capture result"
+    bug: "298899993"
+}

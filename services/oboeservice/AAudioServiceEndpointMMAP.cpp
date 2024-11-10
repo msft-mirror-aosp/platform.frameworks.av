@@ -206,12 +206,17 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
           __func__, config->format, config->sample_rate,
           config->channel_mask, deviceId);
 
+    android::DeviceIdVector deviceIds;
+    if (deviceId != AAUDIO_UNSPECIFIED) {
+        deviceIds.push_back(deviceId);
+    }
+
     const std::lock_guard<std::mutex> lock(mMmapStreamLock);
     const status_t status = MmapStreamInterface::openMmapStream(streamDirection,
                                                                 &attributes,
                                                                 config,
                                                                 mMmapClient,
-                                                                &deviceId,
+                                                                &deviceIds,
                                                                 &sessionId,
                                                                 this, // callback
                                                                 mMmapStream,
@@ -228,6 +233,7 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
         config->channel_mask = currentConfig.channel_mask;
         return AAUDIO_ERROR_UNAVAILABLE;
     }
+    deviceId = android::getFirstDeviceId(deviceIds);
 
     if (deviceId == AAUDIO_UNSPECIFIED) {
         ALOGW("%s() - openMmapStream() failed to set deviceId", __func__);
@@ -422,9 +428,17 @@ aaudio_result_t AAudioServiceEndpointMMAP::getFreeRunningPosition(int64_t *posit
         return AAUDIO_ERROR_NULL;
     }
     struct audio_mmap_position position;
-    const status_t status = mMmapStream->getMmapPosition(&position);
+    status_t status = mMmapStream->getMmapPosition(&position);
     ALOGV("%s() status= %d, pos = %d, nanos = %lld\n",
           __func__, status, position.position_frames, (long long) position.time_nanoseconds);
+    if (status == INVALID_OPERATION) {
+        // The HAL can return INVALID_OPERATION when the position is UNKNOWN.
+        // That can cause SHARED MMAP to break. So coerce it to NOT_ENOUGH_DATA.
+        // That will get converted to AAUDIO_ERROR_UNAVAILABLE.
+        ALOGW("%s(): change INVALID_OPERATION to NOT_ENOUGH_DATA", __func__);
+        status = NOT_ENOUGH_DATA; // see b/376467258
+    }
+
     const aaudio_result_t result = AAudioConvert_androidToAAudioResult(status);
     if (result == AAUDIO_ERROR_UNAVAILABLE) {
         ALOGW("%s(): getMmapPosition() has no position data available", __func__);
@@ -476,8 +490,9 @@ void AAudioServiceEndpointMMAP::onVolumeChanged(float volume) {
     }
 };
 
-void AAudioServiceEndpointMMAP::onRoutingChanged(audio_port_handle_t portHandle) {
-    const auto deviceId = static_cast<int32_t>(portHandle);
+void AAudioServiceEndpointMMAP::onRoutingChanged(const android::DeviceIdVector& deviceIds) {
+    const auto deviceId = android::getFirstDeviceId(deviceIds);
+    // TODO(b/367816690): Compare the new and saved device sets.
     ALOGD("%s() called with dev %d, old = %d", __func__, deviceId, getDeviceId());
     if (getDeviceId() != deviceId) {
         if (getDeviceId() != AUDIO_PORT_HANDLE_NONE) {

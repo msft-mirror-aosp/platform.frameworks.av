@@ -24,6 +24,7 @@
 #include <android/content/AttributionSourceState.h>
 #include <android_media_audiopolicy.h>
 #include <com_android_media_audio.h>
+#include <cutils/properties.h>
 #include <error/expected_utils.h>
 #include <media/AidlConversion.h>
 #include <media/AudioPolicy.h>
@@ -369,7 +370,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
                                             const AttributionSourceState& attributionSource,
                                             const AudioConfig& configAidl,
                                             int32_t flagsAidl,
-                                            int32_t selectedDeviceIdAidl,
+                                            const std::vector<int32_t>& selectedDeviceIdsAidl,
                                             media::GetOutputForAttrResponse* _aidl_return)
 {
     audio_attributes_t attr = VALUE_OR_RETURN_BINDER_STATUS(
@@ -381,8 +382,9 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
             aidl2legacy_AudioConfig_audio_config_t(configAidl, false /*isInput*/));
     audio_output_flags_t flags = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_int32_t_audio_output_flags_t_mask(flagsAidl));
-    audio_port_handle_t selectedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
-            aidl2legacy_int32_t_audio_port_handle_t(selectedDeviceIdAidl));
+    DeviceIdVector selectedDeviceIds = VALUE_OR_RETURN_BINDER_STATUS(
+            convertContainer<DeviceIdVector>(selectedDeviceIdsAidl,
+                                             aidl2legacy_int32_t_audio_port_handle_t));
 
     audio_io_handle_t output;
     audio_port_handle_t portId;
@@ -446,7 +448,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
                                                             &stream,
                                                             attributionSource,
                                                             &config,
-                                                            &flags, &selectedDeviceId, &portId,
+                                                            &flags, &selectedDeviceIds, &portId,
                                                             &secondaryOutputs,
                                                             &outputType,
                                                             &isSpatialized,
@@ -493,20 +495,24 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
     }
 
     if (result == NO_ERROR) {
-        attr = VALUE_OR_RETURN_BINDER_STATUS(
-                mUsecaseValidator->verifyAudioAttributes(output, attributionSource, attr));
+        // usecase validator is disabled by default
+        if (property_get_bool("ro.audio.usecase_validator_enabled", false /* default */)) {
+                attr = VALUE_OR_RETURN_BINDER_STATUS(
+                        mUsecaseValidator->verifyAudioAttributes(output, attributionSource, attr));
+        }
 
         sp<AudioPlaybackClient> client =
                 new AudioPlaybackClient(attr, output, attributionSource, session,
-                    portId, selectedDeviceId, stream, isSpatialized, config.channel_mask);
+                    portId, selectedDeviceIds, stream, isSpatialized, config.channel_mask);
         mAudioPlaybackClients.add(portId, client);
 
         _aidl_return->output = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_io_handle_t_int32_t(output));
         _aidl_return->stream = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_stream_type_t_AudioStreamType(stream));
-        _aidl_return->selectedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
-                legacy2aidl_audio_port_handle_t_int32_t(selectedDeviceId));
+        _aidl_return->selectedDeviceIds = VALUE_OR_RETURN_BINDER_STATUS(
+                convertContainer<std::vector<int32_t>>(selectedDeviceIds,
+                                                       legacy2aidl_audio_port_handle_t_int32_t));
         _aidl_return->portId = VALUE_OR_RETURN_BINDER_STATUS(
                 legacy2aidl_audio_port_handle_t_int32_t(portId));
         _aidl_return->secondaryOutputs = VALUE_OR_RETURN_BINDER_STATUS(
@@ -864,8 +870,9 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
             return binderStatusFromStatusT(status);
         }
 
+        DeviceIdVector selectedDeviceIds = { selectedDeviceId };
         sp<AudioRecordClient> client = new AudioRecordClient(attr, input, session, portId,
-                                                             selectedDeviceId, attributionSource,
+                                                             selectedDeviceIds, attributionSource,
                                                              virtualDeviceId,
                                                              canCaptureOutput, canCaptureHotword,
                                                              mOutputCommandThread);
@@ -897,6 +904,17 @@ std::string AudioPolicyService::getDeviceTypeStrForPortId(audio_port_handle_t po
         return toString(port.ext.device.type);
     }
     return {};
+}
+
+std::string AudioPolicyService::getDeviceTypeStrForPortIds(DeviceIdVector portIds) {
+    std::string output = {};
+    for (auto it = portIds.begin(); it != portIds.end(); ++it) {
+        if (it != portIds.begin()) {
+            output += ", ";
+        }
+        output += getDeviceTypeStrForPortId(*it);
+    }
+    return output;
 }
 
 Status AudioPolicyService::startInput(int32_t portIdAidl)
@@ -988,6 +1006,8 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
                 "android.media.audiopolicy.active.session";
         static constexpr char kAudioPolicyActiveDevice[] =
                 "android.media.audiopolicy.active.device";
+        static constexpr char kAudioPolicyActiveDevices[] =
+                "android.media.audiopolicy.active.devices";
 
         mediametrics::Item *item = mediametrics::Item::create(kAudioPolicy);
         if (item != NULL) {
@@ -1005,8 +1025,8 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
                 item->setCString(kAudioPolicyRqstPkg,
                     std::to_string(client->attributionSource.uid).c_str());
             }
-            item->setCString(
-                    kAudioPolicyRqstDevice, getDeviceTypeStrForPortId(client->deviceId).c_str());
+            item->setCString(kAudioPolicyRqstDevice,
+                    getDeviceTypeStrForPortId(getFirstDeviceId(client->deviceIds)).c_str());
 
             int count = mAudioRecordClients.size();
             for (int i = 0; i < count ; i++) {
@@ -1028,7 +1048,9 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
                             other->attributionSource.uid).c_str());
                     }
                     item->setCString(kAudioPolicyActiveDevice,
-                                     getDeviceTypeStrForPortId(other->deviceId).c_str());
+                            getDeviceTypeStrForPortId(getFirstDeviceId(other->deviceIds)).c_str());
+                    item->setCString(kAudioPolicyActiveDevices,
+                            getDeviceTypeStrForPortIds(other->deviceIds).c_str());
                 }
             }
             item->selfrecord();

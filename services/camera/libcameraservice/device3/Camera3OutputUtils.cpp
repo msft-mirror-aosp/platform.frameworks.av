@@ -304,7 +304,7 @@ void sendCaptureResult(
         CameraMetadata &collectedPartialResult,
         uint32_t frameNumber,
         bool reprocess, bool zslStillCapture, bool rotateAndCropAuto,
-        const std::set<std::string>& cameraIdsWithZoom,
+        const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
         const std::vector<PhysicalCaptureResultInfo>& physicalMetadatas) {
     ATRACE_CALL();
     if (pendingMetadata.isEmpty())
@@ -385,8 +385,9 @@ void sendCaptureResult(
     // Fix up result metadata to account for zoom ratio availabilities between
     // HAL and app.
     bool zoomRatioIs1 = cameraIdsWithZoom.find(states.cameraId) == cameraIdsWithZoom.end();
+    bool appUsesZoomRatio = !zoomRatioIs1 || useZoomRatio;
     res = states.zoomRatioMappers[states.cameraId].updateCaptureResult(
-            &captureResult.mMetadata, zoomRatioIs1);
+            &captureResult.mMetadata, appUsesZoomRatio);
     if (res != OK) {
         SET_ERR("Failed to update capture result zoom ratio metadata for frame %d: %s (%d)",
                 frameNumber, strerror(-res), res);
@@ -452,9 +453,10 @@ void sendCaptureResult(
             }
         }
 
-        zoomRatioIs1 = cameraIdsWithZoom.find(cameraId) == cameraIdsWithZoom.end();
+        // Note: Physical camera continues to use SCALER_CROP_REGION to reflect
+        // zoom levels.
         res = states.zoomRatioMappers[cameraId].updateCaptureResult(
-                &physicalMetadata.mPhysicalCameraMetadata, zoomRatioIs1);
+                &physicalMetadata.mPhysicalCameraMetadata, /*appUsesZoomRatio*/ false);
         if (res != OK) {
             SET_ERR("Failed to update camera %s's physical zoom ratio metadata for "
                     "frame %d: %s(%d)", cameraId.c_str(), frameNumber, strerror(-res), res);
@@ -828,7 +830,7 @@ void processCaptureResult(CaptureOutputStates& states, const camera_capture_resu
                 sendCaptureResult(states, metadata, request.resultExtras,
                     collectedPartialResult, frameNumber,
                     hasInputBufferInRequest, request.zslCapture && request.stillCapture,
-                    request.rotateAndCropAuto, cameraIdsWithZoom,
+                    request.rotateAndCropAuto, cameraIdsWithZoom, request.useZoomRatio,
                     request.physicalMetadatas);
             }
         }
@@ -1097,7 +1099,8 @@ void notifyShutter(CaptureOutputStates& states, const camera_shutter_msg_t &msg)
                     r.pendingMetadata, r.resultExtras,
                     r.collectedPartialResult, msg.frame_number,
                     r.hasInputBuffer, r.zslCapture && r.stillCapture,
-                    r.rotateAndCropAuto, cameraIdsWithZoom, r.physicalMetadatas);
+                    r.rotateAndCropAuto, cameraIdsWithZoom, r.useZoomRatio,
+                    r.physicalMetadatas);
             }
             collectAndRemovePendingOutputBuffers(
                     states.useHalBufManager, states.halBufManagedStreamIds,
