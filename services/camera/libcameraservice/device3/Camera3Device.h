@@ -1275,8 +1275,8 @@ class Camera3Device :
             bool callback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
             bool isFixedFps, const std::set<std::set<std::string>>& physicalCameraIds,
             bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
-            const std::set<std::string>& cameraIdsWithZoom, const SurfaceMap& outputSurfaces,
-            nsecs_t requestTimeNs);
+            const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
+            const SurfaceMap& outputSurfaces, nsecs_t requestTimeNs);
 
     /**
      * Tracking for idle detection

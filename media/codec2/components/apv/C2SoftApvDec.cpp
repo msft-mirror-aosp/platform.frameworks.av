@@ -493,10 +493,13 @@ C2SoftApvDec::C2SoftApvDec(const char* name, c2_node_id_t id,
       mOutBufferFlush(nullptr),
       mIvColorformat(IV_YUV_420P),
       mOutputDelay(kDefaultOutputDelay),
+      mHeaderDecoded(false),
+      mOutIndex(0u),
+      mHalPixelFormat(HAL_PIXEL_FORMAT_YV12),
       mWidth(320),
       mHeight(240),
-      mHeaderDecoded(false),
-      mOutIndex(0u) {
+      mSignalledOutputEos(false),
+      mSignalledError(false) {
     oapvdHandle = NULL;
     oapvmHandle = NULL;
     outputCsp = OUTPUT_CSP_NATIVE;
