@@ -1224,7 +1224,7 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
                                        const AttributionSourceState& attributionSource,
                                        audio_config_t* config,
                                        audio_output_flags_t flags,
-                                       audio_port_handle_t* selectedDeviceId,
+                                       DeviceIdVector* selectedDeviceIds,
                                        audio_port_handle_t* portId,
                                        std::vector<audio_io_handle_t>* secondaryOutputs,
                                        bool *isSpatialized,
@@ -1239,8 +1239,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
         ALOGE("%s NULL output - shouldn't happen", __func__);
         return BAD_VALUE;
     }
-    if (selectedDeviceId == nullptr) {
-        ALOGE("%s NULL selectedDeviceId - shouldn't happen", __func__);
+    if (selectedDeviceIds == nullptr) {
+        ALOGE("%s NULL selectedDeviceIds - shouldn't happen", __func__);
         return BAD_VALUE;
     }
     if (portId == nullptr) {
@@ -1262,20 +1262,20 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
             legacy2aidl_audio_config_t_AudioConfig(*config, false /*isInput*/));
     int32_t flagsAidl = VALUE_OR_RETURN_STATUS(
             legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
-    int32_t selectedDeviceIdAidl = VALUE_OR_RETURN_STATUS(
-            legacy2aidl_audio_port_handle_t_int32_t(*selectedDeviceId));
+    auto selectedDeviceIdsAidl = VALUE_OR_RETURN_STATUS(convertContainer<std::vector<int32_t>>(
+            *selectedDeviceIds, legacy2aidl_audio_port_handle_t_int32_t));
 
     media::GetOutputForAttrResponse responseAidl;
 
     status_t status = statusTFromBinderStatus(
             aps->getOutputForAttr(attrAidl, sessionAidl, attributionSource, configAidl, flagsAidl,
-                                  selectedDeviceIdAidl, &responseAidl));
+                                  selectedDeviceIdsAidl, &responseAidl));
     if (status != NO_ERROR) {
         config->format = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_AudioFormatDescription_audio_format_t(responseAidl.configBase.format));
+                aidl2legacy_AudioFormatDescription_audio_format_t(responseAidl.configBase.format));
         config->channel_mask = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
-                    responseAidl.configBase.channelMask, false /*isInput*/));
+                aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
+                        responseAidl.configBase.channelMask, false /*isInput*/));
         config->sample_rate = responseAidl.configBase.sampleRate;
         return status;
     }
@@ -1287,8 +1287,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
         *stream = VALUE_OR_RETURN_STATUS(
                 aidl2legacy_AudioStreamType_audio_stream_type_t(responseAidl.stream));
     }
-    *selectedDeviceId = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_int32_t_audio_port_handle_t(responseAidl.selectedDeviceId));
+    *selectedDeviceIds = VALUE_OR_RETURN_STATUS(convertContainer<DeviceIdVector>(
+            responseAidl.selectedDeviceIds, aidl2legacy_int32_t_audio_port_handle_t));
     *portId = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_port_handle_t(responseAidl.portId));
     *secondaryOutputs = VALUE_OR_RETURN_STATUS(convertContainer<std::vector<audio_io_handle_t>>(
             responseAidl.secondaryOutputs, aidl2legacy_int32_t_audio_io_handle_t));

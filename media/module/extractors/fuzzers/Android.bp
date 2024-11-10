@@ -129,10 +129,16 @@ cc_fuzz {
     ],
 
     static_libs: [
+        "android.media.extractor.flags-aconfig-cc",
+        "libaconfig_storage_read_api_cc",
         "libstagefright_id3",
         "libstagefright_esds",
         "libmp4extractor",
         "libstagefright_metadatautils",
+    ],
+
+    shared_libs: [
+        "server_configurable_flags",
     ],
 
     dictionary: "mp4_extractor_fuzzer.dict",

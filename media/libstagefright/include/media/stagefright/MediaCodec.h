@@ -123,6 +123,13 @@ struct MediaCodec : public AHandler {
         CB_RESOURCE_RECLAIMED = 5,
         CB_CRYPTO_ERROR = 6,
         CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
+
+        /** Callback ID for when the metrics for this codec have been flushed
+         * due to the start of a new subsession. The associated AMessage will
+         * contain an sp<WrapperObject<std::unique_ptr<mediametrics::Item>>>
+         * Object at the "metrics" key.
+         */
+        CB_METRICS_FLUSHED = 8,
     };
 
     static const pid_t kNoPid = -1;

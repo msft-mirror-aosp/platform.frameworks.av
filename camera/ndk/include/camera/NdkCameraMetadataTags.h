@@ -2401,6 +2401,40 @@ typedef enum acamera_metadata_tag {
      */
     ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE =                     // byte (acamera_metadata_enum_android_control_low_light_boost_state_t)
             ACAMERA_CONTROL_START + 59,
+    /**
+     * <p>Whether the application uses ACAMERA_SCALER_CROP_REGION or ACAMERA_CONTROL_ZOOM_RATIO
+     * to control zoom levels.</p>
+     *
+     * @see ACAMERA_CONTROL_ZOOM_RATIO
+     * @see ACAMERA_SCALER_CROP_REGION
+     *
+     * <p>Type: byte (acamera_metadata_enum_android_control_zoom_method_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
+     *   <li>ACaptureRequest</li>
+     * </ul></p>
+     *
+     * <p>If set to AUTO, the camera device detects which capture request key the application uses
+     * to do zoom, ACAMERA_SCALER_CROP_REGION or ACAMERA_CONTROL_ZOOM_RATIO. If
+     * the application doesn't set android.scaler.zoomRatio or sets it to 1.0 in the capture
+     * request, the effective zoom level is reflected in ACAMERA_SCALER_CROP_REGION in capture
+     * results. If ACAMERA_CONTROL_ZOOM_RATIO is set to values other than 1.0, the effective
+     * zoom level is reflected in ACAMERA_CONTROL_ZOOM_RATIO. AUTO is the default value
+     * for this control, and also the behavior of the OS before Android version
+     * <a href="https://developer.android.com/reference/android/os/Build.VERSION_CODES.html#BAKLAVA">BAKLAVA</a>.</p>
+     * <p>If set to ZOOM_RATIO, the application explicitly specifies zoom level be controlled
+     * by ACAMERA_CONTROL_ZOOM_RATIO, and the effective zoom level is reflected in
+     * ACAMERA_CONTROL_ZOOM_RATIO in capture results. This addresses an ambiguity with AUTO,
+     * with which the camera device cannot know if the application is using cropRegion or
+     * zoomRatio at 1.0x.</p>
+     *
+     * @see ACAMERA_CONTROL_ZOOM_RATIO
+     * @see ACAMERA_SCALER_CROP_REGION
+     */
+    ACAMERA_CONTROL_ZOOM_METHOD =                               // byte (acamera_metadata_enum_android_control_zoom_method_t)
+            ACAMERA_CONTROL_START + 60,
     ACAMERA_CONTROL_END,
 
     /**
@@ -7959,6 +7993,145 @@ typedef enum acamera_metadata_tag {
     ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS_MAXIMUM_RESOLUTION = 
                                                                 // int64[4*n]
             ACAMERA_HEIC_START + 5,
+    /**
+     * <p>The available HEIC (ISO/IEC 23008-12/24) UltraHDR stream
+     * configurations that this camera device supports
+     * (i.e. format, width, height, output/input stream).</p>
+     *
+     * <p>Type: int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>The configurations are listed as <code>(format, width, height, input?)</code> tuples.</p>
+     * <p>All the static, control, and dynamic metadata tags related to JPEG apply to HEIC formats.
+     * Configuring JPEG and HEIC streams at the same time is not supported.</p>
+     * <p>All the configuration tuples <code>(format, width, height, input?)</code> will contain
+     * AIMAGE_FORMAT_HEIC format as OUTPUT only.</p>
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS = 
+                                                                // int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t)
+            ACAMERA_HEIC_START + 6,
+    /**
+     * <p>This lists the minimum frame duration for each
+     * format/size combination for HEIC UltraHDR output formats.</p>
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>This should correspond to the frame duration when only that
+     * stream is active, with all processing (typically in android.*.mode)
+     * set to either OFF or FAST.</p>
+     * <p>When multiple streams are used in a request, the minimum frame
+     * duration will be max(individual stream min durations).</p>
+     * <p>See ACAMERA_SENSOR_FRAME_DURATION and
+     * ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS for more details about
+     * calculating the max frame rate.</p>
+     *
+     * @see ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS
+     * @see ACAMERA_SENSOR_FRAME_DURATION
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS = // int64[4*n]
+            ACAMERA_HEIC_START + 7,
+    /**
+     * <p>This lists the maximum stall duration for each
+     * output format/size combination for HEIC UltraHDR streams.</p>
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>A stall duration is how much extra time would get added
+     * to the normal minimum frame duration for a repeating request
+     * that has streams with non-zero stall.</p>
+     * <p>This functions similarly to
+     * ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS for HEIC UltraHDR
+     * streams.</p>
+     * <p>All HEIC output stream formats may have a nonzero stall
+     * duration.</p>
+     *
+     * @see ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS =     // int64[4*n]
+            ACAMERA_HEIC_START + 8,
+    /**
+     * <p>The available HEIC (ISO/IEC 23008-12/24) UltraHDR stream
+     * configurations that this camera device supports
+     * (i.e. format, width, height, output/input stream) for CaptureRequests where
+     * ACAMERA_SENSOR_PIXEL_MODE is set to
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+     *
+     * @see ACAMERA_SENSOR_PIXEL_MODE
+     *
+     * <p>Type: int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS for details.</p>
+     * <p>All the configuration tuples <code>(format, width, height, input?)</code> will contain
+     * AIMAGE_FORMAT_HEIC format as OUTPUT only.</p>
+     *
+     * @see ACAMERA_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION = 
+                                                                // int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t)
+            ACAMERA_HEIC_START + 9,
+    /**
+     * <p>This lists the minimum frame duration for each
+     * format/size combination for HEIC UltraHDR output formats for CaptureRequests where
+     * ACAMERA_SENSOR_PIXEL_MODE is set to
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+     *
+     * @see ACAMERA_SENSOR_PIXEL_MODE
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_MIN_FRAME_DURATIONS for details.</p>
+     *
+     * @see ACAMERA_HEIC_AVAILABLE_HEIC_MIN_FRAME_DURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS_MAXIMUM_RESOLUTION = 
+                                                                // int64[4*n]
+            ACAMERA_HEIC_START + 10,
+    /**
+     * <p>This lists the maximum stall duration for each
+     * output format/size combination for HEIC UltraHDR streams for CaptureRequests where
+     * ACAMERA_SENSOR_PIXEL_MODE is set to
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+     *
+     * @see ACAMERA_SENSOR_PIXEL_MODE
+     *
+     * <p>Type: int64[4*n]</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
+     * </ul></p>
+     *
+     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS for details.</p>
+     *
+     * @see ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS
+     */
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS_MAXIMUM_RESOLUTION = 
+                                                                // int64[4*n]
+            ACAMERA_HEIC_START + 11,
     ACAMERA_HEIC_END,
 
     /**
@@ -8041,6 +8214,33 @@ typedef enum acamera_metadata_tag {
     ACAMERA_AUTOMOTIVE_LENS_FACING =                            // byte[n] (acamera_metadata_enum_android_automotive_lens_facing_t)
             ACAMERA_AUTOMOTIVE_LENS_START,
     ACAMERA_AUTOMOTIVE_LENS_END,
+
+    /**
+     * <p>Indicates when to activate Night Mode Camera Extension for high-quality
+     * still captures in low-light conditions.</p>
+     *
+     * <p>Type: int32 (acamera_metadata_enum_android_extension_night_mode_indicator_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
+     * </ul></p>
+     *
+     * <p>Provides awareness to the application when the current scene can benefit from using a
+     * Night Mode Camera Extension to take a high-quality photo.</p>
+     * <p>Support for this capture result can be queried via
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics.html#getAvailableCaptureResultKeys">CameraCharacteristics#getAvailableCaptureResultKeys</a>.</p>
+     * <p>If the device supports this capability then it will also support
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraExtensionCharacteristics.html#EXTENSION_NIGHT">NIGHT</a>
+     * and will be available in both
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraCaptureSession.html">sessions</a> and
+     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraExtensionSession.html">sessions</a>.</p>
+     * <p>The value will be {@code UNKNOWN} in the following auto exposure modes: ON_AUTO_FLASH,
+     * ON_ALWAYS_FLASH, ON_AUTO_FLASH_REDEYE, or ON_EXTERNAL_FLASH.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR =                    // int32 (acamera_metadata_enum_android_extension_night_mode_indicator_t)
+            ACAMERA_EXTENSION_START + 2,
+    ACAMERA_EXTENSION_END,
 
     /**
      * <p>The available Jpeg/R stream
@@ -11526,6 +11726,26 @@ typedef enum acamera_metadata_enum_acamera_heic_available_heic_stream_configurat
 
 } acamera_metadata_enum_android_heic_available_heic_stream_configurations_maximum_resolution_t;
 
+// ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS
+typedef enum acamera_metadata_enum_acamera_heic_available_heic_ultra_hdr_stream_configurations {
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_OUTPUT
+                                                                      = 0,
+
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_INPUT
+                                                                      = 1,
+
+} acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t;
+
+// ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION
+typedef enum acamera_metadata_enum_acamera_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution {
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION_OUTPUT
+                                                                      = 0,
+
+    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION_INPUT
+                                                                      = 1,
+
+} acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t;
+
 
 
 // ACAMERA_AUTOMOTIVE_LOCATION
@@ -11688,6 +11908,33 @@ typedef enum acamera_metadata_enum_acamera_automotive_lens_facing {
 
 } acamera_metadata_enum_android_automotive_lens_facing_t;
 
+
+// ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR
+typedef enum acamera_metadata_enum_acamera_extension_night_mode_indicator {
+    /**
+     * <p>The camera can't accurately assess the scene's lighting to determine if a Night Mode
+     * Camera Extension capture would improve the photo. This can happen when the current
+     * camera configuration doesn't support night mode indicator detection, such as when
+     * the auto exposure mode is ON_AUTO_FLASH, ON_ALWAYS_FLASH, ON_AUTO_FLASH_REDEYE, or
+     * ON_EXTERNAL_FLASH.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_UNKNOWN                   = 0,
+
+    /**
+     * <p>The camera has detected lighting conditions that are sufficiently bright. Night
+     * Mode Camera Extensions is available but may not be able to optimize the camera
+     * settings to take a higher quality photo.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_OFF                       = 1,
+
+    /**
+     * <p>The camera has detected low-light conditions. It is recommended to use Night Mode
+     * Camera Extension to optimize the camera settings to take a high-quality photo in
+     * the dark.</p>
+     */
+    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_ON                        = 2,
+
+} acamera_metadata_enum_android_extension_night_mode_indicator_t;
 
 
 // ACAMERA_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS

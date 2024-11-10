@@ -44,6 +44,7 @@
 
 #include <utility>
 
+#include <android/data_space.h>
 #include <android-base/stringprintf.h>
 #include <sched.h>
 #include <utils/Log.h>
@@ -2561,6 +2562,8 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
                                                                 // always occupy the initial entry.
             if ((outputStream->data_space == HAL_DATASPACE_V0_JFIF) ||
                     (outputStream->data_space ==
+                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
+                    (outputStream->data_space ==
                      static_cast<android_dataspace_t>(
                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R))) {
                 bufferSizes[k] = static_cast<uint32_t>(
@@ -2882,7 +2885,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
         bool hasAppCallback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
         bool isFixedFps, const std::set<std::set<std::string>>& physicalCameraIds,
         bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
-        const std::set<std::string>& cameraIdsWithZoom,
+        const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
         const SurfaceMap& outputSurfaces, nsecs_t requestTimeNs) {
     ATRACE_CALL();
     std::lock_guard<std::mutex> l(mInFlightLock);
@@ -2891,7 +2894,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
     res = mInFlightMap.add(frameNumber, InFlightRequest(numBuffers, resultExtras, hasInput,
             hasAppCallback, minExpectedDuration, maxExpectedDuration, isFixedFps, physicalCameraIds,
             isStillCapture, isZslCapture, rotateAndCropAuto, autoframingAuto, cameraIdsWithZoom,
-            requestTimeNs, outputSurfaces));
+            requestTimeNs, useZoomRatio, outputSurfaces));
     if (res < 0) return res;
 
     if (mInFlightMap.size() == 1) {
@@ -4179,6 +4182,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
         }
         bool isStillCapture = false;
         bool isZslCapture = false;
+        bool useZoomRatio = false;
         const camera_metadata_t* settings = halRequest->settings;
         bool shouldUnlockSettings = false;
         if (settings == nullptr) {
@@ -4198,6 +4202,14 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
             if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_ENABLE_ZSL_TRUE)) {
                 isZslCapture = true;
             }
+
+            if (flags::zoom_method()) {
+                e = camera_metadata_ro_entry_t();
+                find_camera_metadata_ro_entry(settings, ANDROID_CONTROL_ZOOM_METHOD, &e);
+                if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_ZOOM_METHOD_ZOOM_RATIO)) {
+                    useZoomRatio = true;
+                }
+            }
         }
         bool passSurfaceMap =
                 mUseHalBufManager || containsHalBufferManagedStream;
@@ -4211,7 +4223,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                 expectedDurationInfo.isFixedFps,
                 requestedPhysicalCameras, isStillCapture, isZslCapture,
                 captureRequest->mRotateAndCropAuto, captureRequest->mAutoframingAuto,
-                mPrevCameraIdsWithZoom,
+                mPrevCameraIdsWithZoom, useZoomRatio,
                 passSurfaceMap ? uniqueSurfaceIdMap :
                                       SurfaceMap{}, captureRequest->mRequestTimeNs);
         ALOGVV("%s: registered in flight requestId = %" PRId32 ", frameNumber = %" PRId64
