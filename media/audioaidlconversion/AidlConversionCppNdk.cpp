@@ -2315,6 +2315,15 @@ aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(const AudioPortDevic
     audio_port_config_device_ext legacy{};
     RETURN_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
                     aidl.device, &legacy.type, legacy.address));
+    const bool isInput = false;  // speaker_layout_channel_mask only represents output.
+    if (aidl.speakerLayout.has_value()) {
+        legacy.speaker_layout_channel_mask =
+                VALUE_OR_RETURN(aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
+                        aidl.speakerLayout.value(), isInput));
+    } else {
+        // Default to none when the field is null in the AIDL.
+        legacy.speaker_layout_channel_mask = AUDIO_CHANNEL_NONE;
+    }
     return legacy;
 }
 
@@ -2323,6 +2332,14 @@ ConversionResult<AudioPortDeviceExt> legacy2aidl_audio_port_config_device_ext_Au
     AudioPortDeviceExt aidl;
     aidl.device = VALUE_OR_RETURN(
             legacy2aidl_audio_device_AudioDevice(legacy.type, legacy.address));
+    const bool isInput = false;  // speaker_layout_channel_mask only represents output.
+    // The AIDL speakerLayout is nullable and if set, can only be a layoutMask.
+    if (audio_channel_mask_is_valid(legacy.speaker_layout_channel_mask) &&
+        audio_channel_mask_get_representation(legacy.speaker_layout_channel_mask) ==
+                AUDIO_CHANNEL_REPRESENTATION_POSITION) {
+        aidl.speakerLayout = VALUE_OR_RETURN(legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
+                legacy.speaker_layout_channel_mask, isInput));
+    }
     return aidl;
 }
 
