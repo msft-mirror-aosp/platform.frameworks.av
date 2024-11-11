@@ -2401,6 +2401,40 @@ typedef enum acamera_metadata_tag {
      */
     ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE =                     // byte (acamera_metadata_enum_android_control_low_light_boost_state_t)
             ACAMERA_CONTROL_START + 59,
+    /**
+     * <p>Whether the application uses ACAMERA_SCALER_CROP_REGION or ACAMERA_CONTROL_ZOOM_RATIO
+     * to control zoom levels.</p>
+     *
+     * @see ACAMERA_CONTROL_ZOOM_RATIO
+     * @see ACAMERA_SCALER_CROP_REGION
+     *
+     * <p>Type: byte (acamera_metadata_enum_android_control_zoom_method_t)</p>
+     *
+     * <p>This tag may appear in:
+     * <ul>
+     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
+     *   <li>ACaptureRequest</li>
+     * </ul></p>
+     *
+     * <p>If set to AUTO, the camera device detects which capture request key the application uses
+     * to do zoom, ACAMERA_SCALER_CROP_REGION or ACAMERA_CONTROL_ZOOM_RATIO. If
+     * the application doesn't set android.scaler.zoomRatio or sets it to 1.0 in the capture
+     * request, the effective zoom level is reflected in ACAMERA_SCALER_CROP_REGION in capture
+     * results. If ACAMERA_CONTROL_ZOOM_RATIO is set to values other than 1.0, the effective
+     * zoom level is reflected in ACAMERA_CONTROL_ZOOM_RATIO. AUTO is the default value
+     * for this control, and also the behavior of the OS before Android version
+     * <a href="https://developer.android.com/reference/android/os/Build.VERSION_CODES.html#BAKLAVA">BAKLAVA</a>.</p>
+     * <p>If set to ZOOM_RATIO, the application explicitly specifies zoom level be controlled
+     * by ACAMERA_CONTROL_ZOOM_RATIO, and the effective zoom level is reflected in
+     * ACAMERA_CONTROL_ZOOM_RATIO in capture results. This addresses an ambiguity with AUTO,
+     * with which the camera device cannot know if the application is using cropRegion or
+     * zoomRatio at 1.0x.</p>
+     *
+     * @see ACAMERA_CONTROL_ZOOM_RATIO
+     * @see ACAMERA_SCALER_CROP_REGION
+     */
+    ACAMERA_CONTROL_ZOOM_METHOD =                               // byte (acamera_metadata_enum_android_control_zoom_method_t)
+            ACAMERA_CONTROL_START + 60,
     ACAMERA_CONTROL_END,
 
     /**

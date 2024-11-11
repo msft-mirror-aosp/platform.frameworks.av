@@ -218,3 +218,11 @@ flag {
     description: "Indicates when to activate Night Mode Camera Extension"
     bug: "335902696"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "zoom_method"
+    is_exported: true
+    description: "Gives apps explicit control on reflects zoom via ZOOM_RATIO capture result"
+    bug: "298899993"
+}
