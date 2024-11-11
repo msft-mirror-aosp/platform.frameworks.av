@@ -138,6 +138,7 @@ std::map<int, std::vector<camera_metadata_tag>> dynamic_api_level_to_keys{
       {36, {
           ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE,
           ANDROID_COLOR_CORRECTION_COLOR_TINT,
+          ANDROID_CONTROL_ZOOM_METHOD,
           ANDROID_EXTENSION_NIGHT_MODE_INDICATOR,
         }  },
 };

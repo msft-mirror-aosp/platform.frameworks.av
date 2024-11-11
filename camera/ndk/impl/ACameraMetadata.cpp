@@ -562,6 +562,7 @@ ACameraMetadata::isCaptureRequestTag(const uint32_t tag) {
         case ACAMERA_CONTROL_ZOOM_RATIO:
         case ACAMERA_CONTROL_SETTINGS_OVERRIDE:
         case ACAMERA_CONTROL_AUTOFRAMING:
+        case ACAMERA_CONTROL_ZOOM_METHOD:
         case ACAMERA_EDGE_MODE:
         case ACAMERA_FLASH_MODE:
         case ACAMERA_FLASH_STRENGTH_LEVEL:
