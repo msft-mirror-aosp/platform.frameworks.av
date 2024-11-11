@@ -220,3 +220,12 @@ flag {
     description: "Gives apps explicit control on reflects zoom via ZOOM_RATIO capture result"
     bug: "298899993"
 }
+
+flag {
+    namespace: "camera_platform"
+    is_exported: true
+    name: "ae_priority"
+    description: "Add AE priority modes"
+    bug: "359944765"
+}
+
