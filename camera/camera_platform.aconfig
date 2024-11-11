@@ -175,16 +175,10 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "use_context_attribution_source"
-    description: "Use the context-provided AttributionSource when checking for client permissions"
+    name: "data_delivery_permission_checks"
+    description: "Pass the full AttributionSource chain to PermissionChecker for data delivery"
     bug: "190657833"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "check_full_attribution_source_chain"
-    description: "Pass the full AttributionSource chain to PermissionChecker"
-    bug: "190657833"
+    is_fixed_read_only: true
 }
 
 flag {
