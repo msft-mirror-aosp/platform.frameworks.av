@@ -183,6 +183,13 @@ flag {
 
 flag {
     namespace: "camera_platform"
+    name: "depth_jpeg_extensions"
+    description: "Add Depth Jpeg extension output support"
+    bug: "362788689"
+}
+
+flag {
+    namespace: "camera_platform"
     name: "mirror_mode_shared_surfaces"
     is_exported: true
     description: "Support setting and getting mirror mode for shared surfaces"
