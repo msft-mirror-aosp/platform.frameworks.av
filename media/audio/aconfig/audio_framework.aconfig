@@ -23,6 +23,14 @@ flag {
 }
 
 flag {
+    name: "deprecate_stream_bt_sco"
+    namespace: "media_audio"
+    description: "Deprecate STREAM_BLUETOOTH_SCO"
+    is_exported: true
+    bug: "376756660"
+}
+
+flag {
     name: "feature_spatial_audio_headtracking_low_latency"
     is_exported: true
     namespace: "media_audio"
