@@ -8767,6 +8767,7 @@ bool AudioPolicyManager::isValidAttributes(const audio_attributes_t *paa)
     case AUDIO_USAGE_SAFETY:
     case AUDIO_USAGE_VEHICLE_STATUS:
     case AUDIO_USAGE_ANNOUNCEMENT:
+    case AUDIO_USAGE_SPEAKER_CLEANUP:
         break;
     default:
         return false;
