@@ -618,6 +618,14 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         }
     }
 
+    if (flags::ae_priority()) {
+        res = addAePriorityModeTags();
+        if (OK != res) {
+            ALOGE("%s: Unable to add CONTROL_AE_AVAILABLE_PRIORITY_MODES tag: %s (%d)",
+                    __FUNCTION__, strerror(-res), res);
+        }
+    }
+
     camera_metadata_entry flashAvailable =
             mCameraCharacteristics.find(ANDROID_FLASH_INFO_AVAILABLE);
     if (flashAvailable.count == 1 &&

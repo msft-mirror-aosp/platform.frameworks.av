@@ -779,6 +779,7 @@ private:
             status_t addPreCorrectionActiveArraySize();
             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
             status_t addColorCorrectionAvailableModesTag(CameraMetadata& ch);
+            status_t addAePriorityModeTags();
             status_t addSessionConfigQueryVersionTag();
 
             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
