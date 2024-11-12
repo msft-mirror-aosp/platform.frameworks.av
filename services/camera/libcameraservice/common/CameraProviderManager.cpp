@@ -1898,6 +1898,36 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addAutoframingTags() 
     return res;
 }
 
+status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addAePriorityModeTags() {
+    status_t res = OK;
+    auto& c = mCameraCharacteristics;
+
+    auto entry = c.find(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+    if (entry.count != 0) {
+        return res;
+    }
+
+    std::vector<int32_t> supportedChTags;
+    auto chTags = c.find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
+    if (chTags.count == 0) {
+        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
+        return BAD_VALUE;
+    }
+
+    std::vector<uint8_t> aePriorityAvailableModes = {
+            ANDROID_CONTROL_AE_PRIORITY_MODE_OFF };
+    supportedChTags.reserve(chTags.count + 1);
+    supportedChTags.insert(supportedChTags.end(), chTags.data.i32,
+            chTags.data.i32 + chTags.count);
+    supportedChTags.push_back(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+    c.update(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES,
+            aePriorityAvailableModes.data(), aePriorityAvailableModes.size());
+    c.update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
+             supportedChTags.size());
+
+    return res;
+}
+
 status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addPreCorrectionActiveArraySize() {
     status_t res = OK;
     auto& c = mCameraCharacteristics;
