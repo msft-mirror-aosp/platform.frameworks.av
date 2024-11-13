@@ -1684,8 +1684,9 @@ ndk::ScopedAStatus CameraDevice::ServiceCallback::onCaptureStarted(
                     __FUNCTION__, burstId, cbh.mRequests.size());
             dev->setCameraDeviceErrorLocked(ACAMERA_ERROR_CAMERA_SERVICE);
         }
+
         sp<CaptureRequest> request = cbh.mRequests[burstId];
-        ALOGE("%s: request = %p", __FUNCTION__, request.get());
+        ALOGV("%s: request = %p", __FUNCTION__, request.get());
         sp<AMessage> msg = nullptr;
         if (v2Callback) {
             msg = new AMessage(kWhatCaptureStart2, dev->mHandler);
