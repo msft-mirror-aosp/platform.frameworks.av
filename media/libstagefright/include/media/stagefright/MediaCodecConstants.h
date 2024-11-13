@@ -983,6 +983,7 @@ inline constexpr char KEY_MAX_OUTPUT_CHANNEL_COUNT[] = "max-output-channel-count
 inline constexpr char KEY_MAX_PTS_GAP_TO_ENCODER[] = "max-pts-gap-to-encoder";
 inline constexpr char KEY_MAX_WIDTH[] = "max-width";
 inline constexpr char KEY_MIME[] = "mime";
+inline constexpr char KEY_NUM_SLOTS[] = "num-slots";
 inline constexpr char KEY_OPERATING_RATE[] = "operating-rate";
 inline constexpr char KEY_OUTPUT_REORDER_DEPTH[] = "output-reorder-depth";
 inline constexpr char KEY_PCM_ENCODING[] = "pcm-encoding";

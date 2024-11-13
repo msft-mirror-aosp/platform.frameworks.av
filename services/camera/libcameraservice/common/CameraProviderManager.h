@@ -88,6 +88,7 @@ enum SystemCameraKind {
 #define CAMERA_DEVICE_API_VERSION_1_0 HARDWARE_DEVICE_API_VERSION(1, 0)
 #define CAMERA_DEVICE_API_VERSION_1_2 HARDWARE_DEVICE_API_VERSION(1, 2)
 #define CAMERA_DEVICE_API_VERSION_1_3 HARDWARE_DEVICE_API_VERSION(1, 3)
+#define CAMERA_DEVICE_API_VERSION_1_4 HARDWARE_DEVICE_API_VERSION(1, 4)
 #define CAMERA_DEVICE_API_VERSION_3_0 HARDWARE_DEVICE_API_VERSION(3, 0)
 #define CAMERA_DEVICE_API_VERSION_3_1 HARDWARE_DEVICE_API_VERSION(3, 1)
 #define CAMERA_DEVICE_API_VERSION_3_2 HARDWARE_DEVICE_API_VERSION(3, 2)
@@ -779,6 +780,7 @@ private:
             status_t addPreCorrectionActiveArraySize();
             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
             status_t addColorCorrectionAvailableModesTag(CameraMetadata& ch);
+            status_t addAePriorityModeTags();
             status_t addSessionConfigQueryVersionTag();
 
             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,

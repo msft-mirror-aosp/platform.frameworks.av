@@ -123,7 +123,7 @@ public:
                                   const AttributionSourceState& attributionSource,
                                   audio_config_t *config,
                                   audio_output_flags_t *flags,
-                                  audio_port_handle_t *selectedDeviceId,
+                                  DeviceIdVector *selectedDeviceIds,
                                   audio_port_handle_t *portId,
                                   std::vector<audio_io_handle_t> *secondaryOutputs,
                                   output_type_t *outputType,
@@ -893,15 +893,7 @@ protected:
             return mAvailableInputDevices.getDevicesFromHwModule(
                     mPrimaryOutput->getModuleHandle());
         }
-        /**
-         * @brief getFirstDeviceId of the Device Vector
-         * @return if the collection is not empty, it returns the first device Id,
-         *         otherwise AUDIO_PORT_HANDLE_NONE
-         */
-        audio_port_handle_t getFirstDeviceId(const DeviceVector &devices) const
-        {
-            return (devices.size() > 0) ? devices.itemAt(0)->getId() : AUDIO_PORT_HANDLE_NONE;
-        }
+
         String8 getFirstDeviceAddress(const DeviceVector &devices) const
         {
             return (devices.size() > 0) ?
@@ -1142,7 +1134,7 @@ private:
                 uid_t uid,
                 audio_config_t *config,
                 audio_output_flags_t *flags,
-                audio_port_handle_t *selectedDeviceId,
+                DeviceIdVector *selectedDeviceIds,
                 bool *isRequestedDeviceForExclusiveUse,
                 std::vector<sp<AudioPolicyMix>> *secondaryMixes,
                 output_type_t *outputType,

@@ -120,6 +120,14 @@ flag {
 }
 
 flag {
+    name: "hardening_permission_spa"
+    is_exported: true
+    namespace: "media_audio"
+    description: "Flag for special app access impl for hardening."
+    bug: "376480814"
+}
+
+flag {
     name: "iamf_definitions_api"
     is_exported: true
     namespace: "media_audio"
@@ -196,6 +204,20 @@ flag {
         "Enable Java and native functions to get"
         "multiple routed device ids"
     bug: "367816690"
+}
+
+flag {
+    name: "spatial_audio_settings_versioning"
+    namespace: "media_audio"
+    description: "introduce versioning of spatial audio settings"
+    bug: "377977731"
+}
+
+flag {
+    name: "spatializer_capabilities"
+    namespace: "media_audio"
+    description: "spatializer reports effective channel masks"
+    bug: "377582613"
 }
 
 flag {

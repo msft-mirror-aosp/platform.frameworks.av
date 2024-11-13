@@ -28,6 +28,7 @@
 #include <camera/CameraUtils.h>
 #include <camera/StringUtils.h>
 #include <com_android_internal_camera_flags.h>
+#include <com_android_window_flags.h>
 #include <cutils/properties.h>
 #include <gui/Surface.h>
 #include <gui/view/Surface.h>
@@ -53,6 +54,7 @@ namespace android {
 using namespace camera2;
 
 namespace flags = com::android::internal::camera::flags;
+namespace wm_flags = com::android::window::flags;
 
 // Interface used by CameraService
 
@@ -134,8 +136,13 @@ status_t Camera2Client::initializeImpl(TProviderPtr providerPtr, const std::stri
     // The 'mRotateAndCropMode' value only accounts for the necessary adjustment
     // when the display rotates. The sensor orientation still needs to be calculated
     // and applied similar to the Camera2 path.
+    using hardware::BnCameraService::ROTATION_OVERRIDE_ROTATION_ONLY;
+    bool enableTransformInverseDisplay = true;
+    if (wm_flags::enable_camera_compat_for_desktop_windowing()) {
+        enableTransformInverseDisplay = (mRotationOverride != ROTATION_OVERRIDE_ROTATION_ONLY);
+    }
     CameraUtils::getRotationTransform(staticInfo, OutputConfiguration::MIRROR_MODE_AUTO,
-            &mRotateAndCropPreviewTransform);
+            enableTransformInverseDisplay, &mRotateAndCropPreviewTransform);
 
     mStreamingProcessor = new StreamingProcessor(this);
 

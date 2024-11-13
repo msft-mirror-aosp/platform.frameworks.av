@@ -2275,7 +2275,7 @@ Status CameraService::connectDevice(
 
     bool isNonSystemNdk = clientPackageNameMaybe.size() == 0;
 
-    if (!flags::use_context_attribution_source()) {
+    if (!flags::data_delivery_permission_checks()) {
         resolvedClientAttribution.pid = USE_CALLING_PID;
     }
 
@@ -4111,7 +4111,7 @@ CameraService::BasicClient::BasicClient(
         mAppOpsManager = std::make_unique<AppOpsManager>();
     }
 
-    mUidIsTrusted = isTrustedCallingUid(getClientUid());
+    mUidIsTrusted = isTrustedCallingUid(mClientAttribution.uid);
 }
 
 CameraService::BasicClient::~BasicClient() {
@@ -4281,7 +4281,7 @@ status_t CameraService::BasicClient::notifyCameraOpening() {
     ATRACE_CALL();
 
     // Don't start watching until we're streaming when using permissionChecker for data delivery
-    if (!flags::check_full_attribution_source_chain()) {
+    if (!flags::data_delivery_permission_checks()) {
         ALOGD("%s: Start camera ops, package name = %s, client UID = %d", __FUNCTION__,
               getPackageName().c_str(), getClientUid());
 
@@ -4303,7 +4303,7 @@ status_t CameraService::BasicClient::notifyCameraOpening() {
             }
         }
     } else {
-        // TODO: Remove when removing the check_full_attribution_source_chain flag
+        // TODO: Remove when removing the data_delivery_permission_checks flag
         ALOGD("%s: Bypassing checkOp for uid %d", __FUNCTION__, getClientUid());
     }
 
@@ -4337,7 +4337,7 @@ status_t CameraService::BasicClient::startCameraStreamingOps() {
           getPackageName().c_str(), getClientUid());
 
     if (mAppOpsManager != nullptr) {
-        if (flags::check_full_attribution_source_chain()) {
+        if (flags::data_delivery_permission_checks()) {
             ALOGD("%s: Start data delivery for uid %d", __FUNCTION__, getClientUid());
 
             const PermissionChecker::PermissionResult result =
@@ -4381,7 +4381,7 @@ status_t CameraService::BasicClient::noteAppOp() {
 
     // noteAppOp is only used for when camera mute is not supported, in order
     // to trigger the sensor privacy "Unblock" dialog
-    if (flags::check_full_attribution_source_chain()) {
+    if (flags::data_delivery_permission_checks()) {
         // Ignore the result, since we're only triggering the dialog
         ALOGD("%s: Check data delivery permissions for uid %d", __FUNCTION__, getClientUid());
         hasPermissionsForCameraForDataDelivery(std::string(), mClientAttribution);
@@ -4413,7 +4413,7 @@ status_t CameraService::BasicClient::finishCameraStreamingOps() {
     }
 
     if (mAppOpsManager != nullptr) {
-        if (flags::check_full_attribution_source_chain()) {
+        if (flags::data_delivery_permission_checks()) {
             ALOGD("%s: finishDataDelivery for uid %d", __FUNCTION__, getClientUid());
             finishDataDelivery(mClientAttribution);
 
@@ -4458,7 +4458,7 @@ status_t CameraService::BasicClient::notifyCameraClosing() {
     }
 
     // When using the data delivery permission checks, the open state does not involve AppOps
-    if (!flags::check_full_attribution_source_chain()) {
+    if (!flags::data_delivery_permission_checks()) {
         // Always stop watching, even if no camera op is active
         if (mOpsCallback != nullptr && mAppOpsManager != nullptr) {
             mAppOpsManager->stopWatchingMode(mOpsCallback);
@@ -4486,7 +4486,7 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
     }
 
     PermissionChecker::PermissionResult res;
-    if (flags::check_full_attribution_source_chain()) {
+    if (flags::data_delivery_permission_checks()) {
         int32_t appOpMode = AppOpsManager::MODE_ALLOWED;
         std::for_each(AttrSourceItr{mClientAttribution}, AttrSourceItr::end(),
                 [&](const auto& attr) {
@@ -4522,7 +4522,7 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
         // Uid may be active, but not visible to the user (e.g. PROCESS_STATE_FOREGROUND_SERVICE).
         // If not visible, but still active, then we want to block instead of muting the camera.
         int32_t procState = ActivityManager::PROCESS_STATE_NONEXISTENT;
-        if (flags::check_full_attribution_source_chain()) {
+        if (flags::data_delivery_permission_checks()) {
             // Use the proc state of the last uid in the chain (ultimately receiving the data)
             // when determining whether to mute or block
             int32_t uid = -1;

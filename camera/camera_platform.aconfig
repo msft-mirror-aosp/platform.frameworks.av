@@ -175,16 +175,10 @@ flag {
 
 flag {
     namespace: "camera_platform"
-    name: "use_context_attribution_source"
-    description: "Use the context-provided AttributionSource when checking for client permissions"
+    name: "data_delivery_permission_checks"
+    description: "Pass the full AttributionSource chain to PermissionChecker for data delivery"
     bug: "190657833"
-}
-
-flag {
-    namespace: "camera_platform"
-    name: "check_full_attribution_source_chain"
-    description: "Pass the full AttributionSource chain to PermissionChecker"
-    bug: "190657833"
+    is_fixed_read_only: true
 }
 
 flag {
@@ -211,3 +205,33 @@ flag {
     bug: "359409044"
 }
 
+flag {
+    namespace: "camera_platform"
+    name: "night_mode_indicator"
+    is_exported: true
+    description: "Indicates when to activate Night Mode Camera Extension"
+    bug: "335902696"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "zoom_method"
+    is_exported: true
+    description: "Gives apps explicit control on reflects zoom via ZOOM_RATIO capture result"
+    bug: "298899993"
+}
+
+flag {
+    namespace: "camera_platform"
+    is_exported: true
+    name: "ae_priority"
+    description: "Add AE priority modes"
+    bug: "359944765"
+}
+
+flag {
+    namespace: "camera_platform"
+    name: "feature_combination_baklava"
+    description: "Add new feature combination query version for Baklava"
+    bug: "370778206"
+}

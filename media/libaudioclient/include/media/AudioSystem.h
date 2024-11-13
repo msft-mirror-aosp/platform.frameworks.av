@@ -342,7 +342,7 @@ public:
                                      const AttributionSourceState& attributionSource,
                                      audio_config_t *config,
                                      audio_output_flags_t flags,
-                                     audio_port_handle_t *selectedDeviceId,
+                                     DeviceIdVector *selectedDeviceIds,
                                      audio_port_handle_t *portId,
                                      std::vector<audio_io_handle_t> *secondaryOutputs,
                                      bool *isSpatialized,

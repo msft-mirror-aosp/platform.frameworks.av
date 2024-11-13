@@ -95,7 +95,7 @@ sp<CaptureStateListenerImpl> AudioSystem::gSoundTriggerCaptureStateListener;
 // ServiceSingleton to provide interaction with the service notifications and
 // binder death notifications.
 //
-// If the AF/AP service is unavailable for kServiceWaitMs from ServiceManager,
+// If the AF/AP service is unavailable for kServiceClientWaitMs from ServiceManager,
 // ServiceSingleton will return a nullptr service handle resulting in the same dead object error
 // as if the service died (which it did, otherwise we'd be returning the cached handle).
 //
@@ -129,9 +129,10 @@ sp<CaptureStateListenerImpl> AudioSystem::gSoundTriggerCaptureStateListener;
 //
 // TODO(b/375691003) We use 10s as a conservative timeout value, and will tune closer to 3s.
 // Too small a value (i.e. less than 1s would churn repeated calls to get the service).
-static constexpr int32_t kServiceWaitMs = 10'000;
+// The value can be tuned by the property audio.service.client_wait_ms.
+static constexpr int32_t kServiceClientWaitMs = 10'000;
 
-static constexpr const char kServiceWaitProperty[] = "audio.service.wait_ms";
+static constexpr const char kServiceWaitProperty[] = "audio.service.client_wait_ms";
 
 // AudioFlingerServiceTraits is a collection of methods that parameterize the
 // ServiceSingleton handler for IAudioFlinger
@@ -172,7 +173,7 @@ public:
             }
             mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
             mWaitMs = std::chrono::milliseconds(
-                property_get_int32(kServiceWaitProperty, kServiceWaitMs));
+                property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
             init = true;
         }
         if (mValid) return mService;
@@ -272,7 +273,8 @@ private:
     static inline constinit std::mutex mMutex;
     static inline constinit sp<AudioSystem::AudioFlingerClient> mClient GUARDED_BY(mMutex);
     static inline constinit sp<IAudioFlinger> mService GUARDED_BY(mMutex);
-    static inline constinit std::chrono::milliseconds mWaitMs GUARDED_BY(mMutex) {kServiceWaitMs};
+    static inline constinit std::chrono::milliseconds mWaitMs
+            GUARDED_BY(mMutex) {kServiceClientWaitMs};
     static inline constinit bool mValid GUARDED_BY(mMutex) = false;
     static inline constinit std::atomic_bool mDisableThreadPoolStart = false;
 };
@@ -1014,7 +1016,7 @@ public:
             }
             mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
             mWaitMs = std::chrono::milliseconds(
-                    property_get_int32(kServiceWaitProperty, kServiceWaitMs));
+                    property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
             init = true;
         }
         if (mValid) return mService;
@@ -1071,7 +1073,8 @@ private:
     static inline constinit sp<AudioSystem::AudioPolicyServiceClient> mClient GUARDED_BY(mMutex);
     static inline constinit sp<IAudioPolicyService> mService GUARDED_BY(mMutex);
     static inline constinit bool mValid GUARDED_BY(mMutex) = false;
-    static inline constinit std::chrono::milliseconds mWaitMs GUARDED_BY(mMutex) {kServiceWaitMs};
+    static inline constinit std::chrono::milliseconds mWaitMs
+            GUARDED_BY(mMutex) {kServiceClientWaitMs};
     static inline constinit std::atomic_bool mDisableThreadPoolStart = false;
 };
 
@@ -1224,7 +1227,7 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
                                        const AttributionSourceState& attributionSource,
                                        audio_config_t* config,
                                        audio_output_flags_t flags,
-                                       audio_port_handle_t* selectedDeviceId,
+                                       DeviceIdVector* selectedDeviceIds,
                                        audio_port_handle_t* portId,
                                        std::vector<audio_io_handle_t>* secondaryOutputs,
                                        bool *isSpatialized,
@@ -1239,8 +1242,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
         ALOGE("%s NULL output - shouldn't happen", __func__);
         return BAD_VALUE;
     }
-    if (selectedDeviceId == nullptr) {
-        ALOGE("%s NULL selectedDeviceId - shouldn't happen", __func__);
+    if (selectedDeviceIds == nullptr) {
+        ALOGE("%s NULL selectedDeviceIds - shouldn't happen", __func__);
         return BAD_VALUE;
     }
     if (portId == nullptr) {
@@ -1262,20 +1265,20 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
             legacy2aidl_audio_config_t_AudioConfig(*config, false /*isInput*/));
     int32_t flagsAidl = VALUE_OR_RETURN_STATUS(
             legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
-    int32_t selectedDeviceIdAidl = VALUE_OR_RETURN_STATUS(
-            legacy2aidl_audio_port_handle_t_int32_t(*selectedDeviceId));
+    auto selectedDeviceIdsAidl = VALUE_OR_RETURN_STATUS(convertContainer<std::vector<int32_t>>(
+            *selectedDeviceIds, legacy2aidl_audio_port_handle_t_int32_t));
 
     media::GetOutputForAttrResponse responseAidl;
 
     status_t status = statusTFromBinderStatus(
             aps->getOutputForAttr(attrAidl, sessionAidl, attributionSource, configAidl, flagsAidl,
-                                  selectedDeviceIdAidl, &responseAidl));
+                                  selectedDeviceIdsAidl, &responseAidl));
     if (status != NO_ERROR) {
         config->format = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_AudioFormatDescription_audio_format_t(responseAidl.configBase.format));
+                aidl2legacy_AudioFormatDescription_audio_format_t(responseAidl.configBase.format));
         config->channel_mask = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
-                    responseAidl.configBase.channelMask, false /*isInput*/));
+                aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
+                        responseAidl.configBase.channelMask, false /*isInput*/));
         config->sample_rate = responseAidl.configBase.sampleRate;
         return status;
     }
@@ -1287,8 +1290,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
         *stream = VALUE_OR_RETURN_STATUS(
                 aidl2legacy_AudioStreamType_audio_stream_type_t(responseAidl.stream));
     }
-    *selectedDeviceId = VALUE_OR_RETURN_STATUS(
-            aidl2legacy_int32_t_audio_port_handle_t(responseAidl.selectedDeviceId));
+    *selectedDeviceIds = VALUE_OR_RETURN_STATUS(convertContainer<DeviceIdVector>(
+            responseAidl.selectedDeviceIds, aidl2legacy_int32_t_audio_port_handle_t));
     *portId = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_port_handle_t(responseAidl.portId));
     *secondaryOutputs = VALUE_OR_RETURN_STATUS(convertContainer<std::vector<audio_io_handle_t>>(
             responseAidl.secondaryOutputs, aidl2legacy_int32_t_audio_io_handle_t));
