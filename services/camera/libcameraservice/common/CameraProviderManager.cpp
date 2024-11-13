@@ -2058,14 +2058,25 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQuery
 
     int versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_UPSIDE_DOWN_CAKE;
     IPCTransport ipcTransport = parentProvider->getIPCTransport();
-    int deviceVersion = HARDWARE_DEVICE_API_VERSION(mVersion.get_major(), mVersion.get_minor());
-    if (ipcTransport == IPCTransport::AIDL
-            && deviceVersion >= CAMERA_DEVICE_API_VERSION_1_3) {
-        versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
+    auto& c = mCameraCharacteristics;
+    status_t res = OK;
+    if (ipcTransport != IPCTransport::AIDL) {
+        res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
+        mSessionConfigQueryVersion = versionCode;
+        return res;
     }
 
-    auto& c = mCameraCharacteristics;
-    status_t res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
+    int deviceVersion = HARDWARE_DEVICE_API_VERSION(mVersion.get_major(), mVersion.get_minor());
+    if (deviceVersion == CAMERA_DEVICE_API_VERSION_1_3) {
+        versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
+    } else if (deviceVersion >= CAMERA_DEVICE_API_VERSION_1_4) {
+        if (flags::feature_combination_baklava()) {
+            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_BAKLAVA;
+        } else {
+            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
+        }
+    }
+    res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
     mSessionConfigQueryVersion = versionCode;
     return res;
 }
