@@ -1189,6 +1189,19 @@ sp<PersistentSurface> MediaCodec::CreatePersistentInputSurface() {
     return new PersistentSurface(bufferProducer, bufferSource);
 }
 
+//static
+status_t MediaCodec::getGloballyAvailableResources(std::vector<GlobalResourceInfo>& resources) {
+    resources.clear();
+    // Make sure codec availability feature is on.
+    if (!android::media::codec::codec_availability()) {
+        return ERROR_UNSUPPORTED;
+    }
+    // TODO: For now this is just an empty function.
+    // The actual implementation should use component store to query the
+    // available resources from hal, and fill in resources with the same.
+    return ERROR_UNSUPPORTED;
+}
+
 // GenerateCodecId generates a 64bit Random ID for each codec that is created.
 // The Codec ID is generated as:
 //   - A process-unique random high 32bits
@@ -2551,6 +2564,31 @@ status_t MediaCodec::configure(
     }
 
     return err;
+}
+
+status_t MediaCodec::getRequiredResources(std::vector<InstanceResourceInfo>& resources) {
+    resources.clear();
+    // Make sure codec availability feature is on.
+    if (!android::media::codec::codec_availability()) {
+        return ERROR_UNSUPPORTED;
+    }
+    // Make sure that the codec was configured already.
+    if (mState != CONFIGURED && mState != STARTING && mState != STARTED &&
+        mState != FLUSHING && mState != FLUSHED) {
+        ALOGE("Codec wasn't configured yet!");
+        return INVALID_OPERATION;
+    }
+
+    if (!mRequiredResourceInfo.empty()) {
+        resources = mRequiredResourceInfo;
+        return OK;
+    }
+
+    // TODO: For now this is just an empty function.
+    // The actual implementation should use component interface
+    // (for example, through mCodec->getRequiredDeviceResources) to query the
+    // the required resources for this configuration, and fill in resources with the same.
+    return ERROR_UNSUPPORTED;
 }
 
 // Media Format Shaping support
@@ -7037,6 +7075,18 @@ void MediaCodec::onOutputFormatChanged() {
         sp<AMessage> msg = mCallback->dup();
         msg->setInt32("callbackID", CB_OUTPUT_FORMAT_CHANGED);
         msg->setMessage("format", mOutputFormat);
+        msg->post();
+    }
+}
+
+void MediaCodec::onRequiredResourcesChanged(
+        const std::vector<InstanceResourceInfo>& resourceInfo) {
+    mRequiredResourceInfo = resourceInfo;
+    // Make sure codec availability feature is on.
+    if (mCallback != nullptr && android::media::codec::codec_availability()) {
+        // Post the callback
+        sp<AMessage> msg = mCallback->dup();
+        msg->setInt32("callbackID", CB_REQUIRED_RESOURCES_CHANGED);
         msg->post();
     }
 }
