@@ -75,6 +75,9 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
 
     builder.setBufferCapacity(DEFAULT_BUFFER_CAPACITY);
 
+    // Each shared stream will use its own SRC.
+    builder.setSampleRate(AAUDIO_UNSPECIFIED);
+
     result = mStreamInternal->open(builder);
 
     setSampleRate(mStreamInternal->getSampleRate());
