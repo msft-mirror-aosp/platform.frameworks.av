@@ -37,8 +37,6 @@ cc_fuzz {
         "effect-aidl-cpp",
         "libaudioclient",
         "libbase",
-        "libcgrouprc",
-        "libcgrouprc_format",
         "libcutils",
         "libjsoncpp",
         "liblog",
