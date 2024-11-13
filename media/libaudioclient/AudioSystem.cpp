@@ -324,20 +324,15 @@ status_t AudioSystem::setStreamMute(audio_stream_type_t stream, bool mute) {
     return NO_ERROR;
 }
 
-status_t AudioSystem::getStreamVolume(audio_stream_type_t stream, float* volume,
-                                      audio_io_handle_t output) {
-    if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
+status_t AudioSystem::setPortsVolume(
+        const std::vector<audio_port_handle_t>& portIds, float volume, audio_io_handle_t output) {
     const sp<IAudioFlinger> af = get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
-    *volume = af->streamVolume(stream, output);
-    return NO_ERROR;
-}
-
-status_t AudioSystem::getStreamMute(audio_stream_type_t stream, bool* mute) {
-    if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
-    const sp<IAudioFlinger> af = get_audio_flinger();
-    if (af == 0) return PERMISSION_DENIED;
-    *mute = af->streamMute(stream);
+    std::vector<int32_t> portIdsAidl = VALUE_OR_RETURN_STATUS(
+            convertContainer<std::vector<int32_t>>(
+                    portIds, legacy2aidl_audio_port_handle_t_int32_t));
+    int32_t outputAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
+    af->setPortsVolume(portIdsAidl, volume, outputAidl);
     return NO_ERROR;
 }
 
@@ -1100,7 +1095,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
                                        audio_port_handle_t* portId,
                                        std::vector<audio_io_handle_t>* secondaryOutputs,
                                        bool *isSpatialized,
-                                       bool *isBitPerfect) {
+                                       bool *isBitPerfect,
+                                       float *volume) {
     if (attr == nullptr) {
         ALOGE("%s NULL audio attributes", __func__);
         return BAD_VALUE;
@@ -1166,6 +1162,7 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
     *isBitPerfect = responseAidl.isBitPerfect;
     *attr = VALUE_OR_RETURN_STATUS(
             aidl2legacy_AudioAttributes_audio_attributes_t(responseAidl.attr));
+    *volume = responseAidl.volume;
 
     return OK;
 }

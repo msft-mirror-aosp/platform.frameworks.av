@@ -45,7 +45,6 @@
 #include <android_media_audiopolicy.h>
 #include <com_android_media_audioserver.h>
 #include <cutils/bitops.h>
-#include <cutils/properties.h>
 #include <media/AudioParameter.h>
 #include <policy.h>
 #include <private/android_filesystem_config.h>
@@ -55,6 +54,7 @@
 #include <utils/Log.h>
 
 #include "AudioPolicyManager.h"
+#include "SpatializerHelper.h"
 #include "TypeConverter.h"
 
 namespace android {
@@ -66,6 +66,7 @@ using android::media::audio::common::AudioDevice;
 using android::media::audio::common::AudioDeviceAddress;
 using android::media::audio::common::AudioPortDeviceExt;
 using android::media::audio::common::AudioPortExt;
+using com::android::media::audioserver::fix_call_audio_patch;
 using content::AttributionSourceState;
 
 //FIXME: workaround for truncated touch sounds
@@ -721,8 +722,10 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
     audio_attributes_t attr = { .source = AUDIO_SOURCE_VOICE_COMMUNICATION };
     auto txSourceDevice = mEngine->getInputDeviceForAttributes(attr);
 
-    disconnectTelephonyAudioSource(mCallRxSourceClient);
-    disconnectTelephonyAudioSource(mCallTxSourceClient);
+    if (!fix_call_audio_patch()) {
+        disconnectTelephonyAudioSource(mCallRxSourceClient);
+        disconnectTelephonyAudioSource(mCallTxSourceClient);
+    }
 
     if (rxDevices.isEmpty()) {
         ALOGW("%s() no selected output device", __func__);
@@ -775,6 +778,9 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
     // Use legacy routing method for voice calls via setOutputDevice() on primary output.
     // Otherwise, create two audio patches for TX and RX path.
     if (!createRxPatch) {
+        if (fix_call_audio_patch()) {
+            disconnectTelephonyAudioSource(mCallRxSourceClient);
+        }
         if (!hasPrimaryOutput()) {
             ALOGW("%s() no primary output available", __func__);
             return INVALID_OPERATION;
@@ -797,6 +803,8 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
             }
         }
         connectTelephonyTxAudioSource(txSourceDevice, txSinkDevice, delayMs);
+    } else if (fix_call_audio_patch()) {
+        disconnectTelephonyAudioSource(mCallTxSourceClient);
     }
     if (waitMs != nullptr) {
         *waitMs = muteWaitMs;
@@ -818,18 +826,38 @@ bool AudioPolicyManager::isDeviceOfModule(
 
 void AudioPolicyManager::connectTelephonyRxAudioSource(uint32_t delayMs)
 {
-    disconnectTelephonyAudioSource(mCallRxSourceClient);
+    const auto aa = mEngine->getAttributesForStreamType(AUDIO_STREAM_VOICE_CALL);
+
+    if (fix_call_audio_patch()) {
+        if (mCallRxSourceClient != nullptr) {
+            DeviceVector rxDevices =
+                  mEngine->getOutputDevicesForAttributes(aa, nullptr, false /*fromCache*/);
+            ALOG_ASSERT(!rxDevices.isEmpty() || !mCallRxSourceClient->isConnected(),
+                        "connectTelephonyRxAudioSource(): no device found for call RX source");
+            sp<DeviceDescriptor> rxDevice = rxDevices.itemAt(0);
+            if (mCallRxSourceClient->isConnected()
+                    && mCallRxSourceClient->sinkDevice()->equals(rxDevice)) {
+                return;
+            }
+            disconnectTelephonyAudioSource(mCallRxSourceClient);
+        }
+    } else {
+        disconnectTelephonyAudioSource(mCallRxSourceClient);
+    }
+
     const struct audio_port_config source = {
         .role = AUDIO_PORT_ROLE_SOURCE, .type = AUDIO_PORT_TYPE_DEVICE,
         .ext.device.type = AUDIO_DEVICE_IN_TELEPHONY_RX, .ext.device.address = ""
     };
-    const auto aa = mEngine->getAttributesForStreamType(AUDIO_STREAM_VOICE_CALL);
-
     audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE;
+
     status_t status = startAudioSourceInternal(&source, &aa, &portId, 0 /*uid*/,
                                        true /*internal*/, true /*isCallRx*/, delayMs);
     ALOGE_IF(status != OK, "%s: failed to start audio source (%d)", __func__, status);
     mCallRxSourceClient = mAudioSources.valueFor(portId);
+    ALOGV("%s portdID %d between source %s and sink %s", __func__, portId,
+        mCallRxSourceClient->srcDevice()->toString().c_str(),
+        mCallRxSourceClient->sinkDevice()->toString().c_str());
     ALOGE_IF(mCallRxSourceClient == nullptr,
              "%s failed to start Telephony Rx AudioSource", __func__);
 }
@@ -848,15 +876,26 @@ void AudioPolicyManager::connectTelephonyTxAudioSource(
         const sp<DeviceDescriptor> &srcDevice, const sp<DeviceDescriptor> &sinkDevice,
         uint32_t delayMs)
 {
-    disconnectTelephonyAudioSource(mCallTxSourceClient);
     if (srcDevice == nullptr || sinkDevice == nullptr) {
         ALOGW("%s could not create patch, invalid sink and/or source device(s)", __func__);
         return;
     }
+
+    if (fix_call_audio_patch()) {
+        if (mCallTxSourceClient != nullptr) {
+            if (mCallTxSourceClient->isConnected()
+                    && mCallTxSourceClient->srcDevice()->equals(srcDevice)) {
+                return;
+            }
+            disconnectTelephonyAudioSource(mCallTxSourceClient);
+        }
+    } else {
+        disconnectTelephonyAudioSource(mCallTxSourceClient);
+    }
+
     PatchBuilder patchBuilder;
     patchBuilder.addSource(srcDevice).addSink(sinkDevice);
-    ALOGV("%s between source %s and sink %s", __func__,
-            srcDevice->toString().c_str(), sinkDevice->toString().c_str());
+
     auto callTxSourceClientPortId = PolicyAudioPort::getNextUniqueId();
     const auto aa = mEngine->getAttributesForStreamType(AUDIO_STREAM_VOICE_CALL);
 
@@ -873,6 +912,8 @@ void AudioPolicyManager::connectTelephonyTxAudioSource(
                 mCallTxSourceClient, sinkDevice, patchBuilder.patch(), patchHandle, mUidCached,
                 delayMs);
     ALOGE_IF(status != NO_ERROR, "%s() error %d creating TX audio patch", __func__, status);
+    ALOGV("%s portdID %d between source %s and sink %s", __func__, callTxSourceClientPortId,
+        srcDevice->toString().c_str(), sinkDevice->toString().c_str());
     if (status == NO_ERROR) {
         mAudioSources.add(callTxSourceClientPortId, mCallTxSourceClient);
     }
@@ -1460,7 +1501,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
                                               std::vector<audio_io_handle_t> *secondaryOutputs,
                                               output_type_t *outputType,
                                               bool *isSpatialized,
-                                              bool *isBitPerfect)
+                                              bool *isBitPerfect,
+                                              float *volume)
 {
     // The supplied portId must be AUDIO_PORT_HANDLE_NONE
     if (*portId != AUDIO_PORT_HANDLE_NONE) {
@@ -1515,6 +1557,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
                                   std::move(weakSecondaryOutputDescs),
                                   outputDesc->mPolicyMix);
     outputDesc->addClient(clientDesc);
+
+    *volume = Volume::DbToAmpl(outputDesc->getCurVolume(toVolumeSource(resultAttr)));
 
     ALOGV("%s() returns output %d requestedPortId %d selectedDeviceId %d for port ID %d", __func__,
           *output, requestedPortId, *selectedDeviceId, *portId);
@@ -2352,10 +2396,14 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
                 // If it is first bit-perfect client, reroute all clients that will be routed to
                 // the bit-perfect sink so that it is guaranteed only bit-perfect stream is active.
                 PortHandleVector clientsToInvalidate;
+                std::vector<sp<SwAudioOutputDescriptor>> outputsToResetDevice;
                 for (size_t i = 0; i < mOutputs.size(); i++) {
-                    if (mOutputs[i] == outputDesc ||
-                        mOutputs[i]->devices().filter(outputDesc->devices()).isEmpty()) {
+                    if (mOutputs[i] == outputDesc || (!mOutputs[i]->devices().isEmpty() &&
+                        mOutputs[i]->devices().filter(outputDesc->devices()).isEmpty())) {
                         continue;
+                    }
+                    if (mOutputs[i]->getPatchHandle() != AUDIO_PATCH_HANDLE_NONE) {
+                        outputsToResetDevice.push_back(mOutputs[i]);
                     }
                     for (const auto& c : mOutputs[i]->getClientIterable()) {
                         clientsToInvalidate.push_back(c->portId());
@@ -2365,6 +2413,9 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
                     ALOGD("%s Invalidate clients due to first bit-perfect client started",
                           __func__);
                     mpClientInterface->invalidateTracks(clientsToInvalidate);
+                }
+                for (const auto& output : outputsToResetDevice) {
+                    resetOutputDevice(output, 0 /*delayMs*/, nullptr /*patchHandle*/);
                 }
             }
         }
@@ -3123,43 +3174,115 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
         }
     }
 
+    bool isPreemptor = false;
     if (!profile->canOpenNewIo()) {
-        for (size_t i = 0; i < mInputs.size(); ) {
-            sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
-            if (desc->mProfile != profile) {
-                i++;
-                continue;
-            }
-            // if sound trigger, reuse input if used by other sound trigger on same session
-            // else
-            //    reuse input if active client app is not in IDLE state
-            //
-            RecordClientVector clients = desc->clientsList();
-            bool doClose = false;
-            for (const auto& client : clients) {
-                if (isSoundTrigger != client->isSoundTrigger()) {
+        if (com::android::media::audioserver::fix_input_sharing_logic()) {
+            //  First pick best candidate for preemption (there may not be any):
+            //  - Preempt and input if:
+            //     - It has only strictly lower priority use cases than the new client
+            //     - It has equal priority use cases than the new client, was not
+            //     opened thanks to preemption or has been active since opened.
+            //  - Order the preemption candidates by inactive first and priority second
+            sp<AudioInputDescriptor> closeCandidate;
+            int leastCloseRank = INT_MAX;
+            static const int sCloseActive = 0x100;
+
+            for (size_t i = 0; i < mInputs.size(); i++) {
+                sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
+                if (desc->mProfile != profile) {
                     continue;
                 }
-                if (client->isSoundTrigger()) {
-                    if (session == client->session()) {
+                sp<RecordClientDescriptor> topPrioClient = desc->getHighestPriorityClient();
+                if (topPrioClient == nullptr) {
+                    continue;
+                }
+                int topPrio = source_priority(topPrioClient->source());
+                if (topPrio < source_priority(attributes.source)
+                      || (topPrio == source_priority(attributes.source)
+                          && !desc->isPreemptor())) {
+                    int closeRank = (desc->isActive() ? sCloseActive : 0) + topPrio;
+                    if (closeRank < leastCloseRank) {
+                        leastCloseRank = closeRank;
+                        closeCandidate = desc;
+                    }
+                }
+            }
+
+            if (closeCandidate != nullptr) {
+                closeInput(closeCandidate->mIoHandle);
+                // Mark the new input as being issued from a preemption
+                // so that is will not be preempted later
+                isPreemptor = true;
+            } else {
+                // Then pick the best reusable input (There is always one)
+                // The order of preference is:
+                // 1) active inputs with same use case as the new client
+                // 2) inactive inputs with same use case
+                // 3) active inputs with different use cases
+                // 4) inactive inputs with different use cases
+                sp<AudioInputDescriptor> reuseCandidate;
+                int leastReuseRank = INT_MAX;
+                static const int sReuseDifferentUseCase = 0x100;
+
+                for (size_t i = 0; i < mInputs.size(); i++) {
+                    sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
+                    if (desc->mProfile != profile) {
+                        continue;
+                    }
+                    int reuseRank = sReuseDifferentUseCase;
+                    for (const auto& client: desc->getClientIterable()) {
+                        if (client->source() == attributes.source) {
+                            reuseRank = 0;
+                            break;
+                        }
+                    }
+                    reuseRank += desc->isActive() ? 0 : 1;
+                    if (reuseRank < leastReuseRank) {
+                        leastReuseRank = reuseRank;
+                        reuseCandidate = desc;
+                    }
+                }
+                return reuseCandidate->mIoHandle;
+            }
+        } else { // fix_input_sharing_logic()
+            for (size_t i = 0; i < mInputs.size(); ) {
+                 sp<AudioInputDescriptor> desc = mInputs.valueAt(i);
+                 if (desc->mProfile != profile) {
+                     i++;
+                     continue;
+                 }
+                // if sound trigger, reuse input if used by other sound trigger on same session
+                // else
+                //    reuse input if active client app is not in IDLE state
+                //
+                RecordClientVector clients = desc->clientsList();
+                bool doClose = false;
+                for (const auto& client : clients) {
+                    if (isSoundTrigger != client->isSoundTrigger()) {
+                        continue;
+                    }
+                    if (client->isSoundTrigger()) {
+                        if (session == client->session()) {
+                            return desc->mIoHandle;
+                        }
+                        continue;
+                    }
+                    if (client->active() && client->appState() != APP_STATE_IDLE) {
                         return desc->mIoHandle;
                     }
-                    continue;
+                    doClose = true;
                 }
-                if (client->active() && client->appState() != APP_STATE_IDLE) {
-                    return desc->mIoHandle;
+                if (doClose) {
+                    closeInput(desc->mIoHandle);
+                } else {
+                    i++;
                 }
-                doClose = true;
-            }
-            if (doClose) {
-                closeInput(desc->mIoHandle);
-            } else {
-                i++;
             }
         }
     }
 
-    sp<AudioInputDescriptor> inputDesc = new AudioInputDescriptor(profile, mpClientInterface);
+    sp<AudioInputDescriptor> inputDesc = new AudioInputDescriptor(
+            profile, mpClientInterface, isPreemptor);
 
     audio_config_t lConfig = AUDIO_CONFIG_INITIALIZER;
     lConfig.sample_rate = profileSamplingRate;
@@ -3422,6 +3545,11 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
                                                             bool enabled,
                                                             audio_stream_type_t streamToDriveAbs)
 {
+    if (!enabled) {
+        mAbsoluteVolumeDrivingStreams.erase(deviceType);
+        return NO_ERROR;
+    }
+
     audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
     if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
         ALOGW("%s: no attributes for stream %s, bailing out", __func__,
@@ -3429,12 +3557,7 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
         return BAD_VALUE;
     }
 
-    if (enabled) {
-        mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
-    } else {
-        mAbsoluteVolumeDrivingStreams.erase(deviceType);
-    }
-
+    mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
     return NO_ERROR;
 }
 
@@ -3712,9 +3835,10 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
     // 1: An offloaded output. If the effect ends up not being offloadable,
     //    AudioFlinger will invalidate the track and the offloaded output
     //    will be closed causing the effect to be moved to a PCM output.
-    // 2: A deep buffer output
-    // 3: The primary output
-    // 4: the first output in the list
+    // 2: Spatializer output if the stereo spatializer feature enabled
+    // 3: A deep buffer output
+    // 4: The primary output
+    // 5: the first output in the list
 
     DeviceVector devices = mEngine->getOutputDevicesForAttributes(
                 attributes_initializer(AUDIO_USAGE_MEDIA), nullptr, false /*fromCache*/);
@@ -3729,28 +3853,36 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
 
     while (output == AUDIO_IO_HANDLE_NONE) {
         audio_io_handle_t outputOffloaded = AUDIO_IO_HANDLE_NONE;
+        audio_io_handle_t outputSpatializer = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputDeepBuffer = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputPrimary = AUDIO_IO_HANDLE_NONE;
 
-        for (audio_io_handle_t output : outputs) {
-            sp<SwAudioOutputDescriptor> desc = mOutputs.valueFor(output);
+        for (audio_io_handle_t outputLoop : outputs) {
+            sp<SwAudioOutputDescriptor> desc = mOutputs.valueFor(outputLoop);
             if (activeOnly && !desc->isActive(toVolumeSource(AUDIO_STREAM_MUSIC))) {
                 continue;
             }
             ALOGV("selectOutputForMusicEffects activeOnly %d output %d flags 0x%08x",
-                  activeOnly, output, desc->mFlags);
+                  activeOnly, outputLoop, desc->mFlags);
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) != 0) {
-                outputOffloaded = output;
+                outputOffloaded = outputLoop;
+            }
+            if ((desc->mFlags & AUDIO_OUTPUT_FLAG_SPATIALIZER) != 0) {
+                if (SpatializerHelper::isStereoSpatializationFeatureEnabled()) {
+                    outputSpatializer = outputLoop;
+                }
             }
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER) != 0) {
-                outputDeepBuffer = output;
+                outputDeepBuffer = outputLoop;
             }
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY) != 0) {
-                outputPrimary = output;
+                outputPrimary = outputLoop;
             }
         }
         if (outputOffloaded != AUDIO_IO_HANDLE_NONE) {
             output = outputOffloaded;
+        } else if (outputSpatializer != AUDIO_IO_HANDLE_NONE) {
+            output = outputSpatializer;
         } else if (outputDeepBuffer != AUDIO_IO_HANDLE_NONE) {
             output = outputDeepBuffer;
         } else if (outputPrimary != AUDIO_IO_HANDLE_NONE) {
@@ -4277,8 +4409,9 @@ void AudioPolicyManager::updateCallAndOutputRouting(bool forceVolumeReeval, uint
             // As done in setDeviceConnectionState, we could also fix default device issue by
             // preventing the force re-routing in case of default dev that distinguishes on address.
             // Let's give back to engine full device choice decision however.
-            bool forceRouting = !newDevices.isEmpty();
-            if (outputDesc->mPreferredAttrInfo != nullptr && newDevices != outputDesc->devices()) {
+            bool newDevicesNotEmpty = !newDevices.isEmpty();
+            if (outputDesc->mPreferredAttrInfo != nullptr && newDevices != outputDesc->devices()
+                && newDevicesNotEmpty) {
                 // If the device is using preferred mixer attributes, the output need to reopen
                 // with default configuration when the new selected devices are different from
                 // current routing devices.
@@ -4286,9 +4419,10 @@ void AudioPolicyManager::updateCallAndOutputRouting(bool forceVolumeReeval, uint
                 continue;
             }
 
-            waitMs = setOutputDevices(__func__, outputDesc, newDevices, forceRouting, delayMs,
-                                       nullptr, !skipDelays /*requiresMuteCheck*/,
-                                      !forceRouting /*requiresVolumeCheck*/, skipDelays);
+            waitMs = setOutputDevices(__func__, outputDesc, newDevices,
+                                      newDevicesNotEmpty /*force*/, delayMs,
+                                      nullptr /*patchHandle*/, !skipDelays /*requiresMuteCheck*/,
+                                      !newDevicesNotEmpty /*requiresVolumeCheck*/, skipDelays);
             // Only apply special touch sound delay once
             delayMs = 0;
         }
@@ -5949,7 +6083,8 @@ status_t AudioPolicyManager::getMasterMono(bool *mono)
 float AudioPolicyManager::getStreamVolumeDB(
         audio_stream_type_t stream, int index, audio_devices_t device)
 {
-    return computeVolume(getVolumeCurves(stream), toVolumeSource(stream), index, {device});
+    return computeVolume(getVolumeCurves(stream), toVolumeSource(stream), index,
+                         {device}, /* adjustAttenuation= */false);
 }
 
 status_t AudioPolicyManager::getSurroundFormats(unsigned int *numSurroundFormats,
@@ -6278,12 +6413,10 @@ bool AudioPolicyManager::canBeSpatializedInt(const audio_attributes_t *attr,
     // mode is not requested.
 
     if (config != nullptr && *config != AUDIO_CONFIG_INITIALIZER) {
-        static const bool stereo_spatialization_enabled =
-                property_get_bool("ro.audio.stereo_spatialization_enabled", false);
         const bool channel_mask_spatialized =
-                (stereo_spatialization_enabled && com_android_media_audio_stereo_spatialization())
-                ? audio_channel_mask_contains_stereo(config->channel_mask)
-                : audio_is_channel_mask_spatialized(config->channel_mask);
+                SpatializerHelper::isStereoSpatializationFeatureEnabled()
+                        ? audio_channel_mask_contains_stereo(config->channel_mask)
+                        : audio_is_channel_mask_spatialized(config->channel_mask);
         if (!channel_mask_spatialized) {
             return false;
         }
@@ -6698,8 +6831,8 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
                 continue;
             }
 
-            sp<AudioInputDescriptor> inputDesc =
-                    new AudioInputDescriptor(inProfile, mpClientInterface);
+            sp<AudioInputDescriptor> inputDesc = new AudioInputDescriptor(
+                    inProfile, mpClientInterface, false /*isPreemptor*/);
 
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
             status_t status = inputDesc->open(nullptr,
@@ -7017,7 +7150,7 @@ status_t AudioPolicyManager::checkInputsForDevice(const sp<DeviceDescriptor>& de
                 continue;
             }
 
-            desc = new AudioInputDescriptor(profile, mpClientInterface);
+            desc = new AudioInputDescriptor(profile, mpClientInterface, false  /*isPreemptor*/);
             audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
             ALOGV("%s opening input for profile %s", __func__, profile->getTagName().c_str());
             status = desc->open(nullptr, device, AUDIO_SOURCE_MIC,
@@ -8155,7 +8288,7 @@ float AudioPolicyManager::adjustDeviceAttenuationForAbsVolume(IVolumeCurves &cur
             VolumeSource vsToDriveAbs = toVolumeSource(groupToDriveAbs);
             if (vsToDriveAbs == volumeSource) {
                 // attenuation is applied by the abs volume controller
-                return volumeDbMax;
+                return (index != 0) ? volumeDbMax : volumeDb;
             } else {
                 IVolumeCurves &curvesAbs = getVolumeCurves(vsToDriveAbs);
                 int indexAbs = curvesAbs.getVolumeIndex({volumeDevice});
@@ -8179,9 +8312,15 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
                                         VolumeSource volumeSource,
                                         int index,
                                         const DeviceTypeSet& deviceTypes,
+                                        bool adjustAttenuation,
                                         bool computeInternalInteraction)
 {
-    float volumeDb = adjustDeviceAttenuationForAbsVolume(curves, volumeSource, index, deviceTypes);
+    float volumeDb;
+    if (adjustAttenuation) {
+        volumeDb = adjustDeviceAttenuationForAbsVolume(curves, volumeSource, index, deviceTypes);
+    } else {
+        volumeDb = curves.volIndexToDb(Volume::getDeviceCategory(deviceTypes), index);
+    }
     ALOGV("%s volume source %d, index %d,  devices %s, compute internal %b ", __func__,
           volumeSource, index, dumpDeviceTypes(deviceTypes).c_str(), computeInternalInteraction);
 
@@ -8202,7 +8341,8 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
             mOutputs.isActive(ringVolumeSrc, 0)) {
         auto &ringCurves = getVolumeCurves(AUDIO_STREAM_RING);
         const float ringVolumeDb = computeVolume(ringCurves, ringVolumeSrc, index, deviceTypes,
-                /* computeInternalInteraction= */ false);
+                                                 adjustAttenuation,
+                                                 /* computeInternalInteraction= */false);
         return ringVolumeDb - 4 > volumeDb ? ringVolumeDb - 4 : volumeDb;
     }
 
@@ -8220,7 +8360,7 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
         int voiceVolumeIndex = voiceCurves.getVolumeIndex(deviceTypes);
         const float maxVoiceVolDb =
                 computeVolume(voiceCurves, callVolumeSrc, voiceVolumeIndex, deviceTypes,
-                              /* computeInternalInteraction= */ false)
+                        adjustAttenuation, /* computeInternalInteraction= */false)
                 + IN_CALL_EARPIECE_HEADROOM_DB;
         // FIXME: Workaround for call screening applications until a proper audio mode is defined
         // to support this scenario : Exempt the RING stream from the audio cap if the audio was
@@ -8273,7 +8413,8 @@ float AudioPolicyManager::computeVolume(IVolumeCurves &curves,
                                              musicVolumeSrc,
                                              musicCurves.getVolumeIndex(musicDevice),
                                              musicDevice,
-                                             /* computeInternalInteraction= */ false);
+                                              adjustAttenuation,
+                                              /* computeInternalInteraction= */ false);
             float minVolDb = (musicVolDb > SONIFICATION_HEADSET_VOLUME_MIN_DB) ?
                         musicVolDb : SONIFICATION_HEADSET_VOLUME_MIN_DB;
             if (volumeDb > minVolDb) {
@@ -8415,11 +8556,19 @@ bool AudioPolicyManager::isVolumeConsistentForCalls(VolumeSource volumeSource,
                                                    bool& isBtScoVolSrc,
                                                    const char* caller) {
     const VolumeSource callVolSrc = toVolumeSource(AUDIO_STREAM_VOICE_CALL, false);
-    const VolumeSource btScoVolSrc = toVolumeSource(AUDIO_STREAM_BLUETOOTH_SCO, false);
+    isVoiceVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource);
+
     const bool isScoRequested = isScoRequestedForComm();
     const bool isHAUsed = isHearingAidUsedForComm();
 
-    isVoiceVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource);
+    if (com_android_media_audio_replace_stream_bt_sco()) {
+        ALOGV("%s stream bt sco is replaced, no volume consistency check for calls", __func__);
+        isBtScoVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource) &&
+                        (isScoRequested || isHAUsed);
+        return true;
+    }
+
+    const VolumeSource btScoVolSrc = toVolumeSource(AUDIO_STREAM_BLUETOOTH_SCO, false);
     isBtScoVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (btScoVolSrc == volumeSource);
 
     if ((callVolSrc != btScoVolSrc) &&
@@ -8967,6 +9116,13 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
 
 status_t AudioPolicyManager::getDevicesForAttributes(
         const audio_attributes_t &attr, DeviceVector &devices, bool forVolume) {
+    // attr containing source set by AudioAttributes.Builder.setCapturePreset() has precedence
+    // over any usage or content type also present in attr.
+    if (com::android::media::audioserver::enable_audio_input_device_routing() &&
+        attr.source != AUDIO_SOURCE_INVALID) {
+        return getInputDevicesForAttributes(attr, devices);
+    }
+
     // Devices are determined in the following precedence:
     //
     // 1) Devices associated with a dynamic policy matching the attributes.  This is often
@@ -9027,6 +9183,15 @@ status_t AudioPolicyManager::getDevicesForAttributes(
         }
     }
 
+    return NO_ERROR;
+}
+
+status_t AudioPolicyManager::getInputDevicesForAttributes(
+        const audio_attributes_t &attr, DeviceVector &devices) {
+    devices = DeviceVector(
+            mEngine->getInputDeviceForAttributes(attr, 0 /*uid unknown here*/,
+                                                 AUDIO_SESSION_NONE,
+                                                 nullptr /* mix */));
     return NO_ERROR;
 }
 

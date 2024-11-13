@@ -44,6 +44,7 @@
 #include "AudioPolicyManagerTestClient.h"
 #include "AudioPolicyTestClient.h"
 #include "AudioPolicyTestManager.h"
+#include "test_execution_tracer.h"
 
 using namespace android;
 using testing::UnorderedElementsAre;
@@ -308,11 +309,12 @@ void AudioPolicyManagerTest::getOutputForAttr(
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized;
     bool isBitPerfectInternal;
+    float volume;
     AttributionSourceState attributionSource = createAttributionSourceState(uid);
     ASSERT_EQ(OK, mManager->getOutputForAttr(
                     &attr, output, session, &stream, attributionSource, &config, &flags,
                     selectedDeviceId, portId, {}, &outputType, &isSpatialized,
-                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect));
+                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect, &volume));
     ASSERT_NE(AUDIO_PORT_HANDLE_NONE, *portId);
     ASSERT_NE(AUDIO_IO_HANDLE_NONE, *output);
 }
@@ -2077,6 +2079,7 @@ class AudioPolicyManagerTestMMapPlaybackRerouting
     audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
     bool mIsSpatialized;
     bool mIsBitPerfect;
+    float mVolume;
 };
 
 TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLoopbackDapMixFails) {
@@ -2095,7 +2098,7 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLo
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
 }
 
 TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
@@ -2114,7 +2117,7 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
 }
 
 TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
@@ -2145,7 +2148,7 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
     auto outputDesc = mManager->getOutputs().valueFor(mOutput);
     ASSERT_NE(nullptr, outputDesc);
@@ -2161,7 +2164,7 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
     outputDesc = mManager->getOutputs().valueFor(mOutput);
     ASSERT_NE(nullptr, outputDesc);
@@ -2190,7 +2193,7 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
                                          createAttributionSourceState(testUid), &audioConfig,
                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect));
+                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -3800,7 +3803,7 @@ TEST_F(AudioPolicyManagerPreProcEffectTest, DeviceDisconnectWhileClientActive) {
     audio_port_handle_t routedPortId = devicePort.id;
     ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &inputClientHandle, session, 1, &routedPortId,
                                             AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
-                                            k48000SamplingRate, AUDIO_INPUT_FLAG_NONE, &portId));
+                                            48000, AUDIO_INPUT_FLAG_NONE, &portId));
     ASSERT_EQ(devicePort.id, routedPortId);
     auto selectedDevice = availableDevices.getDeviceFromId(routedPortId);
     ASSERT_NE(nullptr, selectedDevice);
@@ -3846,7 +3849,7 @@ protected:
 
     const audio_format_t mBitPerfectFormat = AUDIO_FORMAT_PCM_16_BIT;
     const audio_channel_mask_t mBitPerfectChannelMask = AUDIO_CHANNEL_OUT_STEREO;
-    const uint32_t mBitPerfectSampleRate = 48000;
+    const uint32_t mBitPerfectSampleRate = k48000SamplingRate;
     const uid_t mUid = 1234;
     audio_port_handle_t mUsbPortId = AUDIO_PORT_HANDLE_NONE;
 
@@ -3947,11 +3950,12 @@ void AudioPolicyManagerTestBitPerfectBase::getBitPerfectOutput(status_t expected
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized;
     bool isBitPerfect;
+    float volume;
     EXPECT_EQ(expected,
               mManager->getOutputForAttr(&sMediaAttr, &mBitPerfectOutput, AUDIO_SESSION_NONE,
                                          &stream, attributionSource, &config, &flags,
                                          &mSelectedDeviceId, &mBitPerfectPortId, {}, &outputType,
-                                         &isSpatialized, &isBitPerfect));
+                                         &isSpatialized, &isBitPerfect, &volume));
 }
 
 class AudioPolicyManagerTestBitPerfect : public AudioPolicyManagerTestBitPerfectBase {
@@ -4121,8 +4125,8 @@ TEST_P(AudioPolicyManagerTestBitPerfectHigherPriorityUseCaseActive,
     ASSERT_NO_FATAL_FAILURE(startBitPerfectOutput());
 
     audio_attributes_t attr = {
+            .content_type = AUDIO_CONTENT_TYPE_UNKNOWN,
             .usage = GetParam(),
-            .content_type = AUDIO_CONTENT_TYPE_UNKNOWN
     };
     audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
     audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE;
@@ -4145,3 +4149,98 @@ INSTANTIATE_TEST_CASE_P(
         testing::Values(AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
                         AUDIO_USAGE_ALARM)
 );
+
+class AudioPolicyManagerInputPreemptionTest : public AudioPolicyManagerTestWithConfigurationFile {
+};
+
+TEST_F_WITH_FLAGS(
+        AudioPolicyManagerInputPreemptionTest,
+        SameSessionReusesInput,
+        REQUIRES_FLAGS_ENABLED(
+                ACONFIG_FLAG(com::android::media::audioserver, fix_input_sharing_logic))
+) {
+    mClient->resetInputApiCallsCounters();
+
+    audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
+    attr.source = AUDIO_SOURCE_MIC;
+    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t input1 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input1, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                            AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                            k48000SamplingRate));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+
+    audio_io_handle_t input2 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input2, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                        AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                        k48000SamplingRate));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+    EXPECT_EQ(0, mClient->getCloseInputCallsCount());
+    EXPECT_EQ(input1, input2);
+}
+
+TEST_F_WITH_FLAGS(
+        AudioPolicyManagerInputPreemptionTest,
+        LesserPriorityReusesInput,
+        REQUIRES_FLAGS_ENABLED(
+                ACONFIG_FLAG(com::android::media::audioserver, fix_input_sharing_logic))
+) {
+    mClient->resetInputApiCallsCounters();
+
+    audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
+    attr.source = AUDIO_SOURCE_MIC;
+    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t input1 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input1, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                            AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                            k48000SamplingRate));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+
+    audio_io_handle_t input2 = AUDIO_PORT_HANDLE_NONE;
+    attr.source = AUDIO_SOURCE_VOICE_RECOGNITION;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input2, OTHER_SESSION_ID, 1, &selectedDeviceId,
+                                        AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                        k48000SamplingRate));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+    EXPECT_EQ(0, mClient->getCloseInputCallsCount());
+    EXPECT_EQ(input1, input2);
+}
+
+TEST_F_WITH_FLAGS(
+        AudioPolicyManagerInputPreemptionTest,
+        HigherPriorityPreemptsInput,
+        REQUIRES_FLAGS_ENABLED(
+                ACONFIG_FLAG(com::android::media::audioserver, fix_input_sharing_logic))
+) {
+    mClient->resetInputApiCallsCounters();
+
+    audio_attributes_t attr = AUDIO_ATTRIBUTES_INITIALIZER;
+    attr.source = AUDIO_SOURCE_MIC;
+    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t input1 = AUDIO_PORT_HANDLE_NONE;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input1, TEST_SESSION_ID, 1, &selectedDeviceId,
+                                            AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                            k48000SamplingRate));
+
+    EXPECT_EQ(1, mClient->getOpenInputCallsCount());
+
+    audio_io_handle_t input2 = AUDIO_PORT_HANDLE_NONE;
+    attr.source = AUDIO_SOURCE_CAMCORDER;
+    ASSERT_NO_FATAL_FAILURE(getInputForAttr(attr, &input2, OTHER_SESSION_ID, 1, &selectedDeviceId,
+                                        AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO,
+                                        k48000SamplingRate));
+
+    EXPECT_EQ(2, mClient->getOpenInputCallsCount());
+    EXPECT_EQ(1, mClient->getCloseInputCallsCount());
+    EXPECT_NE(input1, input2);
+}
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
+    return RUN_ALL_TESTS();
+}
