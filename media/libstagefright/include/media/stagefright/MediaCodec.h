@@ -491,12 +491,21 @@ private:
 
     Mutex mMetricsLock;
     mediametrics_handle_t mMetricsHandle = 0;
+    mediametrics_handle_t mLastMetricsHandle = 0; // only accessed from the looper or destructor
     bool mMetricsToUpload = false;
     nsecs_t mLifetimeStartNs = 0;
     void initMediametrics();
     void updateMediametrics();
     void flushMediametrics();
     void resetMetricsFields();
+
+    // Reset the metrics fields for a new subsession.
+    void resetSubsessionMetricsFields();
+
+    // Start a new subsession (for metrics). This includes flushing the current
+    // metrics, notifying the client and resetting the session fields.
+    void handleStartingANewSubsession();
+
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
     void updateCodecImportance(const sp<AMessage>& msg);
@@ -558,6 +567,7 @@ private:
         int32_t setOutputSurfaceCount;
         int32_t resolutionChangeCount;
     } mReliabilityContextMetrics;
+    int32_t mSubsessionCount;
 
     // initial create parameters
     AString mInitName;
