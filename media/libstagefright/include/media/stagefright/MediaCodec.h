@@ -123,6 +123,13 @@ struct MediaCodec : public AHandler {
         CB_RESOURCE_RECLAIMED = 5,
         CB_CRYPTO_ERROR = 6,
         CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
+
+        /** Callback ID for when the metrics for this codec have been flushed
+         * due to the start of a new subsession. The associated AMessage will
+         * contain an sp<WrapperObject<std::unique_ptr<mediametrics::Item>>>
+         * Object at the "metrics" key.
+         */
+        CB_METRICS_FLUSHED = 8,
     };
 
     static const pid_t kNoPid = -1;
@@ -484,12 +491,21 @@ private:
 
     Mutex mMetricsLock;
     mediametrics_handle_t mMetricsHandle = 0;
+    mediametrics_handle_t mLastMetricsHandle = 0; // only accessed from the looper or destructor
     bool mMetricsToUpload = false;
     nsecs_t mLifetimeStartNs = 0;
     void initMediametrics();
     void updateMediametrics();
     void flushMediametrics();
     void resetMetricsFields();
+
+    // Reset the metrics fields for a new subsession.
+    void resetSubsessionMetricsFields();
+
+    // Start a new subsession (for metrics). This includes flushing the current
+    // metrics, notifying the client and resetting the session fields.
+    void handleStartingANewSubsession();
+
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
     void updateCodecImportance(const sp<AMessage>& msg);
@@ -551,6 +567,7 @@ private:
         int32_t setOutputSurfaceCount;
         int32_t resolutionChangeCount;
     } mReliabilityContextMetrics;
+    int32_t mSubsessionCount;
 
     // initial create parameters
     AString mInitName;
