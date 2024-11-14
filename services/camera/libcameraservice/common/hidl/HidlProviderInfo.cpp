@@ -391,7 +391,7 @@ HidlProviderInfo::startProviderInterface() {
                   __FUNCTION__,
                   mProviderName.c_str(),
                   linked.description().c_str());
-              mManager->removeProvider(mProviderInstance);
+              mManager->removeProvider(std::string(mProviderInstance));
               return nullptr;
             } else if (!linked) {
               ALOGW("%s: Unable to link to provider '%s' death notifications",
@@ -451,7 +451,7 @@ void HidlProviderInfo::serviceDied(uint64_t cookie,
         ALOGW("%s: Unexpected serviceDied cookie %" PRIu64 ", expected %" PRIu32,
                 __FUNCTION__, cookie, mId);
     }
-    mManager->removeProvider(mProviderInstance);
+    mManager->removeProvider(std::string(mProviderInstance));
 }
 
 std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
