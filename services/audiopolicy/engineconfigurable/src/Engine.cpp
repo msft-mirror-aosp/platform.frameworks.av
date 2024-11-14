@@ -75,8 +75,13 @@ status_t Engine::loadFromHalConfigWithFallback(
 
     auto capResult = capEngineConfig::convert(aidlConfig);
     if (capResult.parsedConfig == nullptr) {
+#ifdef ENABLE_CAP_AIDL_HYBRID_MODE
+        ALOGE("%s CapEngine Config invalid, falling back on vendor XML for engine", __func__);
+        return loadFromXmlConfigWithFallback(engineConfig::DEFAULT_PATH);
+#else
         ALOGE("%s CapEngine Config invalid", __func__);
         return BAD_VALUE;
+#endif
     }
     status_t ret = loadWithFallback(aidlConfig);
     if (ret != NO_ERROR) {
