@@ -687,7 +687,8 @@ void processCaptureResult(CaptureOutputStates& states, const camera_capture_resu
                         if (orientation.count > 0) {
                             int32_t transform;
                             ret = CameraUtils::getRotationTransform(deviceInfo->second,
-                                    OutputConfiguration::MIRROR_MODE_AUTO, &transform);
+                                    OutputConfiguration::MIRROR_MODE_AUTO,
+                                            /*transformInverseDisplay*/true, &transform);
                             if (ret == OK) {
                                 // It is possible for camera providers to return the capture
                                 // results after the processed frames. In such scenario, we will
