@@ -120,6 +120,14 @@ flag {
 }
 
 flag {
+    name: "hardening_permission_spa"
+    is_exported: true
+    namespace: "media_audio"
+    description: "Flag for special app access impl for hardening."
+    bug: "376480814"
+}
+
+flag {
     name: "iamf_definitions_api"
     is_exported: true
     namespace: "media_audio"

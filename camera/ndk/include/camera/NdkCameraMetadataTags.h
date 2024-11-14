@@ -9750,6 +9750,28 @@ typedef enum acamera_metadata_enum_acamera_control_low_light_boost_state {
 
 } acamera_metadata_enum_android_control_low_light_boost_state_t;
 
+// ACAMERA_CONTROL_ZOOM_METHOD
+typedef enum acamera_metadata_enum_acamera_control_zoom_method {
+    /**
+     * <p>The camera device automatically detects whether the application does zoom with
+     * ACAMERA_SCALER_CROP_REGION or ACAMERA_CONTROL_ZOOM_RATIO, and in turn decides which
+     * metadata tag reflects the effective zoom level.</p>
+     *
+     * @see ACAMERA_CONTROL_ZOOM_RATIO
+     * @see ACAMERA_SCALER_CROP_REGION
+     */
+    ACAMERA_CONTROL_ZOOM_METHOD_AUTO                                 = 0,
+
+    /**
+     * <p>The application intends to control zoom via ACAMERA_CONTROL_ZOOM_RATIO, and
+     * the effective zoom level is reflected by ACAMERA_CONTROL_ZOOM_RATIO in capture results.</p>
+     *
+     * @see ACAMERA_CONTROL_ZOOM_RATIO
+     */
+    ACAMERA_CONTROL_ZOOM_METHOD_ZOOM_RATIO                           = 1,
+
+} acamera_metadata_enum_android_control_zoom_method_t;
+
 // ACAMERA_CONTROL_AE_PRIORITY_MODE
 typedef enum acamera_metadata_enum_acamera_control_ae_priority_mode {
     /**
