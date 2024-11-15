@@ -91,6 +91,7 @@ typedef enum acamera_metadata_section {
     ACAMERA_AUTOMOTIVE_LENS,
     ACAMERA_EXTENSION,
     ACAMERA_JPEGR,
+    ACAMERA_SHARED_SESSION,
     ACAMERA_SECTION_COUNT,
 
     ACAMERA_VENDOR = 0x8000
@@ -138,6 +139,7 @@ typedef enum acamera_metadata_section_start {
     ACAMERA_AUTOMOTIVE_LENS_START  = ACAMERA_AUTOMOTIVE_LENS   << 16,
     ACAMERA_EXTENSION_START        = ACAMERA_EXTENSION         << 16,
     ACAMERA_JPEGR_START            = ACAMERA_JPEGR             << 16,
+    ACAMERA_SHARED_SESSION_START   = ACAMERA_SHARED_SESSION    << 16,
     ACAMERA_VENDOR_START           = ACAMERA_VENDOR            << 16
 } acamera_metadata_section_start_t;
 
@@ -12076,6 +12078,7 @@ typedef enum acamera_metadata_enum_acamera_jpegr_available_jpeg_r_stream_configu
                                                                       = 1,
 
 } acamera_metadata_enum_android_jpegr_available_jpeg_r_stream_configurations_maximum_resolution_t;
+
 
 
 

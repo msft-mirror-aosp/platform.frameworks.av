@@ -33,6 +33,7 @@ namespace params {
 class OutputConfiguration : public android::Parcelable {
 public:
 
+    static const int ROTATION_0;
     static const int INVALID_ROTATION;
     static const int INVALID_SET_ID;
     enum SurfaceType {
@@ -73,6 +74,7 @@ public:
     int64_t                    getStreamUseCase() const;
     int                        getTimestampBase() const;
     int                        getMirrorMode(sp<IGraphicBufferProducer> surface) const;
+    int                        getMirrorMode() const;
     bool                       useReadoutTimestamp() const;
     int                        getFormat() const;
     int                        getDataspace() const;
@@ -107,6 +109,9 @@ public:
                         int surfaceSetID = INVALID_SET_ID,
                         int surfaceType = SURFACE_TYPE_UNKNOWN, int width = 0,
                         int height = 0, bool isShared = false);
+    OutputConfiguration(int surfaceType, int width, int height, int format, int32_t colorSpace,
+            int mirrorMode, bool useReadoutTimestamp,int timestampBase, int dataspace,
+            int64_t usage, int64_t streamusecase, std::string physicalCamId);
 
     bool operator == (const OutputConfiguration& other) const {
         return ( mRotation == other.mRotation &&
@@ -211,6 +216,28 @@ public:
     bool mirrorModesEqual(const OutputConfiguration& other) const;
     bool mirrorModesLessThan(const OutputConfiguration& other) const;
     const std::vector<int32_t>& getMirrorModes() const {return mMirrorModeForProducers;}
+    bool sharedConfigEqual(const OutputConfiguration& other) const {
+        return (mRotation == other.mRotation &&
+                mSurfaceSetID == other.mSurfaceSetID &&
+                mSurfaceType == other.mSurfaceType &&
+                mWidth == other.mWidth &&
+                mHeight == other.mHeight &&
+                mIsDeferred == other.mIsDeferred &&
+                mIsShared == other.mIsShared &&
+                mPhysicalCameraId == other.mPhysicalCameraId &&
+                mIsMultiResolution == other.mIsMultiResolution &&
+                sensorPixelModesUsedEqual(other) &&
+                mDynamicRangeProfile == other.mDynamicRangeProfile &&
+                mColorSpace == other.mColorSpace &&
+                mStreamUseCase == other.mStreamUseCase &&
+                mTimestampBase == other.mTimestampBase &&
+                mMirrorMode == other.mMirrorMode &&
+                mUseReadoutTimestamp == other.mUseReadoutTimestamp &&
+                mFormat == other.mFormat &&
+                mDataspace == other.mDataspace &&
+                mUsage == other.mUsage);
+    }
+
 private:
     std::vector<sp<IGraphicBufferProducer>> mGbps;
     int                        mRotation;

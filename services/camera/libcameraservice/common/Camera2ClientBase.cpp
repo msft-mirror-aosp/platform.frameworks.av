@@ -31,6 +31,7 @@
 #include <camera/CameraSessionStats.h>
 #include <camera/StringUtils.h>
 #include <com_android_window_flags.h>
+#include <com_android_internal_camera_flags.h>
 
 #include "common/Camera2ClientBase.h"
 
@@ -39,12 +40,14 @@
 #include "device3/Camera3Device.h"
 #include "device3/aidl/AidlCamera3Device.h"
 #include "device3/hidl/HidlCamera3Device.h"
+#include "device3/aidl/AidlCamera3SharedDevice.h"
 
 namespace android {
 
 using namespace camera2;
 
 namespace wm_flags = com::android::window::flags;
+namespace flags = com::android::internal::camera::flags;
 
 // Interface used by CameraService
 
@@ -55,10 +58,11 @@ Camera2ClientBase<TClientBase>::Camera2ClientBase(
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
         const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
         const std::string& cameraId, int api1CameraId, int cameraFacing, int sensorOrientation,
-        int servicePid, bool overrideForPerfClass, int rotationOverride, bool legacyClient)
+        int servicePid, bool overrideForPerfClass, int rotationOverride, bool sharedMode,
+        bool legacyClient)
     : TClientBase(cameraService, remoteCallback, attributionAndPermissionUtils, clientAttribution,
                   callingPid, systemNativeClient, cameraId, api1CameraId, cameraFacing,
-                  sensorOrientation, servicePid, rotationOverride),
+                  sensorOrientation, servicePid, rotationOverride, sharedMode),
       mSharedCameraCallbacks(remoteCallback),
       mCameraServiceProxyWrapper(cameraServiceProxyWrapper),
       mDeviceActive(false),
@@ -114,12 +118,19 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
                             TClientBase::mRotationOverride, mLegacyClient);
             break;
         case IPCTransport::AIDL:
-            mDevice =
+            if (flags::camera_multi_client() && TClientBase::mSharedMode) {
+                mDevice = AidlCamera3SharedDevice::getInstance(mCameraServiceProxyWrapper,
+                            TClientBase::mAttributionAndPermissionUtils,
+                            TClientBase::mCameraIdStr, mOverrideForPerfClass,
+                            TClientBase::mRotationOverride, mLegacyClient);
+            } else {
+                mDevice =
                     new AidlCamera3Device(mCameraServiceProxyWrapper,
                             TClientBase::mAttributionAndPermissionUtils,
                             TClientBase::mCameraIdStr, mOverrideForPerfClass,
                             TClientBase::mRotationOverride, mLegacyClient);
-             break;
+            }
+            break;
         default:
             ALOGE("%s Invalid transport for camera id %s", __FUNCTION__,
                     TClientBase::mCameraIdStr.c_str());
@@ -161,9 +172,10 @@ template <typename TClientBase>
 Camera2ClientBase<TClientBase>::~Camera2ClientBase() {
     ATRACE_CALL();
 
-    TClientBase::mDestructionStarted = true;
-
-    disconnect();
+    if (!flags::camera_multi_client() || !TClientBase::mDisconnected) {
+        TClientBase::mDestructionStarted = true;
+        disconnect();
+    }
 
     ALOGI("%s: Client object's dtor for Camera Id %s completed. Client was: %s (PID %d, UID %u)",
           __FUNCTION__, TClientBase::mCameraIdStr.c_str(), TClientBase::getPackageName().c_str(),
@@ -250,7 +262,10 @@ status_t Camera2ClientBase<TClientBase>::dumpDevice(
 template <typename TClientBase>
 binder::Status Camera2ClientBase<TClientBase>::disconnect() {
 
-    return disconnectImpl();
+   if (!flags::camera_multi_client() || !TClientBase::mDisconnected) {
+       return disconnectImpl();
+   }
+   return binder::Status::ok();
 }
 
 template <typename TClientBase>
@@ -288,7 +303,11 @@ binder::Status Camera2ClientBase<TClientBase>::disconnectImpl() {
 template <typename TClientBase>
 void Camera2ClientBase<TClientBase>::detachDevice() {
     if (mDevice == 0) return;
-    mDevice->disconnect();
+    if (flags::camera_multi_client() && TClientBase::mSharedMode) {
+        mDevice->disconnectClient(TClientBase::getClientUid());
+    } else {
+        mDevice->disconnect();
+    }
 
     ALOGV("Camera %s: Detach complete", TClientBase::mCameraIdStr.c_str());
 }
@@ -328,6 +347,12 @@ void Camera2ClientBase<TClientBase>::notifyError(
         const CaptureResultExtras& resultExtras) {
     ALOGE("Error condition %d reported by HAL, requestId %" PRId32, errorCode,
           resultExtras.requestId);
+}
+
+template <typename TClientBase>
+void Camera2ClientBase<TClientBase>::notifyClientSharedAccessPriorityChanged(bool primaryClient) {
+    ALOGV("%s Camera %s access priorities changed for client %d primaryClient=%d", __FUNCTION__,
+            TClientBase::mCameraIdStr.c_str(), TClientBase::getClientUid(), primaryClient);
 }
 
 template <typename TClientBase>
