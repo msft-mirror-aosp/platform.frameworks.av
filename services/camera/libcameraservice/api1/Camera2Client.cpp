@@ -65,12 +65,12 @@ Camera2Client::Camera2Client(
         const AttributionSourceState& clientAttribution, int callingPid,
         const std::string& cameraDeviceId, int api1CameraId, int cameraFacing,
         int sensorOrientation, int servicePid, bool overrideForPerfClass, int rotationOverride,
-        bool forceSlowJpegMode)
+        bool forceSlowJpegMode, bool sharedMode)
     : Camera2ClientBase(cameraService, cameraClient, cameraServiceProxyWrapper,
                         attributionAndPermissionUtils, clientAttribution, callingPid,
                         false /*systemNativeClient - since no ndk for api1*/, cameraDeviceId,
                         api1CameraId, cameraFacing, sensorOrientation, servicePid,
-                        overrideForPerfClass, rotationOverride,
+                        overrideForPerfClass, rotationOverride, sharedMode,
                         /*legacyClient*/ true),
       mParameters(api1CameraId, cameraFacing),
       mLatestRequestIds(kMaxRequestIds),

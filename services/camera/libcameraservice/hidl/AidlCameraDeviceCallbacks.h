@@ -86,6 +86,10 @@ struct H2BCameraDeviceCallbacks :
         mCaptureResultMetadataQueue = metadataQueue;
     }
 
+    virtual binder::Status onClientSharedAccessPriorityChanged(bool /*primaryClient*/) {
+        return binder::Status::ok();
+    }
+
  private:
     // Wrapper struct so that parameters to onResultReceived callback may be
     // sent through an AMessage.

@@ -30,6 +30,7 @@
 
 #include "device3/DistortionMapper.h"
 #include "device3/ZoomRatioMapper.h"
+#include <utils/AttributionAndPermissionUtils.h>
 #include <utils/SessionConfigurationUtils.h>
 #include <utils/Trace.h>
 
@@ -202,7 +203,7 @@ status_t AidlProviderInfo::initializeAidlProvider(
 void AidlProviderInfo::binderDied(void *cookie) {
     AidlProviderInfo *provider = reinterpret_cast<AidlProviderInfo *>(cookie);
     ALOGI("Camera provider '%s' has died; removing it", provider->mProviderInstance.c_str());
-    provider->mManager->removeProvider(provider->mProviderInstance);
+    provider->mManager->removeProvider(std::string(provider->mProviderInstance));
 }
 
 status_t AidlProviderInfo::setUpVendorTags() {
@@ -320,7 +321,7 @@ const std::shared_ptr<ICameraProvider> AidlProviderInfo::startProviderInterface(
     if (link != STATUS_OK) {
         ALOGW("%s: Unable to link to provider '%s' death notifications",
                 __FUNCTION__, mProviderName.c_str());
-        mManager->removeProvider(mProviderInstance);
+        mManager->removeProvider(std::string(mProviderInstance));
         return nullptr;
     }
 
@@ -730,6 +731,10 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         // in ICameraDevice.isSessionConfigurationWithSettingsSupported.
         mAdditionalKeysForFeatureQuery.insert(mAdditionalKeysForFeatureQuery.end(),
                 {ANDROID_CONTROL_VIDEO_STABILIZATION_MODE, ANDROID_CONTROL_AE_TARGET_FPS_RANGE});
+    }
+
+    if (flags::camera_multi_client() && isAutomotiveDevice()) {
+        addSharedSessionConfigurationTags();
     }
 
     if (!kEnableLazyHal) {

@@ -782,6 +782,8 @@ private:
             status_t addColorCorrectionAvailableModesTag(CameraMetadata& ch);
             status_t addAePriorityModeTags();
             status_t addSessionConfigQueryVersionTag();
+            status_t addSharedSessionConfigurationTags();
+            bool isAutomotiveDevice();
 
             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
                     android_pixel_format_t format,
