@@ -33,6 +33,7 @@ cc_defaults {
         "liblog",
     ],
     shared_libs: [
+        "camera_platform_flags_c_lib",
         "framework-permission-aidl-cpp",
         "libbinder",
         "libbinder_ndk",
