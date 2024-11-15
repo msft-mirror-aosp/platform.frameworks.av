@@ -246,3 +246,13 @@ flag {
         purpose: PURPOSE_FEATURE
     }
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "query_process_state"
+    description: "In opChanged, query the process state from AM instead of relying on mUidPolicy"
+    bug: "378016494"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
