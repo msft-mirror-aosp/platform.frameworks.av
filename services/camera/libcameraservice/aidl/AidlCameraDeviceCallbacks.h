@@ -75,6 +75,8 @@ class AidlCameraDeviceCallbacks : public UBnCameraDeviceCallbacks {
 
     binder::Status onRequestQueueEmpty() override;
 
+    binder::Status onClientSharedAccessPriorityChanged(bool primaryClient) override;
+
     status_t linkToDeath(const sp<DeathRecipient>& recipient, void* cookie,
                          uint32_t flags) override;
     status_t unlinkToDeath(const wp<DeathRecipient>& recipient, void* cookie, uint32_t flags,

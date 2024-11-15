@@ -63,10 +63,11 @@ CameraDeviceClientBase::CameraDeviceClientBase(
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
         const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
         const std::string& cameraId, [[maybe_unused]] int api1CameraId, int cameraFacing,
-        int sensorOrientation, int servicePid, int rotationOverride)
+        int sensorOrientation, int servicePid, int rotationOverride, bool sharedMode)
     : BasicClient(cameraService, IInterface::asBinder(remoteCallback),
                   attributionAndPermissionUtils, clientAttribution, callingPid, systemNativeClient,
-                  cameraId, cameraFacing, sensorOrientation, servicePid, rotationOverride),
+                  cameraId, cameraFacing, sensorOrientation, servicePid, rotationOverride,
+                  sharedMode),
       mRemoteCallback(remoteCallback) {}
 
 // Interface used by CameraService
@@ -78,11 +79,13 @@ CameraDeviceClient::CameraDeviceClient(
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
         const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
         const std::string& cameraId, int cameraFacing, int sensorOrientation, int servicePid,
-        bool overrideForPerfClass, int rotationOverride, const std::string& originalCameraId)
+        bool overrideForPerfClass, int rotationOverride, const std::string& originalCameraId,
+        bool sharedMode)
     : Camera2ClientBase(cameraService, remoteCallback, cameraServiceProxyWrapper,
                         attributionAndPermissionUtils, clientAttribution, callingPid,
                         systemNativeClient, cameraId, /*API1 camera ID*/ -1, cameraFacing,
-                        sensorOrientation, servicePid, overrideForPerfClass, rotationOverride),
+                        sensorOrientation, servicePid, overrideForPerfClass, rotationOverride,
+                        sharedMode),
       mInputStream(),
       mStreamingRequestId(REQUEST_ID_NONE),
       mRequestIdCounter(0),
@@ -610,9 +613,20 @@ binder::Status CameraDeviceClient::cancelRequest(
 }
 
 binder::Status CameraDeviceClient::beginConfigure() {
-    // TODO: Implement this.
     ATRACE_CALL();
-    ALOGV("%s: Not implemented yet.", __FUNCTION__);
+    if (!flags::camera_multi_client()) {
+        return binder::Status::ok();
+    }
+    if (!mDevice.get()) {
+        return STATUS_ERROR(CameraService::ERROR_DISCONNECTED, "Camera device no longer alive");
+    }
+    status_t res = mDevice->beginConfigure();
+    if (res != OK) {
+        std::string msg = fmt::sprintf("Camera %s: Error beginning stream configuration: %s (%d)",
+                mCameraIdStr.c_str(), strerror(-res), res);
+        ALOGE("%s: %s", __FUNCTION__, msg.c_str());
+        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, msg.c_str());
+    }
     return binder::Status::ok();
 }
 
@@ -642,6 +656,12 @@ binder::Status CameraDeviceClient::endConfigure(int operatingMode,
     res = SessionConfigurationUtils::checkOperatingMode(operatingMode, mDevice->info(),
             mCameraIdStr);
     if (!res.isOk()) {
+        return res;
+    }
+
+    if (flags::camera_multi_client() && mSharedMode) {
+        // For shared camera session, streams are already configured
+        // earlier, hence no need to do it here.
         return res;
     }
 
@@ -768,6 +788,7 @@ binder::Status CameraDeviceClient::deleteStream(int streamId) {
 
     bool isInput = false;
     std::vector<sp<IBinder>> surfaces;
+    std::vector<size_t> removedSurfaceIds;
     ssize_t dIndex = NAME_NOT_FOUND;
     ssize_t compositeIndex  = NAME_NOT_FOUND;
 
@@ -778,6 +799,9 @@ binder::Status CameraDeviceClient::deleteStream(int streamId) {
         for (size_t i = 0; i < mStreamMap.size(); ++i) {
             if (streamId == mStreamMap.valueAt(i).streamId()) {
                 surfaces.push_back(mStreamMap.keyAt(i));
+                if (flags::camera_multi_client() && mSharedMode) {
+                    removedSurfaceIds.push_back(mStreamMap.valueAt(i).surfaceId());
+                }
             }
         }
 
@@ -805,8 +829,14 @@ binder::Status CameraDeviceClient::deleteStream(int streamId) {
         }
     }
 
-    // Also returns BAD_VALUE if stream ID was not valid
-    status_t err = mDevice->deleteStream(streamId);
+
+    status_t err;
+    if (flags::camera_multi_client() && mSharedMode) {
+        err = mDevice->removeSharedSurfaces(streamId, removedSurfaceIds);
+    } else {
+        // Also returns BAD_VALUE if stream ID was not valid
+        err = mDevice->deleteStream(streamId);
+    }
 
     if (err != OK) {
         std::string msg = fmt::sprintf("Camera %s: Unexpected error %s (%d) when deleting stream "
@@ -900,6 +930,7 @@ binder::Status CameraDeviceClient::createStream(
 
     std::vector<SurfaceHolder> surfaces;
     std::vector<sp<IBinder>> binders;
+    std::vector<OutputStreamInfo> streamInfos;
     status_t err;
 
     // Create stream for deferred surface case.
@@ -939,52 +970,57 @@ binder::Status CameraDeviceClient::createStream(
 
         binders.push_back(IInterface::asBinder(bufferProducer));
         surfaces.push_back({surface, mirrorMode});
+        if (flags::camera_multi_client() && mSharedMode) {
+            streamInfos.push_back(streamInfo);
+        }
     }
-
-    // If mOverrideForPerfClass is true, do not fail createStream() for small
-    // JPEG sizes because existing createSurfaceFromGbp() logic will find the
-    // closest possible supported size.
 
     int streamId = camera3::CAMERA3_STREAM_ID_INVALID;
     std::vector<int> surfaceIds;
-    bool isDepthCompositeStream =
-            camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0].mSurface);
-    bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(
-            surfaces[0].mSurface);
-    bool isJpegRCompositeStream =
-        camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaces[0].mSurface) &&
-        !mDevice->isCompositeJpegRDisabled();
-    if (isDepthCompositeStream || isHeicCompositeStream || isJpegRCompositeStream) {
-        sp<CompositeStream> compositeStream;
-        if (isDepthCompositeStream) {
-            compositeStream = new camera3::DepthCompositeStream(mDevice, getRemoteCallback());
-        } else if (isHeicCompositeStream) {
-            compositeStream = new camera3::HeicCompositeStream(mDevice, getRemoteCallback());
-        } else {
-            compositeStream = new camera3::JpegRCompositeStream(mDevice, getRemoteCallback());
+    if (flags::camera_multi_client() && mSharedMode) {
+        err = mDevice->getSharedStreamId(outputConfiguration, &streamId);
+        if (err == OK) {
+            err = mDevice->addSharedSurfaces(streamId, streamInfos, surfaces, &surfaceIds);
         }
-
-        err = compositeStream->createStream(surfaces, deferredConsumer, streamInfo.width,
+    } else {
+        bool isDepthCompositeStream =
+                camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0].mSurface);
+        bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(
+                surfaces[0].mSurface);
+        bool isJpegRCompositeStream =
+            camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaces[0].mSurface) &&
+            !mDevice->isCompositeJpegRDisabled();
+        if (isDepthCompositeStream || isHeicCompositeStream || isJpegRCompositeStream) {
+            sp<CompositeStream> compositeStream;
+            if (isDepthCompositeStream) {
+                compositeStream = new camera3::DepthCompositeStream(mDevice, getRemoteCallback());
+            } else if (isHeicCompositeStream) {
+                compositeStream = new camera3::HeicCompositeStream(mDevice, getRemoteCallback());
+            } else {
+                compositeStream = new camera3::JpegRCompositeStream(mDevice, getRemoteCallback());
+            }
+            err = compositeStream->createStream(surfaces, deferredConsumer, streamInfo.width,
                 streamInfo.height, streamInfo.format,
                 static_cast<camera_stream_rotation_t>(outputConfiguration.getRotation()),
                 &streamId, physicalCameraId, streamInfo.sensorPixelModesUsed, &surfaceIds,
                 outputConfiguration.getSurfaceSetID(), isShared, isMultiResolution,
                 streamInfo.colorSpace, streamInfo.dynamicRangeProfile, streamInfo.streamUseCase,
                 useReadoutTimestamp);
-        if (err == OK) {
-            Mutex::Autolock l(mCompositeLock);
-            mCompositeStreamMap.add(
-                    IInterface::asBinder(surfaces[0].mSurface->getIGraphicBufferProducer()),
-                    compositeStream);
+            if (err == OK) {
+                Mutex::Autolock l(mCompositeLock);
+                mCompositeStreamMap.add(
+                        IInterface::asBinder(surfaces[0].mSurface->getIGraphicBufferProducer()),
+                        compositeStream);
+            }
+        } else {
+            err = mDevice->createStream(surfaces, deferredConsumer, streamInfo.width,
+                    streamInfo.height, streamInfo.format, streamInfo.dataSpace,
+                    static_cast<camera_stream_rotation_t>(outputConfiguration.getRotation()),
+                    &streamId, physicalCameraId, streamInfo.sensorPixelModesUsed, &surfaceIds,
+                    outputConfiguration.getSurfaceSetID(), isShared, isMultiResolution,
+                    /*consumerUsage*/0, streamInfo.dynamicRangeProfile, streamInfo.streamUseCase,
+                    streamInfo.timestampBase, streamInfo.colorSpace, useReadoutTimestamp);
         }
-    } else {
-        err = mDevice->createStream(surfaces, deferredConsumer, streamInfo.width,
-                streamInfo.height, streamInfo.format, streamInfo.dataSpace,
-                static_cast<camera_stream_rotation_t>(outputConfiguration.getRotation()),
-                &streamId, physicalCameraId, streamInfo.sensorPixelModesUsed, &surfaceIds,
-                outputConfiguration.getSurfaceSetID(), isShared, isMultiResolution,
-                /*consumerUsage*/0, streamInfo.dynamicRangeProfile, streamInfo.streamUseCase,
-                streamInfo.timestampBase, streamInfo.colorSpace, useReadoutTimestamp);
     }
 
     if (err != OK) {
@@ -1743,6 +1779,20 @@ binder::Status CameraDeviceClient::getGlobalAudioRestriction(/*out*/ int32_t* ou
     return binder::Status::ok();
 }
 
+binder::Status CameraDeviceClient::isPrimaryClient(/*out*/bool* isPrimary) {
+    ATRACE_CALL();
+    binder::Status res =  binder::Status::ok();
+    if (!flags::camera_multi_client()) {
+        return res;
+    }
+    if (!(res = checkPidStatus(__FUNCTION__)).isOk()) return res;
+    if (isPrimary != nullptr) {
+        status_t ret = BasicClient::isPrimaryClient(isPrimary);
+        return  binder::Status::fromStatusT(ret);
+    }
+    return res;
+}
+
 status_t CameraDeviceClient::setCameraServiceWatchdog(bool enabled) {
     return mDevice->setCameraServiceWatchdog(enabled);
 }
@@ -1875,7 +1925,7 @@ binder::Status CameraDeviceClient::switchToOffline(
         offlineClient = new CameraOfflineSessionClient(
                 sCameraService, offlineSession, offlineCompositeStreamMap, cameraCb,
                 mAttributionAndPermissionUtils, mClientAttribution, mCallingPid, mCameraIdStr,
-                mCameraFacing, mOrientation, mServicePid);
+                mCameraFacing, mOrientation, mServicePid, /*sharedMode*/false);
         ret = sCameraService->addOfflineClient(mCameraIdStr, offlineClient);
     }
 
@@ -2078,46 +2128,59 @@ void CameraDeviceClient::notifyRequestQueueEmpty() {
     }
 }
 
+void CameraDeviceClient::notifyClientSharedAccessPriorityChanged(bool primaryClient) {
+    // Thread safe. Don't bother locking.
+    if (!flags::camera_multi_client()) {
+        return;
+    }
+    sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = getRemoteCallback();
+    if (remoteCb != 0) {
+        remoteCb->onClientSharedAccessPriorityChanged(primaryClient);
+    }
+}
+
 void CameraDeviceClient::detachDevice() {
     if (mDevice == 0) return;
 
     nsecs_t startTime = systemTime();
-    ALOGV("Camera %s: Stopping processors", mCameraIdStr.c_str());
+    if (!flags::camera_multi_client() || sCameraService->isOnlyClient(this)){
+        ALOGV("Camera %s: Stopping processors", mCameraIdStr.c_str());
 
-    if (mFrameProcessor.get() != nullptr) {
-        mFrameProcessor->removeListener(
-                camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MIN_ID,
-                camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MAX_ID, /*listener*/this);
-        mFrameProcessor->requestExit();
-        ALOGV("Camera %s: Waiting for threads", mCameraIdStr.c_str());
-        mFrameProcessor->join();
-        ALOGV("Camera %s: Disconnecting device", mCameraIdStr.c_str());
-    }
-
-    // WORKAROUND: HAL refuses to disconnect while there's streams in flight
-    {
-        int64_t lastFrameNumber;
-        status_t code;
-        if ((code = mDevice->flush(&lastFrameNumber)) != OK) {
-            ALOGE("%s: flush failed with code 0x%x", __FUNCTION__, code);
+        if (mFrameProcessor.get() != nullptr) {
+            mFrameProcessor->removeListener(
+                    camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MIN_ID,
+                    camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MAX_ID, /*listener*/this);
+            mFrameProcessor->requestExit();
+            ALOGV("Camera %s: Waiting for threads", mCameraIdStr.c_str());
+            mFrameProcessor->join();
+            ALOGV("Camera %s: Disconnecting device", mCameraIdStr.c_str());
         }
 
-        if ((code = mDevice->waitUntilDrained()) != OK) {
-            ALOGE("%s: waitUntilDrained failed with code 0x%x", __FUNCTION__,
-                  code);
-        }
-    }
+        // WORKAROUND: HAL refuses to disconnect while there's streams in flight
+        {
+            int64_t lastFrameNumber;
+            status_t code;
+            if ((code = mDevice->flush(&lastFrameNumber)) != OK) {
+                ALOGE("%s: flush failed with code 0x%x", __FUNCTION__, code);
+            }
 
-    {
-        Mutex::Autolock l(mCompositeLock);
-        for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
-            auto ret = mCompositeStreamMap.valueAt(i)->deleteInternalStreams();
-            if (ret != OK) {
-                ALOGE("%s: Failed removing composite stream  %s (%d)", __FUNCTION__,
-                        strerror(-ret), ret);
+            if ((code = mDevice->waitUntilDrained()) != OK) {
+                ALOGE("%s: waitUntilDrained failed with code 0x%x", __FUNCTION__,
+                        code);
             }
         }
-        mCompositeStreamMap.clear();
+
+        {
+            Mutex::Autolock l(mCompositeLock);
+            for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
+                auto ret = mCompositeStreamMap.valueAt(i)->deleteInternalStreams();
+                if (ret != OK) {
+                    ALOGE("%s: Failed removing composite stream  %s (%d)", __FUNCTION__,
+                            strerror(-ret), ret);
+                }
+            }
+            mCompositeStreamMap.clear();
+        }
     }
 
     bool hasDeviceError = mDevice->hasDeviceError();

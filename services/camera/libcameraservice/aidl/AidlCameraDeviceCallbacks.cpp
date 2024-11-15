@@ -79,6 +79,15 @@ binder::Status AidlCameraDeviceCallbacks::onDeviceError(
     return binder::Status::ok();
 }
 
+binder::Status AidlCameraDeviceCallbacks::onClientSharedAccessPriorityChanged(bool primaryClient) {
+    if (!flags::camera_multi_client()) {
+        return binder::Status::ok();
+    }
+    auto ret = mBase->onClientSharedAccessPriorityChanged(primaryClient);
+    LOG_STATUS_ERROR_IF_NOT_OK(ret, "onClientSharedAccessPriorityChanged")
+    return binder::Status::ok();
+ }
+
 binder::Status AidlCameraDeviceCallbacks::onDeviceIdle() {
     auto ret = mBase->onDeviceIdle();
     LOG_STATUS_ERROR_IF_NOT_OK(ret, "onDeviceIdle")
