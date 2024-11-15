@@ -7829,7 +7829,8 @@ sp<DeviceDescriptor> AudioPolicyManager::getNewInputDevice(
     }
 
     // Honor explicit routing requests only if no client using default routing is active on this
-    // input: a specific app can not force routing for other apps by setting a preferred device.
+    // input or if all active clients are from the same app: a specific app can not force routing
+    // for other apps by setting a preferred device.
     bool active;
     device = findPreferredDevice(inputDesc, AUDIO_SOURCE_DEFAULT, active, mAvailableInputDevices);
     if (device != nullptr) {
