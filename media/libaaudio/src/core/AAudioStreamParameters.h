@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include <aaudio/AAudio.h>
+#include <media/AudioContainers.h>
 #include <utility/AAudioUtilities.h>
 
 namespace aaudio {
@@ -29,12 +30,12 @@ public:
     AAudioStreamParameters() = default;
     virtual ~AAudioStreamParameters() = default;
 
-    int32_t getDeviceId() const {
-        return mDeviceId;
+    android::DeviceIdVector getDeviceIds() const {
+        return mDeviceIds;
     }
 
-    void setDeviceId(int32_t deviceId) {
-        mDeviceId = deviceId;
+    void setDeviceIds(const android::DeviceIdVector& deviceIds) {
+        mDeviceIds = deviceIds;
     }
 
     int32_t getSampleRate() const {
@@ -225,7 +226,7 @@ private:
 
     int32_t                         mSamplesPerFrame      = AAUDIO_UNSPECIFIED;
     int32_t                         mSampleRate           = AAUDIO_UNSPECIFIED;
-    int32_t                         mDeviceId             = AAUDIO_UNSPECIFIED;
+    android::DeviceIdVector         mDeviceIds;
     aaudio_sharing_mode_t           mSharingMode          = AAUDIO_SHARING_MODE_SHARED;
     audio_format_t                  mAudioFormat          = AUDIO_FORMAT_DEFAULT;
     aaudio_direction_t              mDirection            = AAUDIO_DIRECTION_OUTPUT;

@@ -27,7 +27,7 @@ using namespace aaudio;
 void AAudioStreamParameters::copyFrom(const AAudioStreamParameters &other) {
     mSamplesPerFrame      = other.mSamplesPerFrame;
     mSampleRate           = other.mSampleRate;
-    mDeviceId             = other.mDeviceId;
+    mDeviceIds            = other.mDeviceIds;
     mSessionId            = other.mSessionId;
     mSharingMode          = other.mSharingMode;
     mAudioFormat          = other.mAudioFormat;
@@ -74,9 +74,13 @@ aaudio_result_t AAudioStreamParameters::validate() const {
         return AAUDIO_ERROR_OUT_OF_RANGE;
     }
 
-    if (mDeviceId < 0) {
-        ALOGD("deviceId out of range = %d", mDeviceId);
-        return AAUDIO_ERROR_OUT_OF_RANGE;
+    // TODO(b/379139078): Query AudioSystem::listAudioPorts
+    for (auto deviceId : mDeviceIds) {
+        if (deviceId < 0) {
+            ALOGE("deviceId out of range = %d, deviceIds = %s", deviceId,
+                      android::toString(mDeviceIds).c_str());
+            return AAUDIO_ERROR_OUT_OF_RANGE;
+        }
     }
 
     // All Session ID values are legal.
@@ -296,7 +300,7 @@ aaudio_result_t AAudioStreamParameters::validateChannelMask() const {
 }
 
 void AAudioStreamParameters::dump() const {
-    ALOGD("mDeviceId             = %6d", mDeviceId);
+    ALOGD("mDeviceIds            = %s",  android::toString(mDeviceIds).c_str());
     ALOGD("mSessionId            = %6d", mSessionId);
     ALOGD("mSampleRate           = %6d", mSampleRate);
     ALOGD("mSamplesPerFrame      = %6d", mSamplesPerFrame);
