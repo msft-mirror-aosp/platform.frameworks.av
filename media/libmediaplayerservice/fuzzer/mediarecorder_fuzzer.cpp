@@ -116,7 +116,7 @@ class TestAudioDeviceCallback : public AudioSystem::AudioDeviceCallback {
     virtual ~TestAudioDeviceCallback() = default;
 
     void onAudioDeviceUpdate(audio_io_handle_t /*audioIo*/,
-                             audio_port_handle_t /*deviceId*/) override{};
+                             const DeviceIdVector& /*deviceIds*/) override{};
 };
 
 class TestCamera : public ICamera {
@@ -185,8 +185,8 @@ void MediaRecorderClientFuzzer::getConfig() {
     int32_t max;
     mStfRecorder->getMaxAmplitude(&max);
 
-    int32_t deviceId;
-    mStfRecorder->getRoutedDeviceId(&deviceId);
+    DeviceIdVector deviceIds;
+    mStfRecorder->getRoutedDeviceIds(deviceIds);
 
     vector<android::media::MicrophoneInfoFw> activeMicrophones{};
     mStfRecorder->getActiveMicrophones(&activeMicrophones);

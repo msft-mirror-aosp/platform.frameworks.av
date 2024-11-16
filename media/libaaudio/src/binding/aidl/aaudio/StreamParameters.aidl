@@ -21,7 +21,7 @@ import android.media.audio.common.AudioFormatDescription;
 parcelable StreamParameters {
     int                                       channelMask;  //          = AAUDIO_UNSPECIFIED;
     int                                       sampleRate;  //           = AAUDIO_UNSPECIFIED;
-    int                                       deviceId;  //             = AAUDIO_UNSPECIFIED;
+    int[]                                     deviceIds;  //            = null;
     int /* aaudio_sharing_mode_t */           sharingMode;  //          = AAUDIO_SHARING_MODE_SHARED;
     AudioFormatDescription                    audioFormat;  //          = AUDIO_FORMAT_DEFAULT;
     int /* aaudio_direction_t */              direction;  //            = AAUDIO_DIRECTION_OUTPUT;

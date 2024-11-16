@@ -95,7 +95,11 @@ AAUDIO_API void AAudioStreamBuilder_setDeviceId(AAudioStreamBuilder* builder,
                                                 int32_t deviceId)
 {
     AudioStreamBuilder *streamBuilder = convertAAudioBuilderToStreamBuilder(builder);
-    streamBuilder->setDeviceId(deviceId);
+    android::DeviceIdVector deviceIds;
+    if (deviceId != AAUDIO_UNSPECIFIED) {
+        deviceIds.push_back(deviceId);
+    }
+    streamBuilder->setDeviceIds(deviceIds);
 }
 
 AAUDIO_API void AAudioStreamBuilder_setPackageName(AAudioStreamBuilder* builder,
@@ -537,7 +541,33 @@ AAUDIO_API aaudio_performance_mode_t AAudioStream_getPerformanceMode(AAudioStrea
 AAUDIO_API int32_t AAudioStream_getDeviceId(AAudioStream* stream)
 {
     AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
-    return audioStream->getDeviceId();
+    auto deviceIds = audioStream->getDeviceIds();
+    if (deviceIds.empty()) {
+        return AAUDIO_UNSPECIFIED;
+    }
+    return deviceIds[0];
+}
+
+AAUDIO_API aaudio_result_t AAudioStream_getDeviceIds(AAudioStream* stream, int32_t* ids,
+                                                     int32_t* numIds)
+{
+    if (numIds == nullptr) {
+        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
+    }
+    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
+    auto deviceIds = audioStream->getDeviceIds();
+    if (*numIds < deviceIds.size()) {
+        *numIds = deviceIds.size();
+        return AAUDIO_ERROR_OUT_OF_RANGE;
+    }
+    if (ids == nullptr) {
+        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
+    }
+    for (int i = 0; i < deviceIds.size(); i++) {
+        ids[i] = deviceIds[i];
+    }
+    *numIds = deviceIds.size();
+    return AAUDIO_OK;
 }
 
 AAUDIO_API aaudio_sharing_mode_t AAudioStream_getSharingMode(AAudioStream* stream)
