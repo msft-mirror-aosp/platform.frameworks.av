@@ -127,10 +127,10 @@ sp<CaptureStateListenerImpl> AudioSystem::gSoundTriggerCaptureStateListener;
 // Such an audioserver failure is considered benign as the ground truth is stored in
 // the Java AudioService and can be restored once audioserver has finished initialization.
 //
-// TODO(b/375691003) We use 10s as a conservative timeout value, and will tune closer to 3s.
+// TODO(b/375691003) We use 5s as a conservative timeout value, and will tune closer to 3s.
 // Too small a value (i.e. less than 1s would churn repeated calls to get the service).
 // The value can be tuned by the property audio.service.client_wait_ms.
-static constexpr int32_t kServiceClientWaitMs = 10'000;
+static constexpr int32_t kServiceClientWaitMs = 5'000;
 
 static constexpr const char kServiceWaitProperty[] = "audio.service.client_wait_ms";
 
