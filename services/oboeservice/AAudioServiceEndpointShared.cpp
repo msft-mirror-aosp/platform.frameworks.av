@@ -64,7 +64,7 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
     const AAudioStreamConfiguration &configuration = request.getConstantConfiguration();
 
     copyFrom(configuration);
-    mRequestedDeviceId = configuration.getDeviceId();
+    mRequestedDeviceId = android::getFirstDeviceId(configuration.getDeviceIds());
 
     AudioStreamBuilder builder;
     builder.copyFrom(configuration);
@@ -79,7 +79,7 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
 
     setSampleRate(mStreamInternal->getSampleRate());
     setChannelMask(mStreamInternal->getChannelMask());
-    setDeviceId(mStreamInternal->getDeviceId());
+    setDeviceIds(mStreamInternal->getDeviceIds());
     setSessionId(mStreamInternal->getSessionId());
     setFormat(AUDIO_FORMAT_PCM_FLOAT); // force for mixer
     setHardwareSampleRate(mStreamInternal->getHardwareSampleRate());
@@ -220,7 +220,7 @@ aaudio_result_t AAudioServiceEndpointShared::getTimestamp(int64_t *positionFrame
 void AAudioServiceEndpointShared::handleDisconnectRegisteredStreamsAsync() {
     android::sp<AAudioServiceEndpointShared> holdEndpoint(this);
     // When there is a routing changed, mmap stream should be disconnected. Set `mConnected`
-    // as false here so that there won't be a new stream connect to this endpoint.
+    // as false here so that there won't be a new stream connected to this endpoint.
     mConnected.store(false);
     std::thread asyncTask([holdEndpoint]() {
         // When handling disconnection, the service side has disconnected. In that case,

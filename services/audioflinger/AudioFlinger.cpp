@@ -1190,7 +1190,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
                                             adjAttributionSource, &input.config, input.flags,
                                             &selectedDeviceIds, &portId, &secondaryOutputs,
                                             &isSpatialized, &isBitPerfect, &volume, &muted);
-    output.selectedDeviceId = getFirstDeviceId(selectedDeviceIds);
+    output.selectedDeviceIds = selectedDeviceIds;
 
     if (lStatus != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
         ALOGE("createTrack() getOutputForAttr() return error %d or invalid output handle", lStatus);
