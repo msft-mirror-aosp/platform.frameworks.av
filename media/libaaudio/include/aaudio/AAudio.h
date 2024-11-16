@@ -1909,9 +1909,31 @@ AAUDIO_API int32_t AAudioStream_getSamplesPerFrame(AAudioStream* _Nonnull stream
  * Available since API level 26.
  *
  * @param stream reference provided by AAudioStreamBuilder_openStream()
- * @return actual device ID
+ * @return actual device id. If there are multiple device ids used, the first device picked by
+ *         the audio policy engine will be returned.
  */
 AAUDIO_API int32_t AAudioStream_getDeviceId(AAudioStream* _Nonnull stream) __INTRODUCED_IN(26);
+
+/**
+ * Available since API level 36.
+ *
+ * Call this function after AAudioStreamBuilder_openStream().
+ * This function will crash if stream is null.
+ * An array of size 16 should generally be large enough to fit all device identifiers.
+ *
+ * @param stream reference provided by AAudioStreamBuilder_openStream().
+ * @param ids reference to an array of ids.
+ * @params numIds size allocated to the array of ids.
+ *         The input should be the size of the ids array.
+ *         The output will be the actual number of device ids.
+ * @return {@link #AAUDIO_OK} or an error code.
+ *         If numIds is null, return {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT}.
+ *         If numIds is smaller than the number of device ids, return
+ *         {@link #AAUDIO_ERROR_OUT_OF_RANGE}. The value of numIds will still be updated.
+ *         Otherwise, if ids is null, return {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT}.
+ */
+AAUDIO_API aaudio_result_t AAudioStream_getDeviceIds(AAudioStream* _Nonnull stream,
+        int32_t* _Nonnull ids, int32_t* _Nonnull numIds) __INTRODUCED_IN(36);
 
 /**
  * Available since API level 26.

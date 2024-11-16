@@ -691,6 +691,8 @@ private:
         return activityManager;
     }
 
+    static int32_t getUidProcessState(int32_t uid);
+
     /**
      * Typesafe version of device status, containing both the HAL-layer and the service interface-
      * layer values.

@@ -4550,6 +4550,17 @@ status_t CameraService::BasicClient::notifyCameraClosing() {
     return OK;
 }
 
+int32_t CameraService::getUidProcessState(int32_t uid) {
+    const auto& activityManager = getActivityManager();
+    int32_t procState = ActivityManager::PROCESS_STATE_NONEXISTENT;
+    if (activityManager != nullptr) {
+        procState = activityManager->getUidProcessState(uid, toString16(kServiceName));
+    } else {
+        ALOGE("%s: getActivityManager returned nullptr.", __FUNCTION__);
+    }
+    return procState;
+}
+
 void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
     ATRACE_CALL();
     if (mAppOpsManager == nullptr) {
@@ -4606,12 +4617,9 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
                       [&](const auto& attr) {
                           uid = static_cast<uid_t>(attr.uid);
                       });
-            const auto& activityManager = getActivityManager();
-            if (activityManager != nullptr) {
-                procState = activityManager->getUidProcessState(uid, toString16(kServiceName));
-            } else {
-                ALOGD("%s: getActivityManager returned nullptr.", __FUNCTION__);
-            }
+            procState = getUidProcessState(uid);
+        } else if (flags::query_process_state()) {
+            procState = getUidProcessState(getClientUid());
         } else {
             procState = sCameraService->mUidPolicy->getProcState(getClientUid());
         }

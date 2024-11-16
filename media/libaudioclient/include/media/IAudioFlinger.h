@@ -109,7 +109,7 @@ public:
         audio_output_flags_t flags;
         size_t frameCount;
         size_t notificationFrameCount;
-        audio_port_handle_t selectedDeviceId;
+        DeviceIdVector selectedDeviceIds;
         audio_session_t sessionId;
 
         /* output */

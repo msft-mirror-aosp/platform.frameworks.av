@@ -60,6 +60,7 @@ cc_fuzz {
         "libaaudio",
         "libaaudio_internal",
         "libaudioclient",
+        "libaudiofoundation",
         "libaudioutils",
         "libbase_ndk",
         "libcutils",
