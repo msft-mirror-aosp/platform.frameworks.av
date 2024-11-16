@@ -2565,7 +2565,8 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
                                                                 // always occupy the initial entry.
             if ((outputStream->data_space == HAL_DATASPACE_V0_JFIF) ||
                     (outputStream->data_space ==
-                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
+                     static_cast<android_dataspace_t>(
+                         aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) ||
                     (outputStream->data_space ==
                      static_cast<android_dataspace_t>(
                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R))) {
