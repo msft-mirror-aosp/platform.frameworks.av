@@ -24,8 +24,6 @@ cc_defaults {
         "android.hardware.audio.common@7.0-enums",
         "audiopermissioncontroller",
         "libaudiomockhal",
-        "libcgrouprc",
-        "libcgrouprc_format",
         "libfakeservicemanager",
         "libjsoncpp",
         "libmediametricsservice",
