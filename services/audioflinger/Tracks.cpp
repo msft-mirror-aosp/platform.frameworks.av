@@ -1327,7 +1327,8 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
 
         // states to reset position info for pcm tracks
         if (audio_is_linear_pcm(mFormat)
-                && (state == IDLE || state == STOPPED || state == FLUSHED)) {
+                && (state == IDLE || state == STOPPED || state == FLUSHED
+                        || state == PAUSED)) {
             mFrameMap.reset();
 
             if (!isFastTrack()) {

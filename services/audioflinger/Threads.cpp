@@ -10921,7 +10921,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
 
     // For mmap streams, once the routing has changed, they will be disconnected. It should be
     // okay to notify the client earlier before the new patch creation.
-    if (mDeviceIds != deviceIds) {
+    if (!areDeviceIdsEqual(deviceIds, mDeviceIds)) {
         if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
             // The aaudioservice handle the routing changed event asynchronously. In that case,
             // it is safe to hold the lock here.
@@ -10945,7 +10945,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
         *handle = AUDIO_PATCH_HANDLE_NONE;
     }
 
-    if (numDevices == 0 || mDeviceIds != deviceIds) {
+    if (numDevices == 0 || (!areDeviceIdsEqual(deviceIds, mDeviceIds))) {
         if (isOutput()) {
             sendIoConfigEvent_l(AUDIO_OUTPUT_CONFIG_CHANGED);
             mOutDeviceTypeAddrs = sinkDeviceTypeAddrs;
@@ -11110,8 +11110,7 @@ void MmapThread::checkInvalidTracks_l()
             if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
                 // The aaudioservice handle the routing changed event asynchronously. In that case,
                 // it is safe to hold the lock here.
-                DeviceIdVector emptyDeviceIdVector;
-                callback->onRoutingChanged(emptyDeviceIdVector);
+                callback->onRoutingChanged({});
             } else if (mNoCallbackWarningCount < kMaxNoCallbackWarnings) {
                 ALOGW("Could not notify MMAP stream tear down: no onRoutingChanged callback!");
                 mNoCallbackWarningCount++;

@@ -130,6 +130,15 @@ public:
         return binder::Status::ok();
     }
 
+    virtual binder::Status onCameraOpenedInSharedMode(
+            [[maybe_unused]] const std::string& /*cameraId*/,
+            [[maybe_unused]] const std::string& /*clientPackageName*/,
+            [[maybe_unused]] int32_t /*deviceId*/,
+            [[maybe_unused]] bool /*isPrimaryClient*/) override {
+        // No op
+        return binder::Status::ok();
+    }
+
     bool waitForNumCameras(size_t num) const {
         Mutex::Autolock l(mLock);
 
@@ -281,6 +290,12 @@ public:
         return binder::Status::ok();
     }
 
+    virtual binder::Status onClientSharedAccessPriorityChanged(
+            [[maybe_unused]] bool /*isPrimaryClient*/) {
+        // No-op
+        return binder::Status::ok();
+    }
+
     // Test helper functions:
 
     bool hadError() const {
@@ -402,7 +417,8 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         res = service->connectDevice(callbacks, cameraId,
                 /*oomScoreOffset*/ 0,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__,
-                /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0, /*out*/&device);
+                /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0,
+                /*sharedMode*/false, /*out*/&device);
         EXPECT_TRUE(res.isOk()) << res;
         ASSERT_NE(nullptr, device.get());
         device->disconnect();
@@ -451,7 +467,7 @@ protected:
                     /*oomScoreOffset*/ 0,
                     /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                     /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0,
-                    /*out*/&device);
+                    /*sharedMode*/false, /*out*/&device);
             EXPECT_TRUE(res.isOk()) << res;
         }
         auto p = std::make_pair(callbacks, device);

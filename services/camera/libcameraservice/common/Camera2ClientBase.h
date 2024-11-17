@@ -56,7 +56,8 @@ public:
                       const AttributionSourceState& clientAttribution, int callingPid,
                       bool systemNativeClient, const std::string& cameraId, int api1CameraId,
                       int cameraFacing, int sensorOrientation, int servicePid,
-                      bool overrideForPerfClass, int rotationOverride, bool legacyClient = false);
+                      bool overrideForPerfClass, int rotationOverride,  bool sharedMode,
+                      bool legacyClient = false);
     virtual ~Camera2ClientBase();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,
@@ -88,6 +89,7 @@ public:
     virtual void          notifyPrepared(int streamId);
     virtual void          notifyRequestQueueEmpty();
     virtual void          notifyRepeatingRequestError(long lastFrameNumber);
+    virtual void          notifyClientSharedAccessPriorityChanged(bool primaryClient) override;
 
     void                  notifyIdleWithUserTag(int64_t requestCount, int64_t resultErrorCount,
                                      bool deviceError,

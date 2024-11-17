@@ -105,7 +105,7 @@ aaudio_result_t AAudioServiceEndpointMMAP::open(const aaudio::AAudioStreamReques
     aaudio_result_t result = AAUDIO_OK;
     mAudioDataWrapper = std::make_unique<SharedMemoryWrapper>();
     copyFrom(request.getConstantConfiguration());
-    mRequestedDeviceId = getDeviceId();
+    mRequestedDeviceId = android::getFirstDeviceId(getDeviceIds());
 
     mMmapClient.attributionSource = request.getAttributionSource();
     // TODO b/182392769: use attribution source util
@@ -173,11 +173,13 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
         audio_config_base_t* config) {
     aaudio_result_t result = AAUDIO_OK;
     audio_config_base_t currentConfig = *config;
-    audio_port_handle_t deviceId;
+    android::DeviceIdVector deviceIds;
 
     const audio_attributes_t attributes = getAudioAttributesFrom(this);
 
-    deviceId = mRequestedDeviceId;
+    if (mRequestedDeviceId != AAUDIO_UNSPECIFIED) {
+        deviceIds.push_back(mRequestedDeviceId);
+    }
 
     const aaudio_direction_t direction = getDirection();
 
@@ -202,14 +204,9 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
 
     // Open HAL stream. Set mMmapStream
     ALOGD("%s trying to open MMAP stream with format=%#x, "
-          "sample_rate=%u, channel_mask=%#x, device=%d",
+          "sample_rate=%u, channel_mask=%#x, device=%s",
           __func__, config->format, config->sample_rate,
-          config->channel_mask, deviceId);
-
-    android::DeviceIdVector deviceIds;
-    if (deviceId != AAUDIO_UNSPECIFIED) {
-        deviceIds.push_back(deviceId);
-    }
+          config->channel_mask, android::toString(deviceIds).c_str());
 
     const std::lock_guard<std::mutex> lock(mMmapStreamLock);
     const status_t status = MmapStreamInterface::openMmapStream(streamDirection,
@@ -233,12 +230,11 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
         config->channel_mask = currentConfig.channel_mask;
         return AAUDIO_ERROR_UNAVAILABLE;
     }
-    deviceId = android::getFirstDeviceId(deviceIds);
 
-    if (deviceId == AAUDIO_UNSPECIFIED) {
-        ALOGW("%s() - openMmapStream() failed to set deviceId", __func__);
+    if (deviceIds.empty()) {
+        ALOGW("%s() - openMmapStream() failed to set deviceIds", __func__);
     }
-    setDeviceId(deviceId);
+    setDeviceIds(deviceIds);
 
     if (sessionId == AUDIO_SESSION_ALLOCATE) {
         ALOGW("%s() - openMmapStream() failed to set sessionId", __func__);
@@ -250,8 +246,8 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
             : (aaudio_session_id_t) sessionId;
     setSessionId(actualSessionId);
 
-    ALOGD("%s(format = 0x%X) deviceId = %d, sessionId = %d",
-          __func__, config->format, getDeviceId(), getSessionId());
+    ALOGD("%s(format = 0x%X) deviceIds = %s, sessionId = %d",
+          __func__, config->format, toString(getDeviceIds()).c_str(), getSessionId());
 
     // Create MMAP/NOIRQ buffer.
     result = createMmapBuffer_l();
@@ -280,9 +276,9 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
 
     mDataReportOffsetNanos = ((int64_t)mTimestampGracePeriodMs) * AAUDIO_NANOS_PER_MILLISECOND;
 
-    ALOGD("%s() got rate = %d, channels = %d channelMask = %#x, deviceId = %d, capacity = %d\n",
+    ALOGD("%s() got rate = %d, channels = %d channelMask = %#x, deviceIds = %s, capacity = %d\n",
           __func__, getSampleRate(), getSamplesPerFrame(), getChannelMask(),
-          deviceId, getBufferCapacity());
+          android::toString(deviceIds).c_str(), getBufferCapacity());
 
     ALOGD("%s() got format = 0x%X = %s, frame size = %d, burst size = %d",
           __func__, getFormat(), audio_format_to_string(getFormat()),
@@ -293,7 +289,11 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
 error:
     close_l();
     // restore original requests
-    setDeviceId(mRequestedDeviceId);
+    android::DeviceIdVector requestedDeviceIds;
+    if (mRequestedDeviceId != AAUDIO_UNSPECIFIED) {
+        requestedDeviceIds.push_back(mRequestedDeviceId);
+    }
+    setDeviceIds(requestedDeviceIds);
     setSessionId(requestedSessionId);
     return result;
 }
@@ -491,27 +491,26 @@ void AAudioServiceEndpointMMAP::onVolumeChanged(float volume) {
 };
 
 void AAudioServiceEndpointMMAP::onRoutingChanged(const android::DeviceIdVector& deviceIds) {
-    const auto deviceId = android::getFirstDeviceId(deviceIds);
-    // TODO(b/367816690): Compare the new and saved device sets.
-    ALOGD("%s() called with dev %d, old = %d", __func__, deviceId, getDeviceId());
-    if (getDeviceId() != deviceId) {
-        if (getDeviceId() != AUDIO_PORT_HANDLE_NONE) {
+    ALOGD("%s() called with dev %s, old = %s", __func__, android::toString(deviceIds).c_str(),
+          android::toString(getDeviceIds()).c_str());
+    if (!android::areDeviceIdsEqual(getDeviceIds(), deviceIds)) {
+        if (!getDeviceIds().empty()) {
             // When there is a routing changed, mmap stream should be disconnected. Set `mConnected`
-            // as false here so that there won't be a new stream connect to this endpoint.
+            // as false here so that there won't be a new stream connected to this endpoint.
             mConnected.store(false);
             const android::sp<AAudioServiceEndpointMMAP> holdEndpoint(this);
-            std::thread asyncTask([holdEndpoint, deviceId]() {
+            std::thread asyncTask([holdEndpoint, deviceIds]() {
                 ALOGD("onRoutingChanged() asyncTask launched");
                 // When routing changed, the stream is disconnected and cannot be used except for
                 // closing. In that case, it should be safe to release all registered streams.
                 // This can help release service side resource in case the client doesn't close
                 // the stream after receiving disconnect event.
                 holdEndpoint->releaseRegisteredStreams();
-                holdEndpoint->setDeviceId(deviceId);
+                holdEndpoint->setDeviceIds(deviceIds);
             });
             asyncTask.detach();
         } else {
-            setDeviceId(deviceId);
+            setDeviceIds(deviceIds);
         }
     }
 };

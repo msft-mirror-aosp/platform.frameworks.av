@@ -307,8 +307,8 @@ void AudioStreamBuilder::logParameters() const {
           getSampleRate(), getSamplesPerFrame(), getChannelMask(), getFormat(),
           AAudio_convertSharingModeToShortText(getSharingMode()),
           AAudio_convertDirectionToText(getDirection()));
-    ALOGI("device = %6d, sessionId = %d, perfMode = %d, callback: %s with frames = %d",
-          getDeviceId(),
+    ALOGI("devices = %s, sessionId = %d, perfMode = %d, callback: %s with frames = %d",
+          android::toString(getDeviceIds()).c_str(),
           getSessionId(),
           getPerformanceMode(),
           ((getDataCallbackProc() != nullptr) ? "ON" : "OFF"),

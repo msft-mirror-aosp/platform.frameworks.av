@@ -138,7 +138,7 @@ PermissionChecker::PermissionResult AttributionAndPermissionUtils::checkPermissi
         int32_t attributedOpCode, bool forDataDelivery, bool startDataDelivery,
         bool checkAutomotive) {
     AttributionSourceState clientAttribution = attributionSource;
-    if (!flags::check_full_attribution_source_chain() && !clientAttribution.next.empty()) {
+    if (!flags::data_delivery_permission_checks() && !clientAttribution.next.empty()) {
         clientAttribution.next.clear();
     }
 
@@ -408,7 +408,7 @@ bool AttributionAndPermissionUtils::resolveClientUid(/*inout*/ int& clientUid) {
         clientUid = callingUid;
     } else {
         validUid = isTrustedCallingUid(callingUid);
-        if (flags::use_context_attribution_source()) {
+        if (flags::data_delivery_permission_checks()) {
             validUid = validUid || (clientUid == callingUid);
         }
     }
@@ -426,7 +426,7 @@ bool AttributionAndPermissionUtils::resolveClientPid(/*inout*/ int& clientPid) {
         clientPid = callingPid;
     } else {
         validPid = isTrustedCallingUid(callingUid);
-        if (flags::use_context_attribution_source()) {
+        if (flags::data_delivery_permission_checks()) {
             validPid = validPid || (clientPid == callingPid);
         }
     }
