@@ -50,4 +50,15 @@ interface ICameraDeviceCallbacks
     oneway void onRepeatingRequestError(in long lastFrameNumber,
                                         in int repeatingRequestId);
     oneway void onRequestQueueEmpty();
+
+    /**
+     * Notify registered clients about client shared access priority changes when the camera device
+     * has been opened in shared mode.
+     *
+     * If the client priority changes from secondary to primary, then it can now
+     * create capture request and change the capture request parameters. If client priority
+     * changes from primary to secondary, that implies that another higher priority client is also
+     * accessing the camera in shared mode and is now the primary client.
+     */
+    oneway void onClientSharedAccessPriorityChanged(boolean primaryClient);
 }

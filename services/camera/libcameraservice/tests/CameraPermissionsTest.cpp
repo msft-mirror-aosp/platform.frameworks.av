@@ -77,6 +77,13 @@ public:
         // No op
         return binder::Status::ok();
     }
+
+    virtual binder::Status onCameraOpenedInSharedMode(const std::string& /*cameraId*/,
+            const std::string& /*clientPackageName*/, int32_t /*deviceId*/,
+            bool /*isPrimaryClient*/) {
+        // No op
+        return binder::Status::ok();
+    }
 };
 
 // Empty device callback.
@@ -116,6 +123,10 @@ public:
     }
 
     virtual binder::Status onRequestQueueEmpty() {
+        return binder::Status::ok();
+    }
+
+    virtual binder::Status onClientSharedAccessPriorityChanged(bool /*isPrimaryClient*/) {
         return binder::Status::ok();
     }
 };
@@ -242,7 +253,7 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
                 sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                clientAttribution, /*devicePolicy*/0, &device);
+                clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, &device);
         AutoDisconnectDevice autoDisconnect(device);
         ASSERT_TRUE(!status.isOk()) << "connectDevice returned OK status";
         ASSERT_EQ(status.serviceSpecificErrorCode(), hardware::ICameraService::ERROR_DISABLED)
@@ -257,7 +268,7 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
                 sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                clientAttribution, /*devicePolicy*/0, &device);
+                clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, &device);
         AutoDisconnectDevice autoDisconnect(device);
         ASSERT_TRUE(status.isOk());
     }
@@ -281,7 +292,7 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
                 sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                clientAttribution, /*devicePolicy*/0, &deviceA);
+                clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, &deviceA);
         AutoDisconnectDevice autoDisconnectA(deviceA);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
@@ -289,7 +300,7 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
                 sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                clientAttribution, /*devicePolicy*/0, &deviceB);
+                clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, &deviceB);
         AutoDisconnectDevice autoDisconnectB(deviceB);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
@@ -315,7 +326,7 @@ TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
                 sCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                clientAttribution, /*devicePolicy*/0, &deviceA);
+                clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, &deviceA);
         AutoDisconnectDevice autoDisconnectA(deviceA);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();
@@ -323,7 +334,7 @@ TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
                 sCameraService->connectDevice(callbacks, s.cameraId,
                 1/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-                clientAttribution, /*devicePolicy*/0, &deviceB);
+                clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, &deviceB);
         AutoDisconnectDevice autoDisconnectB(deviceB);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
                 " service specific error code " << status.serviceSpecificErrorCode();

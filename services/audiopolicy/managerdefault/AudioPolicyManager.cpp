@@ -3573,26 +3573,19 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
     ALOGI("%s: deviceType 0x%X, enabled %d, streamToDriveAbs %d", __func__, deviceType, enabled,
           streamToDriveAbs);
 
-    audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
-    if (enabled) {
-        if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
-            ALOGW("%s: no attributes for stream %s, bailing out", __func__,
-                  toString(streamToDriveAbs).c_str());
-            return BAD_VALUE;
-        }
-
-        mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
-    } else {
+    if (!enabled) {
         mAbsoluteVolumeDrivingStreams.erase(deviceType);
+        return NO_ERROR;
     }
 
-    // apply the stream volumes regarding the new absolute mode to all the outputs
-    for (size_t i = 0; i < mOutputs.size(); i++) {
-        sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
-        ALOGV("%s: apply stream volumes for portId %d", __func__, desc->getId());
-        applyStreamVolumes(desc, {deviceType}, static_cast<int>(desc->latency()) * 2);
+    audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
+    if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
+        ALOGW("%s: no attributes for stream %s, bailing out", __func__,
+              toString(streamToDriveAbs).c_str());
+        return BAD_VALUE;
     }
 
+    mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
     return NO_ERROR;
 }
 
@@ -8350,7 +8343,9 @@ float AudioPolicyManager::adjustDeviceAttenuationForAbsVolume(IVolumeCurves &cur
             VolumeSource vsToDriveAbs = toVolumeSource(groupToDriveAbs);
             if (vsToDriveAbs == volumeSource) {
                 // attenuation is applied by the abs volume controller
-                return (index != 0) ? volumeDbMax : volumeDb;
+                // do not mute LE broadcast to allow the secondary device to continue playing
+                return (index != 0 || volumeDevice == AUDIO_DEVICE_OUT_BLE_BROADCAST) ? volumeDbMax
+                                                                                      : volumeDb;
             } else {
                 IVolumeCurves &curvesAbs = getVolumeCurves(vsToDriveAbs);
                 int indexAbs = curvesAbs.getVolumeIndex({volumeDevice});
@@ -8765,6 +8760,7 @@ bool AudioPolicyManager::isValidAttributes(const audio_attributes_t *paa)
     case AUDIO_USAGE_SAFETY:
     case AUDIO_USAGE_VEHICLE_STATUS:
     case AUDIO_USAGE_ANNOUNCEMENT:
+    case AUDIO_USAGE_SPEAKER_CLEANUP:
         break;
     default:
         return false;

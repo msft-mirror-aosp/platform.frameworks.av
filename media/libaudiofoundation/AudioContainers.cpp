@@ -151,6 +151,12 @@ audio_port_handle_t getFirstDeviceId(const DeviceIdVector& deviceIds) {
     return deviceIds[0];
 }
 
+bool areDeviceIdsEqual(const DeviceIdVector& first, const DeviceIdVector& second) {
+    const std::set<audio_port_handle_t> firstSet(first.begin(), first.end());
+    const std::set<audio_port_handle_t> secondSet(second.begin(), second.end());
+    return firstSet == secondSet;
+}
+
 AudioProfileAttributesMultimap createAudioProfilesAttrMap(audio_profile profiles[],
                                                           uint32_t first,
                                                           uint32_t last) {

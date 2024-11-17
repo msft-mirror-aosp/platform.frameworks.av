@@ -308,6 +308,9 @@ void CameraOfflineSessionClient::onResultAvailable(const CaptureResult& result) 
     }
 }
 
+void CameraOfflineSessionClient::notifyClientSharedAccessPriorityChanged(bool /*primaryClient*/) {
+}
+
 void CameraOfflineSessionClient::notifyShutter(const CaptureResultExtras& resultExtras,
         nsecs_t timestamp) {
 

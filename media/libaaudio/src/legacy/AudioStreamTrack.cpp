@@ -132,9 +132,7 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
           notificationFrames, (uint)frameCount);
 
     // Don't call mAudioTrack->setDeviceId() because it will be overwritten by set()!
-    audio_port_handle_t selectedDeviceId = (getDeviceId() == AAUDIO_UNSPECIFIED)
-                                           ? AUDIO_PORT_HANDLE_NONE
-                                           : getDeviceId();
+    audio_port_handle_t selectedDeviceId = getFirstDeviceId(getDeviceIds());
 
     const audio_content_type_t contentType =
             AAudioConvert_contentTypeToInternal(builder.getContentType());
@@ -197,7 +195,8 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
                  AudioGlobal_convertPerformanceModeToText(builder.getPerformanceMode()))
             .set(AMEDIAMETRICS_PROP_SHARINGMODE,
                  AudioGlobal_convertSharingModeToText(builder.getSharingMode()))
-            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT, toString(getFormat()).c_str()).record();
+            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT,
+                 android::toString(getFormat()).c_str()).record();
 
     doSetVolume();
 
@@ -233,7 +232,7 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
         mBlockAdapter = nullptr;
     }
 
-    setDeviceId(mAudioTrack->getRoutedDeviceId());
+    setDeviceIds(mAudioTrack->getRoutedDeviceIds());
 
     aaudio_session_id_t actualSessionId =
             (requestedSessionId == AAUDIO_SESSION_ID_NONE)
@@ -317,7 +316,7 @@ void AudioStreamTrack::onNewIAudioTrack() {
     if (mAudioTrack->channelCount() != getSamplesPerFrame()
           || mAudioTrack->format() != getFormat()
           || mAudioTrack->getSampleRate() != getSampleRate()
-          || mAudioTrack->getRoutedDeviceId() != getDeviceId()
+          || !areDeviceIdsEqual(mAudioTrack->getRoutedDeviceIds(), getDeviceIds())
           || getBufferCapacityFromDevice() != getBufferCapacity()
           || getFramesPerBurstFromDevice() != getFramesPerBurst()) {
         AudioStreamLegacy::onNewIAudioTrack();

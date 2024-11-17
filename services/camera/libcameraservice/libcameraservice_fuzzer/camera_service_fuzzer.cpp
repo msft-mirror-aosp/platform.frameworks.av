@@ -749,6 +749,13 @@ public:
         // No op
         return binder::Status::ok();
     }
+
+    virtual binder::Status onCameraOpenedInSharedMode(const std::string& /*cameraId*/,
+            const std::string& /*clientPackageName*/, int32_t /*deviceId*/,
+            bool /*isPrimaryClient*/) {
+        // No op
+        return binder::Status::ok();
+    }
 };
 
 class TestCameraDeviceCallbacks : public hardware::camera2::BnCameraDeviceCallbacks {
@@ -789,6 +796,11 @@ public:
     virtual binder::Status onRequestQueueEmpty() {
         return binder::Status::ok();
     }
+
+    virtual binder::Status onClientSharedAccessPriorityChanged(bool /*isPrimaryClient*/) {
+        return binder::Status::ok();
+    }
+
 };
 
 class Camera2Fuzzer {
@@ -817,7 +829,7 @@ void Camera2Fuzzer::process() {
         mCameraService->connectDevice(callbacks, s.cameraId,
                 0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
-                clientAttribution, /*devicePolicy*/0, &device);
+                clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, &device);
         if (device == nullptr) {
             continue;
         }

@@ -753,7 +753,7 @@ TEST_P(AudioPolicyManagerTestMsd, PatchCreationFromHdmiInToMsd) {
 TEST_P(AudioPolicyManagerTestMsd, GetDirectProfilesForAttributesWithMsd) {
     const audio_attributes_t attr = {
         AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-        AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""};
+        AUDIO_SOURCE_INVALID, AUDIO_FLAG_NONE, ""};
 
     // count expected direct profiles for the default device
     int countDirectProfilesPrimary = 0;
