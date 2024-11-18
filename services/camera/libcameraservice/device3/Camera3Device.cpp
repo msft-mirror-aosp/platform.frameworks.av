@@ -3796,16 +3796,19 @@ bool Camera3Device::RequestThread::threadLoop() {
     return submitRequestSuccess;
 }
 
-status_t Camera3Device::removeFwkOnlyRegionKeys(CameraMetadata *request) {
-    static const std::array<uint32_t, 4> kFwkOnlyRegionKeys = {ANDROID_CONTROL_AF_REGIONS_SET,
-        ANDROID_CONTROL_AE_REGIONS_SET, ANDROID_CONTROL_AWB_REGIONS_SET,
-        ANDROID_SCALER_CROP_REGION_SET};
+status_t Camera3Device::removeFwkOnlyKeys(CameraMetadata *request) {
+    static const std::array<uint32_t, 5> kFwkOnlyKeys = {
+            ANDROID_CONTROL_AF_REGIONS_SET,
+            ANDROID_CONTROL_AE_REGIONS_SET,
+            ANDROID_CONTROL_AWB_REGIONS_SET,
+            ANDROID_SCALER_CROP_REGION_SET,
+            ANDROID_CONTROL_ZOOM_METHOD};
     if (request == nullptr) {
         ALOGE("%s request metadata nullptr", __FUNCTION__);
         return BAD_VALUE;
     }
     status_t res = OK;
-    for (const auto &key : kFwkOnlyRegionKeys) {
+    for (const auto &key : kFwkOnlyKeys) {
         if (request->exists(key)) {
             res = request->erase(key);
             if (res != OK) {
@@ -3884,7 +3887,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                             it != captureRequest->mSettingsList.end(); it++) {
                         if (parent->mUHRCropAndMeteringRegionMappers.find(it->cameraId) ==
                                 parent->mUHRCropAndMeteringRegionMappers.end()) {
-                            if (removeFwkOnlyRegionKeys(&(it->metadata)) != OK) {
+                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
                                 SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
                                         "%d: %s (%d)", halRequest->frame_number, strerror(-res),
                                         res);
@@ -3904,7 +3907,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                                 return INVALID_OPERATION;
                             }
                             captureRequest->mUHRCropAndMeteringRegionsUpdated = true;
-                            if (removeFwkOnlyRegionKeys(&(it->metadata)) != OK) {
+                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
                                 SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
                                         "%d: %s (%d)", halRequest->frame_number, strerror(-res),
                                         res);
