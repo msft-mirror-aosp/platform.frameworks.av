@@ -367,7 +367,7 @@ class Camera3Device :
 
   protected:
     status_t disconnectImpl();
-    static status_t removeFwkOnlyRegionKeys(CameraMetadata *request);
+    static status_t removeFwkOnlyKeys(CameraMetadata *request);
 
     float getMaxPreviewFps(sp<camera3::Camera3OutputStreamInterface> stream);
 
