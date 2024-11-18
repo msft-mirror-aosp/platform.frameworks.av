@@ -920,6 +920,7 @@ ACameraManager::openCamera(
     clientAttribution.deviceId = mDeviceContext.deviceId;
     clientAttribution.packageName = "";
     clientAttribution.attributionTag = std::nullopt;
+    clientAttribution.token = sp<BBinder>::make();
 
     // No way to get package name from native.
     // Send a zero length package name and let camera service figure it out from UID
