@@ -72,15 +72,15 @@ TEST_F(AudioCapsAacTest, AudioCaps_Aac_Bitrate) {
 }
 
 TEST_F(AudioCapsAacTest, AudioCaps_Aac_InputChannelCount) {
-    int maxInputChannelCount = audioCaps->getMaxInputChannelCount();
+    int32_t maxInputChannelCount = audioCaps->getMaxInputChannelCount();
     EXPECT_EQ(maxInputChannelCount, 8);
-    int minInputChannelCount = audioCaps->getMinInputChannelCount();
+    int32_t minInputChannelCount = audioCaps->getMinInputChannelCount();
     EXPECT_EQ(minInputChannelCount, 1);
 }
 
 TEST_F(AudioCapsAacTest, AudioCaps_Aac_SupportedSampleRates) {
-    const std::vector<int>& sampleRates = audioCaps->getSupportedSampleRates();
-    EXPECT_EQ(sampleRates, std::vector<int>({7350, 8000, 11025, 12000, 16000, 22050,
+    const std::vector<int32_t>& sampleRates = audioCaps->getSupportedSampleRates();
+    EXPECT_EQ(sampleRates, std::vector<int32_t>({7350, 8000, 11025, 12000, 16000, 22050,
             24000, 32000, 44100, 48000}));
 
     EXPECT_FALSE(audioCaps->isSampleRateSupported(6000))
@@ -120,16 +120,16 @@ TEST_F(AudioCapsRawTest, AudioCaps_Raw_Bitrate) {
 }
 
 TEST_F(AudioCapsRawTest, AudioCaps_Raw_InputChannelCount) {
-    int maxInputChannelCount = audioCaps->getMaxInputChannelCount();
+    int32_t maxInputChannelCount = audioCaps->getMaxInputChannelCount();
     EXPECT_EQ(maxInputChannelCount, 12);
-    int minInputChannelCount = audioCaps->getMinInputChannelCount();
+    int32_t minInputChannelCount = audioCaps->getMinInputChannelCount();
     EXPECT_EQ(minInputChannelCount, 1);
 }
 
 TEST_F(AudioCapsRawTest, AudioCaps_Raw_InputChannelCountRanges) {
-    const std::vector<Range<int>>& inputChannelCountRanges
+    const std::vector<Range<int32_t>>& inputChannelCountRanges
             = audioCaps->getInputChannelCountRanges();
-    std::vector<Range<int>> expectedOutput({{1,1}, {2,2}, {3,3}, {4,4}, {5,5},
+    std::vector<Range<int32_t>> expectedOutput({{1,1}, {2,2}, {3,3}, {4,4}, {5,5},
             {6,6}, {7,7}, {8,8}, {9,9}, {10,10}, {11,11}, {12,12}});
     ASSERT_EQ(inputChannelCountRanges.size(), expectedOutput.size());
     for (int i = 0; i < inputChannelCountRanges.size(); i++) {
@@ -139,7 +139,7 @@ TEST_F(AudioCapsRawTest, AudioCaps_Raw_InputChannelCountRanges) {
 }
 
 TEST_F(AudioCapsRawTest, AudioCaps_Raw_SupportedSampleRates) {
-    const std::vector<Range<int>>& sampleRateRanges = audioCaps->getSupportedSampleRateRanges();
+    const std::vector<Range<int32_t>>& sampleRateRanges = audioCaps->getSupportedSampleRateRanges();
     EXPECT_EQ(sampleRateRanges.size(), 1);
     EXPECT_EQ(sampleRateRanges.at(0).lower(), 8000);
     EXPECT_EQ(sampleRateRanges.at(0).upper(), 192000);
