@@ -298,20 +298,21 @@ private:
 class RequestDeathNotificationNdk {
 public:
     RequestDeathNotificationNdk(
-            const ::ndk::SpAIBinder &binder, std::function<void()> &&onBinderDied)
-            : mOnBinderDied(std::move(onBinderDied)),
-              mRecipient(::AIBinder_DeathRecipient_new(OnBinderDiedStatic),
-                         &AIBinder_DeathRecipient_delete), mStatus{AIBinder_linkToDeath(
-                    binder.get(), mRecipient.get(), /* cookie */ this)} {
+            const ::ndk::SpAIBinder &binder, std::function<void()>&& onBinderDied)
+            : mRecipient(::AIBinder_DeathRecipient_new(OnBinderDiedStatic),
+                         &AIBinder_DeathRecipient_delete),
+              mStatus{(AIBinder_DeathRecipient_setOnUnlinked(  // sets cookie deleter
+                              mRecipient.get(), OnBinderDiedUnlinkedStatic),
+                      AIBinder_linkToDeath(  // registers callback
+                              binder.get(), mRecipient.get(),
+                              // we create functional cookie ptr which may outlive this object.
+                              new std::function<void()>(std::move(onBinderDied))))} {
         ALOGW_IF(mStatus != OK, "%s: AIBinder_linkToDeath status:%d", __func__, mStatus);
-        // We do not use AIBinder_DeathRecipient_setOnUnlinked() to do resource deallocation
-        // as the functor mOnBinderDied is kept alive by this class.
     }
 
     ~RequestDeathNotificationNdk() {
-        // The AIBinder_DeathRecipient dtor automatically unlinks all registered notifications,
-        // so AIBinder_unlinkToDeath() is not needed here (elsewise we need to maintain a
-        // AIBinder_Weak here).
+        // mRecipient's unique_ptr calls AIBinder_DeathRecipient_delete to unlink the recipient.
+        // Then OnBinderDiedUnlinkedStatic eventually deletes the cookie.
     }
 
     status_t getStatus() const {
@@ -319,15 +320,14 @@ public:
     }
 
 private:
-    void onBinderDied() {
-        mOnBinderDied();
+    static void OnBinderDiedUnlinkedStatic(void* cookie) {
+        delete reinterpret_cast<std::function<void()>*>(cookie);
     }
 
-    static void OnBinderDiedStatic(void *cookie) {
-        reinterpret_cast<RequestDeathNotificationNdk *>(cookie)->onBinderDied();
+    static void OnBinderDiedStatic(void* cookie) {
+        (*reinterpret_cast<std::function<void()>*>(cookie))();
     }
 
-    const std::function<void()> mOnBinderDied;
     const std::unique_ptr<AIBinder_DeathRecipient, decltype(
             &AIBinder_DeathRecipient_delete)>
             mRecipient;
@@ -362,8 +362,11 @@ std::shared_ptr<void> requestServiceNotification(
 /**
  * Requests a death notification.
  *
- * An opaque handle is returned - after clearing it is guaranteed that
- * no notification will occur.
+ * An opaque handle is returned.  If the service is already dead, the
+ * handle will be null.
+ *
+ * Implementation detail: A callback may occur after the handle is released
+ * if a death notification is in progress.
  *
  * The callback will be of form void onBinderDied();
  */
