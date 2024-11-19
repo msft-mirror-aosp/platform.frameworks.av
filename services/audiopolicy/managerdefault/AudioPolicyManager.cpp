@@ -2350,7 +2350,7 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
     sp<SwAudioOutputDescriptor> outputDesc = mOutputs.getOutputForClient(portId);
     if (outputDesc == 0) {
         ALOGW("startOutput() no output for client %d", portId);
-        return BAD_VALUE;
+        return DEAD_OBJECT;
     }
     sp<TrackClientDescriptor> client = outputDesc->getClient(portId);
 
@@ -2727,7 +2727,7 @@ status_t AudioPolicyManager::stopOutput(audio_port_handle_t portId)
     sp<SwAudioOutputDescriptor> outputDesc = mOutputs.getOutputForClient(portId);
     if (outputDesc == 0) {
         ALOGW("stopOutput() no output for client %d", portId);
-        return BAD_VALUE;
+        return DEAD_OBJECT;
     }
     sp<TrackClientDescriptor> client = outputDesc->getClient(portId);
 
@@ -3430,7 +3430,7 @@ status_t AudioPolicyManager::stopInput(audio_port_handle_t portId)
     sp<AudioInputDescriptor> inputDesc = mInputs.getInputForClient(portId);
     if (inputDesc == 0) {
         ALOGW("%s no input for client %d", __FUNCTION__, portId);
-        return BAD_VALUE;
+        return DEAD_OBJECT;
     }
     audio_io_handle_t input = inputDesc->mIoHandle;
     sp<RecordClientDescriptor> client = inputDesc->getClient(portId);
