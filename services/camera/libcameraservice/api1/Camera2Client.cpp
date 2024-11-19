@@ -73,6 +73,7 @@ Camera2Client::Camera2Client(
                         overrideForPerfClass, rotationOverride, sharedMode,
                         /*legacyClient*/ true),
       mParameters(api1CameraId, cameraFacing),
+      mInitialized(false),
       mLatestRequestIds(kMaxRequestIds),
       mLatestFailedRequestIds(kMaxRequestIds) {
     ATRACE_CALL();
@@ -194,6 +195,7 @@ status_t Camera2Client::initializeImpl(TProviderPtr providerPtr, const std::stri
         ALOGD("%s", l.mParameters.paramsFlattened.c_str());
     }
 
+    mInitialized = true;
     return OK;
 }
 
@@ -1040,6 +1042,12 @@ void Camera2Client::stopPreview() {
 
 void Camera2Client::stopPreviewL() {
     ATRACE_CALL();
+
+    if (!mInitialized) {
+        // If we haven't initialized yet, there's no stream to stop (b/379558387)
+        return;
+    }
+
     status_t res;
     const nsecs_t kStopCaptureTimeout = 3000000000LL; // 3 seconds
     Parameters::State state;
