@@ -118,6 +118,26 @@ struct C2SoftApvDec final : public SimpleC2Component {
     uint32_t mHeight;
     bool mSignalledOutputEos;
     bool mSignalledError;
+    // Color aspects. These are ISO values and are meant to detect changes in aspects to avoid
+    // converting them to C2 values for each frame
+    struct VuiColorAspects {
+        uint8_t primaries;
+        uint8_t transfer;
+        uint8_t coeffs;
+        uint8_t fullRange;
+
+        // default color aspects
+        VuiColorAspects()
+            : primaries(C2Color::PRIMARIES_UNSPECIFIED),
+            transfer(C2Color::TRANSFER_UNSPECIFIED),
+            coeffs(C2Color::MATRIX_UNSPECIFIED),
+            fullRange(C2Color::RANGE_UNSPECIFIED) { }
+
+        bool operator==(const VuiColorAspects &o) {
+            return primaries == o.primaries && transfer == o.transfer && coeffs == o.coeffs
+                && fullRange == o.fullRange;
+        }
+    } mBitstreamColorAspects;
 
     oapvd_t oapvdHandle;
     oapvm_t oapvmHandle;
@@ -125,6 +145,8 @@ struct C2SoftApvDec final : public SimpleC2Component {
     oapv_frms_t ofrms;
 
     int outputCsp;
+
+    void getVuiParams(VuiColorAspects* buffer);
 
     C2_DO_NOT_COPY(C2SoftApvDec);
 };
