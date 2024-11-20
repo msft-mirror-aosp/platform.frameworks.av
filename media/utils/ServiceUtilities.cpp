@@ -291,6 +291,21 @@ bool captureVoiceCommunicationOutputAllowed(const AttributionSourceState& attrib
     return ok;
 }
 
+bool bypassConcurrentPolicyAllowed(const AttributionSourceState& attributionSource) {
+    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+    uid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
+    if (isAudioServerOrRootUid(uid)) return true;
+    static const String16 sBypassConcurrentPolicy(
+            "android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION ");
+    // Use PermissionChecker, which includes some logic for allowing the isolated
+    // HotwordDetectionService to hold certain permissions.
+    bool ok = PermissionCache::checkPermission(sBypassConcurrentPolicy, pid, uid);
+    if (!ok) {
+        ALOGV("Request requires android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION");
+    }
+    return ok;
+}
+
 bool accessUltrasoundAllowed(const AttributionSourceState& attributionSource) {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     uid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
