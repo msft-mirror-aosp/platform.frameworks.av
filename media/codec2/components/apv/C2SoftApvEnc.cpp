@@ -221,10 +221,13 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
                              .withSetter(CodedColorAspectsSetter, mColorAspects)
                              .build());
         std::vector<uint32_t> pixelFormats = {
-                HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
+            HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
         };
         if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
             pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
+        }
+        if (isHalPixelFormatSupported((AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210)) {
+            pixelFormats.push_back(AHARDWAREBUFFER_FORMAT_YCbCr_P210);
         }
         addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
                              .withDefault(new C2StreamPixelFormatInfo::input(
@@ -623,12 +626,6 @@ c2_status_t C2SoftApvEnc::initEncoder() {
         return C2_NO_MEMORY;
     }
 
-    /* Calculate SDR to HDR mapping values */
-    mSdrToHdrMapping.clear();
-    for (int32_t i = 0; i < 256; i++) {
-        mSdrToHdrMapping.push_back((uint16_t)(i * 1023 / 255 + 0.5));
-    }
-
     mStarted = true;
     mInitEncoder = true;
     return C2_OK;
@@ -692,26 +689,48 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
 
     switch (layout.type) {
         case C2PlanarLayout::TYPE_RGB:
-            [[fallthrough]];
-        case C2PlanarLayout::TYPE_RGBA: {
-            // TODO: Add RGBA1010102 support
             ALOGE("Not supported RGB color format");
             return C2_BAD_VALUE;
+        case C2PlanarLayout::TYPE_RGBA: {
+            [[fallthrough]];
+        }
+        case C2PlanarLayout::TYPE_YUVA: {
+            ALOGV("Convert from ABGR2101010 to P210");
+            uint16_t *dstY, *dstU, *dstV;
+            dstY = (uint16_t*)inputFrames->frm[0].imgb->a[0];
+            dstU = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+            dstV = (uint16_t*)inputFrames->frm[0].imgb->a[2];
+            convertRGBA1010102ToYUV420Planar16(dstY, dstU, dstV, (uint32_t*)(input->data()[0]),
+                                                layout.planes[layout.PLANE_Y].rowInc / 4, width,
+                                                height, mColorAspects->matrix,
+                                                mColorAspects->range);
+            break;
         }
         case C2PlanarLayout::TYPE_YUV: {
             if (IsP010(*input)) {
                 if (mColorFormat == OAPV_CF_YCBCR422) {
                     ColorConvertP010ToYUV422P10le(input, inputFrames->frm[0].imgb);
                 } else if (mColorFormat == OAPV_CF_PLANAR2) {
-                    ColorConvertP010ToP210(input, inputFrames->frm[0].imgb);
+                    uint16_t *srcY  = (uint16_t*)(input->data()[0]);
+                    uint16_t *srcUV = (uint16_t*)(input->data()[1]);
+                    uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
+                    uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+                    convertP010ToP210(dstY, dstUV, srcY, srcUV,
+                                      input->width(), input->width(), input->width(),
+                                      input->height());
                 } else {
                     ALOGE("Not supported color format. %d", mColorFormat);
                     return C2_BAD_VALUE;
                 }
             } else if (IsNV12(*input)) {
-                ColorConvertNv12ToP210(input, inputFrames->frm[0].imgb);
-            } else if (IsNV21(*input)) {
-                ColorConvertNv12ToP210(input, inputFrames->frm[0].imgb);
+                uint8_t  *srcY  = (uint8_t*)input->data()[0];
+                uint8_t  *srcUV = (uint8_t*)input->data()[1];
+                uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
+                uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+                convertSemiPlanar8ToP210(dstY, dstUV, srcY, srcUV,
+                                         input->width(), input->width(), input->width(),
+                                         input->width(), input->width(), input->height(),
+                                         CONV_FORMAT_I420);
             } else if (IsYUV420(*input)) {
                 return C2_BAD_VALUE;
             } else if (IsI420(*input)) {
@@ -729,46 +748,6 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
     }
 
     return C2_OK;
-}
-
-void C2SoftApvEnc::ColorConvertNv12ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb) {
-    auto width = input->width();
-    auto height = input->height();
-
-    auto* yPlane = (uint8_t*)input->data()[0];
-    auto* uvPlane = (uint8_t*)input->data()[1];
-
-    auto* dst = (uint16_t*)imgb->a[0];
-    int32_t lumaOffset = 0;
-    for (int32_t y = 0; y < height; ++y) {
-        for (int32_t x = 0; x < width; ++x) {
-            lumaOffset = y * width + x;
-            dst[lumaOffset] = (mSdrToHdrMapping[yPlane[lumaOffset]] << 6) |
-                              ((mSdrToHdrMapping[yPlane[lumaOffset]] & 0x300) >> 3);
-        }
-    }
-
-    auto* dst_uv = (uint16_t*)imgb->a[1];
-    uint32_t uvDstStride = width;
-    int32_t srcOffset = 0;
-    int32_t dstOffset1 = 0, dstOffset2 = 0;
-    int32_t tmp1 = 0, tmp2 = 0;
-    for (int32_t y = 0; y < height / 2; ++y) {
-        for (int32_t x = 0; x < width; x += 2) {
-            srcOffset = y * width + x;
-            dstOffset1 = (y * 2) * width + x;
-            dstOffset2 = ((y * 2) + 1) * width + x;
-
-            tmp1 = (mSdrToHdrMapping[uvPlane[srcOffset]] << 6) |
-                   ((mSdrToHdrMapping[uvPlane[srcOffset]] & 0x300) >> 3);
-            tmp2 = (mSdrToHdrMapping[uvPlane[srcOffset + 1]] << 6) |
-                   ((mSdrToHdrMapping[uvPlane[srcOffset + 1]] & 0x300) >> 3);
-            dst_uv[dstOffset1] = (uint16_t)tmp1;
-            dst_uv[dstOffset1 + 1] = (uint16_t)tmp2;
-            dst_uv[dstOffset2] = (uint16_t)tmp1;
-            dst_uv[dstOffset2 + 1] = (uint16_t)tmp2;
-        }
-    }
 }
 
 C2Config::level_t C2SoftApvEnc::decisionApvLevel(int32_t width, int32_t height, int32_t fps,
@@ -883,30 +862,6 @@ C2Config::level_t C2SoftApvEnc::decisionApvLevel(int32_t width, int32_t height, 
     }
 
     return level;
-}
-
-void C2SoftApvEnc::ColorConvertP010ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb) {
-    auto width = input->width();
-    auto height = input->height();
-
-    auto* yPlane = (uint8_t*)input->data()[0];
-    auto* uvPlane = (uint8_t*)input->data()[1];
-    uint32_t uvStride = width * 2;
-
-    auto* src = yPlane;
-    auto* dst = (uint8_t*)imgb->a[0];
-    std::memcpy(dst, src, width * height * 2);
-
-    auto* dst_uv = (uint8_t*)imgb->a[1];
-    int32_t offset1 = 0, offset2 = 0;
-    for (int32_t y = 0; y < height / 2; ++y) {
-        offset1 = (y * 2) * uvStride;
-        offset2 = (y * 2 + 1) * uvStride;
-        src = uvPlane + (y * uvStride);
-
-        std::memcpy(dst_uv + offset1, src, uvStride);
-        std::memcpy(dst_uv + offset2, src, uvStride);
-    }
 }
 
 void C2SoftApvEnc::ColorConvertP010ToYUV422P10le(const C2GraphicView* const input,

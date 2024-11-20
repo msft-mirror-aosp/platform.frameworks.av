@@ -65,9 +65,7 @@ struct C2SoftApvEnc final : public SimpleC2Component {
 
     void showEncoderParams(oapve_cdesc_t* cdsc);
 
-    void ColorConvertNv12ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb);
     void ColorConvertP010ToYUV422P10le(const C2GraphicView* const input, oapv_imgb_t* imgb);
-    void ColorConvertP010ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb);
 
     void createCsdData(const std::unique_ptr<C2Work>& work, oapv_bitb_t* bitb,
                        uint32_t encodedSize);
@@ -106,7 +104,6 @@ struct C2SoftApvEnc final : public SimpleC2Component {
     oapve_t mEncoderId;
     oapvm_t mMetaId;
     uint8_t* mBitstreamBuf = nullptr;
-    std::vector<uint16_t> mSdrToHdrMapping;
     bool mReceivedFirstFrame = false;
     C2_DO_NOT_COPY(C2SoftApvEnc);
 };
