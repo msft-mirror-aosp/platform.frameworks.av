@@ -815,22 +815,20 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
                                            int32_t selectedDeviceIdAidl,
                                            media::GetInputForAttrResponse* _aidl_return) {
     auto inputSource = attrAidl.source;
-    audio_attributes_t attr = VALUE_OR_RETURN_BINDER_STATUS(
+    const audio_attributes_t attr = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioAttributes_audio_attributes_t(attrAidl));
-    audio_io_handle_t input = VALUE_OR_RETURN_BINDER_STATUS(
+    const audio_io_handle_t requestedInput = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_int32_t_audio_io_handle_t(inputAidl));
-    audio_unique_id_t riid = VALUE_OR_RETURN_BINDER_STATUS(
+    const audio_unique_id_t riid = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_int32_t_audio_unique_id_t(riidAidl));
-    audio_session_t session = VALUE_OR_RETURN_BINDER_STATUS(
+    const audio_session_t session = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_int32_t_audio_session_t(sessionAidl));
-    audio_config_base_t config = VALUE_OR_RETURN_BINDER_STATUS(
+    const audio_config_base_t config = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioConfigBase_audio_config_base_t(configAidl, true /*isInput*/));
-    audio_input_flags_t flags = VALUE_OR_RETURN_BINDER_STATUS(
+    const audio_input_flags_t flags = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_int32_t_audio_input_flags_t_mask(flagsAidl));
-    audio_port_handle_t selectedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
+    const audio_port_handle_t requestedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
                 aidl2legacy_int32_t_audio_port_handle_t(selectedDeviceIdAidl));
-
-    audio_port_handle_t portId;
 
     if (mAudioPolicyManager == NULL) {
         return binderStatusFromStatusT(NO_INIT);
@@ -881,77 +879,72 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
                                              toString(inputSource).c_str()));
     }
 
-    uint32_t virtualDeviceId = kDefaultVirtualDeviceId;
-
-    sp<AudioPolicyEffects>audioPolicyEffects;
+    sp<AudioPolicyEffects> audioPolicyEffects;
+    base::expected<media::GetInputForAttrResponse, std::variant<binder::Status, AudioConfigBase>>
+            res;
     {
-        status_t status;
         AudioPolicyInterface::input_type_t inputType;
 
         audio_utils::lock_guard _l(mMutex);
         {
             AutoCallerClear acc;
             // the audio_in_acoustics_t parameter is ignored by get_input()
-            status = mAudioPolicyManager->getInputForAttr(&attr, &input, riid, session,
-                                                          attributionSource, &config,
-                                                          flags, &selectedDeviceId,
-                                                          &inputType, &portId,
-                                                          &virtualDeviceId);
+            res = mAudioPolicyManager->getInputForAttr(attr, requestedInput, requestedDeviceId,
+                    config, flags, riid, session, attributionSource, &inputType);
 
         }
         audioPolicyEffects = mAudioPolicyEffects;
 
-        if (status == NO_ERROR) {
+        if (res.has_value()) {
             const auto permResult = evaluatePermsForDevice(attributionSource,
-                    inputSource, inputType, virtualDeviceId,
+                    inputSource, inputType, res->virtualDeviceId,
                     isCallRedir);
 
             if (!permResult.has_value()) {
                 AutoCallerClear acc;
-                mAudioPolicyManager->releaseInput(portId);
+                mAudioPolicyManager->releaseInput(res->portId);
                 return permResult.error();
             } else if (!permResult.value()) {
                 AutoCallerClear acc;
-                mAudioPolicyManager->releaseInput(portId);
+                mAudioPolicyManager->releaseInput(res->portId);
                 return Status::fromExceptionCode(
                         EX_SECURITY,
                         String8::format(
                                 "%s: %s missing perms for input type %d, inputSource %d, vdi %d",
                                 __func__, attributionSource.toString().c_str(), inputType,
-                                inputSource, virtualDeviceId));
+                                inputSource, res->virtualDeviceId));
             }
         }
 
-        if (status != NO_ERROR) {
-            _aidl_return->config = VALUE_OR_RETURN_BINDER_STATUS(
-                    legacy2aidl_audio_config_base_t_AudioConfigBase(config, true /*isInput*/));
-            return binderStatusFromStatusT(status);
+        if (!res.has_value()) {
+            if (res.error().index() == 1) {
+                _aidl_return->config = std::get<1>(res.error());
+                return Status::fromExceptionCode(EX_ILLEGAL_STATE);
+            } else {
+                return std::get<0>(res.error());
+            }
         }
 
-        DeviceIdVector selectedDeviceIds = { selectedDeviceId };
-        sp<AudioRecordClient> client = new AudioRecordClient(attr, input, session, portId,
+        DeviceIdVector selectedDeviceIds = { res->selectedDeviceId };
+        sp<AudioRecordClient> client = new AudioRecordClient(attr, res->input, session, res->portId,
                                                              selectedDeviceIds, attributionSource,
-                                                             virtualDeviceId,
+                                                             res->virtualDeviceId,
                                                              canBypassConcurrentPolicy,
                                                              mOutputCommandThread);
-        mAudioRecordClients.add(portId, client);
+        mAudioRecordClients.add(res->portId, client);
     }
 
     if (audioPolicyEffects != 0) {
         // create audio pre processors according to input source
-        status_t status = audioPolicyEffects->addInputEffects(input,
+        status_t status = audioPolicyEffects->addInputEffects(res->input,
                 aidl2legacy_AudioSource_audio_source_t(inputSource).value(), session);
         if (status != NO_ERROR && status != ALREADY_EXISTS) {
-            ALOGW("Failed to add effects on input %d", input);
+            ALOGW("Failed to add effects on input %d", res->input);
         }
     }
 
-    _aidl_return->input = VALUE_OR_RETURN_BINDER_STATUS(
-            legacy2aidl_audio_io_handle_t_int32_t(input));
-    _aidl_return->selectedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
-            legacy2aidl_audio_port_handle_t_int32_t(selectedDeviceId));
-    _aidl_return->portId = VALUE_OR_RETURN_BINDER_STATUS(
-            legacy2aidl_audio_port_handle_t_int32_t(portId));
+    *_aidl_return = res.value();
+
     return Status::ok();
 }
 
