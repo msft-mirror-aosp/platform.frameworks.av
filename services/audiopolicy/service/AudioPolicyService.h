@@ -105,10 +105,10 @@ public:
             const std::string& deviceName,
             const AudioFormatDescription& encodedFormat) override;
     binder::Status setPhoneState(AudioMode state, int32_t uid) override;
-    binder::Status setForceUse(media::AudioPolicyForceUse usage,
-                               media::AudioPolicyForcedConfig config) override;
-    binder::Status getForceUse(media::AudioPolicyForceUse usage,
-                               media::AudioPolicyForcedConfig* _aidl_return) override;
+    binder::Status setForceUse(android::media::audio::common::AudioPolicyForceUse usage,
+            android::media::audio::common::AudioPolicyForcedConfig config) override;
+    binder::Status getForceUse(android::media::audio::common::AudioPolicyForceUse usage,
+            android::media::audio::common::AudioPolicyForcedConfig* _aidl_return) override;
     binder::Status getOutput(AudioStreamType stream, int32_t* _aidl_return) override;
     binder::Status getOutputForAttr(const media::audio::common::AudioAttributes& attr,
                                     int32_t session,
