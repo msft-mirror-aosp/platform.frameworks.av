@@ -87,8 +87,6 @@ using media::audio::common::AudioDeviceDescription;
 using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioMode;
 using media::audio::common::AudioOffloadInfo;
-using media::audio::common::AudioPolicyForceUse;
-using media::audio::common::AudioPolicyForcedConfig;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
 using media::audio::common::AudioUsage;
@@ -298,8 +296,8 @@ Status AudioPolicyService::getPhoneState(AudioMode* _aidl_return) {
     return Status::ok();
 }
 
-Status AudioPolicyService::setForceUse(AudioPolicyForceUse usageAidl,
-                                       AudioPolicyForcedConfig configAidl)
+Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
+                                       media::AudioPolicyForcedConfig configAidl)
 {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
@@ -330,8 +328,8 @@ Status AudioPolicyService::setForceUse(AudioPolicyForceUse usageAidl,
     return Status::ok();
 }
 
-Status AudioPolicyService::getForceUse(AudioPolicyForceUse usageAidl,
-                                       AudioPolicyForcedConfig* _aidl_return) {
+Status AudioPolicyService::getForceUse(media::AudioPolicyForceUse usageAidl,
+                                       media::AudioPolicyForcedConfig* _aidl_return) {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
 
