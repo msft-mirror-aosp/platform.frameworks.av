@@ -17,6 +17,8 @@
 #ifndef ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
 #define ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
 
+#include <atomic>
+
 #include <gui/Flags.h>
 #include <gui/view/Surface.h>
 #include <media/RingBuffer.h>
@@ -235,6 +237,8 @@ private:
     sp<camera2::CaptureSequencer> mCaptureSequencer;
     sp<camera2::JpegProcessor> mJpegProcessor;
     sp<camera2::ZslProcessor> mZslProcessor;
+
+    std::atomic<bool> mInitialized;
 
     /** Utility members */
     bool mLegacyMode;
