@@ -227,3 +227,147 @@ TEST_F(VideoCapsHevcTest, VideoCaps_HEVC_AchievableFrameRates) {
     EXPECT_EQ(achievableFR1080p.value().lower(), 569);
     EXPECT_EQ(achievableFR1080p.value().upper(), 572);
 }
+
+class EncoderCapsAacTest : public testing::Test {
+protected:
+    EncoderCapsAacTest() {
+        std::string mediaType = MIMETYPE_AUDIO_AAC;
+
+        sp<AMessage> details = new AMessage;
+        details->setString("bitrate-range", "8000-960000");
+        details->setString("max-channel-count", "6");
+        details->setString("sample-rate-ranges",
+                "8000,11025,12000,16000,22050,24000,32000,44100,48000");
+
+        std::vector<ProfileLevel> profileLevel{
+            ProfileLevel(2, 0),
+            ProfileLevel(5, 0),
+            ProfileLevel(29, 0),
+            ProfileLevel(23, 0),
+            ProfileLevel(39, 0),
+        };
+
+        encoderCaps = EncoderCapabilities::Create(mediaType, profileLevel, details);
+    }
+
+    std::shared_ptr<EncoderCapabilities> encoderCaps;
+};
+
+
+TEST_F(EncoderCapsAacTest, EncoderCaps_AAC_ComplexityRange) {
+    const Range<int>& complexityRange = encoderCaps->getComplexityRange();
+    EXPECT_EQ(complexityRange.lower(), 0);
+    EXPECT_EQ(complexityRange.upper(), 0);
+}
+
+TEST_F(EncoderCapsAacTest, EncoderCaps_AAC_QualityRange) {
+    const Range<int>& qualityRange = encoderCaps->getQualityRange();
+    EXPECT_EQ(qualityRange.lower(), 0);
+    EXPECT_EQ(qualityRange.upper(), 0);
+}
+
+TEST_F(EncoderCapsAacTest, EncoderCaps_AAC_SupportedBitrateMode) {
+    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR));
+    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_VBR));
+    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CQ));
+    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR_FD));
+}
+
+class EncoderCapsFlacTest : public testing::Test {
+protected:
+    EncoderCapsFlacTest() {
+        std::string mediaType = MIMETYPE_AUDIO_FLAC;
+
+        sp<AMessage> details = new AMessage;
+        details->setString("bitrate-range", "1-21000000");
+        details->setString("complexity-default", "5");
+        details->setString("complexity-range", "0-8");
+        details->setString("feature-bitrate-modes", "CQ");
+        details->setString("max-channel-count", "2");
+        details->setString("sample-rate-ranges", "1-655350");
+
+        std::vector<ProfileLevel> profileLevel;
+
+        encoderCaps = EncoderCapabilities::Create(mediaType, profileLevel, details);
+    }
+
+    std::shared_ptr<EncoderCapabilities> encoderCaps;
+};
+
+TEST_F(EncoderCapsFlacTest, EncoderCaps_FLAC_ComplexityRange) {
+    const Range<int>& complexityRange = encoderCaps->getComplexityRange();
+    EXPECT_EQ(complexityRange.lower(), 0);
+    EXPECT_EQ(complexityRange.upper(), 8);
+}
+
+TEST_F(EncoderCapsFlacTest, EncoderCaps_FLAC_QualityRange) {
+    const Range<int>& qualityRange = encoderCaps->getQualityRange();
+    EXPECT_EQ(qualityRange.lower(), 0);
+    EXPECT_EQ(qualityRange.upper(), 0);
+}
+
+TEST_F(EncoderCapsFlacTest, EncoderCaps_FLAC_SupportedBitrateMode) {
+    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR));
+    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_VBR));
+    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CQ));
+    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR_FD));
+}
+
+class EncoderCapsHevcTest : public testing::Test {
+protected:
+    EncoderCapsHevcTest() {
+        std::string mediaType = MIMETYPE_VIDEO_HEVC;
+
+        sp<AMessage> details = new AMessage;
+        details->setString("alignment", "2x2");
+        details->setString("bitrate-range", "1-120000000");
+        details->setString("block-count-range", "1-8160");
+        details->setString("block-size", "32x32");
+        details->setString("blocks-per-second-range", "1-979200");
+        details->setString("feature-bitrate-modes", "VBR,CBR,CQ,CBR-FD");
+        details->setInt32("feature-can-swap-width-height", 1);
+        details->setInt32("feature-qp-bounds", 0);
+        details->setInt32("feature-vq-minimum-quality", 0);
+        details->setString("max-concurrent-instances", "16");
+        details->setString("measured-frame-rate-1280x720-range", "154-198");
+        details->setString("measured-frame-rate-1920x1080-range", "46-97");
+        details->setString("measured-frame-rate-320x240-range", "371-553");
+        details->setString("measured-frame-rate-720x480-range", "214-305");
+        details->setString("performance-point-1280x720-range", "240");
+        details->setString("performance-point-3840x2160-range", "120");
+        details->setString("quality-default", "57");
+        details->setString("quality-range", "0-100");
+        details->setString("quality-scale", "linear");
+        details->setString("size-range", "64x64-3840x2176");
+
+        std::vector<ProfileLevel> profileLevel{
+            ProfileLevel(1, 2097152),
+            ProfileLevel(2, 2097152),
+            ProfileLevel(4096, 2097152),
+            ProfileLevel(8192, 2097152),
+        };
+
+        encoderCaps = EncoderCapabilities::Create(mediaType, profileLevel, details);
+    }
+
+    std::shared_ptr<EncoderCapabilities> encoderCaps;
+};
+
+TEST_F(EncoderCapsHevcTest, EncoderCaps_HEVC_ComplexityRange) {
+    const Range<int>& complexityRange = encoderCaps->getComplexityRange();
+    EXPECT_EQ(complexityRange.lower(), 0);
+    EXPECT_EQ(complexityRange.upper(), 0);
+}
+
+TEST_F(EncoderCapsHevcTest, EncoderCaps_HEVC_QualityRange) {
+    const Range<int>& qualityRange = encoderCaps->getQualityRange();
+    EXPECT_EQ(qualityRange.lower(), 0);
+    EXPECT_EQ(qualityRange.upper(), 100);
+}
+
+TEST_F(EncoderCapsHevcTest, EncoderCaps_HEVC_SupportedBitrateMode) {
+    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR));
+    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_VBR));
+    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CQ));
+    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR_FD));
+}

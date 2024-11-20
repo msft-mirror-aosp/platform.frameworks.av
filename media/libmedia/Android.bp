@@ -260,6 +260,7 @@ cc_library_shared {
     srcs: [
         "AudioCapabilities.cpp",
         "CodecCapabilities.cpp",
+        "EncoderCapabilities.cpp",
         "VideoCapabilities.cpp",
         "CodecCapabilitiesUtils.cpp",
     ],
