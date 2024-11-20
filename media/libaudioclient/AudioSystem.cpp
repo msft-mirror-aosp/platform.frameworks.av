@@ -60,6 +60,8 @@ using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioMMapPolicyInfo;
 using media::audio::common::AudioMMapPolicyType;
 using media::audio::common::AudioOffloadInfo;
+using media::audio::common::AudioPolicyForceUse;
+using media::audio::common::AudioPolicyForcedConfig;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
 using media::audio::common::AudioUsage;
@@ -1059,9 +1061,9 @@ audio_policy_forced_cfg_t AudioSystem::getForceUse(audio_policy_force_use_t usag
     if (aps == 0) return AUDIO_POLICY_FORCE_NONE;
 
     auto result = [&]() -> ConversionResult<audio_policy_forced_cfg_t> {
-        media::AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
+        AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
                 legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(usage));
-        media::AudioPolicyForcedConfig configAidl;
+        AudioPolicyForcedConfig configAidl;
         RETURN_IF_ERROR(statusTFromBinderStatus(
                 aps->getForceUse(usageAidl, &configAidl)));
         return aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(configAidl);
