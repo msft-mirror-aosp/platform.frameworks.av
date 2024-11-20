@@ -504,14 +504,6 @@ private:
                             const audio_output_flags_t flags);
     status_t unregisterOutput(audio_io_handle_t output);
 
-    error::BinderResult<bool> evaluatePermsForSource(const AttributionSourceState& attrSource,
-                                                     AudioSource source, bool isHotword);
-
-    error::BinderResult<bool> evaluatePermsForDevice(const AttributionSourceState& attrSource,
-                                                     AudioSource source,
-                                                     AudioPolicyInterface::input_type_t inputType,
-                                                     uint32_t vdi, bool isCallRedir);
-
     // If recording we need to make sure the UID is allowed to do that. If the UID is idle
     // then it cannot record and gets buffers with zeros - silence. As soon as the UID
     // transitions to an active state we will start reporting buffers with data. This approach
@@ -967,6 +959,9 @@ private:
         status_t getMmapPolicyInfos(
                 media::audio::common::AudioMMapPolicyType policyType,
                 std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
+
+        error::BinderResult<bool> checkPermissionForInput(const AttributionSourceState& attr,
+                const PermissionReqs& req) override;
 
      private:
         AudioPolicyService *mAudioPolicyService;

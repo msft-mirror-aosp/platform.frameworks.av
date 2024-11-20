@@ -295,14 +295,12 @@ bool AudioPolicyManagerFuzzer::getInputForAttr(
     audio_port_handle_t localPortId;
     if (!portId) portId = &localPortId;
     *portId = AUDIO_PORT_HANDLE_NONE;
-    AudioPolicyInterface::input_type_t inputType;
 
     AttributionSourceState attributionSource;
     attributionSource.uid = 0;
     attributionSource.token = sp<BBinder>::make();
-    const auto inputRes =
-            mManager->getInputForAttr(attr, input, *selectedDeviceId, config, flags, riid,
-                                      AUDIO_SESSION_NONE, attributionSource, &inputType);
+    const auto inputRes = mManager->getInputForAttr(attr, input, *selectedDeviceId, config, flags,
+                                                    riid, AUDIO_SESSION_NONE, attributionSource);
     if (!inputRes.has_value()) return false;
 
     if (inputRes->portId == AUDIO_PORT_HANDLE_NONE || inputRes->input == AUDIO_IO_HANDLE_NONE) {
