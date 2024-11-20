@@ -635,8 +635,7 @@ void DeprecatedCamera3StreamSplitter::decrementBufRefCountLocked(uint64_t id, si
         if (detach) {
             res = consumer->detachBuffer(consumerSlot);
         } else {
-            res = consumer->releaseBuffer(consumerSlot, frameNumber, EGL_NO_DISPLAY,
-                                          EGL_NO_SYNC_KHR, tracker_ptr->getMergedFence());
+            res = consumer->releaseBuffer(consumerSlot, frameNumber, tracker_ptr->getMergedFence());
         }
     } else {
         SP_LOGE("%s: consumer has become null!", __FUNCTION__);

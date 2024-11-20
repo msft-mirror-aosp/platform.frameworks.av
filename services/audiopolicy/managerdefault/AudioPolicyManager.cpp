@@ -3573,19 +3573,36 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
     ALOGI("%s: deviceType 0x%X, enabled %d, streamToDriveAbs %d", __func__, deviceType, enabled,
           streamToDriveAbs);
 
-    if (!enabled) {
-        mAbsoluteVolumeDrivingStreams.erase(deviceType);
-        return NO_ERROR;
-    }
-
+    bool changed = false;
     audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
-    if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
-        ALOGW("%s: no attributes for stream %s, bailing out", __func__,
-              toString(streamToDriveAbs).c_str());
-        return BAD_VALUE;
+    if (enabled) {
+        if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
+            ALOGW("%s: no attributes for stream %s, bailing out", __func__,
+                  toString(streamToDriveAbs).c_str());
+            return BAD_VALUE;
+        }
+
+        if (mAbsoluteVolumeDrivingStreams[deviceType] != attributesToDriveAbs) {
+            mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
+            changed = true;
+        }
+    } else {
+        if (mAbsoluteVolumeDrivingStreams.find(deviceType) != mAbsoluteVolumeDrivingStreams.end()) {
+            mAbsoluteVolumeDrivingStreams.erase(deviceType);
+            changed = true;
+        }
     }
 
-    mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
+    // if something changed, apply the stream volumes regarding the new absolute mode to all the
+    // outputs without any delay
+    if (changed) {
+        for (size_t i = 0; i < mOutputs.size(); i++) {
+            sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
+            ALOGV("%s: apply stream volumes for portId %d", __func__, desc->getId());
+            applyStreamVolumes(desc, {deviceType});
+        }
+    }
+
     return NO_ERROR;
 }
 
