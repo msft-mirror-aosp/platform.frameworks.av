@@ -19,6 +19,7 @@
 #define CODEC_CAPABILITIES_H_
 
 #include <media/AudioCapabilities.h>
+#include <media/VideoCapabilities.h>
 #include <media/CodecCapabilitiesUtils.h>
 #include <media/stagefright/foundation/ABase.h>
 #include <media/stagefright/foundation/AMessage.h>
@@ -52,6 +53,7 @@ private:
     std::vector<ProfileLevel> mProfileLevels;
 
     std::shared_ptr<AudioCapabilities> mAudioCaps;
+    std::shared_ptr<VideoCapabilities> mVideoCaps;
 };
 
 }  // namespace android
