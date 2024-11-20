@@ -3582,23 +3582,30 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
             return BAD_VALUE;
         }
 
-        if (mAbsoluteVolumeDrivingStreams[deviceType] != attributesToDriveAbs) {
+        const auto attrIt = mAbsoluteVolumeDrivingStreams.find(deviceType);
+        if (attrIt == mAbsoluteVolumeDrivingStreams.end() ||
+            (attrIt->second.usage != attributesToDriveAbs.usage ||
+             attrIt->second.content_type != attributesToDriveAbs.content_type ||
+             attrIt->second.flags != attributesToDriveAbs.flags)) {
             mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
             changed = true;
         }
     } else {
-        if (mAbsoluteVolumeDrivingStreams.find(deviceType) != mAbsoluteVolumeDrivingStreams.end()) {
-            mAbsoluteVolumeDrivingStreams.erase(deviceType);
+        if (mAbsoluteVolumeDrivingStreams.erase(deviceType) != 0) {
             changed = true;
         }
     }
 
-    // if something changed, apply the stream volumes regarding the new absolute mode to all the
-    // outputs without any delay
+    const DeviceVector devices = mEngine->getOutputDevicesForAttributes(
+            attributesToDriveAbs, nullptr /* preferredDevice */, true /* fromCache */);
+    changed &= devices.types().contains(deviceType);
+    // if something changed on the output device for the changed attributes, apply the stream
+    // volumes regarding the new absolute mode to all the outputs without any delay
     if (changed) {
         for (size_t i = 0; i < mOutputs.size(); i++) {
             sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
-            ALOGV("%s: apply stream volumes for portId %d", __func__, desc->getId());
+            ALOGI("%s: apply stream volumes for portId %d and device type %d", __func__,
+                  desc->getId(), deviceType);
             applyStreamVolumes(desc, {deviceType});
         }
     }
@@ -8649,7 +8656,6 @@ bool AudioPolicyManager::isVolumeConsistentForCalls(VolumeSource volumeSource,
     const bool isHAUsed = isHearingAidUsedForComm();
 
     if (com_android_media_audio_replace_stream_bt_sco()) {
-        ALOGV("%s stream bt sco is replaced, no volume consistency check for calls", __func__);
         isBtScoVolSrc = (volumeSource != VOLUME_SOURCE_NONE) && (callVolSrc == volumeSource) &&
                         (isScoRequested || isHAUsed);
         return true;
