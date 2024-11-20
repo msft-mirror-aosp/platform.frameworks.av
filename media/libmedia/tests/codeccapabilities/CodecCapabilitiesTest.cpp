@@ -148,3 +148,82 @@ TEST_F(AudioCapsRawTest, AudioCaps_Raw_SupportedSampleRates) {
     EXPECT_EQ(audioCaps->isSampleRateSupported(10000), true);
     EXPECT_EQ(audioCaps->isSampleRateSupported(193000), false);
 }
+
+class VideoCapsHevcTest : public testing::Test {
+protected:
+    VideoCapsHevcTest() {
+        std::string mediaType = MIMETYPE_VIDEO_HEVC;
+
+        sp<AMessage> details = new AMessage;
+        details->setString("alignment", "2x2");
+        details->setString("bitrate-range", "1-120000000");
+        details->setString("block-count-range", "1-32640");
+        details->setString("block-size", "16x16");
+        details->setString("blocks-per-second-range", "1-3916800");
+        details->setInt32("feature-adaptive-playback", 0);
+        details->setInt32("feature-can-swap-width-height", 1);
+        details->setString("max-concurrent-instances", "16");
+        details->setString("measured-frame-rate-1280x720-range", "547-553");
+        details->setString("measured-frame-rate-1920x1080-range", "569-572");
+        details->setString("measured-frame-rate-352x288-range", "1150-1250");
+        details->setString("measured-frame-rate-3840x2160-range", "159-159");
+        details->setString("measured-frame-rate-640x360-range", "528-529");
+        details->setString("measured-frame-rate-720x480-range", "546-548");
+        details->setString("performance-point-1280x720-range", "240");
+        details->setString("performance-point-3840x2160-range", "120");
+        details->setString("size-range", "64x64-3840x2176");
+
+        std::vector<ProfileLevel> profileLevel{
+            ProfileLevel(1, 8388608),
+            ProfileLevel(2, 8388608),
+            ProfileLevel(4096, 8388608),
+            ProfileLevel(8192, 8388608),
+        };
+
+        videoCaps = VideoCapabilities::Create(mediaType, profileLevel, details);
+    }
+
+    std::shared_ptr<VideoCapabilities> videoCaps;
+};
+
+TEST_F(VideoCapsHevcTest, VideoCaps_HEVC_Alignment) {
+    int32_t widthAlignment = videoCaps->getWidthAlignment();
+    EXPECT_EQ(widthAlignment, 2);
+    int32_t heightAlignment = videoCaps->getHeightAlignment();
+    EXPECT_EQ(heightAlignment, 2);
+}
+
+TEST_F(VideoCapsHevcTest, VideoCaps_HEVC_BitrateRange) {
+    const Range<int32_t>& bitrateRange = videoCaps->getBitrateRange();
+    EXPECT_EQ(bitrateRange.lower(), 1);
+    EXPECT_EQ(bitrateRange.upper(), 120000000);
+}
+
+TEST_F(VideoCapsHevcTest, VideoCaps_HEVC_SupportedWidthsAndHeights) {
+    const Range<int32_t>& supportedWidths = videoCaps->getSupportedWidths();
+    EXPECT_EQ(supportedWidths.upper(), 3840);
+    const Range<int32_t>& supportedHeights = videoCaps->getSupportedHeights();
+    EXPECT_EQ(supportedHeights.upper(), 3840);
+}
+
+TEST_F(VideoCapsHevcTest, VideoCaps_HEVC_SupportedFrameRates) {
+    const Range<int32_t>& supportedFrameRates = videoCaps->getSupportedFrameRates();
+    EXPECT_EQ(supportedFrameRates.lower(), 0);
+    EXPECT_EQ(supportedFrameRates.upper(), 960);
+
+    std::optional<Range<double>> supportedFR720p = videoCaps->getSupportedFrameRatesFor(1280, 720);
+    EXPECT_EQ(supportedFR720p.value().upper(), 960.0);
+    std::optional<Range<double>> supportedFR1080p
+            = videoCaps->getSupportedFrameRatesFor(1920, 1080);
+    EXPECT_EQ(supportedFR1080p.value().upper(), 480.0);
+    std::optional<Range<double>> supportedFR4k = videoCaps->getSupportedFrameRatesFor(3840, 2160);
+    EXPECT_EQ(std::round(supportedFR4k.value().upper()), 121);
+}
+
+TEST_F(VideoCapsHevcTest, VideoCaps_HEVC_AchievableFrameRates) {
+    std::optional<Range<double>> achievableFR1080p
+            = videoCaps->getAchievableFrameRatesFor(1920, 1080);
+    ASSERT_NE(achievableFR1080p, std::nullopt) << "resolution not supported";
+    EXPECT_EQ(achievableFR1080p.value().lower(), 569);
+    EXPECT_EQ(achievableFR1080p.value().upper(), 572);
+}
