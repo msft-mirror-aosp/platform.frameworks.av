@@ -97,13 +97,6 @@ AttributionSourceState createAttributionSourceState(uid_t uid) {
     attributionSourceState.token = sp<BBinder>::make();
     return attributionSourceState;
 }
-
-bool equals(const audio_config_base_t& config1, const audio_config_base_t& config2) {
-    return config1.format == config2.format
-            && config1.sample_rate == config2.sample_rate
-            && config1.channel_mask == config2.channel_mask;
-}
-
 } // namespace
 
 TEST(AudioPolicyConfigTest, DefaultConfigForTestsIsEmpty) {
@@ -343,10 +336,14 @@ void AudioPolicyManagerTest::getInputForAttr(
     if (!virtualDeviceId) virtualDeviceId = 0;
     AudioPolicyInterface::input_type_t inputType;
     AttributionSourceState attributionSource = createAttributionSourceState(/*uid=*/ 0);
-    ASSERT_EQ(OK, mManager->getInputForAttr(
-            &attr, input, riid, session, attributionSource, &config, flags,
-            selectedDeviceId, &inputType, portId, virtualDeviceId));
-    ASSERT_NE(AUDIO_PORT_HANDLE_NONE, *portId);
+    auto inputRes = mManager->getInputForAttr(attr, *input, *selectedDeviceId,
+        config, flags, riid, session, attributionSource, &inputType);
+    ASSERT_TRUE(inputRes.has_value());
+    ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
+    *input = inputRes->input;
+    if (selectedDeviceId != nullptr) *selectedDeviceId = inputRes->selectedDeviceId;
+    *portId = inputRes->portId;
+    if (virtualDeviceId != nullptr) *virtualDeviceId = inputRes->virtualDeviceId;
 }
 
 void AudioPolicyManagerTest::getAudioPorts(audio_port_type_t type, audio_port_role_t role,
@@ -1231,40 +1228,39 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, PreferExactConfigForInput) {
                                                            AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
                                                            "", "", AUDIO_FORMAT_DEFAULT));
 
-    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    const audio_port_handle_t requestedDeviceId = AUDIO_PORT_HANDLE_NONE;
+    const audio_io_handle_t requestedInput = AUDIO_PORT_HANDLE_NONE;
+    const AttributionSourceState attributionSource = createAttributionSourceState(/*uid=*/ 0);
+    AudioPolicyInterface::input_type_t inputType;
+
     audio_attributes_t attr = {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
                                AUDIO_SOURCE_VOICE_COMMUNICATION,AUDIO_FLAG_NONE, ""};
-    AudioPolicyInterface::input_type_t inputType;
-    audio_io_handle_t input = AUDIO_PORT_HANDLE_NONE;
-    AttributionSourceState attributionSource = createAttributionSourceState(/*uid=*/ 0);
     audio_config_base_t requestedConfig = {
             .sample_rate = k48000SamplingRate,
             .channel_mask = AUDIO_CHANNEL_IN_STEREO,
             .format = AUDIO_FORMAT_PCM_16_BIT,
     };
-    audio_config_base_t config = requestedConfig;
-    audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE;
-    uint32_t *virtualDeviceId = 0;
-    ASSERT_EQ(OK, mManager->getInputForAttr(
-            &attr, &input, 1 /*riid*/, AUDIO_SESSION_NONE, attributionSource, &config,
-            AUDIO_INPUT_FLAG_NONE,
-            &selectedDeviceId, &inputType, &portId, virtualDeviceId));
-    ASSERT_NE(AUDIO_PORT_HANDLE_NONE, portId);
-    ASSERT_TRUE(equals(requestedConfig, config));
+    auto inputRes = mManager->getInputForAttr(attr, requestedInput, requestedDeviceId,
+                                              requestedConfig, AUDIO_INPUT_FLAG_NONE, 1 /*riid*/,
+                                              AUDIO_SESSION_NONE, attributionSource, &inputType);
+    ASSERT_TRUE(inputRes.has_value());
+    ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
+    ASSERT_EQ(VALUE_OR_FATAL(legacy2aidl_audio_config_base_t_AudioConfigBase(
+                               requestedConfig, true /* isInput */)),
+                       inputRes->config);
 
     attr = {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
             AUDIO_SOURCE_VOICE_COMMUNICATION, AUDIO_FLAG_NONE, ""};
     requestedConfig.channel_mask = deviceChannelMask;
-    config = requestedConfig;
-    selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
-    input = AUDIO_PORT_HANDLE_NONE;
-    portId = AUDIO_PORT_HANDLE_NONE;
-    ASSERT_EQ(OK, mManager->getInputForAttr(
-            &attr, &input, 1 /*riid*/, AUDIO_SESSION_NONE, attributionSource, &config,
-            AUDIO_INPUT_FLAG_NONE,
-            &selectedDeviceId, &inputType, &portId, virtualDeviceId));
-    ASSERT_NE(AUDIO_PORT_HANDLE_NONE, portId);
-    ASSERT_TRUE(equals(requestedConfig, config));
+
+    inputRes = mManager->getInputForAttr(attr, requestedInput, requestedDeviceId, requestedConfig,
+                                         AUDIO_INPUT_FLAG_NONE, 1 /*riid*/, AUDIO_SESSION_NONE,
+                                         attributionSource, &inputType);
+    ASSERT_TRUE(inputRes.has_value());
+    ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
+    ASSERT_EQ(VALUE_OR_FATAL(legacy2aidl_audio_config_base_t_AudioConfigBase(requestedConfig,
+                                                                             true /* isInput */)),
+              inputRes->config);
 
     ASSERT_EQ(NO_ERROR, mManager->setDeviceConnectionState(AUDIO_DEVICE_IN_USB_DEVICE,
                                                            AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
