@@ -134,17 +134,18 @@ public:
         virtual status_t startOutput(audio_port_handle_t portId);
         virtual status_t stopOutput(audio_port_handle_t portId);
         virtual bool releaseOutput(audio_port_handle_t portId);
-        virtual status_t getInputForAttr(const audio_attributes_t *attr,
-                                         audio_io_handle_t *input,
+
+        base::expected<media::GetInputForAttrResponse, std::variant<binder::Status,
+            media::audio::common::AudioConfigBase>>
+                         getInputForAttr(audio_attributes_t attributes,
+                                         audio_io_handle_t requestedInput,
+                                         audio_port_handle_t requestedDeviceId,
+                                         audio_config_base_t config,
+                                         audio_input_flags_t flags,
                                          audio_unique_id_t riid,
                                          audio_session_t session,
                                          const AttributionSourceState& attributionSource,
-                                         audio_config_base_t *config,
-                                         audio_input_flags_t flags,
-                                         audio_port_handle_t *selectedDeviceId,
-                                         input_type_t *inputType,
-                                         audio_port_handle_t *portId,
-                                         uint32_t *virtualDeviceId);
+                                         input_type_t *inputType /* out param */) override;
 
         // indicates to the audio policy manager that the input starts being used.
         virtual status_t startInput(audio_port_handle_t portId);
@@ -1226,7 +1227,7 @@ private:
         audio_io_handle_t getInputForDevice(const sp<DeviceDescriptor> &device,
                 audio_session_t session,
                 const audio_attributes_t &attributes,
-                audio_config_base_t *config,
+                const audio_config_base_t &config,
                 audio_input_flags_t flags,
                 const sp<AudioPolicyMix> &policyMix);
 
