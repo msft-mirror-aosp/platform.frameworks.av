@@ -564,7 +564,7 @@ void CameraService::onDeviceStatusChanged(const std::string& cameraId,
         updateStatus(StatusInternal::NOT_PRESENT, cameraId);
         mVirtualDeviceCameraIdMapper.removeCamera(cameraId);
 
-        sp<BasicClient> clientToDisconnectOnline, clientToDisconnectOffline;
+        std::vector<sp<BasicClient>> clientsToDisconnectOnline, clientsToDisconnectOffline;
         {
             // Don't do this in updateStatus to avoid deadlock over mServiceLock
             Mutex::Autolock lock(mServiceLock);
@@ -574,12 +574,12 @@ void CameraService::onDeviceStatusChanged(const std::string& cameraId,
 
             // Remove online as well as offline client from the list of active clients,
             // if they are present
-            clientToDisconnectOnline = removeClientLocked(cameraId);
-            clientToDisconnectOffline = removeClientLocked(kOfflineDevice + cameraId);
+            clientsToDisconnectOnline = removeClientsLocked(cameraId);
+            clientsToDisconnectOffline = removeClientsLocked(kOfflineDevice + cameraId);
         }
 
-        disconnectClient(cameraId, clientToDisconnectOnline);
-        disconnectClient(kOfflineDevice + cameraId, clientToDisconnectOffline);
+        disconnectClients(cameraId, clientsToDisconnectOnline);
+        disconnectClients(kOfflineDevice + cameraId, clientsToDisconnectOffline);
 
         removeStates(cameraId);
     } else {
@@ -650,6 +650,13 @@ void CameraService::onDeviceStatusChanged(const std::string& id,
                     __FUNCTION__, listener->getListenerUid(), listener->getListenerPid(),
                     ret.exceptionCode());
         }
+    }
+}
+
+void CameraService::disconnectClients(const std::string& id,
+        std::vector<sp<BasicClient>> clientsToDisconnect) {
+    for (auto& client : clientsToDisconnect) {
+        disconnectClient(id, client);
     }
 }
 
@@ -1484,8 +1491,8 @@ Status CameraService::makeClient(
         const std::string& cameraId, int api1CameraId, int facing, int sensorOrientation,
         int servicePid, std::pair<int, IPCTransport> deviceVersionAndTransport,
         apiLevel effectiveApiLevel, bool overrideForPerfClass, int rotationOverride,
-        bool forceSlowJpegMode, const std::string& originalCameraId,
-        /*out*/ sp<BasicClient>* client) {
+        bool forceSlowJpegMode, const std::string& originalCameraId, bool sharedMode,
+        /*out*/sp<BasicClient>* client) {
     // For HIDL devices
     if (deviceVersionAndTransport.second == IPCTransport::HIDL) {
         // Create CameraClient based on device version reported by the HAL.
@@ -1520,7 +1527,7 @@ Status CameraService::makeClient(
                                     cameraService->mAttributionAndPermissionUtils,
                                     clientAttribution, callingPid, cameraId, api1CameraId, facing,
                                     sensorOrientation, servicePid, overrideForPerfClass,
-                                    rotationOverride, forceSlowJpegMode);
+                                    rotationOverride, forceSlowJpegMode, /*sharedMode*/false);
         ALOGI("%s: Camera1 API (legacy), rotationOverride %d, forceSlowJpegMode %d",
                 __FUNCTION__, rotationOverride, forceSlowJpegMode);
     } else { // Camera2 API route
@@ -1530,7 +1537,7 @@ Status CameraService::makeClient(
                 cameraService, tmp, cameraService->mCameraServiceProxyWrapper,
                 cameraService->mAttributionAndPermissionUtils, clientAttribution, callingPid,
                 systemNativeClient, cameraId, facing, sensorOrientation, servicePid,
-                overrideForPerfClass, rotationOverride, originalCameraId);
+                overrideForPerfClass, rotationOverride, originalCameraId, sharedMode);
         ALOGI("%s: Camera2 API, rotationOverride %d", __FUNCTION__, rotationOverride);
     }
     return Status::ok();
@@ -1630,7 +1637,8 @@ Status CameraService::initializeShimMetadata(int cameraId) {
                   /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
                   /*rotationOverride*/
                   hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
-                  /*forceSlowJpegMode*/ false, cameraIdStr, /*isNonSystemNdk*/ false, /*out*/ tmp))
+                  /*forceSlowJpegMode*/ false, cameraIdStr, /*isNonSystemNdk*/ false,
+                  /*sharedMode*/false, /*out*/ tmp))
                  .isOk()) {
         ALOGE("%s: Error initializing shim metadata: %s", __FUNCTION__, ret.toString8().c_str());
     }
@@ -1700,11 +1708,12 @@ Status CameraService::getLegacyParametersLazy(int cameraId,
 }
 
 Status CameraService::validateConnectLocked(const std::string& cameraId,
-                                            const AttributionSourceState& clientAttribution) const {
+                                            const AttributionSourceState& clientAttribution,
+                                            bool sharedMode) const {
 #ifdef __BRILLO__
     UNUSED(clientAttribution);
 #else
-    Status allowed = validateClientPermissionsLocked(cameraId, clientAttribution);
+    Status allowed = validateClientPermissionsLocked(cameraId, clientAttribution, sharedMode);
     if (!allowed.isOk()) {
         return allowed;
     }
@@ -1742,7 +1751,8 @@ Status CameraService::validateConnectLocked(const std::string& cameraId,
 }
 
 Status CameraService::validateClientPermissionsLocked(
-        const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
+        const std::string& cameraId, const AttributionSourceState& clientAttribution,
+        bool sharedMode) const {
     int callingPid = getCallingPid();
     int callingUid = getCallingUid();
 
@@ -1761,6 +1771,14 @@ Status CameraService::validateClientPermissionsLocked(
         ALOGE("%s: Invalid camera id %s, skipping", __FUNCTION__, cameraId.c_str());
         return STATUS_ERROR_FMT(ERROR_ILLEGAL_ARGUMENT, "No camera device with ID \"%s\""
                 "found while trying to query device kind", cameraId.c_str());
+    }
+
+    if (flags::camera_multi_client() && sharedMode
+            && (deviceKind != SystemCameraKind::SYSTEM_ONLY_CAMERA)) {
+        ALOGE("%s: camera id %s is not system camera. Device sharing only supported for"
+                " system cameras.", __FUNCTION__, cameraId.c_str());
+        return STATUS_ERROR_FMT(ERROR_ILLEGAL_ARGUMENT, "camera device sharing not supported for "
+                "camera ID \"%s\"", cameraId.c_str());
     }
 
     // Get the device id that owns this camera.
@@ -1886,6 +1904,28 @@ void CameraService::finishConnectLocked(const sp<BasicClient>& client,
                 __FUNCTION__);
     }
 
+    if (flags::camera_multi_client()) {
+        sp<BasicClient> clientSp = clientDescriptor->getValue();
+        auto primaryClient = mActiveClientManager.getPrimaryClient(desc->getKey());
+        if (primaryClient == nullptr) {
+            // There is no primary client yet. Assign this first client as
+            // primary
+            clientSp->setPrimaryClient(true);
+        } else {
+            // There is already primary client. If the incoming client has a
+            // higher priority than the existing primary, then assign incoming
+            // client as primary and change the existing client to secondary.
+            // Otherwise incoming client is secondary client.
+            if (clientDescriptor->getPriority() <= primaryClient->getPriority()) {
+                clientSp->setPrimaryClient(true);
+                primaryClient->getValue()->setPrimaryClient(false);
+                primaryClient->getValue()->notifyClientSharedAccessPriorityChanged(false);
+            } else {
+                clientSp->setPrimaryClient(false);
+            }
+        }
+    }
+
     // And register a death notification for the client callback. Do
     // this last to avoid Binder policy where a nested Binder
     // transaction might be pre-empted to service the client death
@@ -1900,6 +1940,7 @@ void CameraService::finishConnectLocked(const sp<BasicClient>& client,
 status_t CameraService::handleEvictionsLocked(const std::string& cameraId, int clientPid,
         apiLevel effectiveApiLevel, const sp<IBinder>& remoteCallback,
         const std::string& packageName, int oomScoreOffset, bool systemNativeClient,
+        bool sharedMode,
         /*out*/
         sp<BasicClient>* client,
         std::shared_ptr<resource_policy::ClientDescriptor<std::string, sp<BasicClient>>>* partial) {
@@ -1951,7 +1992,8 @@ status_t CameraService::handleEvictionsLocked(const std::string& cameraId, int c
             clientDescriptor = CameraClientManager::makeClientDescriptor(cameraId,
                     sp<BasicClient>{nullptr}, static_cast<int32_t>(state->getCost()),
                     state->getConflicting(), resource_policy::NATIVE_ADJ, clientPid,
-                    ActivityManager::PROCESS_STATE_BOUND_TOP, oomScoreOffset, systemNativeClient);
+                    ActivityManager::PROCESS_STATE_BOUND_TOP, oomScoreOffset, systemNativeClient,
+                    sharedMode);
         } else {
             // Get current active client PIDs
             std::vector<int> ownerPids(mActiveClientManager.getAllOwners());
@@ -1987,7 +2029,7 @@ status_t CameraService::handleEvictionsLocked(const std::string& cameraId, int c
             clientDescriptor = CameraClientManager::makeClientDescriptor(cameraId,
                     sp<BasicClient>{nullptr}, static_cast<int32_t>(state->getCost()),
                     state->getConflicting(), actualScore, clientPid, actualState,
-                    oomScoreOffset, systemNativeClient);
+                    oomScoreOffset, systemNativeClient, sharedMode);
         }
 
         resource_policy::ClientPriority clientPriority = clientDescriptor->getPriority();
@@ -2160,7 +2202,7 @@ Status CameraService::connect(
             cameraClient, cameraIdStr, api1CameraId, resolvedClientAttribution,
             /*systemNativeClient*/ false, API_1,
             /*shimUpdateOnly*/ false, /*oomScoreOffset*/ 0, targetSdkVersion, rotationOverride,
-            forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*out*/ client);
+            forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*sharedMode*/false, /*out*/ client);
 
     if (!ret.isOk()) {
         logRejected(cameraIdStr, getCallingPid(),
@@ -2244,8 +2286,7 @@ Status CameraService::connectDevice(
         const std::string& unresolvedCameraId,
         int oomScoreOffset, int targetSdkVersion,
         int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
-        /*out*/
-        sp<hardware::camera2::ICameraDeviceUser>* device) {
+        bool sharedMode, /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
     ATRACE_CALL();
     RunThreadWithRealtimePriority priorityBump;
     Status ret = Status::ok();
@@ -2325,7 +2366,8 @@ Status CameraService::connectDevice(
     ret = connectHelper<hardware::camera2::ICameraDeviceCallbacks, CameraDeviceClient>(
             cameraCb, cameraId, /*api1CameraId*/ -1, resolvedClientAttribution, systemNativeClient,
             API_2, /*shimUpdateOnly*/ false, oomScoreOffset, targetSdkVersion, rotationOverride,
-            /*forceSlowJpegMode*/ false, unresolvedCameraId, isNonSystemNdk, /*out*/ client);
+            /*forceSlowJpegMode*/ false, unresolvedCameraId, isNonSystemNdk, sharedMode,
+            /*out*/ client);
 
     if (!ret.isOk()) {
         logRejected(cameraId, clientPid, clientPackageName, toStdString(ret.toString8()));
@@ -2405,7 +2447,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
                                     bool shimUpdateOnly, int oomScoreOffset, int targetSdkVersion,
                                     int rotationOverride, bool forceSlowJpegMode,
                                     const std::string& originalCameraId, bool isNonSystemNdk,
-                                    /*out*/ sp<CLIENT>& device) {
+                                    bool sharedMode, /*out*/ sp<CLIENT>& device) {
     binder::Status ret = binder::Status::ok();
 
     nsecs_t openTimeNs = systemTime();
@@ -2432,7 +2474,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
         }
 
         // Enforce client permissions and do basic validity checks
-        if (!(ret = validateConnectLocked(cameraId, clientAttribution)).isOk()) {
+        if (!(ret = validateConnectLocked(cameraId, clientAttribution, sharedMode)).isOk()) {
             return ret;
         }
 
@@ -2453,7 +2495,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
                      cameraId, clientAttribution.pid, effectiveApiLevel,
                      IInterface::asBinder(cameraCb),
                      clientAttribution.packageName.value_or(kUnknownPackageName), oomScoreOffset,
-                     systemNativeClient, /*out*/ &clientTmp,
+                     systemNativeClient, sharedMode, /*out*/ &clientTmp,
                      /*out*/ &partial)) != NO_ERROR) {
             switch (err) {
                 case -ENODEV:
@@ -2504,7 +2546,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
                                systemNativeClient, cameraId, api1CameraId, facing, orientation,
                                getpid(), deviceVersionAndTransport, effectiveApiLevel,
                                overrideForPerfClass, rotationOverride, forceSlowJpegMode,
-                               originalCameraId,
+                               originalCameraId, sharedMode,
                                /*out*/ &tmp))
                      .isOk()) {
             return ret;
@@ -2753,7 +2795,7 @@ status_t CameraService::addOfflineClient(const std::string &cameraId,
                 /*conflictingKeys*/ std::set<std::string>(), onlinePriority.getScore(),
                 onlineClientDesc->getOwnerId(), onlinePriority.getState(),
                 // native clients don't have offline processing support.
-                /*ommScoreOffset*/ 0, /*systemNativeClient*/false);
+                /*ommScoreOffset*/ 0, /*systemNativeClient*/false, /*sharedMode*/false);
         if (offlineClientDesc == nullptr) {
             ALOGE("%s: Offline client descriptor was NULL", __FUNCTION__);
             return BAD_VALUE;
@@ -3686,6 +3728,25 @@ void CameraService::removeByClient(const BasicClient* client) {
     updateAudioRestrictionLocked();
 }
 
+bool CameraService::isOnlyClient(const BasicClient* client) {
+    Mutex::Autolock lock(mServiceLock);
+    bool ret = true;
+    if (!flags::camera_multi_client()) {
+        return ret;
+    }
+    if (client != nullptr) {
+        std::string camId = client->mCameraIdStr;
+        for (const auto& i : mActiveClientManager.getAll()) {
+            auto clientSp = i->getValue();
+            auto curCamId = i->getKey();
+            if (!curCamId.compare(camId) && clientSp.get() != client) {
+                return false;
+            }
+        }
+    }
+    return ret;
+}
+
 bool CameraService::evictClientIdByRemote(const wp<IBinder>& remote) {
     bool ret = false;
     {
@@ -3746,20 +3807,20 @@ std::shared_ptr<CameraService::CameraState> CameraService::getCameraState(
     return state;
 }
 
-sp<CameraService::BasicClient> CameraService::removeClientLocked(const std::string& cameraId) {
+std::vector<sp<CameraService::BasicClient>> CameraService::removeClientsLocked(
+        const std::string& cameraId) {
     // Remove from active clients list
-    auto clientDescriptorPtr = mActiveClientManager.remove(cameraId);
-    if (clientDescriptorPtr == nullptr) {
-        ALOGW("%s: Could not evict client, no client for camera ID %s", __FUNCTION__,
-                cameraId.c_str());
-        return sp<BasicClient>{nullptr};
+    std::vector<sp<CameraService::BasicClient>> clients;
+    std::vector<CameraService::DescriptorPtr> clientDescriptors;
+    clientDescriptors =  mActiveClientManager.removeAll(cameraId);
+    for (const auto& clientDescriptorPtr : clientDescriptors) {
+        sp<BasicClient> client = clientDescriptorPtr->getValue();
+        if (client.get() != nullptr) {
+            cacheClientTagDumpIfNeeded(clientDescriptorPtr->getKey(), client.get());
+        }
+        clients.push_back(client);
     }
-
-    sp<BasicClient> client = clientDescriptorPtr->getValue();
-    if (client.get() != nullptr) {
-        cacheClientTagDumpIfNeeded(clientDescriptorPtr->getKey(), client.get());
-    }
-    return client;
+    return clients;
 }
 
 void CameraService::doUserSwitch(const std::vector<int32_t>& newUserIds) {
@@ -4043,11 +4104,11 @@ CameraService::Client::Client(
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
         const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
         const std::string& cameraIdStr, int api1CameraId, int cameraFacing, int sensorOrientation,
-        int servicePid, int rotationOverride)
+        int servicePid, int rotationOverride, bool sharedMode)
     : CameraService::BasicClient(cameraService, IInterface::asBinder(cameraClient),
                                  attributionAndPermissionUtils, clientAttribution, callingPid,
                                  systemNativeClient, cameraIdStr, cameraFacing, sensorOrientation,
-                                 servicePid, rotationOverride),
+                                 servicePid, rotationOverride, sharedMode),
       mCameraId(api1CameraId) {
     LOG1("Client::Client E (pid %d, id %d)", callingPid, mCameraId);
 
@@ -4075,7 +4136,7 @@ CameraService::BasicClient::BasicClient(
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
         const AttributionSourceState& clientAttribution, int callingPid, bool nativeClient,
         const std::string& cameraIdStr, int cameraFacing, int sensorOrientation, int servicePid,
-        int rotationOverride)
+        int rotationOverride, bool sharedMode)
     : AttributionAndPermissionUtilsEncapsulator(attributionAndPermissionUtils),
       mDestructionStarted(false),
       mCameraIdStr(cameraIdStr),
@@ -4087,7 +4148,7 @@ CameraService::BasicClient::BasicClient(
       mServicePid(servicePid),
       mDisconnected(false),
       mUidIsTrusted(false),
-      mRotationOverride(rotationOverride),
+      mRotationOverride(rotationOverride), mSharedMode(sharedMode),
       mAudioRestriction(hardware::camera2::ICameraDeviceUser::AUDIO_RESTRICTION_NONE),
       mRemoteBinder(remoteCallback),
       mCameraOpen(false),
@@ -4128,8 +4189,15 @@ binder::Status CameraService::BasicClient::disconnect() {
 
     sCameraService->removeByClient(this);
     sCameraService->logDisconnected(mCameraIdStr, mCallingPid, getPackageName());
-    sCameraService->mCameraProviderManager->removeRef(CameraProviderManager::DeviceMode::CAMERA,
-            mCameraIdStr);
+    if (!flags::camera_multi_client() || !mSharedMode || (mSharedMode &&
+            sCameraService->isOnlyClient(this))) {
+        // Remove the HAL reference for the camera in either of the following scenarios :
+        // 1) Camera was opened in non-shared mode.
+        // 2) Camera was opened in shared mode and this is the last client using
+        //    the camera which is being disconnected
+        sCameraService->mCameraProviderManager->removeRef(CameraProviderManager::DeviceMode::CAMERA,
+                mCameraIdStr);
+    }
 
     sp<IBinder> remote = getRemote();
     if (remote != nullptr) {
@@ -4137,8 +4205,11 @@ binder::Status CameraService::BasicClient::disconnect() {
     }
 
     notifyCameraClosing();
-    // Notify flashlight that a camera device is closed.
-    sCameraService->mFlashlight->deviceClosed(mCameraIdStr);
+    if (!flags::camera_multi_client() || !mSharedMode || (mSharedMode &&
+            sCameraService->isOnlyClient(this))) {
+        // Notify flashlight that a camera device is closed.
+        sCameraService->mFlashlight->deviceClosed(mCameraIdStr);
+    }
     ALOGI("%s: Disconnected client for camera %s for PID %d", __FUNCTION__, mCameraIdStr.c_str(),
             mCallingPid);
 
@@ -4315,7 +4386,8 @@ status_t CameraService::BasicClient::notifyCameraOpening() {
     sCameraService->mUidPolicy->registerMonitorUid(getClientUid(), /*openCamera*/ true);
 
     // Notify listeners of camera open/close status
-    sCameraService->updateOpenCloseStatus(mCameraIdStr, true /*open*/, getPackageName());
+    sCameraService->updateOpenCloseStatus(mCameraIdStr, true /*open*/, getPackageName(),
+            mSharedMode);
 
     return OK;
 }
@@ -4453,8 +4525,11 @@ status_t CameraService::BasicClient::notifyCameraClosing() {
                 StatusInternal::ENUMERATING, StatusInternal::NOT_PRESENT};
 
         // Transition to PRESENT if the camera is not in either of the rejected states
-        sCameraService->updateStatus(StatusInternal::PRESENT,
-                mCameraIdStr, rejected);
+        if (!flags::camera_multi_client() || !mSharedMode || (mSharedMode
+                && sCameraService->isOnlyClient(this))) {
+            sCameraService->updateStatus(StatusInternal::PRESENT,
+                    mCameraIdStr, rejected);
+        }
     }
 
     // When using the data delivery permission checks, the open state does not involve AppOps
@@ -4469,9 +4544,21 @@ status_t CameraService::BasicClient::notifyCameraClosing() {
     sCameraService->mUidPolicy->unregisterMonitorUid(getClientUid(), /*closeCamera*/ true);
 
     // Notify listeners of camera open/close status
-    sCameraService->updateOpenCloseStatus(mCameraIdStr, false /*open*/, getPackageName());
+    sCameraService->updateOpenCloseStatus(mCameraIdStr, false /*open*/, getPackageName(),
+            mSharedMode);
 
     return OK;
+}
+
+int32_t CameraService::getUidProcessState(int32_t uid) {
+    const auto& activityManager = getActivityManager();
+    int32_t procState = ActivityManager::PROCESS_STATE_NONEXISTENT;
+    if (activityManager != nullptr) {
+        procState = activityManager->getUidProcessState(uid, toString16(kServiceName));
+    } else {
+        ALOGE("%s: getActivityManager returned nullptr.", __FUNCTION__);
+    }
+    return procState;
 }
 
 void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
@@ -4530,12 +4617,9 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
                       [&](const auto& attr) {
                           uid = static_cast<uid_t>(attr.uid);
                       });
-            const auto& activityManager = getActivityManager();
-            if (activityManager != nullptr) {
-                procState = activityManager->getUidProcessState(uid, toString16(kServiceName));
-            } else {
-                ALOGD("%s: getActivityManager returned nullptr.", __FUNCTION__);
-            }
+            procState = getUidProcessState(uid);
+        } else if (flags::query_process_state()) {
+            procState = getUidProcessState(getClientUid());
         } else {
             procState = sCameraService->mUidPolicy->getProcState(getClientUid());
         }
@@ -4578,6 +4662,35 @@ void CameraService::BasicClient::block() {
     CaptureResultExtras resultExtras; // a dummy result (invalid)
     notifyError(hardware::camera2::ICameraDeviceCallbacks::ERROR_CAMERA_DISABLED, resultExtras);
     disconnect();
+}
+
+status_t CameraService::BasicClient::isPrimaryClient(bool* isPrimary) {
+    ATRACE_CALL();
+    if (!flags::camera_multi_client()) {
+        return INVALID_OPERATION;
+    }
+
+    if (!mSharedMode) {
+        ALOGW("%s: Invalid operation when camera is not opened in shared mode", __FUNCTION__);
+        return INVALID_OPERATION;
+    }
+    *isPrimary = mIsPrimaryClient;
+    return OK;
+}
+
+status_t CameraService::BasicClient::setPrimaryClient(bool isPrimary) {
+    ATRACE_CALL();
+
+    if (!flags::camera_multi_client()) {
+        return INVALID_OPERATION;
+    }
+
+    if (!mSharedMode) {
+        ALOGW("%s:Invalid operation when camera is not opened in shared mode", __FUNCTION__);
+        return INVALID_OPERATION;
+    }
+    mIsPrimaryClient = isPrimary;
+    return OK;
 }
 
 // ----------------------------------------------------------------------------
@@ -5130,12 +5243,27 @@ bool CameraService::CameraState::removeUnavailablePhysicalId(const std::string& 
 
 void CameraService::CameraState::setClientPackage(const std::string& clientPackage) {
     Mutex::Autolock lock(mStatusLock);
-    mClientPackage = clientPackage;
+    mClientPackages.clear();
+    mClientPackages.insert(clientPackage);
 }
 
 std::string CameraService::CameraState::getClientPackage() const {
     Mutex::Autolock lock(mStatusLock);
-    return mClientPackage;
+    if (!mClientPackages.empty()) {
+        std::set<std::string>::iterator it = mClientPackages.begin();
+        return *it;
+    }
+    return std::string();
+}
+
+void CameraService::CameraState::addClientPackage(const std::string& clientPackage) {
+    Mutex::Autolock lock(mStatusLock);
+    mClientPackages.insert(clientPackage);
+}
+
+void CameraService::CameraState::removeClientPackage(const std::string& clientPackage) {
+    Mutex::Autolock lock(mStatusLock);
+    mClientPackages.erase(clientPackage);
 }
 
 // ----------------------------------------------------------------------------
@@ -5183,6 +5311,39 @@ sp<CameraService::BasicClient> CameraService::CameraClientManager::getCameraClie
     return descriptor->getValue();
 }
 
+void CameraService::CameraClientManager::remove(const CameraService::DescriptorPtr& value) {
+    ClientManager::remove(value);
+    if (!flags::camera_multi_client()) {
+        return;
+    }
+    auto clientToRemove = value->getValue();
+    if ((clientToRemove.get() != nullptr) && clientToRemove->mSharedMode) {
+      bool primaryClient = false;
+      status_t ret = clientToRemove->isPrimaryClient(&primaryClient);
+      if ((ret == OK) && primaryClient) {
+            // Primary client is being removed. Find the next higher priority
+            // client to become primary client.
+            auto clientDescriptor = get(value->getKey());
+            if (clientDescriptor == nullptr) {
+                ALOGV("CameraService::CameraClientManager::no other clients are using same camera");
+                return;
+            }
+            resource_policy::ClientPriority highestPriority = clientDescriptor->getPriority();
+            sp<BasicClient> highestPriorityClient = clientDescriptor->getValue();
+            if (highestPriorityClient.get() != nullptr) {
+                for (auto& i : getAll()) {
+                    if ((i->getKey() == value->getKey()) && (i->getPriority() < highestPriority)) {
+                        highestPriority = i->getPriority();
+                        highestPriorityClient = i->getValue();
+                    }
+                }
+                highestPriorityClient->setPrimaryClient(true);
+                highestPriorityClient->notifyClientSharedAccessPriorityChanged(true);
+            }
+       }
+    }
+}
+
 std::string CameraService::CameraClientManager::toString() const {
     auto all = getAll();
     std::ostringstream ret;
@@ -5228,14 +5389,14 @@ std::string CameraService::CameraClientManager::toString() const {
 CameraService::DescriptorPtr CameraService::CameraClientManager::makeClientDescriptor(
         const std::string& key, const sp<BasicClient>& value, int32_t cost,
         const std::set<std::string>& conflictingKeys, int32_t score, int32_t ownerId,
-        int32_t state, int32_t oomScoreOffset, bool systemNativeClient) {
+        int32_t state, int32_t oomScoreOffset, bool systemNativeClient, bool sharedMode) {
 
     int32_t score_adj = systemNativeClient ? kSystemNativeClientScore : score;
     int32_t state_adj = systemNativeClient ? kSystemNativeClientState : state;
 
     return std::make_shared<resource_policy::ClientDescriptor<std::string, sp<BasicClient>>>(
             key, value, cost, conflictingKeys, score_adj, ownerId, state_adj,
-            systemNativeClient, oomScoreOffset);
+            systemNativeClient, oomScoreOffset, sharedMode);
 }
 
 CameraService::DescriptorPtr CameraService::CameraClientManager::makeClientDescriptor(
@@ -5244,7 +5405,7 @@ CameraService::DescriptorPtr CameraService::CameraClientManager::makeClientDescr
     return makeClientDescriptor(partial->getKey(), value, partial->getCost(),
             partial->getConflicting(), partial->getPriority().getScore(),
             partial->getOwnerId(), partial->getPriority().getState(), oomScoreOffset,
-            systemNativeClient);
+            systemNativeClient, partial->getSharedMode());
 }
 
 // ----------------------------------------------------------------------------
@@ -5776,7 +5937,7 @@ void CameraService::updateStatus(StatusInternal status, const std::string& camer
 }
 
 void CameraService::updateOpenCloseStatus(const std::string& cameraId, bool open,
-        const std::string& clientPackageName) {
+        const std::string& clientPackageName, bool sharedMode) {
     auto state = getCameraState(cameraId);
     if (state == nullptr) {
         ALOGW("%s: Could not update the status for %s, no such device exists", __FUNCTION__,
@@ -5784,9 +5945,17 @@ void CameraService::updateOpenCloseStatus(const std::string& cameraId, bool open
         return;
     }
     if (open) {
-        state->setClientPackage(clientPackageName);
+        if (flags::camera_multi_client() && sharedMode) {
+            state->addClientPackage(clientPackageName);
+        } else {
+            state->setClientPackage(clientPackageName);
+        }
     } else {
-        state->setClientPackage(std::string());
+        if (flags::camera_multi_client() && sharedMode) {
+            state->removeClientPackage(clientPackageName);
+        } else {
+            state->setClientPackage(std::string());
+        }
     }
 
     // Get the device id and app-visible camera id for the given HAL-visible camera id.
@@ -5805,7 +5974,10 @@ void CameraService::updateOpenCloseStatus(const std::string& cameraId, bool open
             ret = it->getListener()->onCameraOpened(mappedCameraId, clientPackageName,
                     deviceId);
         } else {
-            ret = it->getListener()->onCameraClosed(mappedCameraId, deviceId);
+            if (!flags::camera_multi_client() || !sharedMode || (sharedMode &&
+                    mActiveClientManager.getCameraClient(cameraId) == nullptr)) {
+                ret = it->getListener()->onCameraClosed(mappedCameraId, deviceId);
+            }
         }
 
         it->handleBinderStatus(ret,

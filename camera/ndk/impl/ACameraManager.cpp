@@ -28,9 +28,11 @@
 #include <memory>
 #include "ACameraDevice.h"
 #include "ACameraMetadata.h"
+#include <com_android_internal_camera_flags.h>
 
 using namespace android::acam;
 namespace vd_flags = android::companion::virtualdevice::flags;
+namespace flags = com::android::internal::camera::flags;
 
 namespace android {
 namespace acam {
@@ -860,10 +862,36 @@ camera_status_t ACameraManager::getCameraCharacteristics(
 }
 
 camera_status_t
-ACameraManager::openCamera(
+ACameraManager::isCameraDeviceSharingSupported(
         const char* cameraId,
+        /*out*/bool* isSharingSupported) {
+    if (!flags::camera_multi_client()) {
+        return ACAMERA_ERROR_UNSUPPORTED_OPERATION;
+    }
+    sp<ACameraMetadata> spChars;
+    camera_status_t ret = getCameraCharacteristics(cameraId, &spChars);
+    if (ret != ACAMERA_OK) {
+        ALOGE("%s: cannot get camera characteristics for camera %s. err %d",
+                __FUNCTION__, cameraId, ret);
+        return ret;
+    }
+
+    ACameraMetadata* chars = spChars.get();
+    ACameraMetadata_const_entry entry;
+    ret = ACameraMetadata_getConstEntry(chars, ANDROID_SHARED_SESSION_OUTPUT_CONFIGURATIONS,
+            &entry);
+    if (ret != ACAMERA_OK) {
+        return ret;
+    }
+    *isSharingSupported =  (entry.count > 0) ? true : false;
+    return ACAMERA_OK;
+}
+
+camera_status_t
+ACameraManager::openCamera(
+        const char* cameraId, bool sharedMode,
         ACameraDevice_StateCallbacks* callback,
-        /*out*/ACameraDevice** outDevice) {
+        /*out*/ACameraDevice** outDevice, /*out*/bool* primaryClient) {
     sp<ACameraMetadata> chars;
     camera_status_t ret = getCameraCharacteristics(cameraId, &chars);
     Mutex::Autolock _l(mLock);
@@ -873,7 +901,7 @@ ACameraManager::openCamera(
         return ACAMERA_ERROR_INVALID_PARAMETER;
     }
 
-    ACameraDevice* device = new ACameraDevice(cameraId, callback, chars);
+    ACameraDevice* device = new ACameraDevice(cameraId, callback, chars, sharedMode);
 
     sp<hardware::ICameraService> cs = mGlobalManager->getCameraService();
     if (cs == nullptr) {
@@ -892,13 +920,14 @@ ACameraManager::openCamera(
     clientAttribution.deviceId = mDeviceContext.deviceId;
     clientAttribution.packageName = "";
     clientAttribution.attributionTag = std::nullopt;
+    clientAttribution.token = sp<BBinder>::make();
 
     // No way to get package name from native.
     // Send a zero length package name and let camera service figure it out from UID
     binder::Status serviceRet = cs->connectDevice(
             callbacks, cameraId, /*oomScoreOffset*/0,
             targetSdkVersion, /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
-            clientAttribution, static_cast<int32_t>(mDeviceContext.policy),
+            clientAttribution, static_cast<int32_t>(mDeviceContext.policy), sharedMode,
             /*out*/&deviceRemote);
 
     if (!serviceRet.isOk()) {
@@ -942,6 +971,14 @@ ACameraManager::openCamera(
         return ACAMERA_ERROR_CAMERA_DISCONNECTED;
     }
     device->setRemoteDevice(deviceRemote);
+    if (flags::camera_multi_client() && sharedMode) {
+        binder::Status remoteRet = deviceRemote->isPrimaryClient(primaryClient);
+        if (!remoteRet.isOk()) {
+            delete device;
+            return ACAMERA_ERROR_UNKNOWN;
+        }
+        device->setPrimaryClient(*primaryClient);
+    }
     *outDevice = device;
     return ACAMERA_OK;
 }

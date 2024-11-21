@@ -63,7 +63,7 @@ class CameraDevice final : public RefBase {
   public:
     CameraDevice(const char* id, ACameraDevice_StateCallbacks* cb,
                   sp<ACameraMetadata> chars,
-                  ACameraDevice* wrapper);
+                  ACameraDevice* wrapper, bool sharedMode);
     ~CameraDevice();
 
     inline const char* getId() const { return mCameraId.c_str(); }
@@ -98,6 +98,7 @@ class CameraDevice final : public RefBase {
         binder::Status onRequestQueueEmpty() override;
         binder::Status onRepeatingRequestError(int64_t lastFrameNumber,
                 int32_t stoppedSequenceId) override;
+        binder::Status onClientSharedAccessPriorityChanged(bool isPrimaryClient) override;
       private:
         const wp<CameraDevice> mDevice;
     };
@@ -112,6 +113,9 @@ class CameraDevice final : public RefBase {
 
     // Stop the looper thread and unregister the handler
     void stopLooperAndDisconnect();
+
+    void setPrimaryClient(bool isPrimary) {mIsPrimaryClient = isPrimary;};
+    bool isPrimaryClient() {return mIsPrimaryClient;};
 
   private:
     friend ACameraCaptureSession;
@@ -186,6 +190,8 @@ class CameraDevice final : public RefBase {
     const sp<ACameraMetadata> mChars;                 // Camera characteristics
     const sp<ServiceCallback> mServiceCallback;
     ACameraDevice* mWrapper;
+    bool mSharedMode;
+    bool mIsPrimaryClient;
 
     // stream id -> pair of (ANW* from application, OutputConfiguration used for camera service)
     std::map<int, std::pair<ANativeWindow*, OutputConfiguration>> mConfiguredOutputs;
@@ -227,7 +233,8 @@ class CameraDevice final : public RefBase {
         kWhatCaptureBufferLost, // onCaptureBufferLost
         kWhatPreparedCb, // onWindowPrepared
         // Internal cleanup
-        kWhatCleanUpSessions   // Cleanup cached sp<ACameraCaptureSession>
+        kWhatCleanUpSessions,   // Cleanup cached sp<ACameraCaptureSession>
+        kWhatClientSharedAccessPriorityChanged
     };
     static const char* kContextKey;
     static const char* kDeviceKey;
@@ -403,8 +410,8 @@ class CameraDevice final : public RefBase {
  */
 struct ACameraDevice {
     ACameraDevice(const char* id, ACameraDevice_StateCallbacks* cb,
-                  sp<ACameraMetadata> chars) :
-            mDevice(new android::acam::CameraDevice(id, cb, chars, this)) {}
+                  sp<ACameraMetadata> chars, bool sharedMode) :
+            mDevice(new android::acam::CameraDevice(id, cb, chars, this, sharedMode)) {}
 
     ~ACameraDevice();
 
@@ -443,6 +450,14 @@ struct ACameraDevice {
     // Camera device is only functional after remote being set
     inline void setRemoteDevice(android::sp<android::hardware::camera2::ICameraDeviceUser> remote) {
         mDevice->setRemoteDevice(remote);
+    }
+
+    inline void setPrimaryClient(bool isPrimary) {
+        mDevice->setPrimaryClient(isPrimary);
+    }
+
+    inline bool isPrimaryClient() {
+        return mDevice->isPrimaryClient();
     }
 
   private:

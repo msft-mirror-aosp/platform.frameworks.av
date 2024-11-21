@@ -11,11 +11,16 @@ package {
 cc_defaults {
     name: "libaudiopolicyservice_dependencies",
 
+    defaults: [
+        "latest_android_media_audio_common_types_cpp_shared",
+    ],
+
     include_dirs: [
         "frameworks/av/services/audiopolicy", // include path outside of libaudiopolicyservice
     ],
 
     shared_libs: [
+        "android.media.audio-aconfig-cc",
         "android.media.audiopolicy-aconfig-cc",
         "audio-permission-aidl-cpp",
         "audioclient-types-aidl-cpp",
@@ -63,7 +68,6 @@ cc_library {
     name: "libaudiopolicyservice",
 
     defaults: [
-        "latest_android_media_audio_common_types_cpp_shared",
         "libaudiopolicyservice_dependencies",
     ],
 

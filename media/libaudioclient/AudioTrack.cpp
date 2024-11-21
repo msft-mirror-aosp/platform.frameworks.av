@@ -1736,7 +1736,7 @@ status_t AudioTrack::setOutputDevice(audio_port_handle_t deviceId) {
                 // allow track invalidation when track is not playing to propagate
                 // the updated mSelectedDeviceId
                 if (isPlaying_l()) {
-                    if (mSelectedDeviceId != mRoutedDeviceId) {
+                    if (getFirstDeviceId(mRoutedDeviceIds) != mSelectedDeviceId) {
                         android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
                         mProxy->interrupt();
                     }
@@ -1759,7 +1759,7 @@ audio_port_handle_t AudioTrack::getOutputDevice() {
 }
 
 // must be called with mLock held
-void AudioTrack::updateRoutedDeviceId_l()
+void AudioTrack::updateRoutedDeviceIds_l()
 {
     // if the track is inactive, do not update actual device as the output stream maybe routed
     // to a device not relevant to this client because of other active use cases.
@@ -1767,17 +1767,21 @@ void AudioTrack::updateRoutedDeviceId_l()
         return;
     }
     if (mOutput != AUDIO_IO_HANDLE_NONE) {
-        audio_port_handle_t deviceId = AudioSystem::getDeviceIdForIo(mOutput);
-        if (deviceId != AUDIO_PORT_HANDLE_NONE) {
-            mRoutedDeviceId = deviceId;
+        DeviceIdVector deviceIds;
+        status_t result = AudioSystem::getDeviceIdsForIo(mOutput, deviceIds);
+        if (result != OK) {
+            ALOGW("%s: getDeviceIdsForIo returned: %d", __func__, result);
+        }
+        if (!deviceIds.empty()) {
+            mRoutedDeviceIds = deviceIds;
         }
     }
 }
 
-audio_port_handle_t AudioTrack::getRoutedDeviceId() {
+DeviceIdVector AudioTrack::getRoutedDeviceIds() {
     AutoMutex lock(mLock);
-    updateRoutedDeviceId_l();
-    return mRoutedDeviceId;
+    updateRoutedDeviceIds_l();
+    return mRoutedDeviceIds;
 }
 
 status_t AudioTrack::attachAuxEffect(int effectId)
@@ -1937,7 +1941,7 @@ status_t AudioTrack::createTrack_l()
 
     mFrameCount = output.frameCount;
     mNotificationFramesAct = (uint32_t)output.notificationFrameCount;
-    mRoutedDeviceId = output.selectedDeviceId;
+    mRoutedDeviceIds = output.selectedDeviceIds;
     mSessionId = output.sessionId;
     mStreamType = output.streamType;
 
@@ -2106,7 +2110,8 @@ status_t AudioTrack::createTrack_l()
         .set(AMEDIAMETRICS_PROP_USAGE, toString(mAttributes.usage).c_str())
         .set(AMEDIAMETRICS_PROP_THREADID, (int32_t)output.outputId)
         .set(AMEDIAMETRICS_PROP_SELECTEDDEVICEID, (int32_t)mSelectedDeviceId)
-        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, (int32_t)mRoutedDeviceId)
+        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, (int32_t)(getFirstDeviceId(mRoutedDeviceIds)))
+        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEIDS, toString(mRoutedDeviceIds).c_str())
         .set(AMEDIAMETRICS_PROP_ENCODING, toString(mFormat).c_str())
         .set(AMEDIAMETRICS_PROP_CHANNELMASK, (int32_t)mChannelMask)
         .set(AMEDIAMETRICS_PROP_FRAMECOUNT, (int32_t)mFrameCount)
@@ -3555,8 +3560,8 @@ status_t AudioTrack::dump(int fd, const Vector<String16>& args __unused) const
     result.appendFormat("  notif. frame count(%u), req. notif. frame count(%u),"
             " req. notif. per buff(%u)\n",
              mNotificationFramesAct, mNotificationFramesReq, mNotificationsPerBufferReq);
-    result.appendFormat("  latency (%d), selected device Id(%d), routed device Id(%d)\n",
-                        mLatency, mSelectedDeviceId, mRoutedDeviceId);
+    result.appendFormat("  latency (%d), selected device Id(%d), routed device Ids(%s)\n",
+                        mLatency, mSelectedDeviceId, toString(mRoutedDeviceIds).c_str());
     result.appendFormat("  output(%d) AF latency (%u) AF frame count(%zu) AF SampleRate(%u)\n",
                         mOutput, mAfLatency, mAfFrameCount, mAfSampleRate);
     ::write(fd, result.c_str(), result.size());
@@ -3623,7 +3628,7 @@ void AudioTrack::triggerPortIdUpdate_l() {
 
     // first time when the track is created we do not have a valid piid
     if (mPlayerIId != PLAYER_PIID_INVALID) {
-        mAudioManager->playerEvent(mPlayerIId, PLAYER_UPDATE_PORT_ID, mPortId);
+        mAudioManager->playerEvent(mPlayerIId, PLAYER_UPDATE_PORT_ID, {mPortId});
     }
 }
 
@@ -3672,7 +3677,7 @@ status_t AudioTrack::removeAudioDeviceCallback(
 
 
 void AudioTrack::onAudioDeviceUpdate(audio_io_handle_t audioIo,
-                                 audio_port_handle_t deviceId)
+                                     const DeviceIdVector& deviceIds)
 {
     sp<AudioSystem::AudioDeviceCallback> callback;
     {
@@ -3684,12 +3689,12 @@ void AudioTrack::onAudioDeviceUpdate(audio_io_handle_t audioIo,
         // only update device if the track is active as route changes due to other use cases are
         // irrelevant for this client
         if (mState == STATE_ACTIVE) {
-            mRoutedDeviceId = deviceId;
+            mRoutedDeviceIds = deviceIds;
         }
     }
 
     if (callback.get() != nullptr) {
-        callback->onAudioDeviceUpdate(mOutput, mRoutedDeviceId);
+        callback->onAudioDeviceUpdate(mOutput, mRoutedDeviceIds);
     }
 }
 

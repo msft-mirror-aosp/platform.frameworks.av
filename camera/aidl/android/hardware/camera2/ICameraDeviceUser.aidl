@@ -68,6 +68,17 @@ interface ICameraDeviceUser
     const int CONSTRAINED_HIGH_SPEED_MODE = 1;
 
     /**
+     * The shared operating mode for a camera device.
+     *
+     * <p>
+     * When in shared mode, the camera device can be opened and accessed by multiple applications
+     * simultaneously.
+     * </p>
+     *
+     */
+    const int SHARED_MODE = 2;
+
+    /**
      * Start of custom vendor modes
      */
     const int VENDOR_MODE_START = 0x8000;
@@ -194,4 +205,12 @@ interface ICameraDeviceUser
      */
     ICameraOfflineSession switchToOffline(in ICameraDeviceCallbacks callbacks,
             in int[] offlineOutputIds);
+
+    /**
+     * Get the client status as primary or secondary when camera is opened in shared mode.
+     *
+     * @return true if this is primary client when camera is opened in shared mode.
+     *         false if another higher priority client with primary access is also using the camera.
+     */
+    boolean isPrimaryClient();
 }

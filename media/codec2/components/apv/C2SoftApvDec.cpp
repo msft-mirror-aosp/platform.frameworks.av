@@ -279,6 +279,10 @@ class C2SoftApvDec::IntfImpl : public SimpleInterface<void>::BaseParams {
         if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
             pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
         }
+        if (isHalPixelFormatSupported((AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210)) {
+            pixelFormats.push_back(AHARDWAREBUFFER_FORMAT_YCbCr_P210);
+        }
+
         // If color format surface isn't added to supported formats, there is no way to know
         // when the color-format is configured to surface. This is necessary to be able to
         // choose 10-bit format while decoding 10-bit clips in surface mode.
@@ -374,6 +378,8 @@ class C2SoftApvDec::IntfImpl : public SimpleInterface<void>::BaseParams {
         (void)mayBlock;
         ALOGV("%s", __FUNCTION__);
         // take default values for all unspecified fields, and coded values for specified ones
+        ALOGV("%s - coded range: %u, primaries: %u, transfer: %u, matrix: %u",
+             __func__, coded.v.range, coded.v.primaries, coded.v.transfer, coded.v.matrix);
         me.set().range = coded.v.range == RANGE_UNSPECIFIED ? def.v.range : coded.v.range;
         me.set().primaries =
                 coded.v.primaries == PRIMARIES_UNSPECIFIED ? def.v.primaries : coded.v.primaries;
@@ -717,6 +723,22 @@ static void copyBufferFromYUV420ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* ds
     }
 }
 
+static void copyBufferP210(uint16_t *dstY, uint16_t *dstUV, const uint16_t *srcY,
+            const uint16_t *srcUV, size_t srcYStride, size_t srcUVStride, size_t dstYStride,
+            size_t dstUVStride, size_t width, size_t height) {
+    for (size_t y = 0; y < height; ++y) {
+        memcpy(dstY, srcY, width * sizeof(uint16_t));
+        srcY += srcYStride;
+        dstY += dstYStride;
+    }
+
+    for (size_t y = 0; y < height; ++y) {
+        memcpy(dstUV, srcUV, width * sizeof(uint16_t));
+        srcUV += srcUVStride;
+        dstUV += dstUVStride;
+    }
+}
+
 static void copyBufferFromYUV422ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV,
                                        const uint8_t* srcY, const uint8_t* srcU,
                                        const uint8_t* srcV, size_t srcYStride, size_t srcUStride,
@@ -992,21 +1014,73 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
     }
 }
 
+void C2SoftApvDec::getVuiParams(VuiColorAspects* buffer) {
+    VuiColorAspects vuiColorAspects;
+    vuiColorAspects.primaries = buffer->primaries;
+    vuiColorAspects.transfer = buffer->transfer;
+    vuiColorAspects.coeffs = buffer->coeffs;
+    vuiColorAspects.fullRange = buffer->fullRange;
+
+    // convert vui aspects to C2 values if changed
+    if (!(vuiColorAspects == mBitstreamColorAspects)) {
+        mBitstreamColorAspects = vuiColorAspects;
+        ColorAspects sfAspects;
+        C2StreamColorAspectsInfo::input codedAspects = { 0u };
+        ColorUtils::convertIsoColorAspectsToCodecAspects(
+                vuiColorAspects.primaries, vuiColorAspects.transfer, vuiColorAspects.coeffs,
+                vuiColorAspects.fullRange, sfAspects);
+        if (!C2Mapper::map(sfAspects.mPrimaries, &codedAspects.primaries)) {
+            codedAspects.primaries = C2Color::PRIMARIES_UNSPECIFIED;
+        }
+        if (!C2Mapper::map(sfAspects.mRange, &codedAspects.range)) {
+            codedAspects.range = C2Color::RANGE_UNSPECIFIED;
+        }
+        if (!C2Mapper::map(sfAspects.mMatrixCoeffs, &codedAspects.matrix)) {
+            codedAspects.matrix = C2Color::MATRIX_UNSPECIFIED;
+        }
+        if (!C2Mapper::map(sfAspects.mTransfer, &codedAspects.transfer)) {
+            codedAspects.transfer = C2Color::TRANSFER_UNSPECIFIED;
+        }
+        ALOGV("colorAspects: primaries:%d, transfer:%d, coeffs:%d, fullRange:%d",
+                codedAspects.primaries, codedAspects.transfer, codedAspects.matrix,
+                codedAspects.range);
+        std::vector<std::unique_ptr<C2SettingResult>> failures;
+        mIntf->config({&codedAspects}, C2_MAY_BLOCK, &failures);
+    }
+}
+
 status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
                                     const std::unique_ptr<C2Work>& work) {
     if (!(work && pool)) return BAD_VALUE;
 
-    oapv_imgb_t* imgbOutput;
+    oapv_imgb_t* imgbOutput = nullptr;
     std::shared_ptr<C2GraphicBlock> block;
 
     if (ofrms.num_frms > 0) {
-        oapv_frm_t* frm = &ofrms.frm[0];
-        imgbOutput = frm->imgb;
+        for(int i = 0; i < ofrms.num_frms; i++) {
+            oapv_frm_t* frm = &ofrms.frm[0];
+            if(frm->pbu_type == OAPV_PBU_TYPE_PRIMARY_FRAME) {
+                imgbOutput = frm->imgb;
+                break;
+            }
+        }
+        if(imgbOutput == nullptr) {
+            ALOGW("No OAPV primary frame");
+            return false;
+        }
     } else {
         ALOGW("No output frames");
         return false;
     }
     bool isMonochrome = OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CS_YCBCR400;
+
+    // TODO: use bitstream color aspect after vui parsing
+    VuiColorAspects colorAspect;
+    colorAspect.primaries = 2;
+    colorAspect.transfer = 2;
+    colorAspect.coeffs = 2;
+    colorAspect.fullRange = 1;
+    getVuiParams(&colorAspect);
 
     uint32_t format = HAL_PIXEL_FORMAT_YV12;
     std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;
@@ -1014,6 +1088,7 @@ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
         mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
         IntfImpl::Lock lock = mIntf->lock();
         codedColorAspects = mIntf->getColorAspects_l();
+
         bool allowRGBA1010102 = false;
         if (codedColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
             codedColorAspects->matrix == C2Color::MATRIX_BT2020 &&
@@ -1070,7 +1145,34 @@ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
     size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
     size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
 
-    if (format == HAL_PIXEL_FORMAT_YCBCR_P010) {
+    if(format == AHARDWAREBUFFER_FORMAT_YCbCr_P210) {
+        if(OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
+            const uint16_t *srcY = (const uint16_t *)imgbOutput->a[0];
+            const uint16_t *srcU = (const uint16_t *)imgbOutput->a[1];
+            const uint16_t *srcV = (const uint16_t *)imgbOutput->a[2];
+            size_t srcYStride = imgbOutput->s[0] / 2;
+            size_t srcUStride = imgbOutput->s[1] / 2;
+            size_t srcVStride = imgbOutput->s[2] / 2;
+            dstYStride /= 2;
+            dstUStride /= 2;
+            dstVStride /= 2;
+            ALOGV("OAPV_CS_P210 buffer");
+            copyBufferP210((uint16_t *)dstY, (uint16_t *)dstU, srcY, srcU,
+                            srcYStride, srcUStride, dstYStride, dstUStride, mWidth, mHeight);
+        } else {
+            ALOGE("Not supported convder from bd:%d, format: %d(%s), to format: %d(%s)",
+                OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs),
+                OAPV_CS_GET_FORMAT(imgbOutput->cs),
+                OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR420 ?
+                    "YUV420" : (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR422 ?
+                                 "YUV422" : "UNKNOWN"),
+                format,
+                format == HAL_PIXEL_FORMAT_YCBCR_P010 ?
+                    "P010" : (format == HAL_PIXEL_FORMAT_YCBCR_420_888 ?
+                         "YUV420" : (format == HAL_PIXEL_FORMAT_YV12 ? "YV12" : "UNKNOWN"))
+                );
+        }
+    } else if(format == HAL_PIXEL_FORMAT_YCBCR_P010) {
         if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
             const uint16_t* srcY = (const uint16_t*)imgbOutput->a[0];
             const uint16_t* srcU = (const uint16_t*)imgbOutput->a[1];

@@ -755,8 +755,7 @@ public:
                 // consume buffer
                 sp<IGraphicBufferConsumer> consumer = mConsumer.promote();
                 if (consumer != nullptr && consumer->acquireBuffer(&buffer, 0) == NO_ERROR) {
-                    consumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber,
-                                            EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, buffer.mFence);
+                    consumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, buffer.mFence);
                 }
             }
 

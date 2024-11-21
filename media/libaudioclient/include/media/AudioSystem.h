@@ -767,7 +767,7 @@ public:
         virtual ~AudioDeviceCallback() {}
 
         virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
-                                         audio_port_handle_t deviceId) = 0;
+                                         const DeviceIdVector& deviceIds) = 0;
     };
 
     static status_t addAudioDeviceCallback(const wp<AudioDeviceCallback>& callback,
@@ -793,7 +793,7 @@ public:
     static status_t removeSupportedLatencyModesCallback(
             const sp<SupportedLatencyModesCallback>& callback);
 
-    static audio_port_handle_t getDeviceIdForIo(audio_io_handle_t audioIo);
+    static status_t getDeviceIdsForIo(audio_io_handle_t audioIo, DeviceIdVector& deviceIds);
 
     static status_t setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos);
 
@@ -842,7 +842,8 @@ public:
         status_t removeSupportedLatencyModesCallback(
                 const sp<SupportedLatencyModesCallback>& callback) EXCLUDES(mMutex);
 
-        audio_port_handle_t getDeviceIdForIo(audio_io_handle_t audioIo) EXCLUDES(mMutex);
+        status_t getDeviceIdsForIo(audio_io_handle_t audioIo, DeviceIdVector& deviceIds)
+                EXCLUDES(mMutex);
 
     private:
         mutable std::mutex mMutex;

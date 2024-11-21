@@ -57,7 +57,7 @@ std::string AAudioServiceEndpoint::dump() const NO_THREAD_SAFETY_ANALYSIS {
     result << "    Direction:            " << ((getDirection() == AAUDIO_DIRECTION_OUTPUT)
                                    ? "OUTPUT" : "INPUT") << "\n";
     result << "    Requested Device Id:  " << mRequestedDeviceId << "\n";
-    result << "    Device Id:            " << getDeviceId() << "\n";
+    result << "    Device Ids:           " << android::toString(getDeviceIds()).c_str() << "\n";
     result << "    Sample Rate:          " << getSampleRate() << "\n";
     result << "    Channel Count:        " << getSamplesPerFrame() << "\n";
     result << "    Channel Mask:         0x" << std::hex << getChannelMask() << std::dec << "\n";
@@ -155,8 +155,8 @@ bool AAudioServiceEndpoint::matches(const AAudioStreamConfiguration& configurati
     if (configuration.getDirection() != getDirection()) {
         return false;
     }
-    if (configuration.getDeviceId() != AAUDIO_UNSPECIFIED &&
-        configuration.getDeviceId() != getDeviceId()) {
+    if (!configuration.getDeviceIds().empty() &&
+        !android::areDeviceIdsEqual(configuration.getDeviceIds(), getDeviceIds())) {
         return false;
     }
     if (configuration.getSessionId() != AAUDIO_SESSION_ID_ALLOCATE &&

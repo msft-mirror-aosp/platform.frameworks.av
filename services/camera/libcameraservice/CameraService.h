@@ -181,7 +181,7 @@ public:
             const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
             const std::string& cameraId, int scoreOffset, int targetSdkVersion,
             int rotationOverride, const AttributionSourceState& clientAttribution,
-            int32_t devicePolicy,
+            int32_t devicePolicy, bool sharedMode,
             /*out*/
             sp<hardware::camera2::ICameraDeviceUser>* device);
 
@@ -384,6 +384,8 @@ public:
         virtual void notifyError(int32_t errorCode,
                 const CaptureResultExtras& resultExtras) = 0;
 
+        virtual void notifyClientSharedAccessPriorityChanged(bool primaryClient) = 0;
+
         // Get the UID of the application client using this
         virtual uid_t getClientUid() const;
 
@@ -453,12 +455,16 @@ public:
         virtual status_t injectSessionParams(
                 const hardware::camera2::impl::CameraMetadataNative& sessionParams) = 0;
 
+        status_t isPrimaryClient(/*out*/bool* isPrimary);
+
+        status_t setPrimaryClient(bool isPrimary);
+
     protected:
         BasicClient(const sp<CameraService>& cameraService, const sp<IBinder>& remoteCallback,
                     std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
                     const AttributionSourceState& clientAttribution, int callingPid,
                     bool nativeClient, const std::string& cameraIdStr, int cameraFacing,
-                    int sensorOrientation, int servicePid, int rotationOverride);
+                    int sensorOrientation, int servicePid, int rotationOverride, bool sharedMode);
 
         virtual ~BasicClient();
 
@@ -480,6 +486,8 @@ public:
         bool                            mDisconnected;
         bool                            mUidIsTrusted;
         int                             mRotationOverride;
+        bool                            mSharedMode;
+        bool                            mIsPrimaryClient;
 
         mutable Mutex                   mAudioRestrictionLock;
         int32_t                         mAudioRestriction;
@@ -562,7 +570,8 @@ public:
                std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
                const AttributionSourceState& clientAttribution, int callingPid,
                bool systemNativeClient, const std::string& cameraIdStr, int api1CameraId,
-               int cameraFacing, int sensorOrientation, int servicePid, int rotationOverride);
+               int cameraFacing, int sensorOrientation, int servicePid, int rotationOverride,
+               bool sharedMode);
         ~Client();
 
         // return our camera client
@@ -622,6 +631,8 @@ public:
         CameraClientManager();
         virtual ~CameraClientManager();
 
+        virtual void remove(const DescriptorPtr& value) override;
+
         /**
          * Return a strong pointer to the active BasicClient for this camera ID, or an empty
          * if none exists.
@@ -639,7 +650,8 @@ public:
         static DescriptorPtr makeClientDescriptor(const std::string& key,
                 const sp<BasicClient>& value, int32_t cost,
                 const std::set<std::string>& conflictingKeys, int32_t score,
-                int32_t ownerId, int32_t state, int oomScoreOffset, bool systemNativeClient);
+                int32_t ownerId, int32_t state, int oomScoreOffset, bool systemNativeClient,
+                bool sharedMode);
 
         /**
          * Make a ClientDescriptor object wrapping the given BasicClient strong pointer with
@@ -653,6 +665,15 @@ public:
 
     int32_t updateAudioRestriction();
     int32_t updateAudioRestrictionLocked();
+
+    /**
+     * Returns true if the given client is the only client in the active clients list for a given
+     * camera.
+     *
+     * This method acquires mServiceLock.
+     */
+    bool isOnlyClient(const BasicClient* client);
+
 
 private:
 
@@ -669,6 +690,8 @@ private:
         }();
         return activityManager;
     }
+
+    static int32_t getUidProcessState(int32_t uid);
 
     /**
      * Typesafe version of device status, containing both the HAL-layer and the service interface-
@@ -771,6 +794,10 @@ private:
         void setClientPackage(const std::string& clientPackage);
         std::string getClientPackage() const;
 
+        void addClientPackage(const std::string& clientPackage);
+        void removeClientPackage(const std::string& clientPackage);
+        std::set<std::string> getClientPackages() const;
+
         /**
          * Return the unavailable physical ids for this device.
          *
@@ -783,7 +810,7 @@ private:
         const int mCost;
         std::set<std::string> mConflicting;
         std::set<std::string> mUnavailablePhysicalIds;
-        std::string mClientPackage;
+        std::set<std::string> mClientPackages;
         mutable Mutex mStatusLock;
         CameraParameters mShimParams;
         const SystemCameraKind mSystemCameraKind;
@@ -913,9 +940,11 @@ private:
 
     // Check if we can connect, before we acquire the service lock.
     binder::Status validateConnectLocked(const std::string& cameraId,
-                                         const AttributionSourceState& clientAttribution) const;
+                                         const AttributionSourceState& clientAttribution,
+                                         bool sharedMode) const;
     binder::Status validateClientPermissionsLocked(
-            const std::string& cameraId, const AttributionSourceState& clientAttribution) const;
+            const std::string& cameraId, const AttributionSourceState& clientAttribution,
+            bool sharedMode) const;
 
     void logConnectionAttempt(int clientPid, const std::string& clientPackageName,
         const std::string& cameraId, apiLevel effectiveApiLevel) const;
@@ -927,7 +956,7 @@ private:
     // Only call with with mServiceLock held.
     status_t handleEvictionsLocked(const std::string& cameraId, int clientPid,
         apiLevel effectiveApiLevel, const sp<IBinder>& remoteCallback,
-        const std::string& packageName, int scoreOffset, bool systemNativeClient,
+        const std::string& packageName, int scoreOffset, bool systemNativeClient, bool sharedMode,
         /*out*/
         sp<BasicClient>* client,
         std::shared_ptr<resource_policy::ClientDescriptor<std::string, sp<BasicClient>>>* partial);
@@ -964,7 +993,7 @@ private:
                                  bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
                                  int rotationOverride, bool forceSlowJpegMode,
                                  const std::string& originalCameraId, bool isNonSystemNdk,
-                                 /*out*/ sp<CLIENT>& device);
+                                 bool sharedMode, /*out*/ sp<CLIENT>& device);
 
     // Lock guarding camera service state
     Mutex               mServiceLock;
@@ -1072,12 +1101,12 @@ private:
     std::string cameraIdIntToStrLocked(int cameraIdInt, int32_t deviceId, int32_t devicePolicy);
 
     /**
-     * Remove a single client corresponding to the given camera id from the list of active clients.
+     * Remove all the clients corresponding to the given camera id from the list of active clients.
      * If none exists, return an empty strongpointer.
      *
      * This method must be called with mServiceLock held.
      */
-    sp<CameraService::BasicClient> removeClientLocked(const std::string& cameraId);
+    std::vector<sp<CameraService::BasicClient>> removeClientsLocked(const std::string& cameraId);
 
     /**
      * Handle a notification that the current device user has changed.
@@ -1285,7 +1314,7 @@ private:
      * This method acqiures mStatusListenerLock.
      */
     void updateOpenCloseStatus(const std::string& cameraId, bool open,
-            const std::string& packageName);
+            const std::string& packageName, bool sharedMode);
 
     // flashlight control
     sp<CameraFlashlight> mFlashlight;
@@ -1460,7 +1489,7 @@ private:
                                      std::pair<int, IPCTransport> deviceVersionAndIPCTransport,
                                      apiLevel effectiveApiLevel, bool overrideForPerfClass,
                                      int rotationOverride, bool forceSlowJpegMode,
-                                     const std::string& originalCameraId,
+                                     const std::string& originalCameraId, bool sharedMode,
                                      /*out*/ sp<BasicClient>* client);
 
     static std::string toString(std::set<userid_t> intSet);
@@ -1475,6 +1504,9 @@ private:
     void broadcastTorchStrengthLevel(const std::string& cameraId, int32_t newTorchStrengthLevel);
 
     void disconnectClient(const std::string& id, sp<BasicClient> clientToDisconnect);
+
+    void disconnectClients(const std::string& id,
+            std::vector<sp<BasicClient>> clientsToDisconnect);
 
     // Regular online and offline devices must not be in conflict at camera service layer.
     // Use separate keys for offline devices.
