@@ -1379,13 +1379,14 @@ status_t AudioSystem::getInputForAttr(const audio_attributes_t* attr,
 
     media::GetInputForAttrResponse response;
 
-    status_t status = statusTFromBinderStatus(
-            aps->getInputForAttr(attrAidl, inputAidl, riidAidl, sessionAidl, attributionSource,
-                configAidl, flagsAidl, selectedDeviceIdAidl, &response));
-    if (status != NO_ERROR) {
+    const Status res = aps->getInputForAttr(attrAidl, inputAidl, riidAidl, sessionAidl,
+                                            attributionSource, configAidl, flagsAidl,
+                                            selectedDeviceIdAidl, &response);
+    if (!res.isOk()) {
+        ALOGE("getInputForAttr error: %s", res.toString8().c_str());
         *config = VALUE_OR_RETURN_STATUS(
                 aidl2legacy_AudioConfigBase_audio_config_base_t(response.config, true /*isInput*/));
-        return status;
+        return statusTFromBinderStatus(res);
     }
 
     *input = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_io_handle_t(response.input));
