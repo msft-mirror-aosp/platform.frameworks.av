@@ -385,9 +385,8 @@ void sendCaptureResult(
     // Fix up result metadata to account for zoom ratio availabilities between
     // HAL and app.
     bool zoomRatioIs1 = cameraIdsWithZoom.find(states.cameraId) == cameraIdsWithZoom.end();
-    bool appUsesZoomRatio = !zoomRatioIs1 || useZoomRatio;
     res = states.zoomRatioMappers[states.cameraId].updateCaptureResult(
-            &captureResult.mMetadata, appUsesZoomRatio);
+            &captureResult.mMetadata, useZoomRatio, zoomRatioIs1);
     if (res != OK) {
         SET_ERR("Failed to update capture result zoom ratio metadata for frame %d: %s (%d)",
                 frameNumber, strerror(-res), res);
@@ -456,7 +455,8 @@ void sendCaptureResult(
         // Note: Physical camera continues to use SCALER_CROP_REGION to reflect
         // zoom levels.
         res = states.zoomRatioMappers[cameraId].updateCaptureResult(
-                &physicalMetadata.mPhysicalCameraMetadata, /*appUsesZoomRatio*/ false);
+                &physicalMetadata.mPhysicalCameraMetadata, /*zoomMethodIsRatio*/false,
+                /*zoomRatioIs1*/false);
         if (res != OK) {
             SET_ERR("Failed to update camera %s's physical zoom ratio metadata for "
                     "frame %d: %s(%d)", cameraId.c_str(), frameNumber, strerror(-res), res);
