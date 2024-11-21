@@ -22,6 +22,7 @@
 #include <media/AudioTrack.h>
 
 #include <aaudio/AAudio.h>
+#include <com_android_media_aaudio.h>
 #include <system/audio.h>
 
 #include "core/AudioGlobal.h"
@@ -56,6 +57,10 @@ AudioStreamTrack::~AudioStreamTrack()
 
 aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
 {
+    if (!com::android::media::aaudio::offload_support() &&
+        builder.getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
     aaudio_result_t result = AAUDIO_OK;
 
     result = AudioStream::open(builder);
@@ -152,6 +157,34 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
     if (tags.has_value() && !tags.value().empty()) {
         strcpy(attributes.tags, tags.value().c_str());
     }
+
+    audio_offload_info_t offloadInfo = AUDIO_INFO_INITIALIZER;
+    if (getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
+        audio_config_t config = AUDIO_CONFIG_INITIALIZER;
+        config.format = format;
+        config.channel_mask = channelMask;
+        config.sample_rate = getSampleRate();
+        audio_direct_mode_t directMode = AUDIO_DIRECT_NOT_SUPPORTED;
+        if (status_t status = AudioSystem::getDirectPlaybackSupport(
+                &attributes, &config, &directMode);
+            status != NO_ERROR) {
+            ALOGE("%s, failed to query direct support, error=%d", __func__, status);
+            return status;
+        }
+        static const audio_direct_mode_t offloadMode = static_cast<audio_direct_mode_t>(
+                AUDIO_DIRECT_OFFLOAD_SUPPORTED | AUDIO_DIRECT_OFFLOAD_GAPLESS_SUPPORTED);
+        if ((directMode & offloadMode) == AUDIO_DIRECT_NOT_SUPPORTED) {
+            return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
+        }
+        flags = AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD;
+        frameCount = 0;
+        offloadInfo.format = format;
+        offloadInfo.sample_rate = getSampleRate();
+        offloadInfo.channel_mask = channelMask;
+        offloadInfo.has_video = false;
+        offloadInfo.stream_type = AUDIO_STREAM_MUSIC;
+    }
+
     mAudioTrack = new AudioTrack();
     // TODO b/182392769: use attribution source util
     mAudioTrack->set(
@@ -167,7 +200,8 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
             false,   // DEFAULT threadCanCallJava
             sessionId,
             streamTransferType,
-            nullptr,    // DEFAULT audio_offload_info_t
+            getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED
+                    ? &offloadInfo : nullptr,
             AttributionSourceState(), // DEFAULT uid and pid
             &attributes,
             // WARNING - If doNotReconnect set true then audio stops after plugging and unplugging
@@ -247,7 +281,9 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
     audio_output_flags_t actualFlags = mAudioTrack->getFlags();
     aaudio_performance_mode_t actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_NONE;
     // We may not get the RAW flag. But as long as we get the FAST flag we can call it LOW_LATENCY.
-    if ((actualFlags & AUDIO_OUTPUT_FLAG_FAST) != 0) {
+    if ((actualFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) != AUDIO_OUTPUT_FLAG_NONE) {
+        actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED;
+    } else if ((actualFlags & AUDIO_OUTPUT_FLAG_FAST) != 0) {
         actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_LOW_LATENCY;
     } else if ((actualFlags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER) != 0) {
         actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_POWER_SAVING;
@@ -347,6 +383,7 @@ aaudio_result_t AudioStreamTrack::requestStart_l() {
         setState(originalState);
         return AAudioConvert_androidToAAudioResult(err);
     }
+    mOffloadEosPending = false;
     return AAUDIO_OK;
 }
 
@@ -430,6 +467,12 @@ aaudio_result_t AudioStreamTrack::processCommands() {
         break;
     case AAUDIO_STREAM_STATE_STOPPING:
         if (mAudioTrack->stopped()) {
+            if (getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
+                std::lock_guard<std::mutex> lock(mStreamLock);
+                if (!mOffloadEosPending) {
+                    break;
+                }
+            }
             setState(AAUDIO_STREAM_STATE_STOPPED);
         }
         break;
@@ -577,6 +620,104 @@ void AudioStreamTrack::registerPlayerBase() {
         return;
     }
     mAudioTrack->setPlayerIId(mPlayerBase->getPlayerIId());
+}
+
+aaudio_result_t AudioStreamTrack::systemStopInternal_l() {
+    if (aaudio_result_t result = AudioStream::systemStopInternal_l(); result != AAUDIO_OK) {
+        return result;
+    }
+    mOffloadEosPending = false;
+    return AAUDIO_OK;
+}
+
+aaudio_result_t AudioStreamTrack::setOffloadDelayPadding(
+        int32_t delayInFrames, int32_t paddingInFrames) {
+    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED ||
+        audio_is_linear_pcm(getFormat())) {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+    if (mAudioTrack == nullptr) {
+        return AAUDIO_ERROR_INVALID_STATE;
+    }
+    AudioParameter param = AudioParameter();
+    param.addInt(String8(AUDIO_OFFLOAD_CODEC_DELAY_SAMPLES),  delayInFrames);
+    param.addInt(String8(AUDIO_OFFLOAD_CODEC_PADDING_SAMPLES),  paddingInFrames);
+    mAudioTrack->setParameters(param.toString());
+    mOffloadDelayFrames.store(delayInFrames);
+    mOffloadPaddingFrames.store(paddingInFrames);
+    return AAUDIO_OK;
+}
+
+int32_t AudioStreamTrack::getOffloadDelay() {
+    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED ||
+        audio_is_linear_pcm(getFormat())) {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+    if (mAudioTrack == nullptr) {
+        return AAUDIO_ERROR_INVALID_STATE;
+    }
+    return mOffloadDelayFrames.load();
+}
+
+int32_t AudioStreamTrack::getOffloadPadding() {
+    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED ||
+        audio_is_linear_pcm(getFormat())) {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+    if (mAudioTrack == nullptr) {
+        return AAUDIO_ERROR_INVALID_STATE;
+    }
+    return mOffloadPaddingFrames.load();
+}
+
+aaudio_result_t AudioStreamTrack::setOffloadEndOfStream() {
+    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+    if (mAudioTrack == nullptr) {
+        return AAUDIO_ERROR_INVALID_STATE;
+    }
+    std::lock_guard<std::mutex> lock(mStreamLock);
+    if (aaudio_result_t result = safeStop_l(); result != AAUDIO_OK) {
+        return result;
+    }
+    mOffloadEosPending = true;
+    return AAUDIO_OK;
+}
+
+bool AudioStreamTrack::collidesWithCallback() const {
+    if (AudioStream::collidesWithCallback()) {
+        return true;
+    }
+    pid_t thisThread = gettid();
+    return mPresentationEndCallbackThread.load() == thisThread;
+}
+
+void AudioStreamTrack::onStreamEnd() {
+    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
+        return;
+    }
+    if (getState() == AAUDIO_STREAM_STATE_STOPPING) {
+        std::lock_guard<std::mutex> lock(mStreamLock);
+        if (mOffloadEosPending) {
+            requestStart_l();
+        }
+        mOffloadEosPending = false;
+    }
+    maybeCallPresentationEndCallback();
+}
+
+void AudioStreamTrack::maybeCallPresentationEndCallback() {
+    if (mPresentationEndCallbackProc != nullptr) {
+        pid_t expected = CALLBACK_THREAD_NONE;
+        if (mPresentationEndCallbackThread.compare_exchange_strong(expected, gettid())) {
+            (*mPresentationEndCallbackProc)(
+                    (AAudioStream *) this, mPresentationEndCallbackUserData);
+            mPresentationEndCallbackThread.store(CALLBACK_THREAD_NONE);
+        } else {
+            ALOGW("%s() error callback already running!", __func__);
+        }
+    }
 }
 
 #if AAUDIO_USE_VOLUME_SHAPER
