@@ -151,7 +151,11 @@ public:
         {
             std::lock_guard l(mMutex);
             mValid = false;
-            mClient->clearIoCache();
+            if (mClient) {
+                mClient->clearIoCache();
+            } else {
+                ALOGW("%s: null client", __func__);
+            }
         }
         AudioSystem::reportError(DEAD_OBJECT);
     }
@@ -1004,7 +1008,11 @@ public:
             mValid = false;
             client = mClient;
         }
-        client->onServiceDied();
+        if (client) {
+            client->onServiceDied();
+        } else {
+            ALOGW("%s: null client", __func__);
+        }
     }
 
     static constexpr mediautils::ServiceOptions options() {
