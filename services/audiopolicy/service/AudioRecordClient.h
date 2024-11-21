@@ -90,14 +90,13 @@ public:
                       const DeviceIdVector deviceIds,
                       const AttributionSourceState& attributionSource,
                       const uint32_t virtualDeviceId,
-                      bool canBypassConcurrentPolicy, bool canCaptureHotword,
+                      bool canBypassConcurrentPolicy,
                       wp<AudioPolicyService::AudioCommandThread> commandThread) :
                 AudioClient(attributes, io, attributionSource,
                     session, portId, deviceIds), attributionSource(attributionSource),
                     virtualDeviceId(virtualDeviceId),
                     startTimeNs(0), canBypassConcurrentPolicy(canBypassConcurrentPolicy),
-                    canCaptureHotword(canCaptureHotword), silenced(false),
-                    mOpRecordAudioMonitor(
+                    silenced(false), mOpRecordAudioMonitor(
                             OpRecordAudioMonitor::createIfNeeded(attributionSource,
                                                                  virtualDeviceId,
                                                                  attributes, commandThread)) {
@@ -113,7 +112,6 @@ public:
     const uint32_t virtualDeviceId; // id of the virtual device associated with the audio device
     nsecs_t startTimeNs;
     const bool canBypassConcurrentPolicy;
-    const bool canCaptureHotword;
     bool silenced;
 
 private:
