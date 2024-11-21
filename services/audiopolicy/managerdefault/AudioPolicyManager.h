@@ -144,8 +144,7 @@ public:
                                          audio_input_flags_t flags,
                                          audio_unique_id_t riid,
                                          audio_session_t session,
-                                         const AttributionSourceState& attributionSource,
-                                         input_type_t *inputType /* out param */) override;
+                                         const AttributionSourceState& attributionSource) override;
 
         // indicates to the audio policy manager that the input starts being used.
         virtual status_t startInput(audio_port_handle_t portId);

@@ -71,7 +71,7 @@ private:
     void checkOp(bool updateUidStates = false);
 
     std::atomic_bool mHasOp;
-    const AttributionSourceState mAttributionSource;
+    AttributionSourceState mAttributionSource;
     const uint32_t mVirtualDeviceId;
     const audio_attributes_t mAttr;
     const int32_t mAppOp;
