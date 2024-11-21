@@ -4,13 +4,13 @@ package {
 }
 
 cc_library_headers {
-    name: "audiopermissioncontroller_headers",
+    name: "libaudiopermission_headers",
     host_supported: true,
     export_include_dirs: ["include"],
 }
 
 cc_library {
-    name: "audiopermissioncontroller",
+    name: "libaudiopermission",
 
     srcs: [
         "NativePermissionController.cpp",
@@ -83,14 +83,14 @@ cc_library {
 }
 
 cc_test {
-    name: "audiopermissioncontroller_test",
+    name: "libaudiopermission_test",
     host_supported: true,
     defaults: [
         "libmediautils_tests_config",
     ],
     static_libs: [
         "audio-permission-aidl-cpp",
-        "audiopermissioncontroller",
+        "libaudiopermission",
         "framework-permission-aidl-cpp",
         "libgmock",
     ],
