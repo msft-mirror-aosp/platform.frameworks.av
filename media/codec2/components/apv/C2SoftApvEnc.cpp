@@ -958,108 +958,98 @@ void C2SoftApvEnc::finishWork(uint64_t workIndex, const std::unique_ptr<C2Work>&
         finish(workIndex, fillWork);
     }
 }
-void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work, oapv_bitb_t* bitb,
-                                 uint32_t encodedSize) {
-    uint32_t csdStart = 0, csdEnd = 0;
-    uint32_t bitOffset = 0;
-    uint8_t* buf = (uint8_t*)bitb->addr + csdStart;
 
-    if (encodedSize == 0) {
-        ALOGE("the first frame size is zero, so no csd data will be created.");
+void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
+                                 oapv_bitb_t* bitb,
+                                 uint32_t encodedSize) {
+    if (encodedSize < 31) {
+        ALOGE("the first frame size is too small, so no csd data will be created.");
         return;
     }
-    ABitReader reader(buf, encodedSize);
+    ABitReader reader((uint8_t*)bitb->addr, encodedSize);
+
+    uint8_t number_of_configuration_entry = 0;
+    uint8_t pbu_type = 0;
+    uint8_t number_of_frame_info = 0;
+    bool color_description_present_flag = false;
+    bool capture_time_distance_ignored = false;
+    uint8_t profile_idc = 0;
+    uint8_t level_idc = 0;
+    uint8_t band_idc = 0;
+    uint32_t frame_width_minus1 = 0;
+    uint32_t frame_height_minus1 = 0;
+    uint8_t chroma_format_idc = 0;
+    uint8_t bit_depth_minus8 = 0;
+    uint8_t capture_time_distance = 0;
+    uint8_t color_primaries = 0;
+    uint8_t transfer_characteristics = 0;
+    uint8_t matrix_coefficients = 0;
 
     /* pbu_header() */
-    reader.skipBits(32);
-    bitOffset += 32;  // pbu_size
-    reader.skipBits(32);
-    bitOffset += 32;  // currReadSize
-    csdStart = bitOffset / 8;
-
-    int32_t pbu_type = reader.getBits(8);
-    bitOffset += 8;  // pbu_type
-    reader.skipBits(16);
-    bitOffset += 16;  // group_id
-    reader.skipBits(8);
-    bitOffset += 8;  // reserved_zero_8bits
+    reader.skipBits(32);           // pbu_size
+    reader.skipBits(32);           // currReadSize
+    pbu_type = reader.getBits(8);  // pbu_type
+    reader.skipBits(16);           // group_id
+    reader.skipBits(8);            // reserved_zero_8bits
 
     /* frame info() */
-    int32_t profile_idc = reader.getBits(8);
-    bitOffset += 8;  // profile_idc
-    int32_t level_idc = reader.getBits(8);
-    bitOffset += 8;  // level_idc
-    int32_t band_idc = reader.getBits(3);
-    bitOffset += 3;  // band_idc
-    reader.skipBits(5);
-    bitOffset += 5;  // reserved_zero_5bits
-    int32_t width = reader.getBits(32);
-    bitOffset += 32;  // width
-    int32_t height = reader.getBits(32);
-    bitOffset += 32;  // height
-    int32_t chroma_idc = reader.getBits(4);
-    bitOffset += 4;  // chroma_format_idc
-    reader.skipBits(4);
-    bitOffset += 4;  // bit_depth
-    reader.skipBits(8);
-    bitOffset += 8;  // capture_time_distance
-    reader.skipBits(8);
-    bitOffset += 8;  // reserved_zero_8bits
+    profile_idc = reader.getBits(8);            // profile_idc
+    level_idc = reader.getBits(8);              // level_idc
+    band_idc = reader.getBits(3);               // band_idc
+    reader.skipBits(5);                         // reserved_zero_5bits
+    frame_width_minus1 = reader.getBits(32);    // width
+    frame_height_minus1 = reader.getBits(32);   // height
+    chroma_format_idc = reader.getBits(4);      // chroma_format_idc
+    bit_depth_minus8 = reader.getBits(4);       // bit_depth
+    capture_time_distance = reader.getBits(8);  // capture_time_distance
+    reader.skipBits(8);                         // reserved_zero_8bits
 
     /* frame header() */
-    reader.skipBits(8);
-    bitOffset += 8;  // reserved_zero_8bit
-    bool color_description_present_flag = reader.getBits(1);
-    bitOffset += 1;  // color_description_present_flag
+    reader.skipBits(8);  // reserved_zero_8bit
+    color_description_present_flag = reader.getBits(1);  // color_description_present_flag
     if (color_description_present_flag) {
-        reader.skipBits(8);
-        bitOffset += 8;  // color_primaries
-        reader.skipBits(8);
-        bitOffset += 8;  // transfer_characteristics
-        reader.skipBits(8);
-        bitOffset += 8;  // matrix_coefficients
-    }
-    bool use_q_matrix = reader.getBits(1);
-    bitOffset += 1;  // use_q_matrix
-    if (use_q_matrix) {
-        /* quantization_matrix() */
-        int32_t numComp = chroma_idc == 0   ? 1
-                          : chroma_idc == 2 ? 3
-                          : chroma_idc == 3 ? 3
-                          : chroma_idc == 4 ? 4
-                                            : -1;
-        int32_t needBitsForQ = 64 * 8 * numComp;
-        reader.skipBits(needBitsForQ);
-        bitOffset += needBitsForQ;
+        color_primaries = reader.getBits(8);           // color_primaries
+        transfer_characteristics = reader.getBits(8);  // transfer_characteristics
+        matrix_coefficients = reader.getBits(8);       // matrix_coefficients
     }
 
-    /* tile_info() */
-    int32_t tile_width_in_mbs_minus1 = reader.getBits(28);
-    bitOffset += 28;
-    int32_t tile_height_in_mbs_minus1 = reader.getBits(28);
-    bitOffset += 28;
-    bool tile_size_present_in_fh_flag = reader.getBits(1);
-    bitOffset += 1;
-    if (tile_size_present_in_fh_flag) {
-        int32_t numTiles = ceil((double)width / (double)tile_width_in_mbs_minus1) *
-                           ceil((double)height / (double)tile_height_in_mbs_minus1);
-        reader.skipBits(32 * numTiles);
-        bitOffset += (32 * numTiles);
-    }
+    number_of_configuration_entry = 1;  // The real-time encoding on the device is assumed to be 1.
+    number_of_frame_info = 1;  // The real-time encoding on the device is assumed to be 1.
 
-    reader.skipBits(8);
-    bitOffset += 8;  // reserved_zero_8bits
+    std::vector<uint8_t> csdData;
+    csdData.push_back((uint8_t)0x1);
+    csdData.push_back(number_of_configuration_entry);
 
-    /* byte_alignmenet() */
-    while (bitOffset % 8) {
-        reader.skipBits(1);
-        bitOffset += 1;
+    for (uint8_t i = 0; i < number_of_configuration_entry; i++) {
+        csdData.push_back(pbu_type);
+        csdData.push_back(number_of_frame_info);
+        for (uint8_t j = 0; j < number_of_frame_info; j++) {
+            csdData.push_back((uint8_t)((color_description_present_flag << 1) |
+                                      capture_time_distance_ignored));
+            csdData.push_back(profile_idc);
+            csdData.push_back(level_idc);
+            csdData.push_back(band_idc);
+            csdData.push_back((uint8_t)((frame_width_minus1 >> 24) & 0xff));
+            csdData.push_back((uint8_t)((frame_width_minus1 >> 16) & 0xff));
+            csdData.push_back((uint8_t)((frame_width_minus1 >> 8) & 0xff));
+            csdData.push_back((uint8_t)(frame_width_minus1 & 0xff));
+            csdData.push_back((uint8_t)((frame_height_minus1 >> 24) & 0xff));
+            csdData.push_back((uint8_t)((frame_height_minus1 >> 16) & 0xff));
+            csdData.push_back((uint8_t)((frame_height_minus1 >> 8) & 0xff));
+            csdData.push_back((uint8_t)(frame_height_minus1 & 0xff));
+            csdData.push_back((uint8_t)(((chroma_format_idc << 4) & 0xf0) |
+                                      (bit_depth_minus8 & 0xf)));
+            csdData.push_back((uint8_t)(capture_time_distance));
+            if (color_description_present_flag) {
+                csdData.push_back(color_primaries);
+                csdData.push_back(transfer_characteristics);
+                csdData.push_back(matrix_coefficients);
+            }
+        }
     }
-    csdEnd = bitOffset / 8;
-    int32_t csdSize = csdEnd - csdStart + 1;
 
     std::unique_ptr<C2StreamInitDataInfo::output> csd =
-            C2StreamInitDataInfo::output::AllocUnique(csdSize, 0u);
+        C2StreamInitDataInfo::output::AllocUnique(csdData.size(), 0u);
     if (!csd) {
         ALOGE("CSD allocation failed");
         mSignalledError = true;
@@ -1068,10 +1058,10 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work, oapv_bitb_
         return;
     }
 
-    buf = buf + csdStart;
-    memcpy(csd->m.value, buf, csdSize);
+    memcpy(csd->m.value, csdData.data(), csdData.size());
     work->worklets.front()->output.configUpdate.push_back(std::move(csd));
 }
+
 c2_status_t C2SoftApvEnc::drainInternal(uint32_t drainMode,
                                         const std::shared_ptr<C2BlockPool>& pool,
                                         const std::unique_ptr<C2Work>& work) {
