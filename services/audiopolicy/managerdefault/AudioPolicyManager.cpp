@@ -3804,19 +3804,21 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
         }
     }
 
-    // update voice volume if the an active call route exists
-    if (mCallRxSourceClient != nullptr && mCallRxSourceClient->isConnected()
-            && (curSrcDevices.find(
-                Volume::getDeviceForVolume({mCallRxSourceClient->sinkDevice()->type()}))
-                != curSrcDevices.end())) {
-        bool isVoiceVolSrc;
-        bool isBtScoVolSrc;
-        if (isVolumeConsistentForCalls(vs, {mCallRxSourceClient->sinkDevice()->type()},
-                isVoiceVolSrc, isBtScoVolSrc, __func__)
-                && (isVoiceVolSrc || isBtScoVolSrc)) {
-            bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
-                    !audio_is_ble_out_device(mCallRxSourceClient->sinkDevice()->type());
-            setVoiceVolume(index, curves, voiceVolumeManagedByHost, 0);
+    // update voice volume if the an active call route exists and target device is same as current
+    if (mCallRxSourceClient != nullptr && mCallRxSourceClient->isConnected()) {
+        audio_devices_t rxSinkDevice = mCallRxSourceClient->sinkDevice()->type();
+        audio_devices_t curVoiceDevice = Volume::getDeviceForVolume({rxSinkDevice});
+        if (curVoiceDevice == device
+                && curSrcDevices.find(curVoiceDevice) != curSrcDevices.end()) {
+            bool isVoiceVolSrc;
+            bool isBtScoVolSrc;
+            if (isVolumeConsistentForCalls(vs, {rxSinkDevice},
+                    isVoiceVolSrc, isBtScoVolSrc, __func__)
+                    && (isVoiceVolSrc || isBtScoVolSrc)) {
+                bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
+                        !audio_is_ble_out_device(rxSinkDevice);
+                setVoiceVolume(index, curves, voiceVolumeManagedByHost, 0);
+            }
         }
     }
 
