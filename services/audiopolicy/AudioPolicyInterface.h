@@ -24,6 +24,7 @@
 #include <android/media/audio/common/AudioMMapPolicyType.h>
 #include <android/media/GetInputForAttrResponse.h>
 #include <android/content/AttributionSourceState.h>
+#include <error/BinderResult.h>
 #include <media/AudioCommonTypes.h>
 #include <media/AudioContainers.h>
 #include <media/AudioDeviceTypeAddr.h>
@@ -182,8 +183,7 @@ public:
                                      audio_input_flags_t flags,
                                      audio_unique_id_t riid,
                                      audio_session_t session,
-                                     const AttributionSourceState& attributionSource,
-                                     input_type_t *inputType /* out param */) = 0;
+                                     const AttributionSourceState& attributionSource) = 0;
     // indicates to the audio policy manager that the input starts being used.
     virtual status_t startInput(audio_port_handle_t portId) = 0;
     // indicates to the audio policy manager that the input stops being used.
@@ -636,6 +636,32 @@ public:
     virtual status_t getMmapPolicyInfos(
             media::audio::common::AudioMMapPolicyType policyType,
             std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
+
+    enum class MixType {
+        // e.g. audio recording from a microphone
+        NONE = 0,
+        // used for "remote submix" legacy mode (no DAP), capture of the media to play it remotely
+        CAPTURE,
+        // used for platform audio rerouting, where mixes are handled by external and dynamically
+        // installed policies which reroute audio mixes
+        EXT_POLICY_REROUTE,
+        // used for playback capture with a MediaProjection
+        PUBLIC_CAPTURE_PLAYBACK,
+        // used for capture from telephony RX path
+        TELEPHONY_RX_CAPTURE,
+    };
+
+    struct PermissionReqs {
+        media::audio::common::AudioSource source;
+        MixType mixType;
+        uint32_t virtualDeviceId;
+        // Flag based validation
+        bool isHotword;
+        bool isCallRedir;
+    };
+
+    virtual error::BinderResult<bool> checkPermissionForInput(const AttributionSourceState& attr,
+                                                              const PermissionReqs& req) = 0;
 };
 
     // These are the signatures of createAudioPolicyManager/destroyAudioPolicyManager
