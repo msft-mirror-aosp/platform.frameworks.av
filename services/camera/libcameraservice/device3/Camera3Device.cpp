@@ -61,6 +61,7 @@
 #include <com_android_window_flags.h>
 
 #include "CameraService.h"
+#include "FwkOnlyMetadataTags.h"
 #include "aidl/android/hardware/graphics/common/Dataspace.h"
 #include "aidl/AidlUtils.h"
 #include "device3/Camera3Device.h"
@@ -3797,18 +3798,12 @@ bool Camera3Device::RequestThread::threadLoop() {
 }
 
 status_t Camera3Device::removeFwkOnlyKeys(CameraMetadata *request) {
-    static const std::array<uint32_t, 5> kFwkOnlyKeys = {
-            ANDROID_CONTROL_AF_REGIONS_SET,
-            ANDROID_CONTROL_AE_REGIONS_SET,
-            ANDROID_CONTROL_AWB_REGIONS_SET,
-            ANDROID_SCALER_CROP_REGION_SET,
-            ANDROID_CONTROL_ZOOM_METHOD};
     if (request == nullptr) {
         ALOGE("%s request metadata nullptr", __FUNCTION__);
         return BAD_VALUE;
     }
     status_t res = OK;
-    for (const auto &key : kFwkOnlyKeys) {
+    for (const auto &key : kFwkOnlyMetadataKeys) {
         if (request->exists(key)) {
             res = request->erase(key);
             if (res != OK) {
