@@ -24,6 +24,7 @@
 #include <aidlcommonsupport/NativeHandle.h>
 #include <camera/StringUtils.h>
 #include <device3/Camera3StreamInterface.h>
+#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
 #include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
 #include <mediautils/AImageReaderUtils.h>
 #include "utils/Utils.h"
@@ -76,20 +77,25 @@ int32_t convertFromAidl(SStreamConfigurationMode streamConfigurationMode) {
 }
 
 UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
-    std::vector<sp<IGraphicBufferProducer>> iGBPs;
+    std::vector<ParcelableSurfaceType> pSurfaces;
     if (!src.surfaces.empty()) {
         auto& surfaces = src.surfaces;
-        iGBPs.reserve(surfaces.size());
+        pSurfaces.reserve(surfaces.size());
 
         for (auto& sSurface : surfaces) {
-            sp<IGraphicBufferProducer> igbp =
-                    Surface::getIGraphicBufferProducer(sSurface.get());
-            if (igbp == nullptr) {
-                ALOGE("%s: ANativeWindow (%p) not backed by a Surface.",
-                      __FUNCTION__, sSurface.get());
+            ParcelableSurfaceType pSurface;
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+            pSurface.graphicBufferProducer = Surface::getIGraphicBufferProducer(sSurface.get());
+            if (pSurface.isEmpty()) {
+#else
+            pSurface = Surface::getIGraphicBufferProducer(sSurface.get());
+            if (pSurface == nullptr) {
+#endif
+                ALOGE("%s: ANativeWindow (%p) not backed by a Surface.", __FUNCTION__,
+                      sSurface.get());
                 continue;
             }
-            iGBPs.push_back(igbp);
+            pSurfaces.push_back(pSurface);
         }
     } else {
 #pragma clang diagnostic push
@@ -100,7 +106,7 @@ UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
         auto &windowHandles = src.windowHandles;
 #pragma clang diagnostic pop
 
-        iGBPs.reserve(windowHandles.size());
+        pSurfaces.reserve(windowHandles.size());
 
         for (auto &handle : windowHandles) {
             native_handle_t* nh = makeFromAidl(handle);
@@ -111,15 +117,20 @@ UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
                 continue;
             }
 
-            iGBPs.push_back(new H2BGraphicBufferProducer(igbp));
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+            view::Surface viewSurface;
+            viewSurface.graphicBufferProducer = new H2BGraphicBufferProducer(igbp);
+            pSurfaces.push_back(viewSurface);
+#else
+            pSurfaces.push_back(new H2BGraphicBufferProducer(igbp));
+#endif
             native_handle_delete(nh);
         }
     }
 
     UOutputConfiguration outputConfiguration(
-        iGBPs, convertFromAidl(src.rotation), src.physicalCameraId,
-        src.windowGroupId, OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0,
-        (iGBPs.size() > 1));
+            pSurfaces, convertFromAidl(src.rotation), src.physicalCameraId, src.windowGroupId,
+            OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0, (pSurfaces.size() > 1));
     return outputConfiguration;
 }
 
