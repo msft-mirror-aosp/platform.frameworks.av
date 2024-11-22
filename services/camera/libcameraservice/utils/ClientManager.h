@@ -746,9 +746,9 @@ std::vector<std::shared_ptr<ClientDescriptor<KEY, VALUE>>>
         for (auto it = mClients.begin(); it != mClients.end();)
         {
             if ((*it)->getKey() == key) {
-                it = mClients.erase(it);
                 if (mListener != nullptr) mListener->onClientRemoved(**it);
                 clients.push_back(*it);
+                it = mClients.erase(it);
             } else {
                 ++it;
             }

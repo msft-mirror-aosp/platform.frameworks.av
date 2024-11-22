@@ -1253,14 +1253,6 @@ status_t overrideDefaultRequestKeys(CameraMetadata *request) {
         request->update(ANDROID_CONTROL_AUTOFRAMING, &kDefaultAutoframingMode, 1);
     }
 
-    if (flags::ae_priority()) {
-        // Fill in CONTROL_AE_PRIORITY_MODE if not available
-        if (!request->exists(ANDROID_CONTROL_AE_PRIORITY_MODE)) {
-            static const uint8_t kDefaultAePriorityMode = ANDROID_CONTROL_AE_PRIORITY_MODE_OFF;
-            request->update(ANDROID_CONTROL_AE_PRIORITY_MODE, &kDefaultAePriorityMode, 1);
-        }
-    }
-
     return OK;
 }
 
