@@ -128,6 +128,10 @@ public:
             std::vector<media::audio::common::AudioMMapPolicyInfo>* /*policyInfos*/) override {
         return INVALID_OPERATION;
     }
+    error::BinderResult<bool> checkPermissionForInput(const AttributionSourceState& /* attr */,
+                                                              const PermissionReqs& /* req */) {
+        return true;
+    }
 };
 
 } // namespace android

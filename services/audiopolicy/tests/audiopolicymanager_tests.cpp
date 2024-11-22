@@ -334,10 +334,9 @@ void AudioPolicyManagerTest::getInputForAttr(
     if (!portId) portId = &localPortId;
     *portId = AUDIO_PORT_HANDLE_NONE;
     if (!virtualDeviceId) virtualDeviceId = 0;
-    AudioPolicyInterface::input_type_t inputType;
     AttributionSourceState attributionSource = createAttributionSourceState(/*uid=*/ 0);
     auto inputRes = mManager->getInputForAttr(attr, *input, *selectedDeviceId,
-        config, flags, riid, session, attributionSource, &inputType);
+        config, flags, riid, session, attributionSource);
     ASSERT_TRUE(inputRes.has_value());
     ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
     *input = inputRes->input;
@@ -1242,7 +1241,7 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, PreferExactConfigForInput) {
     };
     auto inputRes = mManager->getInputForAttr(attr, requestedInput, requestedDeviceId,
                                               requestedConfig, AUDIO_INPUT_FLAG_NONE, 1 /*riid*/,
-                                              AUDIO_SESSION_NONE, attributionSource, &inputType);
+                                              AUDIO_SESSION_NONE, attributionSource);
     ASSERT_TRUE(inputRes.has_value());
     ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
     ASSERT_EQ(VALUE_OR_FATAL(legacy2aidl_audio_config_base_t_AudioConfigBase(
@@ -1255,7 +1254,7 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, PreferExactConfigForInput) {
 
     inputRes = mManager->getInputForAttr(attr, requestedInput, requestedDeviceId, requestedConfig,
                                          AUDIO_INPUT_FLAG_NONE, 1 /*riid*/, AUDIO_SESSION_NONE,
-                                         attributionSource, &inputType);
+                                         attributionSource);
     ASSERT_TRUE(inputRes.has_value());
     ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
     ASSERT_EQ(VALUE_OR_FATAL(legacy2aidl_audio_config_base_t_AudioConfigBase(requestedConfig,

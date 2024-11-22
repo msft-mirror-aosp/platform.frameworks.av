@@ -64,12 +64,12 @@ class AttrSourceItr {
     using iterator_category = std::forward_iterator_tag;
     using difference_type = std::ptrdiff_t;
     using value_type = AttributionSourceState;
-    using pointer = const value_type*;
-    using reference = const value_type&;
+    using pointer = value_type*;
+    using reference = value_type&;
 
     AttrSourceItr() : mAttr(nullptr) {}
 
-    AttrSourceItr(const AttributionSourceState& attr) : mAttr(&attr) {}
+    AttrSourceItr(AttributionSourceState& attr) : mAttr(&attr) {}
 
     reference operator*() const { return *mAttr; }
     pointer operator->() const { return mAttr; }
@@ -89,7 +89,7 @@ class AttrSourceItr {
 
     static AttrSourceItr end() { return AttrSourceItr{}; }
 private:
-    const AttributionSourceState * mAttr;
+    AttributionSourceState * mAttr;
 };
 } // anonymous
 
@@ -134,6 +134,16 @@ OpRecordAudioMonitor::OpRecordAudioMonitor(
         mVirtualDeviceId(virtualDeviceId), mAttr(attr), mAppOp(appOp),
         mShouldMonitorRecord(shouldMonitorRecord),
         mCommandThread(commandThread) {
+    // The vdi is carried in the attribution source for appops perm checks.
+    // Overwrite the entire chain with the vdi associated with the mix this client is attached to
+    // This ensures the checkOps triggered by the listener are correct.
+    // Note: we still only register for events by package name, so we assume that we get events
+    // independent of vdi.
+    if (mVirtualDeviceId != 0 /* default vdi */) {
+        // TODO (atneya@) lift for const
+        std::for_each(AttrSourceItr{mAttributionSource}, AttrSourceItr::end(),
+                      [&](auto& attr) { attr.deviceId = mVirtualDeviceId; });
+    }
 }
 
 OpRecordAudioMonitor::~OpRecordAudioMonitor()
