@@ -108,10 +108,10 @@ public:
             const std::string& deviceName,
             const AudioFormatDescription& encodedFormat) override;
     binder::Status setPhoneState(AudioMode state, int32_t uid) override;
-    binder::Status setForceUse(android::media::audio::common::AudioPolicyForceUse usage,
-            android::media::audio::common::AudioPolicyForcedConfig config) override;
-    binder::Status getForceUse(android::media::audio::common::AudioPolicyForceUse usage,
-            android::media::audio::common::AudioPolicyForcedConfig* _aidl_return) override;
+    binder::Status setForceUse(media::AudioPolicyForceUse usage,
+                               media::AudioPolicyForcedConfig config) override;
+    binder::Status getForceUse(media::AudioPolicyForceUse usage,
+                               media::AudioPolicyForcedConfig* _aidl_return) override;
     binder::Status getOutput(AudioStreamType stream, int32_t* _aidl_return) override;
     binder::Status getOutputForAttr(const media::audio::common::AudioAttributes& attr,
                                     int32_t session,
@@ -503,14 +503,6 @@ private:
                             const audio_config_base_t& config,
                             const audio_output_flags_t flags);
     status_t unregisterOutput(audio_io_handle_t output);
-
-    error::BinderResult<bool> evaluatePermsForSource(const AttributionSourceState& attrSource,
-                                                     AudioSource source, bool isHotword);
-
-    error::BinderResult<bool> evaluatePermsForDevice(const AttributionSourceState& attrSource,
-                                                     AudioSource source,
-                                                     AudioPolicyInterface::input_type_t inputType,
-                                                     uint32_t vdi, bool isCallRedir);
 
     // If recording we need to make sure the UID is allowed to do that. If the UID is idle
     // then it cannot record and gets buffers with zeros - silence. As soon as the UID
@@ -967,6 +959,9 @@ private:
         status_t getMmapPolicyInfos(
                 media::audio::common::AudioMMapPolicyType policyType,
                 std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
+
+        error::BinderResult<bool> checkPermissionForInput(const AttributionSourceState& attr,
+                const PermissionReqs& req) override;
 
      private:
         AudioPolicyService *mAudioPolicyService;
