@@ -3556,26 +3556,8 @@ void PlaybackThread::threadLoop_removeTracks(
 
 void PlaybackThread::checkSilentMode_l()
 {
-    if (!mMasterMute) {
-        char value[PROPERTY_VALUE_MAX];
-        if (mOutDeviceTypeAddrs.empty()) {
-            ALOGD("ro.audio.silent is ignored since no output device is set");
-            return;
-        }
-        if (isSingleDeviceType(outDeviceTypes_l(), AUDIO_DEVICE_OUT_REMOTE_SUBMIX)) {
-            ALOGD("ro.audio.silent will be ignored for threads on AUDIO_DEVICE_OUT_REMOTE_SUBMIX");
-            return;
-        }
-        if (property_get("ro.audio.silent", value, "0") > 0) {
-            char *endptr;
-            unsigned long ul = strtoul(value, &endptr, 0);
-            if (*endptr == '\0' && ul != 0) {
-                ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
-                // The setprop command will not allow a property to be changed after
-                // the first time it is set, so we don't have to worry about un-muting.
-                setMasterMute_l(true);
-            }
-        }
+    if (property_get_bool("ro.audio.silent", false)) {
+        ALOGW("ro.audio.silent is now ignored");
     }
 }
 
@@ -11369,18 +11351,8 @@ ThreadBase::MetadataUpdate MmapPlaybackThread::updateMetadata_l()
 
 void MmapPlaybackThread::checkSilentMode_l()
 {
-    if (!mMasterMute) {
-        char value[PROPERTY_VALUE_MAX];
-        if (property_get("ro.audio.silent", value, "0") > 0) {
-            char *endptr;
-            unsigned long ul = strtoul(value, &endptr, 0);
-            if (*endptr == '\0' && ul != 0) {
-                ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
-                // The setprop command will not allow a property to be changed after
-                // the first time it is set, so we don't have to worry about un-muting.
-                setMasterMute_l(true);
-            }
-        }
+    if (property_get_bool("ro.audio.silent", false)) {
+        ALOGW("ro.audio.silent is now ignored");
     }
 }
 
