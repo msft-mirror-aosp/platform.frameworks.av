@@ -34,8 +34,13 @@ namespace hardware {
 
 class ICameraClient;
 
-class ICamera: public android::IInterface
-{
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+typedef Surface ProducerType;
+#else
+typedef IGraphicBufferProducer ProducerType;
+#endif
+
+class ICamera : public android::IInterface {
     /**
      * Keep up-to-date with ICamera.aidl in frameworks/base
      */
