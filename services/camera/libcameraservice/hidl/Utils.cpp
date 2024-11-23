@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-#include <hidl/Utils.h>
-#include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
-#include <cutils/native_handle.h>
-#include <mediautils/AImageReaderUtils.h>
 #include <camera/StringUtils.h>
+#include <cutils/native_handle.h>
+#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+#include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
+#include <hidl/Utils.h>
+#include <mediautils/AImageReaderUtils.h>
 
 namespace android {
 namespace hardware {
@@ -84,9 +85,9 @@ int convertFromHidl(HOutputConfiguration::Rotation rotation) {
 
 hardware::camera2::params::OutputConfiguration convertFromHidl(
     const HOutputConfiguration &hOutputConfiguration) {
-    std::vector<sp<IGraphicBufferProducer>> iGBPs;
-    auto &windowHandles = hOutputConfiguration.windowHandles;
-    iGBPs.reserve(windowHandles.size());
+    std::vector<ParcelableSurfaceType> surfaces;
+    auto& windowHandles = hOutputConfiguration.windowHandles;
+    surfaces.reserve(windowHandles.size());
     for (auto &handle : windowHandles) {
         auto igbp = AImageReader_getHGBPFromHandle(handle);
         if (igbp == nullptr) {
@@ -94,10 +95,16 @@ hardware::camera2::params::OutputConfiguration convertFromHidl(
                     __FUNCTION__, handle.getNativeHandle());
             continue;
         }
-        iGBPs.push_back(new H2BGraphicBufferProducer(igbp));
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+        view::Surface surface;
+        surface.graphicBufferProducer = new H2BGraphicBufferProducer(igbp);
+        surfaces.push_back(surface);
+#else
+        surfaces.push_back(new H2BGraphicBufferProducer(igbp));
+#endif
     }
     hardware::camera2::params::OutputConfiguration outputConfiguration(
-        iGBPs, convertFromHidl(hOutputConfiguration.rotation),
+        surfaces, convertFromHidl(hOutputConfiguration.rotation),
         hOutputConfiguration.physicalCameraId,
         hOutputConfiguration.windowGroupId, OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0,
         (windowHandles.size() > 1));
