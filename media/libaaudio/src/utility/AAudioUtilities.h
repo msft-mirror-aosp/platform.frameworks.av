@@ -373,4 +373,6 @@ audio_devices_t AAudioConvert_aaudioToAndroidDeviceType(
 aaudio_policy_t AAudioConvert_androidToAAudioMMapPolicy(
         android::media::audio::common::AudioMMapPolicy policy);
 
+bool AAudio_isCompressedFormat(audio_format_t format);
+
 #endif //UTILITY_AAUDIO_UTILITIES_H

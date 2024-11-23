@@ -23,6 +23,7 @@
 #include <camera/camera2/SessionConfiguration.h>
 #include <camera/camera2/SubmitInfo.h>
 #include <unordered_map>
+#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
 
 #include "CameraOfflineSessionClient.h"
 #include "CameraService.h"
@@ -36,6 +37,12 @@ using android::camera3::OutputStreamInfo;
 using android::camera3::CompositeStream;
 
 namespace android {
+
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+typedef uint64_t SurfaceKey;
+#else
+typedef sp<IBinder> SurfaceKey;
+#endif
 
 struct CameraDeviceClientBase :
          public CameraService::BasicClient,
@@ -293,12 +300,20 @@ private:
             int* newStreamId = NULL);
 
     // Utility method to insert the surface into SurfaceMap
-    binder::Status insertGbpLocked(const sp<IGraphicBufferProducer>& gbp,
+    binder::Status insertSurfaceLocked(const ParcelableSurfaceType& surface,
             /*out*/SurfaceMap* surfaceMap, /*out*/Vector<int32_t>* streamIds,
             /*out*/int32_t*  currentStreamId);
 
+    // A ParcelableSurfaceType can be either a view::Surface or IGBP.
+    // We use this type of surface when we need to be able to have a parcelable data type.
+    // view::Surface has helper functions to make converting between a regular Surface and a
+    // view::Surface easy.
+    status_t getSurfaceKey(ParcelableSurfaceType surface, SurfaceKey* out) const;
+    // Surface only
+    status_t getSurfaceKey(sp<Surface> surface, SurfaceKey* out) const;
+
     // IGraphicsBufferProducer binder -> Stream ID + Surface ID for output streams
-    KeyedVector<sp<IBinder>, StreamSurfaceId> mStreamMap;
+    KeyedVector<SurfaceKey, StreamSurfaceId> mStreamMap;
 
     // Stream ID -> OutputConfiguration. Used for looking up Surface by stream/surface index
     KeyedVector<int32_t, hardware::camera2::params::OutputConfiguration> mConfiguredOutputs;
@@ -340,7 +355,7 @@ private:
 
     // Synchronize access to 'mCompositeStreamMap'
     Mutex mCompositeLock;
-    KeyedVector<sp<IBinder>, sp<CompositeStream>> mCompositeStreamMap;
+    KeyedVector<SurfaceKey, sp<CompositeStream>> mCompositeStreamMap;
 
     sp<CameraProviderManager> mProviderManager;
 
