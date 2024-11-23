@@ -290,7 +290,8 @@ status_t ZoomRatioMapper::updateCaptureRequest(CameraMetadata* request) {
     return res;
 }
 
-status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool useZoomRatio) {
+status_t ZoomRatioMapper::updateCaptureResult(
+        CameraMetadata* result, bool zoomMethodIsRatio, bool zoomRatioIs1) {
     if (!mIsValid) return INVALID_OPERATION;
 
     status_t res = OK;
@@ -300,6 +301,8 @@ status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool useZo
     if (res != OK) {
         return res;
     }
+
+    bool useZoomRatio = !zoomRatioIs1 || zoomMethodIsRatio;
     if (mHalSupportsZoomRatio && !useZoomRatio) {
         res = combineZoomAndCropLocked(result, true/*isResult*/, arrayWidth, arrayHeight);
     } else if (!mHalSupportsZoomRatio && useZoomRatio) {
@@ -310,6 +313,12 @@ status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool useZo
             float zoomRatio1x = 1.0f;
             result->update(ANDROID_CONTROL_ZOOM_RATIO, &zoomRatio1x, 1);
         }
+    }
+
+    if (flags::zoom_method()) {
+        uint8_t zoomMethod = zoomMethodIsRatio ?  ANDROID_CONTROL_ZOOM_METHOD_ZOOM_RATIO :
+                ANDROID_CONTROL_ZOOM_METHOD_AUTO;
+        result->update(ANDROID_CONTROL_ZOOM_METHOD, &zoomMethod, 1);
     }
 
     return res;
