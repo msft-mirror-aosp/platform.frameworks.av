@@ -231,25 +231,27 @@ camera_status_t CameraDevice::isSessionConfigurationSupported(
     SessionConfiguration sessionConfiguration(0 /*inputWidth*/, 0 /*inputHeight*/,
             -1 /*inputFormat*/, CAMERA3_STREAM_CONFIGURATION_NORMAL_MODE);
     for (const auto& output : sessionOutputContainer->mOutputs) {
-        sp<IGraphicBufferProducer> iGBP(nullptr);
-        ret = getIGBPfromAnw(output.mWindow, iGBP);
+        sp<SurfaceType> surface(nullptr);
+        ret = getSurfacefromAnw(output.mWindow, surface);
         if (ret != ACAMERA_OK) {
             ALOGE("Camera device %s failed to extract graphic producer from native window",
                     getId());
             return ret;
         }
 
-        OutputConfiguration outConfig(iGBP, output.mRotation, output.mPhysicalCameraId,
+        ParcelableSurfaceType pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
+        OutputConfiguration outConfig(pSurface, output.mRotation, output.mPhysicalCameraId,
                 OutputConfiguration::INVALID_SET_ID, true);
 
         for (auto& anw : output.mSharedWindows) {
-            ret = getIGBPfromAnw(anw, iGBP);
+            ret = getSurfacefromAnw(anw, surface);
             if (ret != ACAMERA_OK) {
                 ALOGE("Camera device %s failed to extract graphic producer from native window",
                         getId());
                 return ret;
             }
-            outConfig.addGraphicProducer(iGBP);
+            pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
+            outConfig.addSurface(pSurface);
         }
 
         sessionConfiguration.addOutputConfiguration(outConfig);
@@ -295,25 +297,27 @@ camera_status_t CameraDevice::updateOutputConfigurationLocked(ACaptureSessionOut
         return ACAMERA_ERROR_INVALID_PARAMETER;
     }
 
-    sp<IGraphicBufferProducer> iGBP(nullptr);
-    ret = getIGBPfromAnw(output->mWindow, iGBP);
+    sp<SurfaceType> surface(nullptr);
+    ret = getSurfacefromAnw(output->mWindow, surface);
     if (ret != ACAMERA_OK) {
         ALOGE("Camera device %s failed to extract graphic producer from native window",
                 getId());
         return ret;
     }
 
-    OutputConfiguration outConfig(iGBP, output->mRotation, output->mPhysicalCameraId,
-            OutputConfiguration::INVALID_SET_ID, true);
+    ParcelableSurfaceType pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
+    OutputConfiguration outConfig(pSurface, output->mRotation, output->mPhysicalCameraId,
+                                  OutputConfiguration::INVALID_SET_ID, true);
 
     for (auto& anw : output->mSharedWindows) {
-        ret = getIGBPfromAnw(anw, iGBP);
+        ret = getSurfacefromAnw(anw, surface);
         if (ret != ACAMERA_OK) {
             ALOGE("Camera device %s failed to extract graphic producer from native window",
                     getId());
             return ret;
         }
-        outConfig.addGraphicProducer(iGBP);
+        pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
+        outConfig.addSurface(pSurface);
     }
 
     auto remoteRet = mRemote->updateOutputConfiguration(streamId, outConfig);
@@ -427,9 +431,9 @@ CameraDevice::allocateCaptureRequest(
         for (const auto& kvPair : mConfiguredOutputs) {
             int streamId = kvPair.first;
             const OutputConfiguration& outConfig = kvPair.second.second;
-            const auto& gbps = outConfig.getGraphicBufferProducers();
-            for (int surfaceId = 0; surfaceId < (int) gbps.size(); surfaceId++) {
-                if (gbps[surfaceId] == surface->getIGraphicBufferProducer()) {
+            const auto& surfaces = outConfig.getSurfaces();
+            for (int surfaceId = 0; surfaceId < (int)surfaces.size(); surfaceId++) {
+                if (surfaces[surfaceId] == flagtools::surfaceToSurfaceType(surface)) {
                     found = true;
                     req->mStreamIdxList.push_back(streamId);
                     req->mSurfaceIdxList.push_back(surfaceId);
@@ -634,16 +638,13 @@ CameraDevice::waitUntilIdleLocked() {
     return ACAMERA_OK;
 }
 
-camera_status_t
-CameraDevice::getIGBPfromAnw(
-        ANativeWindow* anw,
-        sp<IGraphicBufferProducer>& out) {
+camera_status_t CameraDevice::getSurfacefromAnw(ANativeWindow* anw, sp<SurfaceType>& out) {
     sp<Surface> surface;
     camera_status_t ret = getSurfaceFromANativeWindow(anw, surface);
     if (ret != ACAMERA_OK) {
         return ret;
     }
-    out = surface->getIGraphicBufferProducer();
+    out = flagtools::surfaceToSurfaceType(surface);
     return ACAMERA_OK;
 }
 
@@ -681,14 +682,16 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
     std::set<std::pair<ANativeWindow*, OutputConfiguration>> outputSet;
     for (const auto& outConfig : outputs->mOutputs) {
         ANativeWindow* anw = outConfig.mWindow;
-        sp<IGraphicBufferProducer> iGBP(nullptr);
-        ret = getIGBPfromAnw(anw, iGBP);
+        sp<SurfaceType> surface(nullptr);
+        ret = getSurfacefromAnw(anw, surface);
         if (ret != ACAMERA_OK) {
             return ret;
         }
+        ParcelableSurfaceType pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
         outputSet.insert(std::make_pair(
-                anw, OutputConfiguration(iGBP, outConfig.mRotation, outConfig.mPhysicalCameraId,
-                        OutputConfiguration::INVALID_SET_ID, outConfig.mIsShared)));
+                anw,
+                OutputConfiguration(pSurface, outConfig.mRotation, outConfig.mPhysicalCameraId,
+                                    OutputConfiguration::INVALID_SET_ID, outConfig.mIsShared)));
     }
     auto addSet = outputSet;
     std::vector<int> deleteList;
@@ -885,10 +888,14 @@ CameraDevice::onCaptureErrorLocked(
             return;
         }
 
-        const auto& gbps = outputPairIt->second.second.getGraphicBufferProducers();
-        for (const auto& outGbp : gbps) {
+        const auto& outSurfaces = outputPairIt->second.second.getSurfaces();
+        for (const auto& outSurface : outSurfaces) {
             for (const auto& surface : request->mSurfaceList) {
-                if (surface->getIGraphicBufferProducer() == outGbp) {
+                if ( outSurface == surface
+#if not WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+                                ->getIGraphicBufferProducer()
+#endif
+                                            ) {
                     ANativeWindow* anw = static_cast<ANativeWindow*>(surface.get());
                     ALOGV("Camera %s Lost output buffer for ANW %p frame %" PRId64,
                             getId(), anw, frameNumber);

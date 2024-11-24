@@ -286,7 +286,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
 bool AudioPolicyManagerFuzzer::getInputForAttr(
     const audio_attributes_t &attr, audio_unique_id_t riid, audio_port_handle_t *selectedDeviceId,
     audio_format_t format, audio_channel_mask_t channelMask, int sampleRate,
-    audio_input_flags_t flags, audio_port_handle_t *portId, uint32_t *virtualDeviceId) {
+    audio_input_flags_t flags, audio_port_handle_t *portId, uint32_t*) {
     audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
     audio_config_base_t config = AUDIO_CONFIG_BASE_INITIALIZER;
     config.sample_rate = sampleRate;
@@ -295,16 +295,15 @@ bool AudioPolicyManagerFuzzer::getInputForAttr(
     audio_port_handle_t localPortId;
     if (!portId) portId = &localPortId;
     *portId = AUDIO_PORT_HANDLE_NONE;
-    AudioPolicyInterface::input_type_t inputType;
 
     AttributionSourceState attributionSource;
     attributionSource.uid = 0;
     attributionSource.token = sp<BBinder>::make();
-    if (mManager->getInputForAttr(&attr, &input, riid, AUDIO_SESSION_NONE, attributionSource,
-            &config, flags, selectedDeviceId, &inputType, portId, virtualDeviceId) != OK) {
-        return false;
-    }
-    if (*portId == AUDIO_PORT_HANDLE_NONE || input == AUDIO_IO_HANDLE_NONE) {
+    const auto inputRes = mManager->getInputForAttr(attr, input, *selectedDeviceId, config, flags,
+                                                    riid, AUDIO_SESSION_NONE, attributionSource);
+    if (!inputRes.has_value()) return false;
+
+    if (inputRes->portId == AUDIO_PORT_HANDLE_NONE || inputRes->input == AUDIO_IO_HANDLE_NONE) {
         return false;
     }
     return true;

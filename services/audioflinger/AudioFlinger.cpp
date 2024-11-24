@@ -110,10 +110,6 @@ constexpr auto kNoEffectsFactory = "Effects Factory is absent\n"sv;
 
 static constexpr char kAudioServiceName[] = "audio";
 
-// In order to avoid invalidating offloaded tracks each time a Visualizer is turned on and off
-// we define a minimum time during which a global effect is considered enabled.
-static const nsecs_t kMinGlobalEffectEnabletimeNs = seconds(7200);
-
 // Keep a strong reference to media.log service around forever.
 // The service is within our parent process so it can never die in a way that we could observe.
 // These two variables are const after initialization.
@@ -5019,11 +5015,6 @@ Exit:
 
 bool AudioFlinger::isNonOffloadableGlobalEffectEnabled_l() const
 {
-    if (mGlobalEffectEnableTime != 0 &&
-            ((systemTime() - mGlobalEffectEnableTime) < kMinGlobalEffectEnabletimeNs)) {
-        return true;
-    }
-
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
         const auto thread = mPlaybackThreads.valueAt(i);
         audio_utils::lock_guard l(thread->mutex());
@@ -5038,8 +5029,6 @@ bool AudioFlinger::isNonOffloadableGlobalEffectEnabled_l() const
 void AudioFlinger::onNonOffloadableGlobalEffectEnable()
 {
     audio_utils::lock_guard _l(mutex());
-
-    mGlobalEffectEnableTime = systemTime();
 
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
         const sp<IAfPlaybackThread> t = mPlaybackThreads.valueAt(i);

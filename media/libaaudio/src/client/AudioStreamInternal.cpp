@@ -42,7 +42,6 @@
 #include "fifo/FifoBuffer.h"
 #include "utility/AudioClock.h"
 #include <media/AidlConversion.h>
-#include <com_android_media_aaudio.h>
 
 #include "AudioStreamInternal.h"
 
@@ -195,15 +194,6 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     if (getSampleRate() == AAUDIO_UNSPECIFIED) {
         setSampleRate(configurationOutput.getSampleRate());
-    }
-
-    if (!com::android::media::aaudio::sample_rate_conversion()) {
-        if (getSampleRate() != getDeviceSampleRate()) {
-            ALOGD("%s - skipping sample rate converter. SR = %d, Device SR = %d", __func__,
-                    getSampleRate(), getDeviceSampleRate());
-            result = AAUDIO_ERROR_INVALID_RATE;
-            goto error;
-        }
     }
 
     // Save device format so we can do format conversion and volume scaling together.

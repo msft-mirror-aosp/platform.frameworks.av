@@ -332,7 +332,7 @@ public:
      * have been called.
      */
     int32_t getBytesPerFrame() const {
-        return mSamplesPerFrame * getBytesPerSample();
+        return audio_bytes_per_frame(mSamplesPerFrame, mFormat);
     }
 
     /**
@@ -346,7 +346,7 @@ public:
      * This is only valid after setDeviceSamplesPerFrame() and setDeviceFormat() have been called.
      */
     int32_t getBytesPerDeviceFrame() const {
-        return getDeviceSamplesPerFrame() * audio_bytes_per_sample(getDeviceFormat());
+        return audio_bytes_per_frame(getDeviceSamplesPerFrame(), getDeviceFormat());
     }
 
     virtual int64_t getFramesWritten() = 0;
@@ -390,6 +390,24 @@ public:
         mDeviceSamplesPerFrame = deviceSamplesPerFrame;
     }
 
+    virtual aaudio_result_t setOffloadDelayPadding(int32_t delayInFrames, int32_t paddingInFrames) {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+
+    virtual int32_t getOffloadDelay() {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+
+    virtual int32_t getOffloadPadding() {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+
+    virtual aaudio_result_t setOffloadEndOfStream() EXCLUDES(mStreamLock) {
+        return AAUDIO_ERROR_UNIMPLEMENTED;
+    }
+
+    virtual void setPresentationEndCallbackProc(AAudioStream_presentationEndCallback proc) { }
+    virtual void setPresentationEndCallbackUserData(void* userData) { }
 
     /**
      * @return true if data callback has been specified
@@ -408,7 +426,7 @@ public:
     /**
      * @return true if called from the same thread as the callback
      */
-    bool collidesWithCallback() const;
+    virtual bool collidesWithCallback() const;
 
     // Implement AudioDeviceCallback
     void onAudioDeviceUpdate(audio_io_handle_t audioIo,
@@ -649,6 +667,8 @@ protected:
 
     aaudio_result_t joinThread_l(void **returnArg) REQUIRES(mStreamLock);
 
+    virtual aaudio_result_t systemStopInternal_l() REQUIRES(mStreamLock);
+
     std::atomic<bool>    mCallbackEnabled{false};
 
     float                mDuckAndMuteVolume = 1.0f;
@@ -742,6 +762,8 @@ protected:
         mAudioBalance = audioBalance;
     }
 
+    aaudio_result_t safeStop_l() REQUIRES(mStreamLock);
+
     std::string mMetricsId; // set once during open()
 
     std::mutex                 mStreamLock;
@@ -749,8 +771,6 @@ protected:
     const android::sp<MyPlayerBase>   mPlayerBase;
 
 private:
-
-    aaudio_result_t safeStop_l() REQUIRES(mStreamLock);
 
     /**
      * Release then close the stream.

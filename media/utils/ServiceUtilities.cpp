@@ -77,15 +77,24 @@ static String16 resolveCallingPackage(PermissionController& permissionController
     return packages[0];
 }
 
+// NOTE/TODO(b/379754682):
+// AUDIO_SOURCE_VOICE_DOWNLINK and AUDIO_SOURCE_VOICE_CALL are handled specially:
+// DOWNLINK is an output source, but we still require RecordOp in addition to
+// OP_RECORD_INCOMING_PHONE_AUDIO
+// CALL includes both uplink and downlink, but we attribute RECORD_OP (only), since
+// there is not support for noting multiple ops.
 int32_t getOpForSource(audio_source_t source) {
   switch (source) {
+    // BEGIN output sources
     case AUDIO_SOURCE_FM_TUNER:
         return AppOpsManager::OP_NONE;
     case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
     case AUDIO_SOURCE_REMOTE_SUBMIX:
+        // TODO -- valid in all cases?
       return AppOpsManager::OP_RECORD_AUDIO_OUTPUT;
     case AUDIO_SOURCE_VOICE_DOWNLINK:
       return AppOpsManager::OP_RECORD_INCOMING_PHONE_AUDIO;
+    // END output sources
     case AUDIO_SOURCE_HOTWORD:
       return AppOpsManager::OP_RECORD_AUDIO_HOTWORD;
     case AUDIO_SOURCE_DEFAULT:
@@ -99,6 +108,7 @@ bool isRecordOpRequired(audio_source_t source) {
     case AUDIO_SOURCE_FM_TUNER:
     case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
     case AUDIO_SOURCE_REMOTE_SUBMIX:
+    // case AUDIO_SOURCE_VOICE_DOWNLINK:
         return false;
     default:
       return true;
@@ -288,6 +298,21 @@ bool captureVoiceCommunicationOutputAllowed(const AttributionSourceState& attrib
         "android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT");
     bool ok = PermissionCache::checkPermission(sCaptureVoiceCommOutput, pid, uid);
     if (!ok) ALOGE("Request requires android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT");
+    return ok;
+}
+
+bool bypassConcurrentPolicyAllowed(const AttributionSourceState& attributionSource) {
+    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+    uid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
+    if (isAudioServerOrRootUid(uid)) return true;
+    static const String16 sBypassConcurrentPolicy(
+            "android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION ");
+    // Use PermissionChecker, which includes some logic for allowing the isolated
+    // HotwordDetectionService to hold certain permissions.
+    bool ok = PermissionCache::checkPermission(sBypassConcurrentPolicy, pid, uid);
+    if (!ok) {
+        ALOGV("Request requires android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION");
+    }
     return ok;
 }
 

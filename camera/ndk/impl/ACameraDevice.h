@@ -38,8 +38,9 @@
 #include <camera/camera2/SessionConfiguration.h>
 #include <camera/camera2/CaptureRequest.h>
 
-#include <camera/NdkCameraManager.h>
 #include <camera/NdkCameraCaptureSession.h>
+#include <camera/NdkCameraManager.h>
+#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
 
 #include "ACameraMetadata.h"
 
@@ -178,8 +179,10 @@ class CameraDevice final : public RefBase {
     // Input message will be posted and cleared after this returns
     void postSessionMsgAndCleanup(sp<AMessage>& msg);
 
-    static camera_status_t getIGBPfromAnw(
-            ANativeWindow* anw, sp<IGraphicBufferProducer>& out);
+    // Only used when WB_LIBCAMERASERVICE_WITH_DEPENDENCIES is active
+    static ParcelableSurfaceType convertSurfaceTypeToView(sp<SurfaceType> surface);
+
+    static camera_status_t getSurfacefromAnw(ANativeWindow* anw, sp<SurfaceType>& out);
 
     static camera_status_t getSurfaceFromANativeWindow(
             ANativeWindow* anw, sp<Surface>& out);

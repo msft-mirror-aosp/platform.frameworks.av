@@ -3811,14 +3811,31 @@ std::vector<sp<CameraService::BasicClient>> CameraService::removeClientsLocked(
         const std::string& cameraId) {
     // Remove from active clients list
     std::vector<sp<CameraService::BasicClient>> clients;
-    std::vector<CameraService::DescriptorPtr> clientDescriptors;
-    clientDescriptors =  mActiveClientManager.removeAll(cameraId);
-    for (const auto& clientDescriptorPtr : clientDescriptors) {
+    if (flags::camera_multi_client()) {
+        std::vector<CameraService::DescriptorPtr> clientDescriptors;
+        clientDescriptors =  mActiveClientManager.removeAll(cameraId);
+        for (const auto& clientDescriptorPtr : clientDescriptors) {
+            if (clientDescriptorPtr != nullptr) {
+                sp<BasicClient> client = clientDescriptorPtr->getValue();
+                if (client.get() != nullptr) {
+                    cacheClientTagDumpIfNeeded(clientDescriptorPtr->getKey(), client.get());
+                    clients.push_back(client);
+                }
+            }
+        }
+    } else {
+        auto clientDescriptorPtr = mActiveClientManager.remove(cameraId);
+        if (clientDescriptorPtr == nullptr) {
+            ALOGW("%s: Could not evict client, no client for camera ID %s", __FUNCTION__,
+                    cameraId.c_str());
+            return clients;
+        }
+
         sp<BasicClient> client = clientDescriptorPtr->getValue();
         if (client.get() != nullptr) {
             cacheClientTagDumpIfNeeded(clientDescriptorPtr->getKey(), client.get());
+            clients.push_back(client);
         }
-        clients.push_back(client);
     }
     return clients;
 }
