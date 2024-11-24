@@ -62,8 +62,6 @@ using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioMMapPolicyInfo;
 using media::audio::common::AudioMMapPolicyType;
 using media::audio::common::AudioOffloadInfo;
-using media::audio::common::AudioPolicyForceUse;
-using media::audio::common::AudioPolicyForcedConfig;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
 using media::audio::common::AudioUsage;
@@ -1193,9 +1191,9 @@ audio_policy_forced_cfg_t AudioSystem::getForceUse(audio_policy_force_use_t usag
     if (aps == nullptr) return AUDIO_POLICY_FORCE_NONE;
 
     auto result = [&]() -> ConversionResult<audio_policy_forced_cfg_t> {
-        AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
+        media::AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
                 legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(usage));
-        AudioPolicyForcedConfig configAidl;
+        media::AudioPolicyForcedConfig configAidl;
         RETURN_IF_ERROR(statusTFromBinderStatus(
                 aps->getForceUse(usageAidl, &configAidl)));
         return aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(configAidl);
@@ -1379,13 +1377,14 @@ status_t AudioSystem::getInputForAttr(const audio_attributes_t* attr,
 
     media::GetInputForAttrResponse response;
 
-    status_t status = statusTFromBinderStatus(
-            aps->getInputForAttr(attrAidl, inputAidl, riidAidl, sessionAidl, attributionSource,
-                configAidl, flagsAidl, selectedDeviceIdAidl, &response));
-    if (status != NO_ERROR) {
+    const Status res = aps->getInputForAttr(attrAidl, inputAidl, riidAidl, sessionAidl,
+                                            attributionSource, configAidl, flagsAidl,
+                                            selectedDeviceIdAidl, &response);
+    if (!res.isOk()) {
+        ALOGE("getInputForAttr error: %s", res.toString8().c_str());
         *config = VALUE_OR_RETURN_STATUS(
                 aidl2legacy_AudioConfigBase_audio_config_base_t(response.config, true /*isInput*/));
-        return status;
+        return statusTFromBinderStatus(res);
     }
 
     *input = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_io_handle_t(response.input));

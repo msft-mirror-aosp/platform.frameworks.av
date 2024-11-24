@@ -19,15 +19,18 @@
 
 #include <android/media/DeviceConnectedState.h>
 #include <android/media/TrackInternalMuteInfo.h>
+#include <android/media/audio/common/AudioConfigBase.h>
 #include <android/media/audio/common/AudioMMapPolicyInfo.h>
 #include <android/media/audio/common/AudioMMapPolicyType.h>
+#include <android/media/GetInputForAttrResponse.h>
+#include <android/content/AttributionSourceState.h>
+#include <error/BinderResult.h>
 #include <media/AudioCommonTypes.h>
 #include <media/AudioContainers.h>
 #include <media/AudioDeviceTypeAddr.h>
-#include <media/AudioSystem.h>
 #include <media/AudioPolicy.h>
+#include <media/AudioSystem.h>
 #include <media/DeviceDescriptorBase.h>
-#include <android/content/AttributionSourceState.h>
 #include <utils/String8.h>
 
 namespace android {
@@ -161,18 +164,26 @@ public:
     // releases the output, return true if the output descriptor is reopened.
     virtual bool releaseOutput(audio_port_handle_t portId) = 0;
 
-    // request an input appropriate for record from the supplied device with supplied parameters.
-    virtual status_t getInputForAttr(const audio_attributes_t *attr,
-                                     audio_io_handle_t *input,
+    // Request an input appropriate for record from the supplied device with supplied parameters.
+    // attr -- attributes for the requested record
+    // requestedInput -- input only for MMAP mode where an input is re-used, otherwise output param
+    // requestedDeviceId, config, flags -- additional params for matching
+    // riid, session, attributionSource -- params which encapsulate client info to associate with
+    // this input
+    //
+    // On most errors, return a Status describing the error in the error object.
+    // However, in cases where an appropriate device cannot be found for a config, the error side of
+    // the unexpected will contain a suggested config.
+    virtual base::expected<media::GetInputForAttrResponse,
+            std::variant<binder::Status, media::audio::common::AudioConfigBase>>
+                     getInputForAttr(audio_attributes_t attributes,
+                                     audio_io_handle_t requestedInput,
+                                     audio_port_handle_t requestedDeviceId,
+                                     audio_config_base_t config,
+                                     audio_input_flags_t flags,
                                      audio_unique_id_t riid,
                                      audio_session_t session,
-                                     const AttributionSourceState& attributionSource,
-                                     audio_config_base_t *config,
-                                     audio_input_flags_t flags,
-                                     audio_port_handle_t *selectedDeviceId,
-                                     input_type_t *inputType,
-                                     audio_port_handle_t *portId,
-                                     uint32_t *virtualDeviceId) = 0;
+                                     const AttributionSourceState& attributionSource) = 0;
     // indicates to the audio policy manager that the input starts being used.
     virtual status_t startInput(audio_port_handle_t portId) = 0;
     // indicates to the audio policy manager that the input stops being used.
@@ -625,6 +636,32 @@ public:
     virtual status_t getMmapPolicyInfos(
             media::audio::common::AudioMMapPolicyType policyType,
             std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
+
+    enum class MixType {
+        // e.g. audio recording from a microphone
+        NONE = 0,
+        // used for "remote submix" legacy mode (no DAP), capture of the media to play it remotely
+        CAPTURE,
+        // used for platform audio rerouting, where mixes are handled by external and dynamically
+        // installed policies which reroute audio mixes
+        EXT_POLICY_REROUTE,
+        // used for playback capture with a MediaProjection
+        PUBLIC_CAPTURE_PLAYBACK,
+        // used for capture from telephony RX path
+        TELEPHONY_RX_CAPTURE,
+    };
+
+    struct PermissionReqs {
+        media::audio::common::AudioSource source;
+        MixType mixType;
+        uint32_t virtualDeviceId;
+        // Flag based validation
+        bool isHotword;
+        bool isCallRedir;
+    };
+
+    virtual error::BinderResult<bool> checkPermissionForInput(const AttributionSourceState& attr,
+                                                              const PermissionReqs& req) = 0;
 };
 
     // These are the signatures of createAudioPolicyManager/destroyAudioPolicyManager
