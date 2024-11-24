@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 The Android Open Source Project
+ * Copyright (C) 2021 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,18 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package android.media;
 
-#ifndef CODEC2_HAL_SELECTION_H
-#define CODEC2_HAL_SELECTION_H
-
-namespace android {
-
-// Returns true iff AIDL c2 HAL is selected for the system
-bool IsCodec2AidlHalSelected();
-
-// Returns true iff AIDL c2 InputSurface interface is selected for the system
-bool IsCodec2AidlInputSurfaceSelected();
-
-}  // namespace android
-
-#endif  // CODEC2_HAL_SELECTION_H
+/**
+ * {@hide}
+ */
+@Backing(type="int")
+enum AudioPolicyForceUse {
+    COMMUNICATION = 0,
+    MEDIA = 1,
+    RECORD = 2,
+    DOCK = 3,
+    SYSTEM = 4,
+    HDMI_SYSTEM_AUDIO = 5,
+    ENCODED_SURROUND = 6,
+    VIBRATE_RINGING = 7,
+}

@@ -99,6 +99,7 @@ cc_library_static {
 
     static_libs: [
         "libstagefright_esds",
+        "android.media.extractor.flags-aconfig-cc",
     ],
 
     export_include_dirs: [
@@ -321,6 +322,7 @@ cc_library {
 
     static_libs: [
         "android.media.codec-aconfig-cc",
+        "android.media.extractor.flags-aconfig-cc",
         "com.android.media.flags.editing-aconfig-cc",
         "libstagefright_esds",
         "libstagefright_color_conversion",
