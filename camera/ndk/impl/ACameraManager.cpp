@@ -971,6 +971,7 @@ ACameraManager::openCamera(
         return ACAMERA_ERROR_CAMERA_DISCONNECTED;
     }
     device->setRemoteDevice(deviceRemote);
+    device->setDeviceMetadataQueues();
     if (flags::camera_multi_client() && sharedMode) {
         binder::Status remoteRet = deviceRemote->isPrimaryClient(primaryClient);
         if (!remoteRet.isOk()) {

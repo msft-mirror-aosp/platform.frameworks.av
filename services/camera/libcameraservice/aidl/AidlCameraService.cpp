@@ -177,7 +177,7 @@ ndk::ScopedAStatus AidlCameraService::connectDeviceImpl(
                     kDefaultDeviceId);
     clientAttribution.packageName = "";
     clientAttribution.attributionTag = std::nullopt;
-    binder::Status serviceRet = mCameraService->connectDevice(
+    binder::Status serviceRet = mCameraService->connectDeviceVendor(
             callbacks,
             in_cameraId,
             /* scoreOffset= */ 0,
