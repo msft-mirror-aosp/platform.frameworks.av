@@ -789,10 +789,33 @@ camera_status_t ACameraManager::getCameraCharacteristics(const char *cameraIdStr
 }
 
 camera_status_t
-ACameraManager::openCamera(
+ACameraManager::isCameraDeviceSharingSupported(
         const char* cameraId,
+        /*out*/bool* isSharingSupported) {
+    sp<ACameraMetadata> spChars;
+    camera_status_t ret = getCameraCharacteristics(cameraId, &spChars);
+    if (ret != ACAMERA_OK) {
+        ALOGE("%s: cannot get camera characteristics for camera %s. err %d",
+                __FUNCTION__, cameraId, ret);
+        return ret;
+    }
+
+    ACameraMetadata* chars = spChars.get();
+    ACameraMetadata_const_entry entry;
+    ret = ACameraMetadata_getConstEntry(chars, ANDROID_SHARED_SESSION_OUTPUT_CONFIGURATIONS,
+            &entry);
+    if (ret != ACAMERA_OK) {
+        return ret;
+    }
+    *isSharingSupported =  (entry.count > 0) ? true : false;
+    return ACAMERA_OK;
+}
+
+camera_status_t
+ACameraManager::openCamera(
+        const char* cameraId, bool sharedMode,
         ACameraDevice_StateCallbacks* callback,
-        /*out*/ACameraDevice** outDevice) {
+        /*out*/ACameraDevice** outDevice, /*out*/bool* isPrimaryClient) {
     sp<ACameraMetadata> rawChars;
     camera_status_t ret = getCameraCharacteristics(cameraId, &rawChars);
     Mutex::Autolock _l(mLock);
@@ -802,7 +825,7 @@ ACameraManager::openCamera(
         return ACAMERA_ERROR_INVALID_PARAMETER;
     }
 
-    ACameraDevice* device = new ACameraDevice(cameraId, callback, std::move(rawChars));
+    ACameraDevice* device = new ACameraDevice(cameraId, callback, std::move(rawChars), sharedMode);
 
     std::shared_ptr<ICameraService> cs = CameraManagerGlobal::getInstance()->getCameraService();
     if (cs == nullptr) {
@@ -813,11 +836,18 @@ ACameraManager::openCamera(
 
     std::shared_ptr<BnCameraDeviceCallback> deviceCallback = device->getServiceCallback();
     std::shared_ptr<ICameraDeviceUser> deviceRemote;
+    ScopedAStatus serviceRet;
 
     // No way to get package name from native.
     // Send a zero length package name and let camera service figure it out from UID
-    ScopedAStatus serviceRet = cs->connectDevice(deviceCallback,
-                                                 std::string(cameraId), &deviceRemote);
+    if (sharedMode) {
+        serviceRet = cs->connectDeviceV2(deviceCallback,
+                std::string(cameraId), sharedMode, &deviceRemote);
+    } else {
+        serviceRet = cs->connectDevice(deviceCallback,
+                std::string(cameraId), &deviceRemote);
+    }
+
     if (!serviceRet.isOk()) {
         if (serviceRet.getExceptionCode() == EX_SERVICE_SPECIFIC) {
             Status errStatus = static_cast<Status>(serviceRet.getServiceSpecificError());
@@ -840,6 +870,13 @@ ACameraManager::openCamera(
     }
 
     device->setRemoteDevice(deviceRemote);
+    if (sharedMode) {
+        ScopedAStatus remoteRet = deviceRemote->isPrimaryClient(isPrimaryClient);
+        if (!remoteRet.isOk()) {
+            return ACAMERA_ERROR_UNKNOWN;
+        }
+        device->setPrimaryClient(*isPrimaryClient);
+    }
     device->setDeviceMetadataQueues();
     *outDevice = device;
     return ACAMERA_OK;

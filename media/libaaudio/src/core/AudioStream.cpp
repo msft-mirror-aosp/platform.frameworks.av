@@ -79,7 +79,7 @@ aaudio_result_t AudioStream::open(const AudioStreamBuilder& builder)
     mSamplesPerFrame = builder.getSamplesPerFrame();
     mChannelMask = builder.getChannelMask();
     mSampleRate = builder.getSampleRate();
-    mDeviceId = builder.getDeviceId();
+    mDeviceIds = builder.getDeviceIds();
     mFormat = builder.getFormat();
     mSharingMode = builder.getSharingMode();
     mSharingModeMatchRequired = builder.isSharingModeMatchRequired();
@@ -116,6 +116,8 @@ aaudio_result_t AudioStream::open(const AudioStreamBuilder& builder)
     mErrorCallbackProc = builder.getErrorCallbackProc();
     mDataCallbackUserData = builder.getDataCallbackUserData();
     mErrorCallbackUserData = builder.getErrorCallbackUserData();
+    setPresentationEndCallbackUserData(builder.getPresentationEndCallbackUserData());
+    setPresentationEndCallbackProc(builder.getPresentationEndCallbackProc());
 
     return AAUDIO_OK;
 }
@@ -204,7 +206,7 @@ aaudio_result_t AudioStream::systemStart() {
     aaudio_result_t result = requestStart_l();
     if (result == AAUDIO_OK) {
         // We only call this for logging in "dumpsys audio". So ignore return code.
-        (void) mPlayerBase->startWithStatus(getDeviceId());
+        (void) mPlayerBase->startWithStatus(getDeviceIds());
     }
     return result;
 }
@@ -285,6 +287,10 @@ aaudio_result_t AudioStream::safeFlush() {
 
 aaudio_result_t AudioStream::systemStopInternal() {
     std::lock_guard<std::mutex> lock(mStreamLock);
+    return systemStopInternal_l();
+}
+
+aaudio_result_t AudioStream::systemStopInternal_l() {
     aaudio_result_t result = safeStop_l();
     if (result == AAUDIO_OK) {
         // We only call this for logging in "dumpsys audio". So ignore return code.

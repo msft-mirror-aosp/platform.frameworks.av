@@ -130,9 +130,9 @@ std::string dumpMixerBehaviors(const MixerBehaviorSet& mixerBehaviors) {
     return ss.str();
 }
 
-std::string toString(const DeviceIdSet& deviceIds) {
+std::string toString(const DeviceIdVector& deviceIds) {
     if (deviceIds.empty()) {
-        return "Empty device ids";
+        return "AUDIO_PORT_HANDLE_NONE";
     }
     std::stringstream ss;
     for (auto it = deviceIds.begin(); it != deviceIds.end(); ++it) {
@@ -144,11 +144,17 @@ std::string toString(const DeviceIdSet& deviceIds) {
     return ss.str();
 }
 
-audio_port_handle_t getFirstDeviceId(const DeviceIdSet& deviceIds) {
+audio_port_handle_t getFirstDeviceId(const DeviceIdVector& deviceIds) {
     if (deviceIds.empty()) {
         return AUDIO_PORT_HANDLE_NONE;
     }
-    return *(deviceIds.begin());
+    return deviceIds[0];
+}
+
+bool areDeviceIdsEqual(const DeviceIdVector& first, const DeviceIdVector& second) {
+    const std::set<audio_port_handle_t> firstSet(first.begin(), first.end());
+    const std::set<audio_port_handle_t> secondSet(second.begin(), second.end());
+    return firstSet == secondSet;
 }
 
 AudioProfileAttributesMultimap createAudioProfilesAttrMap(audio_profile profiles[],

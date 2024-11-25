@@ -44,9 +44,14 @@ namespace android {
 
 namespace camera3 {
 
+// TODO: Remove this once the GFX native dataspace
+// dependencies are available
+enum { HEIC_ULTRAHDR, ADATASPACE_HEIF_ULTRAHDR = 0x1006 };
+
 typedef enum camera_stream_configuration_mode {
     CAMERA_STREAM_CONFIGURATION_NORMAL_MODE = 0,
     CAMERA_STREAM_CONFIGURATION_CONSTRAINED_HIGH_SPEED_MODE = 1,
+    CAMERA_STREAM_CONFIGURATION_SHARED_MODE = 2,
     CAMERA_VENDOR_STREAM_CONFIGURATION_MODE_START = 0x8000
 } camera_stream_configuration_mode_t;
 
@@ -93,6 +98,7 @@ class CameraDeviceBase : public virtual FrameProducer {
     virtual status_t initialize(sp<CameraProviderManager> manager,
             const std::string& monitorTags) = 0;
     virtual status_t disconnect() = 0;
+    virtual status_t disconnectClient(int) {return OK;};
 
     virtual status_t dump(int fd, const Vector<String16> &args) = 0;
     virtual status_t startWatchingTags(const std::string &tags) = 0;
@@ -285,6 +291,33 @@ class CameraDeviceBase : public virtual FrameProducer {
      * reference that stream.
      */
     virtual status_t deleteStream(int id) = 0;
+
+
+    /**
+     * This function is responsible for configuring camera streams at the start of a session.
+     * In shared session mode, where multiple clients may access the camera, camera service
+     * applies a predetermined shared session configuration. If the camera is opened in non-shared
+     * mode, this function is a no-op.
+     */
+    virtual status_t beginConfigure() = 0;
+
+    /**
+     * In shared session mode, this function retrieves the stream ID associated with a specific
+     * output configuration.
+     */
+    virtual status_t getSharedStreamId(const OutputConfiguration &config, int *streamId) = 0;
+
+    /**
+     * In shared session mode, this function add surfaces to an existing shared stream ID.
+     */
+    virtual status_t addSharedSurfaces(int streamId,
+            const std::vector<android::camera3::OutputStreamInfo> &outputInfo,
+            const std::vector<SurfaceHolder>& surfaces, std::vector<int> *surfaceIds = nullptr) = 0;
+
+    /**
+     * In shared session mode, this function remove surfaces from an existing shared stream ID.
+     */
+    virtual status_t removeSharedSurfaces(int streamId, const std::vector<size_t> &surfaceIds) = 0;
 
     /**
      * Take the currently-defined set of streams and configure the HAL to use
