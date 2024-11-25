@@ -57,10 +57,18 @@
  */
 namespace android::mediautils {
 
-enum ServiceOptions {
+enum class ServiceOptions {
     kNone = 0,
     kNonNull = (1 << 0),  // don't return a null interface unless disabled.
                           // partially implemented and experimental.
+};
+
+enum class SkipMode {
+    kNone = 0,       // do not skip the cache (normal behavior for caching services).
+    kImmediate = 1,  // do not cache or find the service, return null to the caller immediately,
+                     // which is the normal behavior for skipping the service cache.
+    kWait = 2,       // do not cache or find the service, but block the caller;
+                     // this is used for cases where a local service override is desired.
 };
 
 // Traits may come through a constexpr static function collection.
@@ -135,7 +143,7 @@ public:
         std::swap(oldTraits, mTraits);
         const bool existing = oldTraits != nullptr;
         mTraits = std::move(traits);
-        mSkip = false;
+        mSkipMode = SkipMode::kNone;
         return existing;
     }
 
@@ -154,7 +162,8 @@ public:
         audio_utils::unique_lock ul(mMutex);
         auto& service = std::get<BaseInterfaceType<Service>>(mService);
 
-        if (mSkip || (service && mValid)) return service;  // early check.
+        // early check.
+        if (mSkipMode == SkipMode::kImmediate || (service && mValid)) return service;
 
         // clamp to avoid numeric overflow.  INT64_MAX / 2 is effectively forever for a device.
         std::chrono::nanoseconds kWaitLimitNs(
@@ -164,39 +173,44 @@ public:
 
         for (bool first = true; true; first = false) {
             // we may have released mMutex, so see if service has been obtained.
-            if (mSkip || (service && mValid))  return service;
+            if (mSkipMode == SkipMode::kImmediate || (service && mValid))  return service;
 
-            const auto traits = getTraits_l<Service>();
+            int options = 0;
+            if (mSkipMode == SkipMode::kNone) {
+                const auto traits = getTraits_l<Service>();
 
-            // first time or not using callback, check the service.
-            if (first || !useCallback) {
-                auto service_new = checkServicePassThrough<Service>(
-                        traits->getServiceName());
-                if (service_new) {
-                    mValid = true;
-                    service = std::move(service_new);
-                    // service is a reference, so we copy to service_fixed as
-                    // we're releasing the mutex.
-                    const auto service_fixed = service;
-                    ul.unlock();
-                    traits->onNewService(interfaceFromBase<Service>(service_fixed));
-                    ul.lock();
-                    setDeathNotifier_l<Service>(service_fixed);
-                    ul.unlock();
-                    mCv.notify_all();
-                    return service_fixed;
+                // first time or not using callback, check the service.
+                if (first || !useCallback) {
+                    auto service_new = checkServicePassThrough<Service>(
+                            traits->getServiceName());
+                    if (service_new) {
+                        mValid = true;
+                        service = std::move(service_new);
+                        // service is a reference, so we copy to service_fixed as
+                        // we're releasing the mutex.
+                        const auto service_fixed = service;
+                        ul.unlock();
+                        traits->onNewService(interfaceFromBase<Service>(service_fixed));
+                        ul.lock();
+                        setDeathNotifier_l<Service>(service_fixed);
+                        ul.unlock();
+                        mCv.notify_all();
+                        return service_fixed;
+                    }
                 }
-            }
-
-            // install service callback if needed.
-            if (useCallback && !mServiceNotificationHandle) {
-                setServiceNotifier_l<Service>();
+                // install service callback if needed.
+                if (useCallback && !mServiceNotificationHandle) {
+                    setServiceNotifier_l<Service>();
+                }
+                options = static_cast<int>(traits->options());
             }
 
             // check time expiration.
             const auto now = std::chrono::steady_clock::now();
-            if (now >= end
-                && (service || !(traits->options() & ServiceOptions::kNonNull))) {
+            if (now >= end &&
+                    (service
+                    || mSkipMode != SkipMode::kNone  // skip is set.
+                    || !(options & static_cast<int>(ServiceOptions::kNonNull)))) { // null allowed
                 return service;
             }
 
@@ -241,11 +255,16 @@ public:
      *
      * All notifiers removed.
      * Service pointer is released.
+     *
+     * If skipMode is kNone,      then cache management is immediately reenabled.
+     * If skipMode is kImmediate, then any new waiters will return null immediately.
+     * If skipMode is kWait,      then any new waiters will be blocked until an update occurs
+     *                            or the timeout expires.
      */
     template<typename Service>
-    void skip() {
+    void skip(SkipMode skipMode) {
         audio_utils::unique_lock ul(mMutex);
-        mSkip = true;
+        mSkipMode = skipMode;
         // remove notifiers.  OK to hold lock as presuming notifications one-way
         // or manually triggered outside of lock.
         mDeathNotificationHandle.reset();
@@ -274,7 +293,8 @@ private:
         mDeathNotificationHandle.reset();
         const auto traits = getTraits_l<Service>();
         mValid = false;
-        if (!(traits->options() & ServiceOptions::kNonNull) || mSkip) {
+        if (!(static_cast<int>(traits->options()) & static_cast<int>(ServiceOptions::kNonNull))
+                || mSkipMode != SkipMode::kNone) {
             auto &service = std::get<BaseInterfaceType<Service>>(mService);
             service = nullptr;
         }
@@ -380,8 +400,10 @@ private:
     // mValid is true iff the service is non-null and alive.
     bool mValid GUARDED_BY(mMutex) = false;
 
-    // mSkip indicates that the service is not cached.
-    bool mSkip GUARDED_BY(mMutex) = false;
+    // mSkipMode indicates the service cache state:
+    //
+    // one may either wait (blocked) until the service is reinitialized.
+    SkipMode mSkipMode GUARDED_BY(mMutex) = SkipMode::kNone;
 };
 
 } // details
@@ -474,9 +496,9 @@ void setService(const InterfaceType<Service>& service) {
  * another initService() can be called seamlessly.
  */
 template<typename Service>
-void skipService() {
+void skipService(SkipMode skipMode = SkipMode::kImmediate) {
     const auto serviceHandler = details::ServiceHandler::getInstance(Service::descriptor);
-    serviceHandler->template skip<Service>();
+    serviceHandler->template skip<Service>(skipMode);
 }
 
 } // namespace android::mediautils
