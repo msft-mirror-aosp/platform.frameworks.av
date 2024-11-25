@@ -458,11 +458,11 @@ void sendCaptureResult(
         }
 
         // Note: Physical camera continues to use SCALER_CROP_REGION to reflect
-        // zoom levels.
+        // zoom levels. Model this by treating app-set ZOOM_RATIO as 1x.
         res = states.zoomRatioMappers[cameraId].updateCaptureResult(
                 &physicalMetadata.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>(),
                 /*zoomMethodIsRatio*/false,
-                /*zoomRatioIs1*/false);
+                /*zoomRatioIs1*/true);
         if (res != OK) {
             SET_ERR("Failed to update camera %s's physical zoom ratio metadata for "
                     "frame %d: %s(%d)", cameraId.c_str(), frameNumber, strerror(-res), res);
