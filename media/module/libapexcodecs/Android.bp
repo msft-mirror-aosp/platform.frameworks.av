@@ -40,15 +40,6 @@ cc_defaults {
 
 }
 
-cc_library_headers {
-    name: "libapexcodecs-header",
-    visibility: [
-        "//frameworks/av/apex:__subpackages__",
-        "//frameworks/av/media/codec2/hal/client",
-    ],
-    export_include_dirs: ["include"],
-}
-
 cc_library {
     name: "libapexcodecs-testing",
     defaults: ["libapexcodecs-defaults"],
