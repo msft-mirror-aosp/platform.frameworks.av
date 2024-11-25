@@ -8515,9 +8515,11 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
     }
 
     float volumeDb = computeVolume(curves, volumeSource, index, deviceTypes);
+    const VolumeSource dtmfVolSrc = toVolumeSource(AUDIO_STREAM_DTMF, false);
     if (outputDesc->isFixedVolume(deviceTypes) ||
             // Force VoIP volume to max for bluetooth SCO/BLE device except if muted
-            (index != 0 && (isVoiceVolSrc || isBtScoVolSrc) &&
+            (index != 0 && (isVoiceVolSrc || isBtScoVolSrc
+                        || (isInCall() && (dtmfVolSrc == volumeSource))) &&
                     (isSingleDeviceType(deviceTypes, audio_is_bluetooth_out_sco_device)
                     || isSingleDeviceType(deviceTypes, audio_is_ble_out_device)))) {
         volumeDb = 0.0f;
