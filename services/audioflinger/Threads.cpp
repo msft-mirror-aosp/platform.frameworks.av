@@ -8530,7 +8530,6 @@ reacquire_wakelock:
                     }
                     if (invalidate) {
                         activeTrack->invalidate();
-                        ALOG_ASSERT(fastTrackToRemove == 0);
                         fastTrackToRemove = activeTrack;
                         removeTrack_l(activeTrack);
                         mActiveTracks.remove(activeTrack);
