@@ -33,6 +33,7 @@
 #include <audio_utils/mutex.h>
 #include <audio_utils/FdToString.h>
 #include <audio_utils/SimpleLog.h>
+#include <com/android/media/permission/PermissionEnum.h>
 #include <media/IAudioFlinger.h>
 #include <media/IAudioPolicyServiceLocal.h>
 #include <media/MediaMetricsItem.h>
@@ -49,6 +50,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <variant>
 
 namespace android {
 
@@ -474,6 +476,9 @@ private:
 
     AudioHwDevice*          findSuitableHwDev_l(audio_module_handle_t module,
             audio_devices_t deviceType) REQUIRES(mutex());
+
+    error::BinderResult<std::monostate> enforceCallingPermission(
+                    com::android::media::permission::PermissionEnum perm);
 
     // incremented by 2 when screen state changes, bit 0 == 1 means "off"
     // AudioFlinger::setParameters() updates with mutex().

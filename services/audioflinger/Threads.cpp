@@ -124,6 +124,8 @@ static inline T min(const T& a, const T& b)
     return a < b ? a : b;
 }
 
+using com::android::media::audio::audioserver_permissions;
+using com::android::media::permission::PermissionEnum::CAPTURE_AUDIO_HOTWORD;
 using com::android::media::permission::ValidatedAttributionSourceState;
 namespace audioserver_flags = com::android::media::audioserver;
 
@@ -9126,9 +9128,22 @@ sp<IAfRecordTrack> RecordThread::createRecordTrack_l(
     }
 
     if (maxSharedAudioHistoryMs != 0) {
-        if (!captureHotwordAllowed(attributionSource)) {
-            lStatus = PERMISSION_DENIED;
-            goto Exit;
+        if (audioserver_permissions()) {
+            const auto res = mAfThreadCallback->getPermissionProvider().checkPermission(
+                    CAPTURE_AUDIO_HOTWORD,
+                    attributionSource.uid);
+            if (!res.ok()) {
+                lStatus = aidl_utils::statusTFromBinderStatus(res.error());
+            }
+            if (!res.value()) {
+                lStatus = PERMISSION_DENIED;
+                goto Exit;
+            }
+        } else {
+            if (!captureHotwordAllowed(attributionSource)) {
+                lStatus = PERMISSION_DENIED;
+                goto Exit;
+            }
         }
         if (maxSharedAudioHistoryMs < 0
                 || maxSharedAudioHistoryMs > kMaxSharedAudioHistoryMs) {
@@ -9249,7 +9264,11 @@ sp<IAfRecordTrack> RecordThread::createRecordTrack_l(
         if (!mSharedAudioPackageName.empty()
                 && mSharedAudioPackageName == attributionSource.packageName
                 && mSharedAudioSessionId == sessionId
-                && captureHotwordAllowed(attributionSource)) {
+                && (audioserver_permissions() ?
+                      mAfThreadCallback->getPermissionProvider().checkPermission(
+                          CAPTURE_AUDIO_HOTWORD,
+                          attributionSource.uid).value_or(false)
+                    : captureHotwordAllowed(attributionSource))) {
             startFrames = mSharedAudioStartFrames;
         }
 

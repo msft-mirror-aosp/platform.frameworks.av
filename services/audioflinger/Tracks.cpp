@@ -30,7 +30,9 @@
 
 #include <audio_utils/StringUtils.h>
 #include <audio_utils/minifloat.h>
+#include <com_android_media_audio.h>
 #include <media/AudioValidator.h>
+#include <media/IPermissionProvider.h>
 #include <media/RecordBufferConverter.h>
 #include <media/nbaio/Pipe.h>
 #include <media/nbaio/PipeReader.h>
@@ -71,8 +73,11 @@ namespace android {
 
 using ::android::aidl_utils::binderStatusFromStatusT;
 using binder::Status;
+using com::android::media::audio::audioserver_permissions;
+using com::android::media::permission::PermissionEnum::CAPTURE_AUDIO_HOTWORD;
 using content::AttributionSourceState;
 using media::VolumeShaper;
+
 // ----------------------------------------------------------------------------
 //      TrackBase
 // ----------------------------------------------------------------------------
@@ -3286,11 +3291,23 @@ status_t RecordTrack::shareAudioHistory(
     attributionSource.uid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(callingUid));
     attributionSource.pid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(callingPid));
     attributionSource.token = sp<BBinder>::make();
-    if (!captureHotwordAllowed(attributionSource)) {
-        return PERMISSION_DENIED;
+    const sp<IAfThreadBase> thread = mThread.promote();
+    if (audioserver_permissions()) {
+        const auto res = thread->afThreadCallback()->getPermissionProvider().checkPermission(
+                    CAPTURE_AUDIO_HOTWORD,
+                    attributionSource.uid);
+            if (!res.ok()) {
+                return aidl_utils::statusTFromBinderStatus(res.error());
+            }
+            if (!res.value()) {
+                return PERMISSION_DENIED;
+            }
+    } else {
+        if (!captureHotwordAllowed(attributionSource)) {
+            return PERMISSION_DENIED;
+        }
     }
 
-    const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
         auto* const recordThread = thread->asIAfRecordThread().get();
         status_t status = recordThread->shareAudioHistory(
