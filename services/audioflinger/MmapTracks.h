@@ -78,6 +78,7 @@ public:
     float getPortVolume() const override { return mVolume; }
     bool getPortMute() const override { return mMutedFromPort; }
 
+    std::string trackFlagsAsString() const final { return {}; }
 private:
     DISALLOW_COPY_AND_ASSIGN(MmapTrack);
 

@@ -34,6 +34,7 @@
 
 using namespace android;
 using namespace android::hardware::camera;
+using android::hardware::camera2::CameraMetadataInfo;
 
 // Empty service listener.
 class TestCameraServiceListener : public hardware::BnCameraServiceListener {
@@ -107,7 +108,7 @@ public:
         return binder::Status::ok();
     }
 
-    virtual binder::Status onResultReceived(const CameraMetadata& /*metadata*/,
+    virtual binder::Status onResultReceived(const CameraMetadataInfo& /*metadata*/,
             const CaptureResultExtras& /*resultExtras*/,
             const std::vector<PhysicalCaptureResultInfo>& /*physicalResultInfos*/) {
         return binder::Status::ok();
