@@ -29,6 +29,7 @@ namespace conversion {
 
 using hardware::graphics::bufferqueue::V1_0::utils::H2BGraphicBufferProducer;
 using aimg::AImageReader_getHGBPFromHandle;
+using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
 
 // Note: existing data in dst will be gone. Caller still owns the memory of src
 void convertToHidl(const camera_metadata_t *src, HCameraMetadata* dst) {
@@ -281,7 +282,8 @@ HPhysicalCaptureResultInfo convertToHidl(
     hPhysicalCaptureResultInfo.physicalCameraId =
         toString8(physicalCaptureResultInfo.mPhysicalCameraId);
     const camera_metadata_t *rawMetadata =
-        physicalCaptureResultInfo.mPhysicalCameraMetadata.getAndLock();
+        physicalCaptureResultInfo.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().
+                getAndLock();
     // Try using fmq at first.
     size_t metadata_size = get_camera_metadata_size(rawMetadata);
     if ((metadata_size > 0) && (captureResultMetadataQueue->availableToWrite() > 0)) {
@@ -294,7 +296,8 @@ HPhysicalCaptureResultInfo convertToHidl(
             hPhysicalCaptureResultInfo.physicalCameraMetadata.metadata(std::move(metadata));
         }
     }
-    physicalCaptureResultInfo.mPhysicalCameraMetadata.unlock(rawMetadata);
+    physicalCaptureResultInfo.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().
+            unlock(rawMetadata);
     return hPhysicalCaptureResultInfo;
 }
 

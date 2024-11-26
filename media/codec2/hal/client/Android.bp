@@ -42,7 +42,6 @@ cc_library {
 
     header_libs: [
         "libcodec2_internal", // private
-        "libapexcodecs-header",
     ],
 
     shared_libs: [
@@ -80,10 +79,6 @@ cc_library {
         "include",
     ],
 
-    export_header_lib_headers: [
-        "libapexcodecs-header",
-    ],
-
     export_shared_lib_headers: [
         "android.hardware.media.c2@1.0",
         "android.hardware.media.c2@1.1",
@@ -94,4 +89,5 @@ cc_library {
         "libcodec2_hidl_client@1.2",
         "libcodec2_vndk",
     ],
+
 }

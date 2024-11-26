@@ -54,6 +54,7 @@ using namespace std;
 
 using ICameraService::ROTATION_OVERRIDE_NONE;
 using ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT;
+using android::hardware::camera2::CameraMetadataInfo;
 
 const int32_t kPreviewThreshold = 8;
 const int32_t kNumRequestsTested = 8;
@@ -778,7 +779,7 @@ public:
         return binder::Status::ok();
     }
 
-    virtual binder::Status onResultReceived(const CameraMetadata& /*metadata*/,
+    virtual binder::Status onResultReceived(const CameraMetadataInfo& /*metadata*/,
             const CaptureResultExtras& /*resultExtras*/,
             const std::vector<PhysicalCaptureResultInfo>& /*physicalResultInfos*/) {
         return binder::Status::ok();
