@@ -63,6 +63,7 @@ using android::hardware::camera::common::V1_0::Status;
 using namespace camera3::SessionConfigurationUtils;
 using std::literals::chrono_literals::operator""s;
 using hardware::camera2::utils::CameraIdAndSessionConfiguration;
+using hardware::camera2::params::OutputConfiguration;
 
 namespace flags = com::android::internal::camera::flags;
 namespace vd_flags = android::companion::virtualdevice::flags;
@@ -1311,11 +1312,15 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveHeicUltraHDRTag
         int32_t height = std::get<1>(it);
         int32_t gainmapWidth = std::get<0>(it) / HeicCompositeStream::kGainmapScale;
         int32_t gainmapHeight = std::get<1>(it) / HeicCompositeStream::kGainmapScale;
-        if (camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(width, height,
-                &useHeic, &useGrid, &stall, nullptr /*hevcName*/, kFrameworkHeicAllowSWCodecs) &&
-               camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(gainmapWidth,
-                   gainmapHeight, &useHeic, &useGrid, &stall, nullptr /*hevcName*/,
-                   kFrameworkHeicAllowSWCodecs) ) {
+        // Support gainmap sizes that are sufficiently aligned so CPU specific copy
+        // optimizations can be utilized without side effects.
+        if (((gainmapWidth % 64) == 0) && ((gainmapHeight % 2) == 0) &&
+                camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(width, height,
+                    &useHeic, &useGrid, &stall, nullptr /*hevcName*/,
+                    kFrameworkHeicAllowSWCodecs) &&
+                camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(gainmapWidth,
+                    gainmapHeight, &useHeic, &useGrid, &stall, nullptr /*hevcName*/,
+                    kFrameworkHeicAllowSWCodecs)) {
             int32_t entry[4] = {HAL_PIXEL_FORMAT_BLOB, static_cast<int32_t> (std::get<0>(it)),
                     static_cast<int32_t> (std::get<1>(it)),
                     ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_OUTPUT };
@@ -1894,6 +1899,36 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addAutoframingTags() 
     return res;
 }
 
+status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addAePriorityModeTags() {
+    status_t res = OK;
+    auto& c = mCameraCharacteristics;
+
+    auto entry = c.find(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+    if (entry.count != 0) {
+        return res;
+    }
+
+    std::vector<int32_t> supportedChTags;
+    auto chTags = c.find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
+    if (chTags.count == 0) {
+        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
+        return BAD_VALUE;
+    }
+
+    std::vector<uint8_t> aePriorityAvailableModes = {
+            ANDROID_CONTROL_AE_PRIORITY_MODE_OFF };
+    supportedChTags.reserve(chTags.count + 1);
+    supportedChTags.insert(supportedChTags.end(), chTags.data.i32,
+            chTags.data.i32 + chTags.count);
+    supportedChTags.push_back(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+    c.update(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES,
+            aePriorityAvailableModes.data(), aePriorityAvailableModes.size());
+    c.update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
+             supportedChTags.size());
+
+    return res;
+}
+
 status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addPreCorrectionActiveArraySize() {
     status_t res = OK;
     auto& c = mCameraCharacteristics;
@@ -2024,15 +2059,95 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQuery
 
     int versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_UPSIDE_DOWN_CAKE;
     IPCTransport ipcTransport = parentProvider->getIPCTransport();
-    int deviceVersion = HARDWARE_DEVICE_API_VERSION(mVersion.get_major(), mVersion.get_minor());
-    if (ipcTransport == IPCTransport::AIDL
-            && deviceVersion >= CAMERA_DEVICE_API_VERSION_1_3) {
-        versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
+    auto& c = mCameraCharacteristics;
+    status_t res = OK;
+    if (ipcTransport != IPCTransport::AIDL) {
+        res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
+        mSessionConfigQueryVersion = versionCode;
+        return res;
     }
 
-    auto& c = mCameraCharacteristics;
-    status_t res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
+    int deviceVersion = HARDWARE_DEVICE_API_VERSION(mVersion.get_major(), mVersion.get_minor());
+    if (deviceVersion == CAMERA_DEVICE_API_VERSION_1_3) {
+        versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
+    } else if (deviceVersion >= CAMERA_DEVICE_API_VERSION_1_4) {
+        if (flags::feature_combination_baklava()) {
+            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_BAKLAVA;
+        } else {
+            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
+        }
+    }
+    res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
     mSessionConfigQueryVersion = versionCode;
+    return res;
+}
+
+bool CameraProviderManager::ProviderInfo::DeviceInfo3::isAutomotiveDevice() {
+    // Checks the property ro.hardware.type and returns true if it is
+    // automotive.
+    char value[PROPERTY_VALUE_MAX] = {0};
+    property_get("ro.hardware.type", value, "");
+    return strncmp(value, "automotive", PROPERTY_VALUE_MAX) == 0;
+}
+
+status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfigurationTags() {
+    status_t res = OK;
+    if (flags::camera_multi_client()) {
+        const int32_t sharedColorSpaceTag = ANDROID_SHARED_SESSION_COLOR_SPACE;
+        const int32_t sharedOutputConfigurationsTag = ANDROID_SHARED_SESSION_OUTPUT_CONFIGURATIONS;
+        auto& c = mCameraCharacteristics;
+        uint8_t colorSpace = 0;
+
+        res = c.update(sharedColorSpaceTag, &colorSpace, 1);
+
+        // ToDo: b/372321187 Hardcoding the shared session configuration. Update the code to
+        // take these values from XML instead.
+        std::vector<int64_t> sharedOutputConfigEntries;
+        int64_t surfaceType1 =  OutputConfiguration::SURFACE_TYPE_IMAGE_READER;
+        int64_t width = 1280;
+        int64_t height = 800;
+        int64_t format1 = HAL_PIXEL_FORMAT_RGBA_8888;
+        int64_t mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO;
+        int64_t timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT;
+        int64_t usage1 = 3;
+        int64_t dataspace = 0;
+        int64_t useReadoutTimestamp = 0;
+        int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
+        int64_t physicalCamIdLen = 0;
+
+        // Stream 1 configuration hardcoded
+        sharedOutputConfigEntries.push_back(surfaceType1);
+        sharedOutputConfigEntries.push_back(width);
+        sharedOutputConfigEntries.push_back(height);
+        sharedOutputConfigEntries.push_back(format1);
+        sharedOutputConfigEntries.push_back(mirrorMode);
+        sharedOutputConfigEntries.push_back(useReadoutTimestamp);
+        sharedOutputConfigEntries.push_back(timestampBase);
+        sharedOutputConfigEntries.push_back(dataspace);
+        sharedOutputConfigEntries.push_back(usage1);
+        sharedOutputConfigEntries.push_back(streamUseCase);
+        sharedOutputConfigEntries.push_back(physicalCamIdLen);
+
+        // Stream 2 configuration hardcoded
+        int64_t surfaceType2 =  OutputConfiguration::SURFACE_TYPE_SURFACE_VIEW;
+        int64_t format2 = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
+        int64_t usage2 = 0;
+
+        sharedOutputConfigEntries.push_back(surfaceType2);
+        sharedOutputConfigEntries.push_back(width);
+        sharedOutputConfigEntries.push_back(height);
+        sharedOutputConfigEntries.push_back(format2);
+        sharedOutputConfigEntries.push_back(mirrorMode);
+        sharedOutputConfigEntries.push_back(useReadoutTimestamp);
+        sharedOutputConfigEntries.push_back(timestampBase);
+        sharedOutputConfigEntries.push_back(dataspace);
+        sharedOutputConfigEntries.push_back(usage2);
+        sharedOutputConfigEntries.push_back(streamUseCase);
+        sharedOutputConfigEntries.push_back(physicalCamIdLen);
+
+        res = c.update(sharedOutputConfigurationsTag, sharedOutputConfigEntries.data(),
+                sharedOutputConfigEntries.size());
+    }
     return res;
 }
 

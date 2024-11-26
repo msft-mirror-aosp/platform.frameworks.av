@@ -17,3 +17,8 @@ tonihei@google.com
 
 # MediaRouter and native mirroring only:
 aquilescanta@google.com
+
+# Emergency rollbacks and fixes outside LON timezone
+jmtrivi@google.com # US-MTV
+lajos@google.com # US-MTV
+scottnien@google.com # TW-NTC

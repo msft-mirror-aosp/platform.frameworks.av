@@ -1836,6 +1836,9 @@ status_t CCodecBufferChannel::start(
                     channelCount.value,
                     pcmEncoding ? pcmEncoding.value : C2Config::PCM_16);
         }
+        if (!buffersBoundToCodec) {
+            inputFormat->setInt32(KEY_NUM_SLOTS, numInputSlots);
+        }
         bool conforming = (apiFeatures & API_SAME_INPUT_BUFFER);
         // For encrypted content, framework decrypts source buffer (ashmem) into
         // C2Buffers. Thus non-conforming codecs can process these.
@@ -2356,9 +2359,11 @@ void CCodecBufferChannel::flush(const std::list<std::unique_ptr<C2Work>> &flushe
 }
 
 void CCodecBufferChannel::onWorkDone(
-        std::unique_ptr<C2Work> work, const sp<AMessage> &outputFormat,
+        std::unique_ptr<C2Work> work,
+        const sp<AMessage> &inputFormat,
+        const sp<AMessage> &outputFormat,
         const C2StreamInitDataInfo::output *initData) {
-    if (handleWork(std::move(work), outputFormat, initData)) {
+    if (handleWork(std::move(work), inputFormat, outputFormat, initData)) {
         feedInputBufferIfAvailable();
     }
 }
@@ -2388,6 +2393,7 @@ void CCodecBufferChannel::onInputBufferDone(
 
 bool CCodecBufferChannel::handleWork(
         std::unique_ptr<C2Work> work,
+        const sp<AMessage> &inputFormat,
         const sp<AMessage> &outputFormat,
         const C2StreamInitDataInfo::output *initData) {
     {
@@ -2560,6 +2566,9 @@ bool CCodecBufferChannel::handleWork(
                   mName, input->numExtraSlots);
         } else {
             input->numSlots = newNumSlots;
+        }
+        if (inputFormat->contains(KEY_NUM_SLOTS)) {
+            inputFormat->setInt32(KEY_NUM_SLOTS, input->numSlots);
         }
     }
     size_t numOutputSlots = 0;

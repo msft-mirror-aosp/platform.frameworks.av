@@ -174,6 +174,11 @@ aaudio_result_t AudioStreamBuilder::build(AudioStream** streamPtr) {
               __func__);
         allowMMap = false;
     }
+    if (!audio_is_linear_pcm(getFormat())) {
+        ALOGD("%s() MMAP not used because the requested format(%#x) is not pcm",
+              __func__, getFormat());
+        allowMMap = false;
+    }
 
     // SessionID and Effects are only supported in Legacy mode.
     if (getSessionId() != AAUDIO_SESSION_ID_NONE) {
@@ -261,6 +266,14 @@ aaudio_result_t AudioStreamBuilder::validate() const {
         case AAUDIO_PERFORMANCE_MODE_POWER_SAVING:
         case AAUDIO_PERFORMANCE_MODE_LOW_LATENCY:
             break;
+        case AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED:
+            if (getDirection() != AAUDIO_DIRECTION_OUTPUT ||
+                getFormat() == AUDIO_FORMAT_DEFAULT ||
+                getSampleRate() == 0 ||
+                getChannelMask() == AAUDIO_UNSPECIFIED) {
+                return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
+            }
+            break;
         default:
             ALOGE("illegal performanceMode = %d", mPerformanceMode);
             return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
@@ -307,8 +320,8 @@ void AudioStreamBuilder::logParameters() const {
           getSampleRate(), getSamplesPerFrame(), getChannelMask(), getFormat(),
           AAudio_convertSharingModeToShortText(getSharingMode()),
           AAudio_convertDirectionToText(getDirection()));
-    ALOGI("device = %6d, sessionId = %d, perfMode = %d, callback: %s with frames = %d",
-          getDeviceId(),
+    ALOGI("devices = %s, sessionId = %d, perfMode = %d, callback: %s with frames = %d",
+          android::toString(getDeviceIds()).c_str(),
           getSessionId(),
           getPerformanceMode(),
           ((getDataCallbackProc() != nullptr) ? "ON" : "OFF"),

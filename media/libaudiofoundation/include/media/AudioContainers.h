@@ -33,8 +33,8 @@ using DeviceTypeSet = std::set<audio_devices_t>;
 using FormatSet = std::set<audio_format_t>;
 using SampleRateSet = std::set<uint32_t>;
 using MixerBehaviorSet = std::set<audio_mixer_behavior_t>;
-using DeviceIdSet = std::set<audio_port_handle_t>;
 
+using DeviceIdVector = std::vector<audio_port_handle_t>;
 using FormatVector = std::vector<audio_format_t>;
 using AudioProfileAttributesMultimap =
         std::multimap<audio_format_t, std::pair<SampleRateSet, ChannelMaskSet>>;
@@ -140,14 +140,19 @@ inline std::string toString(const DeviceTypeSet& deviceTypes) {
 }
 
 /**
- * Returns human readable string for a set of device ids.
+ * Returns human readable string for a vector of device ids.
  */
-std::string toString(const DeviceIdSet& deviceIds);
+std::string toString(const DeviceIdVector& deviceIds);
 
 /**
- * Returns the first device id of a set of device ids or AUDIO_PORT_HANDLE_NONE when its empty.
+ * Returns the first device id of a vector of device ids or AUDIO_PORT_HANDLE_NONE when its empty.
  */
-audio_port_handle_t getFirstDeviceId(const DeviceIdSet& deviceIds);
+audio_port_handle_t getFirstDeviceId(const DeviceIdVector& deviceIds);
+
+/**
+ * Returns whether two vectors of device ids have the same elements.
+ */
+bool areDeviceIdsEqual(const DeviceIdVector& first, const DeviceIdVector& second);
 
 /**
  * Create audio profile attributes map by given audio profile array from the range of [first, last).
