@@ -263,3 +263,13 @@ flag {
         purpose: PURPOSE_BUGFIX
     }
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "fmq_metadata"
+    description: "Allow CameraMetadata transfer for ndk / sdk clients."
+    bug: "362791857"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}

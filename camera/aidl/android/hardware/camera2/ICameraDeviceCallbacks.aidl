@@ -16,6 +16,7 @@
 
 package android.hardware.camera2;
 
+import android.hardware.camera2.CameraMetadataInfo;
 import android.hardware.camera2.impl.CameraMetadataNative;
 import android.hardware.camera2.impl.CaptureResultExtras;
 import android.hardware.camera2.impl.PhysicalCaptureResultInfo;
@@ -36,7 +37,7 @@ interface ICameraDeviceCallbacks
     oneway void onDeviceError(int errorCode, in CaptureResultExtras resultExtras);
     oneway void onDeviceIdle();
     oneway void onCaptureStarted(in CaptureResultExtras resultExtras, long timestamp);
-    oneway void onResultReceived(in CameraMetadataNative result,
+    oneway void onResultReceived(in CameraMetadataInfo resultInfo,
                                  in CaptureResultExtras resultExtras,
                                  in PhysicalCaptureResultInfo[] physicalCaptureResultInfos);
     oneway void onPrepared(int streamId);

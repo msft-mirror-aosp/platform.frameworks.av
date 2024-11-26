@@ -258,7 +258,9 @@ TEST(service_singleton_tests, one_and_only) {
 
         // we can also request our own death notifications (outside of the service traits).
         handle3 = mediautils::requestDeathNotification(service, [&] { ++listenerServiceDied; });
+        EXPECT_TRUE(handle3);
         handle4 = mediautils::requestDeathNotification(service2, [&] { ++listenerServiceDied; });
+        EXPECT_TRUE(handle4);
     }
 
     EXPECT_EQ(4, sNewService);
@@ -352,6 +354,13 @@ TEST(service_singleton_tests, one_and_only) {
 
     EXPECT_EQ(6, listenerServiceCreated);  // listener associated with service name picks up info.
 
+    // get service pointers that will be made stale later.
+    auto stale_service = mediautils::getService<IServiceSingletonTest>();
+    EXPECT_TRUE(stale_service);  // not stale yet.
+
+    auto stale_service2 = mediautils::getService<aidl::IServiceSingletonTest>();
+    EXPECT_TRUE(stale_service2);  // not stale yet.
+
     // Release the service.
     remoteWorker->putc('b');
     EXPECT_EQ('b', remoteWorker->getc());
@@ -362,4 +371,15 @@ TEST(service_singleton_tests, one_and_only) {
     EXPECT_EQ(4, sServiceDied);
     EXPECT_EQ(2, sNewService2);   // new counters change
     EXPECT_EQ(2, sServiceDied2);
+
+    // The service handles are now stale, verify that we can't register a death notification.
+    {
+        std::atomic_int32_t postDied = 0;
+        // we cannot register death notification so handles are null.
+        auto handle1 = mediautils::requestDeathNotification(stale_service, [&] { ++postDied; });
+        EXPECT_FALSE(handle1);
+        auto handle2= mediautils::requestDeathNotification(stale_service2, [&] { ++postDied; });
+        EXPECT_FALSE(handle2);
+        EXPECT_EQ(0, postDied);  // no callbacks issued.
+    }
 }
