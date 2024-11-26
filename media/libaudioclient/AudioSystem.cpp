@@ -146,10 +146,19 @@ public:
         onNewServiceWithAdapter(createServiceAdapter(afs));
     }
 
-    static void onServiceDied(const sp<media::IAudioFlingerService>&) {
-        ALOGW("%s: %s service died", __func__, getServiceName());
+    static void onServiceDied(const sp<media::IAudioFlingerService>& service) {
+        ALOGW("%s: %s service died %p", __func__, getServiceName(), service.get());
         {
             std::lock_guard l(mMutex);
+            if (!mValid) {
+                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
+                return;
+            }
+            if (!mService || mService->getDelegate() != service) {
+                ALOGW("%s: %s unmatched service death pointers, ignoring",
+                        __func__, getServiceName());
+                return;
+            }
             mValid = false;
             if (mClient) {
                 mClient->clearIoCache();
@@ -219,12 +228,18 @@ public:
     static status_t setLocalService(const sp<IAudioFlinger>& af) {
         mediautils::skipService<media::IAudioFlingerService>();
         sp<IAudioFlinger> old;
-        {
-            std::lock_guard l(mMutex);
-            old = mService;
-            mService = af;
+
+        audio_utils::unique_lock ul(mMutex);
+        old = mService;
+        if (old) {
+            ul.unlock();
+            onServiceDied(old->getDelegate());
+            ul.lock();
+            ALOGW_IF(old != mService,
+                    "%s: service changed during callback, continuing.", __func__);
         }
-        if (old) onServiceDied({});
+        mService = af;
+        ul.unlock();
         if (af) onNewServiceWithAdapter(af);
         return OK;
     }
@@ -255,6 +270,8 @@ private:
         bool reportNoError = false;
         {
             std::lock_guard l(mMutex);
+            ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
+                    __func__, getServiceName());
             if (mClient == nullptr) {
                 mClient = sp<AudioSystem::AudioFlingerClient>::make();
             } else {
@@ -985,6 +1002,8 @@ public:
         sp<AudioSystem::AudioPolicyServiceClient> client;
         {
             std::lock_guard l(mMutex);
+            ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
+                    __func__, getServiceName());
             if (mClient == nullptr) {
                 mClient = sp<AudioSystem::AudioPolicyServiceClient>::make();
             }
@@ -1000,11 +1019,20 @@ public:
         IPCThreadState::self()->restoreCallingIdentity(token);
     }
 
-    static void onServiceDied(const sp<IAudioPolicyService>&) {
-        ALOGW("%s: %s service died", __func__, getServiceName());
+    static void onServiceDied(const sp<IAudioPolicyService>& service) {
+        ALOGW("%s: %s service died %p", __func__, getServiceName(), service.get());
         sp<AudioSystem::AudioPolicyServiceClient> client;
         {
             std::lock_guard l(mMutex);
+            if (!mValid) {
+                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
+                return;
+            }
+            if (mService != service) {
+                ALOGW("%s: %s unmatched service death pointers, ignoring",
+                        __func__, getServiceName());
+                return;
+            }
             mValid = false;
             client = mClient;
         }
@@ -1069,12 +1097,19 @@ public:
     static status_t setLocalService(const sp<IAudioPolicyService>& aps) {
         mediautils::skipService<IAudioPolicyService>();
         sp<IAudioPolicyService> old;
-        {
-            std::lock_guard l(mMutex);
-            old = mService;
-            mService = aps;
+        audio_utils::unique_lock ul(mMutex);
+        old = mService;
+        if (old) {
+            ul.unlock();
+            onServiceDied(old);
+            ul.lock();
+            if (mService != old) {
+                ALOGD("%s: service changed during callback, ignoring.", __func__);
+                return OK;
+            }
         }
-        if (old) onServiceDied(old);
+        mService = aps;
+        ul.unlock();
         if (aps) onNewService(aps);
         return OK;
     }
