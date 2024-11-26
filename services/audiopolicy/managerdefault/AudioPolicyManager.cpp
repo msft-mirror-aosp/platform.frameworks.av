@@ -1492,7 +1492,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
         for (auto &secondaryMix : secondaryMixes) {
             sp<SwAudioOutputDescriptor> outputDesc = secondaryMix->getOutput();
             if (outputDesc != nullptr &&
-                outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE) {
+                outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE &&
+                outputDesc->mIoHandle != *output) {
                 secondaryOutputs->push_back(outputDesc->mIoHandle);
                 weakSecondaryOutputDescs.push_back(outputDesc);
             }
@@ -7432,7 +7433,8 @@ void AudioPolicyManager::checkSecondaryOutputs() {
             for (auto &secondaryMix : secondaryMixes) {
                 sp<SwAudioOutputDescriptor> outputDesc = secondaryMix->getOutput();
                 if (outputDesc != nullptr &&
-                    outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE) {
+                    outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE &&
+                    outputDesc != outputDescriptor) {
                     secondaryDescs.push_back(outputDesc);
                 }
             }
