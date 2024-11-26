@@ -63,6 +63,7 @@
 using namespace android;
 using ::android::hardware::ICameraService;
 using ::android::hardware::camera2::ICameraDeviceUser;
+using ::android::hardware::camera2::CameraMetadataInfo;
 
 #define ASSERT_NOT_NULL(x) \
     ASSERT_TRUE((x) != nullptr)
@@ -249,10 +250,10 @@ public:
         return binder::Status::ok();
     }
 
-    virtual binder::Status onResultReceived(const CameraMetadata& metadata,
+    virtual binder::Status onResultReceived(const CameraMetadataInfo& resultInfo,
             const CaptureResultExtras& resultExtras,
             const std::vector<PhysicalCaptureResultInfo>& physicalResultInfos) {
-        (void) metadata;
+        (void) resultInfo;
         (void) resultExtras;
         (void) physicalResultInfos;
         Mutex::Autolock l(mLock);

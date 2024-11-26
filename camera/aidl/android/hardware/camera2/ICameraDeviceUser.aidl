@@ -23,6 +23,8 @@ import android.hardware.camera2.impl.CameraMetadataNative;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.utils.SubmitInfo;
+import android.hardware.common.fmq.MQDescriptor;
+import android.hardware.common.fmq.SynchronizedReadWrite;
 import android.view.Surface;
 
 /** @hide */
@@ -173,6 +175,7 @@ interface ICameraDeviceUser
 
     void finalizeOutputConfigurations(int streamId, in OutputConfiguration outputConfiguration);
 
+    MQDescriptor<byte, SynchronizedReadWrite> getCaptureResultMetadataQueue();
 
     // Keep in sync with public API in
     // frameworks/base/core/java/android/hardware/camera2/CameraDevice.java

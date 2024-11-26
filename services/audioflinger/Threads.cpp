@@ -33,6 +33,7 @@
 #include <afutils/Vibrator.h>
 #include <audio_utils/MelProcessor.h>
 #include <audio_utils/Metadata.h>
+#include <audio_utils/Trace.h>
 #include <com_android_media_audioserver.h>
 #ifdef DEBUG_CPU_USAGE
 #include <audio_utils/Statistics.h>
@@ -612,7 +613,7 @@ void CpuStats::sample(const String8 &title
 // ----------------------------------------------------------------------------
 
 // static
-const char* ThreadBase::threadTypeToString(ThreadBase::type_t type)
+const char* IAfThreadBase::threadTypeToString(ThreadBase::type_t type)
 {
     switch (type) {
     case MIXER:
@@ -2184,6 +2185,7 @@ PlaybackThread::PlaybackThread(const sp<IAfThreadCallback>& afThreadCallback,
         mIsTimestampAdvancing(kMinimumTimeBetweenTimestampChecksNs)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioOut_%X", id);
+    mFlagsAsString = toString(output->flags);
     mNBLogWriter = afThreadCallback->newWriter_l(kLogSize, mThreadName);
 
     // Assumes constructor is called by AudioFlinger with its mutex() held, but
@@ -4271,6 +4273,17 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
                 track->updateTeePatches_l();
             }
 
+            // check if traces have been enabled.
+            bool atraceEnabled = ATRACE_ENABLED();
+            if (atraceEnabled != mAtraceEnabled) [[unlikely]] {
+                mAtraceEnabled = atraceEnabled;
+                if (atraceEnabled) {
+                    const auto devices = patchSinksToString(&mPatch);
+                    for (const auto& track : activeTracks) {
+                        track->logRefreshInterval(devices);
+                    }
+                }
+            }
             // signal actual start of output stream when the render position reported by
             // the kernel starts moving.
             if (!mHalStarted && ((isSuspended() && (mBytesWritten != 0)) || (!mStandby
@@ -5261,6 +5274,8 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         fastTrack->mHapticScale = os::HapticScale::none();
         fastTrack->mHapticMaxAmplitude = NAN;
         fastTrack->mGeneration++;
+        snprintf(fastTrack->mTraceName, sizeof(fastTrack->mTraceName),
+                 "%s.0.0.%d", AUDIO_TRACE_PREFIX_AUDIO_TRACK_FRDY, mId);
         state->mFastTracksGen++;
         state->mTrackMask = 1;
         // fast mixer will use the HAL output sink
@@ -5838,6 +5853,9 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                     fastTrack->mHapticScale = track->getHapticScale();
                     fastTrack->mHapticMaxAmplitude = track->getHapticMaxAmplitude();
                     fastTrack->mGeneration++;
+                    snprintf(fastTrack->mTraceName, sizeof(fastTrack->mTraceName),
+                             "%s%s", AUDIO_TRACE_PREFIX_AUDIO_TRACK_FRDY,
+                             track->getTraceSuffix().c_str());
                     state->mTrackMask |= 1 << j;
                     didModify = true;
                     // no acknowledgement required for newly active tracks
@@ -5980,11 +5998,9 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
         }
 
         size_t framesReady = track->framesReady();
-        if (ATRACE_ENABLED()) {
-            // I wish we had formatted trace names
-            std::string traceName("nRdy");
-            traceName += std::to_string(trackId);
-            ATRACE_INT(traceName.c_str(), framesReady);
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INT(std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_NRDY)
+                    .append(track->getTraceSuffix()).c_str(), framesReady);
         }
         if ((framesReady >= minFrames) && track->isReady() &&
                 !track->isPaused() && !track->isTerminated())
@@ -7011,10 +7027,9 @@ PlaybackThread::mixer_state DirectOutputThread::prepareTracks_l(
 
         const size_t framesReady = track->framesReady();
         const int trackId = track->id();
-        if (ATRACE_ENABLED()) {
-            std::string traceName("nRdy");
-            traceName += std::to_string(trackId);
-            ATRACE_INT(traceName.c_str(), framesReady);
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INT(std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_NRDY)
+                    .append(track->getTraceSuffix()).c_str(), framesReady);
         }
         if ((framesReady >= minFrames) && track->isReady() && !track->isPaused() &&
                 !track->isStopping_2() && !track->isStopped())
@@ -7534,6 +7549,11 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
             continue;
         }
 
+        const size_t framesReady = track->framesReady();
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INT(std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_NRDY)
+                    .append(track->getTraceSuffix()).c_str(), framesReady);
+        }
         if (track->isPausePending()) {
             track->pauseAck();
             // It is possible a track might have been flushed or stopped.
@@ -7592,7 +7612,7 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
                 // Do not handle new data in this iteration even if track->framesReady()
                 mixerStatus = MIXER_TRACKS_ENABLED;
             }
-        }  else if (track->framesReady() && track->isReady() &&
+        } else if (framesReady && track->isReady() &&
                 !track->isPaused() && !track->isTerminated() && !track->isStopping_2()) {
             ALOGVV("OffloadThread: track(%d) s=%08x [OK]", track->id(), cblk->mServer);
             if (track->fillingStatus() == IAfTrack::FS_FILLED) {
@@ -8237,6 +8257,7 @@ RecordThread::RecordThread(const sp<IAfThreadCallback>& afThreadCallback,
     , mBtNrecSuspended(false)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioIn_%X", id);
+    mFlagsAsString = toString(input->flags);
     mNBLogWriter = afThreadCallback->newWriter_l(kLogSize, mThreadName);
 
     if (mInput->audioHwDev != nullptr) {
@@ -8574,7 +8595,6 @@ reacquire_wakelock:
                     }
                     if (invalidate) {
                         activeTrack->invalidate();
-                        ALOG_ASSERT(fastTrackToRemove == 0);
                         fastTrackToRemove = activeTrack;
                         removeTrack_l(activeTrack);
                         mActiveTracks.remove(activeTrack);
@@ -8590,6 +8610,18 @@ reacquire_wakelock:
             }
 
             mActiveTracks.updatePowerState_l(this);
+
+            // check if traces have been enabled.
+            bool atraceEnabled = ATRACE_ENABLED();
+            if (atraceEnabled != mAtraceEnabled) [[unlikely]] {
+                mAtraceEnabled = atraceEnabled;
+                if (atraceEnabled) {
+                    const auto devices = patchSourcesToString(&mPatch);
+                    for (const auto& track : activeTracks) {
+                        track->logRefreshInterval(devices);
+                    }
+                }
+            }
 
             updateMetadata_l();
 
@@ -11172,6 +11204,7 @@ MmapPlaybackThread::MmapPlaybackThread(
       mOutput(output)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioMmapOut_%X", id);
+    mFlagsAsString = toString(output->flags);
     mChannelCount = audio_channel_count_from_out_mask(mChannelMask);
     mMasterVolume = afThreadCallback->masterVolume_l();
     mMasterMute = afThreadCallback->masterMute_l();
@@ -11515,6 +11548,7 @@ MmapCaptureThread::MmapCaptureThread(
       mInput(input)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioMmapIn_%X", id);
+    mFlagsAsString = toString(input->flags);
     mChannelCount = audio_channel_count_from_in_mask(mChannelMask);
 }
 

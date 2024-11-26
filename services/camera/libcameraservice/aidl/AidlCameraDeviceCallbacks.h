@@ -46,6 +46,7 @@ using ::android::AidlMessageQueue;
 using ::android::frameworks::cameraservice::utils::DeathPipe;
 using ::android::hardware::camera2::impl::CameraMetadataNative;
 
+using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
 using CaptureResultMetadataQueue = AidlMessageQueue<int8_t, SynchronizedReadWrite>;
 
 class AidlCameraDeviceCallbacks : public UBnCameraDeviceCallbacks {
@@ -65,7 +66,8 @@ class AidlCameraDeviceCallbacks : public UBnCameraDeviceCallbacks {
                                     int64_t timestamp) override;
 
     binder::Status onResultReceived(
-            const CameraMetadataNative& result, const CaptureResultExtras& resultExtras,
+            const CameraMetadataInfo &resultInfo,
+            const CaptureResultExtras& resultExtras,
             const std::vector<PhysicalCaptureResultInfo>& physicalCaptureResultInfos) override;
 
     binder::Status onPrepared(int32_t streamId) override;

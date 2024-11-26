@@ -25,6 +25,8 @@
 #include <unordered_map>
 #include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
 
+#include <fmq/AidlMessageQueueCpp.h>
+
 #include "CameraOfflineSessionClient.h"
 #include "CameraService.h"
 #include "common/FrameProcessorBase.h"
@@ -168,6 +170,11 @@ public:
 
     virtual binder::Status setCameraAudioRestriction(int32_t mode) override;
 
+    virtual binder::Status getCaptureResultMetadataQueue(
+          android::hardware::common::fmq::MQDescriptor<
+          int8_t, android::hardware::common::fmq::SynchronizedReadWrite>*
+          aidl_return) override;
+
     virtual binder::Status getGlobalAudioRestriction(/*out*/int32_t* outMode) override;
 
     virtual binder::Status switchToOffline(
@@ -189,7 +196,8 @@ public:
                        const AttributionSourceState& clientAttribution, int callingPid,
                        bool clientPackageOverride, const std::string& cameraId, int cameraFacing,
                        int sensorOrientation, int servicePid, bool overrideForPerfClass,
-                       int rotationOverride, const std::string& originalCameraId, bool sharedMode);
+                       int rotationOverride, const std::string& originalCameraId, bool sharedMode,
+                       bool isVendorClient);
     virtual ~CameraDeviceClient();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,
@@ -240,6 +248,10 @@ public:
      */
 protected:
     /** FilteredListener implementation **/
+
+    size_t writeResultMetadataIntoResultQueue(const CameraMetadata &result);
+    std::vector<PhysicalCaptureResultInfo> convertToFMQ(
+            const std::vector<PhysicalCaptureResultInfo> &physicalResults);
     virtual void          onResultAvailable(const CaptureResult& result);
     virtual void          detachDevice();
 
@@ -251,6 +263,11 @@ protected:
     const CameraMetadata &getStaticInfo(const std::string &cameraId);
 
 private:
+    using MetadataQueue = AidlMessageQueueCpp<
+            int8_t, android::hardware::common::fmq::SynchronizedReadWrite>;
+    using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+    status_t CreateMetadataQueue(
+            std::unique_ptr<MetadataQueue>* metadata_queue, uint32_t default_size);
     // StreamSurfaceId encapsulates streamId + surfaceId for a particular surface.
     // streamId specifies the index of the stream the surface belongs to, and the
     // surfaceId specifies the index of the surface within the stream. (one stream
@@ -337,6 +354,9 @@ private:
 
     int32_t mRequestIdCounter;
 
+    // Metadata queue to write the result metadata to.
+    std::unique_ptr<MetadataQueue> mResultMetadataQueue;
+
     std::vector<std::string> mPhysicalCameraIds;
 
     // The list of output streams whose surfaces are deferred. We have to track them separately
@@ -376,6 +396,8 @@ private:
 
     // This only exists in case of camera ID Remapping.
     const std::string mOriginalCameraId;
+
+    bool mIsVendorClient = false;
 };
 
 }; // namespace android
