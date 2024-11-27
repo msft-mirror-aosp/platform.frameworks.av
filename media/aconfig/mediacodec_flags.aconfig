@@ -26,5 +26,4 @@ flag {
   namespace: "codec_fwk"
   description: "Feature flags for large audio frame support"
   bug: "297219557"
-  is_exported: true
 }
