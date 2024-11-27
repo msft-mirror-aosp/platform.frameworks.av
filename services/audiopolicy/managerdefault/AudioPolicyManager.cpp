@@ -3546,6 +3546,9 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
                                                             bool enabled,
                                                             audio_stream_type_t streamToDriveAbs)
 {
+    ALOGI("%s: deviceType 0x%X, enabled %d, streamToDriveAbs %d", __func__, deviceType, enabled,
+          streamToDriveAbs);
+
     if (!enabled) {
         mAbsoluteVolumeDrivingStreams.erase(deviceType);
         return NO_ERROR;
@@ -8276,9 +8279,9 @@ float AudioPolicyManager::adjustDeviceAttenuationForAbsVolume(IVolumeCurves &cur
     float volumeDb = curves.volIndexToDb(deviceCategory, index);
 
     if (com_android_media_audio_abs_volume_index_fix()) {
-        if (mAbsoluteVolumeDrivingStreams.find(volumeDevice) !=
-            mAbsoluteVolumeDrivingStreams.end()) {
-            audio_attributes_t attributesToDriveAbs = mAbsoluteVolumeDrivingStreams[volumeDevice];
+        const auto it = mAbsoluteVolumeDrivingStreams.find(volumeDevice);
+        if (it != mAbsoluteVolumeDrivingStreams.end()) {
+            audio_attributes_t attributesToDriveAbs = it->second;
             auto groupToDriveAbs = mEngine->getVolumeGroupForAttributes(attributesToDriveAbs);
             if (groupToDriveAbs == VOLUME_GROUP_NONE) {
                 ALOGD("%s: no group matching with %s", __FUNCTION__,
