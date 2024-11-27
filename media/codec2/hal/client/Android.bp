@@ -23,7 +23,6 @@ cc_library {
     name: "libcodec2_client",
 
     srcs: [
-        "ApexCodecsLazy.cpp",
         "GraphicBufferAllocator.cpp",
         "GraphicsTracker.cpp",
         "client.cpp",
@@ -42,18 +41,17 @@ cc_library {
     cpp_std: "gnu++20",
 
     header_libs: [
-        "libapexcodecs-header",
         "libcodec2_internal", // private
     ],
 
     shared_libs: [
         "android.hardware.graphics.bufferqueue@1.0",
-        "android.hardware.media.bufferpool2-V2-ndk",
         "android.hardware.media.bufferpool@2.0",
-        "android.hardware.media.c2-V1-ndk",
         "android.hardware.media.c2@1.0",
         "android.hardware.media.c2@1.1",
         "android.hardware.media.c2@1.2",
+        "android.hardware.media.bufferpool2-V2-ndk",
+        "android.hardware.media.c2-V1-ndk",
         "libbase",
         "libbinder",
         "libbinder_ndk",
@@ -81,10 +79,6 @@ cc_library {
         "include",
     ],
 
-    export_header_lib_headers: [
-        "libapexcodecs-header",
-    ],
-
     export_shared_lib_headers: [
         "android.hardware.media.c2@1.0",
         "android.hardware.media.c2@1.1",
@@ -95,4 +89,5 @@ cc_library {
         "libcodec2_hidl_client@1.2",
         "libcodec2_vndk",
     ],
+
 }
