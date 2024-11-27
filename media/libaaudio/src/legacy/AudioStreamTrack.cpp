@@ -24,6 +24,7 @@
 #include <aaudio/AAudio.h>
 #include <com_android_media_aaudio.h>
 #include <system/audio.h>
+#include <system/aaudio/AAudio.h>
 
 #include "core/AudioGlobal.h"
 #include "legacy/AudioStreamLegacy.h"
@@ -149,13 +150,14 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
                                                             builder.isContentSpatialized(),
                                                             flags);
 
-    const std::optional<std::string> tags = builder.getTags();
+    const std::string tags = getTagsAsString();
     audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
     attributes.content_type = contentType;
     attributes.usage = usage;
     attributes.flags = attributesFlags;
-    if (tags.has_value() && !tags.value().empty()) {
-        strcpy(attributes.tags, tags.value().c_str());
+    if (!tags.empty()) {
+        strncpy(attributes.tags, tags.c_str(), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
+        attributes.tags[AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1] = '\0';
     }
 
     audio_offload_info_t offloadInfo = AUDIO_INFO_INITIALIZER;
