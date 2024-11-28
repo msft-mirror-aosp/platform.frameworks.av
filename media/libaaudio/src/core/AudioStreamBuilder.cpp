@@ -19,6 +19,7 @@
 #include <utils/Log.h>
 
 #include <new>
+#include <numeric>
 #include <stdint.h>
 #include <vector>
 
@@ -28,6 +29,7 @@
 #include <android/media/audio/common/AudioMMapPolicyInfo.h>
 #include <android/media/audio/common/AudioMMapPolicyType.h>
 #include <media/AudioSystem.h>
+#include <system/aaudio/AAudio.h>
 
 #include "binding/AAudioBinderClient.h"
 #include "client/AudioStreamInternalCapture.h"
@@ -290,6 +292,24 @@ aaudio_result_t AudioStreamBuilder::validate() const {
     }
 
     return AAUDIO_OK;
+}
+
+aaudio_result_t AudioStreamBuilder::addTag(const char* tag) {
+    const std::string tagStr(tag);
+    mTags.insert(tagStr);
+    // The tags will be joined with `;` and ended with null terminator when sending to the HAL.
+    const int tagsLength = std::accumulate(
+            mTags.begin(), mTags.end(), 0, [](int v, const std::string& s) { return v + s.size(); })
+            + mTags.size();
+    if (tagsLength <= AUDIO_ATTRIBUTES_TAGS_MAX_SIZE) {
+        return AAUDIO_OK;
+    }
+    mTags.erase(tagStr);
+    return AAUDIO_ERROR_OUT_OF_RANGE;
+}
+
+void AudioStreamBuilder::clearTags() {
+    mTags.clear();
 }
 
 static const char *AAudio_convertSharingModeToShortText(aaudio_sharing_mode_t sharingMode) {

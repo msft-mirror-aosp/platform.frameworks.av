@@ -33,6 +33,7 @@ namespace android::hardware::cameraservice::utils::conversion::aidl {
 
 using aimg::AImageReader_getHGBPFromHandle;
 using hardware::graphics::bufferqueue::V1_0::utils::H2BGraphicBufferProducer;
+using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
 
 // Note: existing data in dst will be gone. Caller still owns the memory of src
 void cloneToAidl(const camera_metadata_t* src, SCameraMetadata* dst) {
@@ -265,7 +266,8 @@ SPhysicalCaptureResultInfo convertToAidl(const UPhysicalCaptureResultInfo & src,
     SPhysicalCaptureResultInfo dst;
     dst.physicalCameraId = src.mPhysicalCameraId;
 
-    const camera_metadata_t *rawMetadata = src.mPhysicalCameraMetadata.getAndLock();
+    const camera_metadata_t *rawMetadata =
+            src.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().getAndLock();
     // Try using fmq at first.
     size_t metadata_size = get_camera_metadata_size(rawMetadata);
     if ((metadata_size > 0) && (fmq->availableToWrite() > 0)) {
@@ -278,7 +280,7 @@ SPhysicalCaptureResultInfo convertToAidl(const UPhysicalCaptureResultInfo & src,
             dst.physicalCameraMetadata.set<SCaptureMetadataInfo::metadata>(std::move(metadata));
         }
     }
-    src.mPhysicalCameraMetadata.unlock(rawMetadata);
+    src.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().unlock(rawMetadata);
     return dst;
 }
 

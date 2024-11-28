@@ -30,6 +30,8 @@ enum {
 
 };
 
+static const char AUDIO_ATTRIBUTES_TAGS_SEPARATOR = ';';
+
 aaudio_policy_t AudioGlobal_getMMapPolicy();
 aaudio_result_t AudioGlobal_setMMapPolicy(aaudio_policy_t policy);
 

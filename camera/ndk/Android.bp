@@ -79,6 +79,8 @@ cc_library_shared {
     shared_libs: [
         "android.companion.virtual.virtualdevice_aidl-cpp",
         "android.companion.virtualdevice.flags-aconfig-cc",
+        "android.hardware.common-V2-cpp",
+        "android.hardware.common.fmq-V1-cpp",
         "camera_platform_flags_c_lib",
         "framework-permission-aidl-cpp",
         "libandroid_runtime",
@@ -86,6 +88,7 @@ cc_library_shared {
         "libcamera_client",
         "libcamera_metadata",
         "libcutils",
+        "libfmq",
         "libgui",
         "liblog",
         "libmediandk",

@@ -26,6 +26,7 @@
 #include <aaudio/AAudio.h>
 #include <aaudio/AAudioTesting.h>
 #include <system/aaudio/AAudio.h>
+#include <system/audio.h>
 #include "AudioClock.h"
 #include "AudioGlobal.h"
 #include "AudioStreamBuilder.h"
@@ -182,15 +183,18 @@ AAUDIO_API void AAudioStreamBuilder_setContentType(AAudioStreamBuilder* builder,
     streamBuilder->setContentType(contentType);
 }
 
-AAUDIO_API aaudio_result_t AAudioStreamBuilder_setTags(AAudioStreamBuilder* builder,
-                                                       const char* tags) {
-    if (tags == nullptr || strlen(tags) >= AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE) {
+AAUDIO_API aaudio_result_t AAudioStreamBuilder_addTag(AAudioStreamBuilder* builder,
+                                                      const char* tags) {
+    if (tags == nullptr) {
         return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
     }
     AudioStreamBuilder *streamBuilder = convertAAudioBuilderToStreamBuilder(builder);
-    std::optional<std::string> optionalTags = std::string(tags);
-    streamBuilder->setTags(optionalTags);
-    return AAUDIO_OK;
+    return streamBuilder->addTag(tags);
+}
+
+AAUDIO_API void AAudioStreamBuilder_clearTags(AAudioStreamBuilder* builder) {
+    AudioStreamBuilder *streamBuilder = convertAAudioBuilderToStreamBuilder(builder);
+    streamBuilder->clearTags();
 }
 
 AAUDIO_API void AAudioStreamBuilder_setSpatializationBehavior(AAudioStreamBuilder* builder,
@@ -598,20 +602,43 @@ AAUDIO_API aaudio_content_type_t AAudioStream_getContentType(AAudioStream* strea
     return audioStream->getContentType();
 }
 
-AAUDIO_API aaudio_result_t AAudioStream_getTags(AAudioStream* stream, char* tags)
+AAUDIO_API int32_t AAudioStream_obtainTags(AAudioStream* stream, char*** tags)
 {
+    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
+    auto aaTags = audioStream->getTags();
+    if (aaTags.empty()) {
+        *tags = nullptr;
+        return 0;
+    }
+    *tags = new char*[aaTags.size()];
+    if (*tags == nullptr) {
+        return AAUDIO_ERROR_NO_MEMORY;
+    }
+    auto it = aaTags.begin();
+    for (int i = 0; it != aaTags.end(); i++, it++) {
+        (*tags)[i] = new char[AUDIO_ATTRIBUTES_TAGS_MAX_SIZE];
+        if ((*tags)[i] == nullptr) {
+            for (int j = 0; j < i; ++j) {
+                delete[] (*tags)[i];
+            }
+            delete[] (*tags);
+            return AAUDIO_ERROR_NO_MEMORY;
+        }
+        strcpy((*tags)[i], it->c_str());
+    }
+    return aaTags.size();
+}
+
+AAUDIO_API void AAudioStream_releaseTags(AAudioStream* stream, char** tags) {
     if (tags == nullptr) {
-        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
+        return;
     }
     AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
-    std::optional<std::string> optTags = audioStream->getTags();
-    if (optTags.has_value() && !optTags->empty()) {
-        strncpy(tags, optTags.value().c_str(), AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
-        tags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE-1] = '\0';
-    } else {
-        tags[0] = '\0';
+    const int tagsNum = audioStream->getTags().size();
+    for (int i = 0; i < tagsNum; ++i) {
+        delete[] tags[i];
     }
-    return AAUDIO_OK;
+    delete[] tags;
 }
 
 AAUDIO_API aaudio_spatialization_behavior_t AAudioStream_getSpatializationBehavior(

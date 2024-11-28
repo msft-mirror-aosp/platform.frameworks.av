@@ -280,6 +280,14 @@ public:
             std::vector<hardware::CameraStatus>* cameraStatuses, bool isVendor = false,
             bool isProcessLocalTest = false);
 
+    binder::Status  connectDeviceVendor(
+            const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
+            const std::string& cameraId, int scoreOffset, int targetSdkVersion,
+            int rotationOverride, const AttributionSourceState& clientAttribution,
+            int32_t devicePolicy, bool sharedMode,
+            /*out*/
+            sp<hardware::camera2::ICameraDeviceUser>* device);
+
     // Monitored UIDs availability notification
     void                notifyMonitoredUids();
     void                notifyMonitoredUids(const std::unordered_set<uid_t> &notifyUidSet);
@@ -996,7 +1004,16 @@ private:
                                  bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
                                  int rotationOverride, bool forceSlowJpegMode,
                                  const std::string& originalCameraId, bool isNonSystemNdk,
-                                 bool sharedMode, /*out*/ sp<CLIENT>& device);
+                                 bool sharedMode, bool isVendorClient,
+                                 /*out*/ sp<CLIENT>& device);
+
+    binder::Status connectDeviceImpl(
+            const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
+            const std::string& cameraId, int scoreOffset, int targetSdkVersion,
+            int rotationOverride, const AttributionSourceState& clientAttribution,
+            int32_t devicePolicy, bool sharedMode, bool isVendorClient,
+            /*out*/
+            sp<hardware::camera2::ICameraDeviceUser>* device);
 
     // Lock guarding camera service state
     Mutex               mServiceLock;
@@ -1493,6 +1510,7 @@ private:
                                      apiLevel effectiveApiLevel, bool overrideForPerfClass,
                                      int rotationOverride, bool forceSlowJpegMode,
                                      const std::string& originalCameraId, bool sharedMode,
+                                     bool isVendorClient,
                                      /*out*/ sp<BasicClient>* client);
 
     static std::string toString(std::set<userid_t> intSet);

@@ -223,21 +223,6 @@ std::chrono::nanoseconds getMaxFrameDuration(
       static_cast<uint64_t>(1e9 / VirtualCameraDevice::kMinFps));
 }
 
-class FrameAvailableListenerProxy : public ConsumerBase::FrameAvailableListener {
- public:
-  FrameAvailableListenerProxy(std::function<void()> callback)
-      : mOnFrameAvailableCallback(callback) {
-  }
-
-  virtual void onFrameAvailable(const BufferItem&) override {
-    ALOGV("%s: onFrameAvailable", __func__);
-    mOnFrameAvailableCallback();
-  }
-
- private:
-  std::function<void()> mOnFrameAvailableCallback;
-};
-
 }  // namespace
 
 CaptureRequestBuffer::CaptureRequestBuffer(int streamId, int bufferId,
@@ -383,10 +368,8 @@ void VirtualCameraRenderThread::threadLoop() {
       EglTextureProgram::TextureFormat::RGBA);
   mEglSurfaceTexture = std::make_unique<EglSurfaceTexture>(
       mInputSurfaceSize.width, mInputSurfaceSize.height);
-  sp<FrameAvailableListenerProxy> frameAvailableListener =
-      sp<FrameAvailableListenerProxy>::make(
-          [this]() { requestTextureUpdate(); });
-  mEglSurfaceTexture->setFrameAvailableListener(frameAvailableListener);
+  mEglSurfaceTexture->setFrameAvailableListener(
+      [this]() { requestTextureUpdate(); });
 
   mInputSurfacePromise.set_value(mEglSurfaceTexture->getSurface());
 
