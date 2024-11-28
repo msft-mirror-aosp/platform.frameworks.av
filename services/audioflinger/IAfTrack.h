@@ -205,12 +205,16 @@ public:
 
     virtual const char* getTrackStateAsString() const = 0;
 
+    virtual const std::string& getTraceSuffix() const = 0;
     // Called by the PlaybackThread to indicate that the track is becoming active
     // and a new interval should start with a given device list.
     virtual void logBeginInterval(const std::string& devices) = 0;
 
     // Called by the PlaybackThread to indicate the track is no longer active.
     virtual void logEndInterval() = 0;
+
+    // Called by the PlaybackThread when ATRACE is enabled.
+    virtual void logRefreshInterval(const std::string& devices) = 0;
 
     // Called to tally underrun frames in playback.
     virtual void tallyUnderrunFrames(size_t frames) = 0;
@@ -299,7 +303,7 @@ public:
         return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
                         "  Format Chn mask  SRate "
                         "ST Usg CT "
-                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted"
+                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted "
                         "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
                         "   Latency\n"sv;
     }

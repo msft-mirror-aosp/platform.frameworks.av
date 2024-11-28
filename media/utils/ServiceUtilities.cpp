@@ -45,6 +45,7 @@
 namespace android {
 
 namespace {
+constexpr auto PERMISSION_GRANTED = permission::PermissionChecker::PERMISSION_GRANTED;
 constexpr auto PERMISSION_HARD_DENIED = permission::PermissionChecker::PERMISSION_HARD_DENIED;
 }
 
@@ -76,18 +77,41 @@ static String16 resolveCallingPackage(PermissionController& permissionController
     return packages[0];
 }
 
+// NOTE/TODO(b/379754682):
+// AUDIO_SOURCE_VOICE_DOWNLINK and AUDIO_SOURCE_VOICE_CALL are handled specially:
+// DOWNLINK is an output source, but we still require RecordOp in addition to
+// OP_RECORD_INCOMING_PHONE_AUDIO
+// CALL includes both uplink and downlink, but we attribute RECORD_OP (only), since
+// there is not support for noting multiple ops.
 int32_t getOpForSource(audio_source_t source) {
   switch (source) {
-    case AUDIO_SOURCE_HOTWORD:
-      return AppOpsManager::OP_RECORD_AUDIO_HOTWORD;
+    // BEGIN output sources
+    case AUDIO_SOURCE_FM_TUNER:
+        return AppOpsManager::OP_NONE;
     case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
     case AUDIO_SOURCE_REMOTE_SUBMIX:
+        // TODO -- valid in all cases?
       return AppOpsManager::OP_RECORD_AUDIO_OUTPUT;
     case AUDIO_SOURCE_VOICE_DOWNLINK:
       return AppOpsManager::OP_RECORD_INCOMING_PHONE_AUDIO;
+    // END output sources
+    case AUDIO_SOURCE_HOTWORD:
+      return AppOpsManager::OP_RECORD_AUDIO_HOTWORD;
     case AUDIO_SOURCE_DEFAULT:
     default:
       return AppOpsManager::OP_RECORD_AUDIO;
+  }
+}
+
+bool isRecordOpRequired(audio_source_t source) {
+  switch (source) {
+    case AUDIO_SOURCE_FM_TUNER:
+    case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
+    case AUDIO_SOURCE_REMOTE_SUBMIX:
+    // case AUDIO_SOURCE_VOICE_DOWNLINK:
+        return false;
+    default:
+      return true;
   }
 }
 
@@ -122,7 +146,8 @@ std::optional<AttributionSourceState> resolveAttributionSource(
     return std::optional<AttributionSourceState>{myAttributionSource};
 }
 
-    static int checkRecordingInternal(const AttributionSourceState &attributionSource,
+
+static int checkRecordingInternal(const AttributionSourceState &attributionSource,
                                        const uint32_t virtualDeviceId,
                                        const String16 &msg, bool start, audio_source_t source) {
     // Okay to not track in app ops as audio server or media server is us and if
@@ -131,32 +156,47 @@ std::optional<AttributionSourceState> resolveAttributionSource(
     // user is active, but it is a core system service so let it through.
     // TODO(b/141210120): UserManager.DISALLOW_RECORD_AUDIO should not affect system user 0
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
-    if (isAudioServerOrMediaServerOrSystemServerOrRootUid(uid)) return true;
-
-    // We specify a pid and uid here as mediaserver (aka MediaRecorder or StageFrightRecorder)
-    // may open a record track on behalf of a client. Note that pid may be a tid.
-    // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
-    std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource, virtualDeviceId);
-    if (!resolvedAttributionSource.has_value()) {
-        return false;
-    }
+    if (isAudioServerOrMediaServerOrSystemServerOrRootUid(uid)) return PERMISSION_GRANTED;
 
     const int32_t attributedOpCode = getOpForSource(source);
+    if (isRecordOpRequired(source)) {
+        // We specify a pid and uid here as mediaserver (aka MediaRecorder or StageFrightRecorder)
+        // may open a record track on behalf of a client. Note that pid may be a tid.
+        // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
+        std::optional<AttributionSourceState> resolvedAttributionSource =
+                resolveAttributionSource(attributionSource, virtualDeviceId);
+        if (!resolvedAttributionSource.has_value()) {
+            return PERMISSION_HARD_DENIED;
+        }
 
-    permission::PermissionChecker permissionChecker;
-    int permitted;
-    if (start) {
-        permitted = permissionChecker.checkPermissionForStartDataDeliveryFromDatasource(
-                sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
-                attributedOpCode);
+        permission::PermissionChecker permissionChecker;
+        int permitted;
+        if (start) {
+            permitted = permissionChecker.checkPermissionForStartDataDeliveryFromDatasource(
+                    sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
+                    attributedOpCode);
+        } else {
+            permitted = permissionChecker.checkPermissionForPreflightFromDatasource(
+                    sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
+                    attributedOpCode);
+        }
+
+        return permitted;
     } else {
-        permitted = permissionChecker.checkPermissionForPreflightFromDatasource(
-                sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
-                attributedOpCode);
+        if (attributedOpCode == AppOpsManager::OP_NONE) return PERMISSION_GRANTED;  // nothing to do
+        AppOpsManager ap{};
+        PermissionController pc{};
+        return ap.startOpNoThrow(
+                attributedOpCode, attributionSource.uid,
+                resolveCallingPackage(pc,
+                                      String16{attributionSource.packageName.value_or("").c_str()},
+                                      attributionSource.uid),
+                false,
+                attributionSource.attributionTag.has_value()
+                        ? String16{attributionSource.attributionTag.value().c_str()}
+                        : String16{},
+                msg);
     }
-
-    return permitted;
 }
 
 static constexpr int DEVICE_ID_DEFAULT = 0;
@@ -188,19 +228,32 @@ void finishRecording(const AttributionSourceState &attributionSource, uint32_t v
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     if (isAudioServerOrMediaServerOrSystemServerOrRootUid(uid)) return;
 
-    // We specify a pid and uid here as mediaserver (aka MediaRecorder or StageFrightRecorder)
-    // may open a record track on behalf of a client. Note that pid may be a tid.
-    // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
-    const std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource, virtualDeviceId);
-    if (!resolvedAttributionSource.has_value()) {
-        return;
-    }
-
     const int32_t attributedOpCode = getOpForSource(source);
-    permission::PermissionChecker permissionChecker;
-    permissionChecker.finishDataDeliveryFromDatasource(attributedOpCode,
-            resolvedAttributionSource.value());
+    if (isRecordOpRequired(source)) {
+        // We specify a pid and uid here as mediaserver (aka MediaRecorder or StageFrightRecorder)
+        // may open a record track on behalf of a client. Note that pid may be a tid.
+        // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
+        const std::optional<AttributionSourceState> resolvedAttributionSource =
+                resolveAttributionSource(attributionSource, virtualDeviceId);
+        if (!resolvedAttributionSource.has_value()) {
+            return;
+        }
+
+        permission::PermissionChecker permissionChecker;
+        permissionChecker.finishDataDeliveryFromDatasource(attributedOpCode,
+                resolvedAttributionSource.value());
+    } else {
+        if (attributedOpCode == AppOpsManager::OP_NONE) return;  // nothing to do
+        AppOpsManager ap{};
+        PermissionController pc{};
+        ap.finishOp(attributedOpCode, attributionSource.uid,
+                    resolveCallingPackage(
+                            pc, String16{attributionSource.packageName.value_or("").c_str()},
+                            attributionSource.uid),
+                    attributionSource.attributionTag.has_value()
+                            ? String16{attributionSource.attributionTag.value().c_str()}
+                            : String16{});
+    }
 }
 
 bool captureAudioOutputAllowed(const AttributionSourceState& attributionSource) {
@@ -245,6 +298,21 @@ bool captureVoiceCommunicationOutputAllowed(const AttributionSourceState& attrib
         "android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT");
     bool ok = PermissionCache::checkPermission(sCaptureVoiceCommOutput, pid, uid);
     if (!ok) ALOGE("Request requires android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT");
+    return ok;
+}
+
+bool bypassConcurrentPolicyAllowed(const AttributionSourceState& attributionSource) {
+    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+    uid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
+    if (isAudioServerOrRootUid(uid)) return true;
+    static const String16 sBypassConcurrentPolicy(
+            "android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION ");
+    // Use PermissionChecker, which includes some logic for allowing the isolated
+    // HotwordDetectionService to hold certain permissions.
+    bool ok = PermissionCache::checkPermission(sBypassConcurrentPolicy, pid, uid);
+    if (!ok) {
+        ALOGV("Request requires android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION");
+    }
     return ok;
 }
 

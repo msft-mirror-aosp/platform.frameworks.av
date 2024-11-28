@@ -103,6 +103,7 @@ class AudioSystem
     template <typename ServiceInterface, typename Client, typename AidlInterface,
             typename ServiceTraits>
     friend class ServiceHandler;
+    friend class AudioFlingerServiceTraits;
 
 public:
 
@@ -341,7 +342,7 @@ public:
                                      const AttributionSourceState& attributionSource,
                                      audio_config_t *config,
                                      audio_output_flags_t flags,
-                                     audio_port_handle_t *selectedDeviceId,
+                                     DeviceIdVector *selectedDeviceIds,
                                      audio_port_handle_t *portId,
                                      std::vector<audio_io_handle_t> *secondaryOutputs,
                                      bool *isSpatialized,
@@ -426,17 +427,12 @@ public:
     static status_t setEffectEnabled(int id, bool enabled);
     static status_t moveEffectsToIo(const std::vector<int>& ids, audio_io_handle_t io);
 
-    // clear stream to output mapping cache (gStreamOutputMap)
-    // and output configuration cache (gOutputs)
-    static void clearAudioConfigCache();
-
     // Sets a local AudioPolicyService interface to be used by AudioSystem.
     // This is used by audioserver main() to allow client object initialization
     // before exposing any interfaces to ServiceManager.
     static status_t setLocalAudioPolicyService(const sp<media::IAudioPolicyService>& aps);
 
     static sp<media::IAudioPolicyService> get_audio_policy_service();
-    static void clearAudioPolicyService();
 
     // helpers for android.media.AudioManager.getProperty(), see description there for meaning
     static uint32_t getPrimaryOutputSamplingRate();
@@ -771,7 +767,7 @@ public:
         virtual ~AudioDeviceCallback() {}
 
         virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
-                                         audio_port_handle_t deviceId) = 0;
+                                         const DeviceIdVector& deviceIds) = 0;
     };
 
     static status_t addAudioDeviceCallback(const wp<AudioDeviceCallback>& callback,
@@ -797,11 +793,11 @@ public:
     static status_t removeSupportedLatencyModesCallback(
             const sp<SupportedLatencyModesCallback>& callback);
 
-    static audio_port_handle_t getDeviceIdForIo(audio_io_handle_t audioIo);
+    static status_t getDeviceIdsForIo(audio_io_handle_t audioIo, DeviceIdVector& deviceIds);
 
     static status_t setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos);
 
-    static status_t getMmapPolicyInfo(
+    static status_t getMmapPolicyInfos(
             media::audio::common::AudioMMapPolicyType policyType,
             std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos);
 
@@ -809,7 +805,11 @@ public:
 
     static int32_t getAAudioHardwareBurstMinUsec();
 
-    class AudioFlingerClient: public IBinder::DeathRecipient, public media::BnAudioFlingerClient
+    static status_t getMmapPolicyForDevice(
+            media::audio::common::AudioMMapPolicyType policyType, audio_devices_t device,
+            media::audio::common::AudioMMapPolicyInfo *policyInfo);
+
+    class AudioFlingerClient: public media::BnAudioFlingerClient
     {
     public:
         AudioFlingerClient() = default;
@@ -818,9 +818,6 @@ public:
         status_t getInputBufferSize(uint32_t sampleRate, audio_format_t format,
                 audio_channel_mask_t channelMask, size_t* buffSize) EXCLUDES(mMutex);
         sp<AudioIoDescriptor> getIoDescriptor(audio_io_handle_t ioHandle) EXCLUDES(mMutex);
-
-        // DeathRecipient
-        void binderDied(const wp<IBinder>& who) final;
 
         // IAudioFlingerClient
 
@@ -845,7 +842,8 @@ public:
         status_t removeSupportedLatencyModesCallback(
                 const sp<SupportedLatencyModesCallback>& callback) EXCLUDES(mMutex);
 
-        audio_port_handle_t getDeviceIdForIo(audio_io_handle_t audioIo) EXCLUDES(mMutex);
+        status_t getDeviceIdsForIo(audio_io_handle_t audioIo, DeviceIdVector& deviceIds)
+                EXCLUDES(mMutex);
 
     private:
         mutable std::mutex mMutex;
@@ -866,8 +864,7 @@ public:
         sp<AudioIoDescriptor> getIoDescriptor_l(audio_io_handle_t ioHandle) REQUIRES(mMutex);
     };
 
-    class AudioPolicyServiceClient: public IBinder::DeathRecipient,
-                                    public media::BnAudioPolicyServiceClient {
+    class AudioPolicyServiceClient: public media::BnAudioPolicyServiceClient {
     public:
         AudioPolicyServiceClient() = default;
 
@@ -891,8 +888,7 @@ public:
             return !mAudioVolumeGroupCallbacks.empty();
         }
 
-        // DeathRecipient
-        void binderDied(const wp<IBinder>& who) final;
+        void onServiceDied();
 
         // IAudioPolicyServiceClient
         binder::Status onAudioVolumeGroupChanged(int32_t group, int32_t flags) override;
@@ -922,6 +918,7 @@ public:
 
     static audio_io_handle_t getOutput(audio_stream_type_t stream);
     static sp<AudioFlingerClient> getAudioFlingerClient();
+    static sp<AudioPolicyServiceClient> getAudioPolicyClient();
     static sp<AudioIoDescriptor> getIoDescriptor(audio_io_handle_t ioHandle);
 
     // Invokes all registered error callbacks with the given error code.

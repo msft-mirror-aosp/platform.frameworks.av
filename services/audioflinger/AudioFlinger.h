@@ -439,7 +439,7 @@ public:
                             const audio_attributes_t *attr,
                             audio_config_base_t *config,
                             const AudioClient& client,
-                            audio_port_handle_t *deviceId,
+                            DeviceIdVector *deviceIds,
                             audio_session_t *sessionId,
                             const sp<MmapStreamCallback>& callback,
                             sp<MmapStreamInterface>& interface,
@@ -774,9 +774,6 @@ private:
     int64_t mTotalMemory GUARDED_BY(mutex()) = 0;
     std::atomic<size_t> mClientSharedHeapSize = kMinimumClientSharedHeapSizeBytes;
     static constexpr size_t kMinimumClientSharedHeapSizeBytes = 1024 * 1024; // 1MB
-
-    // when a global effect was last enabled
-    nsecs_t mGlobalEffectEnableTime GUARDED_BY(mutex()) = 0;
 
     /* const */ sp<IAfPatchPanel> mPatchPanel;
 

@@ -374,4 +374,14 @@ status_t AudioPolicyService::AudioPolicyClient::setTracksInternalMute(
     return af->setTracksInternalMute(tracksInternalMute);
 }
 
+status_t AudioPolicyService::AudioPolicyClient::getMmapPolicyInfos(
+        media::audio::common::AudioMMapPolicyType policyType,
+        std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) {
+    sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
+    if (af == nullptr) {
+        return PERMISSION_DENIED;
+    }
+    return af->getMmapPolicyInfos(policyType, policyInfos);
+}
+
 } // namespace android

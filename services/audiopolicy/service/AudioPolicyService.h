@@ -58,6 +58,8 @@ using media::audio::common::AudioConfigBase;
 using media::audio::common::AudioDevice;
 using media::audio::common::AudioDeviceDescription;
 using media::audio::common::AudioFormatDescription;
+using media::audio::common::AudioMMapPolicyInfo;
+using media::audio::common::AudioMMapPolicyType;
 using media::audio::common::AudioMode;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
@@ -106,16 +108,16 @@ public:
             const std::string& deviceName,
             const AudioFormatDescription& encodedFormat) override;
     binder::Status setPhoneState(AudioMode state, int32_t uid) override;
-    binder::Status setForceUse(android::media::audio::common::AudioPolicyForceUse usage,
-            android::media::audio::common::AudioPolicyForcedConfig config) override;
-    binder::Status getForceUse(android::media::audio::common::AudioPolicyForceUse usage,
-            android::media::audio::common::AudioPolicyForcedConfig* _aidl_return) override;
+    binder::Status setForceUse(media::AudioPolicyForceUse usage,
+                               media::AudioPolicyForcedConfig config) override;
+    binder::Status getForceUse(media::AudioPolicyForceUse usage,
+                               media::AudioPolicyForcedConfig* _aidl_return) override;
     binder::Status getOutput(AudioStreamType stream, int32_t* _aidl_return) override;
     binder::Status getOutputForAttr(const media::audio::common::AudioAttributes& attr,
                                     int32_t session,
                                     const AttributionSourceState &attributionSource,
                                     const AudioConfig& config,
-                                    int32_t flags, int32_t selectedDeviceId,
+                                    int32_t flags, const std::vector<int32_t>& selectedDeviceIds,
                                     media::GetOutputForAttrResponse* _aidl_return) override;
     binder::Status startOutput(int32_t portId) override;
     binder::Status stopOutput(int32_t portId) override;
@@ -328,6 +330,13 @@ public:
     // Should only be called by AudioService to push permission data down to audioserver
     binder::Status getPermissionController(sp<INativePermissionController>* out) override;
 
+    binder::Status getMmapPolicyInfos(
+            AudioMMapPolicyType policyType,
+            std::vector<AudioMMapPolicyInfo>* _aidl_return) override;
+    binder::Status getMmapPolicyForDevice(
+            AudioMMapPolicyType policyType,
+            AudioMMapPolicyInfo* policyInfo) override;
+
     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
 
     // -- IAudioPolicyLocal methods
@@ -464,6 +473,8 @@ private:
     status_t printHelp(int out);
 
     std::string getDeviceTypeStrForPortId(audio_port_handle_t portId);
+
+    std::string getDeviceTypeStrForPortIds(DeviceIdVector portIds);
 
     status_t getAudioPolicyEffects(sp<AudioPolicyEffects>& audioPolicyEffects);
 
@@ -945,6 +956,13 @@ private:
         status_t setTracksInternalMute(
                 const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) override;
 
+        status_t getMmapPolicyInfos(
+                media::audio::common::AudioMMapPolicyType policyType,
+                std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
+
+        error::BinderResult<bool> checkPermissionForInput(const AttributionSourceState& attr,
+                const PermissionReqs& req) override;
+
      private:
         AudioPolicyService *mAudioPolicyService;
     };
@@ -1002,10 +1020,10 @@ private:
                             const audio_io_handle_t io,
                             const AttributionSourceState& attributionSource,
                             const audio_session_t session,  audio_port_handle_t portId,
-                            const audio_port_handle_t deviceId) :
+                            const DeviceIdVector deviceIds) :
                                 attributes(attributes), io(io), attributionSource(
                                 attributionSource), session(session), portId(portId),
-                                deviceId(deviceId), active(false) {}
+                                deviceIds(deviceIds), active(false) {}
                 ~AudioClient() override = default;
 
 
@@ -1014,7 +1032,7 @@ private:
         const AttributionSourceState attributionSource; //client attributionsource
         const audio_session_t session;       // audio session ID
         const audio_port_handle_t portId;
-        const audio_port_handle_t deviceId;  // selected input device port ID
+        const DeviceIdVector deviceIds;  // selected input device port IDs
               bool active;                   // Playback/Capture is active or inactive
     };
     private:
@@ -1029,10 +1047,10 @@ private:
                 AudioPlaybackClient(const audio_attributes_t attributes,
                       const audio_io_handle_t io, AttributionSourceState attributionSource,
                             const audio_session_t session, audio_port_handle_t portId,
-                            audio_port_handle_t deviceId, audio_stream_type_t stream,
+                            DeviceIdVector deviceIds, audio_stream_type_t stream,
                             bool isSpatialized, audio_channel_mask_t channelMask) :
                     AudioClient(attributes, io, attributionSource, session, portId,
-                        deviceId), stream(stream), isSpatialized(isSpatialized),
+                        deviceIds), stream(stream), isSpatialized(isSpatialized),
                         channelMask(channelMask) {}
                 ~AudioPlaybackClient() override = default;
 

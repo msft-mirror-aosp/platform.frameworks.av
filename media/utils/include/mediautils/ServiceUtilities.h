@@ -102,6 +102,7 @@ bool captureAudioOutputAllowed(const AttributionSourceState& attributionSource);
 bool captureMediaOutputAllowed(const AttributionSourceState& attributionSource);
 bool captureTunerAudioInputAllowed(const AttributionSourceState& attributionSource);
 bool captureVoiceCommunicationOutputAllowed(const AttributionSourceState& attributionSource);
+bool bypassConcurrentPolicyAllowed(const AttributionSourceState& attributionSource) ;
 bool accessUltrasoundAllowed(const AttributionSourceState& attributionSource);
 bool captureHotwordAllowed(const AttributionSourceState& attributionSource);
 bool settingsAllowed();
@@ -118,6 +119,7 @@ bool mustAnonymizeBluetoothAddress(
         const AttributionSourceState& attributionSource, const String16& caller);
 void anonymizeBluetoothAddress(char *address);
 
+bool isRecordOpRequired(audio_source_t source);
 int32_t getOpForSource(audio_source_t source);
 
 AttributionSourceState getCallingAttributionSource();

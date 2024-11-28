@@ -58,6 +58,10 @@ static std::string getAttributionString(const AttributionSourceState& attributio
     return ret.str();
 }
 
+static std::string getAppOpsMessage(const std::string& cameraId) {
+    return cameraId.empty() ? std::string() : std::string("start camera ") + cameraId;
+}
+
 } // namespace
 
 namespace android {
@@ -132,26 +136,78 @@ binder::Status AttributionAndPermissionUtils::resolveAttributionSource(
     return binder::Status::ok();
 }
 
+PermissionChecker::PermissionResult AttributionAndPermissionUtils::checkPermission(
+        const std::string& cameraId, const std::string& permission,
+        const AttributionSourceState& attributionSource, const std::string& message,
+        int32_t attributedOpCode, bool forDataDelivery, bool startDataDelivery,
+        bool checkAutomotive) {
+    AttributionSourceState clientAttribution = attributionSource;
+    if (!flags::data_delivery_permission_checks() && !clientAttribution.next.empty()) {
+        clientAttribution.next.clear();
+    }
+
+    if (checkAutomotive && checkAutomotivePrivilegedClient(cameraId, clientAttribution)) {
+        return PermissionChecker::PERMISSION_GRANTED;
+    }
+
+    PermissionChecker::PermissionResult result;
+    if (forDataDelivery) {
+        if (startDataDelivery) {
+            result = mPermissionChecker->checkPermissionForStartDataDeliveryFromDatasource(
+                    toString16(permission), clientAttribution, toString16(message),
+                    attributedOpCode);
+        } else {
+            result = mPermissionChecker->checkPermissionForDataDeliveryFromDatasource(
+                    toString16(permission), clientAttribution, toString16(message),
+                    attributedOpCode);
+        }
+    } else {
+        result = mPermissionChecker->checkPermissionForPreflight(
+                toString16(permission), clientAttribution, toString16(message), attributedOpCode);
+    }
+
+    if (result == PermissionChecker::PERMISSION_HARD_DENIED) {
+        ALOGI("%s (forDataDelivery %d startDataDelivery %d): Permission hard denied "
+              "for client attribution %s",
+              __FUNCTION__, forDataDelivery, startDataDelivery,
+              getAttributionString(clientAttribution).c_str());
+    } else if (result == PermissionChecker::PERMISSION_SOFT_DENIED) {
+        ALOGI("%s checkPermission (forDataDelivery %d startDataDelivery %d): Permission soft "
+              "denied "
+              "for client attribution %s",
+              __FUNCTION__, forDataDelivery, startDataDelivery,
+              getAttributionString(clientAttribution).c_str());
+    }
+    return result;
+}
+
 bool AttributionAndPermissionUtils::checkPermissionForPreflight(
         const std::string& cameraId, const std::string& permission,
         const AttributionSourceState& attributionSource, const std::string& message,
         int32_t attributedOpCode) {
-    AttributionSourceState clientAttribution = attributionSource;
-    if (!flags::check_full_attribution_source_chain() && !clientAttribution.next.empty()) {
-        clientAttribution.next.clear();
-    }
+    return checkPermission(cameraId, permission, attributionSource, message, attributedOpCode,
+                           /* forDataDelivery */ false, /* startDataDelivery */ false,
+                           /* checkAutomotive */ true) != PermissionChecker::PERMISSION_HARD_DENIED;
+}
 
-    if (checkAutomotivePrivilegedClient(cameraId, clientAttribution)) {
-        return true;
-    }
+bool AttributionAndPermissionUtils::checkPermissionForDataDelivery(
+        const std::string& cameraId, const std::string& permission,
+        const AttributionSourceState& attributionSource, const std::string& message,
+        int32_t attributedOpCode) {
+    return checkPermission(cameraId, permission, attributionSource, message, attributedOpCode,
+                           /* forDataDelivery */ true, /* startDataDelivery */ false,
+                           /* checkAutomotive */ false) !=
+           PermissionChecker::PERMISSION_HARD_DENIED;
+}
 
-    PermissionChecker::PermissionResult result = mPermissionChecker->checkPermissionForPreflight(
-            toString16(permission), clientAttribution, toString16(message), attributedOpCode);
-    if (result == PermissionChecker::PERMISSION_HARD_DENIED) {
-        ALOGE("%s: Permission denied for client attribution %s", __FUNCTION__,
-              getAttributionString(clientAttribution).c_str());
-    }
-    return result != PermissionChecker::PERMISSION_HARD_DENIED;
+PermissionChecker::PermissionResult
+AttributionAndPermissionUtils::checkPermissionForStartDataDelivery(
+        const std::string& cameraId, const std::string& permission,
+        const AttributionSourceState& attributionSource, const std::string& message,
+        int32_t attributedOpCode) {
+    return checkPermission(cameraId, permission, attributionSource, message, attributedOpCode,
+                           /* forDataDelivery */ true, /* startDataDelivery */ true,
+                           /* checkAutomotive */ false);
 }
 
 // Can camera service trust the caller based on the calling UID?
@@ -244,9 +300,39 @@ bool AttributionAndPermissionUtils::isCallerCameraServerNotDelegating() {
 }
 
 bool AttributionAndPermissionUtils::hasPermissionsForCamera(
+        const std::string& cameraId, const AttributionSourceState& attributionSource,
+        bool forDataDelivery, bool checkAutomotive) {
+    return checkPermission(cameraId, sCameraPermission, attributionSource,
+                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE, forDataDelivery,
+                           /* startDataDelivery */ false, checkAutomotive)
+            != PermissionChecker::PERMISSION_HARD_DENIED;
+}
+
+PermissionChecker::PermissionResult
+AttributionAndPermissionUtils::checkPermissionsForCameraForPreflight(
         const std::string& cameraId, const AttributionSourceState& attributionSource) {
-    return checkPermissionForPreflight(cameraId, sCameraPermission, attributionSource,
-                                       std::string(), AppOpsManager::OP_NONE);
+    return checkPermission(cameraId, sCameraPermission, attributionSource,
+                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE,
+                           /* forDataDelivery */ false, /* startDataDelivery */ false,
+                           /* checkAutomotive */ false);
+}
+
+PermissionChecker::PermissionResult
+AttributionAndPermissionUtils::checkPermissionsForCameraForDataDelivery(
+        const std::string& cameraId, const AttributionSourceState& attributionSource) {
+    return checkPermission(cameraId, sCameraPermission, attributionSource,
+                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE,
+                           /* forDataDelivery */ true, /* startDataDelivery */ false,
+                           /* checkAutomotive */ false);
+}
+
+PermissionChecker::PermissionResult
+AttributionAndPermissionUtils::checkPermissionsForCameraForStartDataDelivery(
+        const std::string& cameraId, const AttributionSourceState& attributionSource) {
+    return checkPermission(cameraId, sCameraPermission, attributionSource,
+                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE,
+                           /* forDataDelivery */ true, /* startDataDelivery */ true,
+                           /* checkAutomotive */ false);
 }
 
 bool AttributionAndPermissionUtils::hasPermissionsForSystemCamera(
@@ -275,6 +361,12 @@ bool AttributionAndPermissionUtils::hasPermissionsForOpenCloseListener(
         const AttributionSourceState& attributionSource) {
     return checkPermissionForPreflight(std::string(), sCameraOpenCloseListenerPermission,
                                        attributionSource, std::string(), AppOpsManager::OP_NONE);
+}
+
+void AttributionAndPermissionUtils::finishDataDelivery(
+        const AttributionSourceState& attributionSource) {
+    mPermissionChecker->finishDataDeliveryFromDatasource(AppOpsManager::OP_CAMERA,
+                                                         attributionSource);
 }
 
 bool AttributionAndPermissionUtils::checkAutomotivePrivilegedClient(
@@ -324,7 +416,7 @@ bool AttributionAndPermissionUtils::resolveClientUid(/*inout*/ int& clientUid) {
         clientUid = callingUid;
     } else {
         validUid = isTrustedCallingUid(callingUid);
-        if (flags::use_context_attribution_source()) {
+        if (flags::data_delivery_permission_checks()) {
             validUid = validUid || (clientUid == callingUid);
         }
     }
@@ -342,7 +434,7 @@ bool AttributionAndPermissionUtils::resolveClientPid(/*inout*/ int& clientPid) {
         clientPid = callingPid;
     } else {
         validPid = isTrustedCallingUid(callingUid);
-        if (flags::use_context_attribution_source()) {
+        if (flags::data_delivery_permission_checks()) {
             validPid = validPid || (clientPid == callingPid);
         }
     }

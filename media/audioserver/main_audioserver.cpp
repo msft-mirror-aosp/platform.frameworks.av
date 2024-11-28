@@ -190,7 +190,7 @@ int main(int argc __unused, char **argv)
         // attempting to call audio flinger on a null pointer could make the process crash
         // and attract attentions.
         std::vector<AudioMMapPolicyInfo> policyInfos;
-        status_t status = sp<IAudioFlinger>::cast(af)->getMmapPolicyInfos(
+        status_t status = AudioSystem::getMmapPolicyInfos(
                 AudioMMapPolicyType::DEFAULT, &policyInfos);
         // Initialize aaudio service when querying mmap policy succeeds and
         // any of the policy supports MMAP.

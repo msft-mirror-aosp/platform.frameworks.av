@@ -123,7 +123,7 @@ public:
                                   const AttributionSourceState& attributionSource,
                                   audio_config_t *config,
                                   audio_output_flags_t *flags,
-                                  audio_port_handle_t *selectedDeviceId,
+                                  DeviceIdVector *selectedDeviceIds,
                                   audio_port_handle_t *portId,
                                   std::vector<audio_io_handle_t> *secondaryOutputs,
                                   output_type_t *outputType,
@@ -134,17 +134,17 @@ public:
         virtual status_t startOutput(audio_port_handle_t portId);
         virtual status_t stopOutput(audio_port_handle_t portId);
         virtual bool releaseOutput(audio_port_handle_t portId);
-        virtual status_t getInputForAttr(const audio_attributes_t *attr,
-                                         audio_io_handle_t *input,
+
+        base::expected<media::GetInputForAttrResponse, std::variant<binder::Status,
+            media::audio::common::AudioConfigBase>>
+                         getInputForAttr(audio_attributes_t attributes,
+                                         audio_io_handle_t requestedInput,
+                                         audio_port_handle_t requestedDeviceId,
+                                         audio_config_base_t config,
+                                         audio_input_flags_t flags,
                                          audio_unique_id_t riid,
                                          audio_session_t session,
-                                         const AttributionSourceState& attributionSource,
-                                         audio_config_base_t *config,
-                                         audio_input_flags_t flags,
-                                         audio_port_handle_t *selectedDeviceId,
-                                         input_type_t *inputType,
-                                         audio_port_handle_t *portId,
-                                         uint32_t *virtualDeviceId);
+                                         const AttributionSourceState& attributionSource) override;
 
         // indicates to the audio policy manager that the input starts being used.
         virtual status_t startInput(audio_port_handle_t portId);
@@ -439,6 +439,13 @@ public:
         bool isCallScreenModeSupported() override;
 
         void onNewAudioModulesAvailable() override;
+
+        status_t getMmapPolicyInfos(
+                media::audio::common::AudioMMapPolicyType policyType,
+                std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
+        status_t getMmapPolicyForDevice(
+                media::audio::common::AudioMMapPolicyType policyType,
+                media::audio::common::AudioMMapPolicyInfo *policyInfo) override;
 
         status_t initialize();
 
@@ -886,15 +893,7 @@ protected:
             return mAvailableInputDevices.getDevicesFromHwModule(
                     mPrimaryOutput->getModuleHandle());
         }
-        /**
-         * @brief getFirstDeviceId of the Device Vector
-         * @return if the collection is not empty, it returns the first device Id,
-         *         otherwise AUDIO_PORT_HANDLE_NONE
-         */
-        audio_port_handle_t getFirstDeviceId(const DeviceVector &devices) const
-        {
-            return (devices.size() > 0) ? devices.itemAt(0)->getId() : AUDIO_PORT_HANDLE_NONE;
-        }
+
         String8 getFirstDeviceAddress(const DeviceVector &devices) const
         {
             return (devices.size() > 0) ?
@@ -1135,7 +1134,7 @@ private:
                 uid_t uid,
                 audio_config_t *config,
                 audio_output_flags_t *flags,
-                audio_port_handle_t *selectedDeviceId,
+                DeviceIdVector *selectedDeviceIds,
                 bool *isRequestedDeviceForExclusiveUse,
                 std::vector<sp<AudioPolicyMix>> *secondaryMixes,
                 output_type_t *outputType,
@@ -1227,7 +1226,7 @@ private:
         audio_io_handle_t getInputForDevice(const sp<DeviceDescriptor> &device,
                 audio_session_t session,
                 const audio_attributes_t &attributes,
-                audio_config_base_t *config,
+                const audio_config_base_t &config,
                 audio_input_flags_t flags,
                 const sp<AudioPolicyMix> &policyMix);
 
@@ -1413,9 +1412,17 @@ private:
                                                   int index,
                                                   const DeviceTypeSet &deviceTypes);
 
+        status_t updateMmapPolicyInfos(media::audio::common::AudioMMapPolicyType policyType);
+
         // Contains for devices that support absolute volume the audio attributes
         // corresponding to the streams that are driving the volume changes
         std::unordered_map<audio_devices_t, audio_attributes_t> mAbsoluteVolumeDrivingStreams;
+
+        std::map<media::audio::common::AudioMMapPolicyType,
+                const std::vector<media::audio::common::AudioMMapPolicyInfo>> mMmapPolicyInfos;
+        std::map<media::audio::common::AudioMMapPolicyType,
+                const std::map<media::audio::common::AudioDeviceDescription,
+                         media::audio::common::AudioMMapPolicy>> mMmapPolicyByDeviceType;
 };
 
 };

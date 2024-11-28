@@ -33,6 +33,7 @@
 #include <afutils/Vibrator.h>
 #include <audio_utils/MelProcessor.h>
 #include <audio_utils/Metadata.h>
+#include <audio_utils/Trace.h>
 #include <com_android_media_audioserver.h>
 #ifdef DEBUG_CPU_USAGE
 #include <audio_utils/Statistics.h>
@@ -338,28 +339,32 @@ std::string IAfThreadBase::formatToString(audio_format_t format) {
 // under  #ifdef __cplusplus #endif
 static std::string patchSinksToString(const struct audio_patch *patch)
 {
-    std::stringstream ss;
+    std::string s;
     for (size_t i = 0; i < patch->num_sinks; ++i) {
-        if (i > 0) {
-            ss << "|";
+        if (i > 0) s.append("|");
+        if (patch->sinks[i].ext.device.address[0]) {
+            s.append("(").append(toString(patch->sinks[i].ext.device.type))
+                    .append(", ").append(patch->sinks[i].ext.device.address).append(")");
+        } else {
+            s.append(toString(patch->sinks[i].ext.device.type));
         }
-        ss << "(" << toString(patch->sinks[i].ext.device.type)
-            << ", " << patch->sinks[i].ext.device.address << ")";
     }
-    return ss.str();
+    return s;
 }
 
 static std::string patchSourcesToString(const struct audio_patch *patch)
 {
-    std::stringstream ss;
+    std::string s;
     for (size_t i = 0; i < patch->num_sources; ++i) {
-        if (i > 0) {
-            ss << "|";
+        if (i > 0) s.append("|");
+        if (patch->sources[i].ext.device.address[0]) {
+            s.append("(").append(toString(patch->sources[i].ext.device.type))
+                    .append(", ").append(patch->sources[i].ext.device.address).append(")");
+        } else {
+            s.append(toString(patch->sources[i].ext.device.type));
         }
-        ss << "(" << toString(patch->sources[i].ext.device.type)
-            << ", " << patch->sources[i].ext.device.address << ")";
     }
-    return ss.str();
+    return s;
 }
 
 static std::string toString(audio_latency_mode_t mode) {
@@ -608,7 +613,7 @@ void CpuStats::sample(const String8 &title
 // ----------------------------------------------------------------------------
 
 // static
-const char* ThreadBase::threadTypeToString(ThreadBase::type_t type)
+const char* IAfThreadBase::threadTypeToString(ThreadBase::type_t type)
 {
     switch (type) {
     case MIXER:
@@ -2180,6 +2185,7 @@ PlaybackThread::PlaybackThread(const sp<IAfThreadCallback>& afThreadCallback,
         mIsTimestampAdvancing(kMinimumTimeBetweenTimestampChecksNs)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioOut_%X", id);
+    mFlagsAsString = toString(output->flags);
     mNBLogWriter = afThreadCallback->newWriter_l(kLogSize, mThreadName);
 
     // Assumes constructor is called by AudioFlinger with its mutex() held, but
@@ -3560,26 +3566,8 @@ void PlaybackThread::threadLoop_removeTracks(
 
 void PlaybackThread::checkSilentMode_l()
 {
-    if (!mMasterMute) {
-        char value[PROPERTY_VALUE_MAX];
-        if (mOutDeviceTypeAddrs.empty()) {
-            ALOGD("ro.audio.silent is ignored since no output device is set");
-            return;
-        }
-        if (isSingleDeviceType(outDeviceTypes_l(), AUDIO_DEVICE_OUT_REMOTE_SUBMIX)) {
-            ALOGD("ro.audio.silent will be ignored for threads on AUDIO_DEVICE_OUT_REMOTE_SUBMIX");
-            return;
-        }
-        if (property_get("ro.audio.silent", value, "0") > 0) {
-            char *endptr;
-            unsigned long ul = strtoul(value, &endptr, 0);
-            if (*endptr == '\0' && ul != 0) {
-                ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
-                // The setprop command will not allow a property to be changed after
-                // the first time it is set, so we don't have to worry about un-muting.
-                setMasterMute_l(true);
-            }
-        }
+    if (property_get_bool("ro.audio.silent", false)) {
+        ALOGW("ro.audio.silent is now ignored");
     }
 }
 
@@ -4285,6 +4273,17 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
                 track->updateTeePatches_l();
             }
 
+            // check if traces have been enabled.
+            bool atraceEnabled = ATRACE_ENABLED();
+            if (atraceEnabled != mAtraceEnabled) [[unlikely]] {
+                mAtraceEnabled = atraceEnabled;
+                if (atraceEnabled) {
+                    const auto devices = patchSinksToString(&mPatch);
+                    for (const auto& track : activeTracks) {
+                        track->logRefreshInterval(devices);
+                    }
+                }
+            }
             // signal actual start of output stream when the render position reported by
             // the kernel starts moving.
             if (!mHalStarted && ((isSuspended() && (mBytesWritten != 0)) || (!mStandby
@@ -5275,6 +5274,8 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         fastTrack->mHapticScale = os::HapticScale::none();
         fastTrack->mHapticMaxAmplitude = NAN;
         fastTrack->mGeneration++;
+        snprintf(fastTrack->mTraceName, sizeof(fastTrack->mTraceName),
+                 "%s.0.0.%d", AUDIO_TRACE_PREFIX_AUDIO_TRACK_FRDY, mId);
         state->mFastTracksGen++;
         state->mTrackMask = 1;
         // fast mixer will use the HAL output sink
@@ -5852,6 +5853,9 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                     fastTrack->mHapticScale = track->getHapticScale();
                     fastTrack->mHapticMaxAmplitude = track->getHapticMaxAmplitude();
                     fastTrack->mGeneration++;
+                    snprintf(fastTrack->mTraceName, sizeof(fastTrack->mTraceName),
+                             "%s%s", AUDIO_TRACE_PREFIX_AUDIO_TRACK_FRDY,
+                             track->getTraceSuffix().c_str());
                     state->mTrackMask |= 1 << j;
                     didModify = true;
                     // no acknowledgement required for newly active tracks
@@ -5994,11 +5998,9 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
         }
 
         size_t framesReady = track->framesReady();
-        if (ATRACE_ENABLED()) {
-            // I wish we had formatted trace names
-            std::string traceName("nRdy");
-            traceName += std::to_string(trackId);
-            ATRACE_INT(traceName.c_str(), framesReady);
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INT(std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_NRDY)
+                    .append(track->getTraceSuffix()).c_str(), framesReady);
         }
         if ((framesReady >= minFrames) && track->isReady() &&
                 !track->isPaused() && !track->isTerminated())
@@ -7025,10 +7027,9 @@ PlaybackThread::mixer_state DirectOutputThread::prepareTracks_l(
 
         const size_t framesReady = track->framesReady();
         const int trackId = track->id();
-        if (ATRACE_ENABLED()) {
-            std::string traceName("nRdy");
-            traceName += std::to_string(trackId);
-            ATRACE_INT(traceName.c_str(), framesReady);
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INT(std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_NRDY)
+                    .append(track->getTraceSuffix()).c_str(), framesReady);
         }
         if ((framesReady >= minFrames) && track->isReady() && !track->isPaused() &&
                 !track->isStopping_2() && !track->isStopped())
@@ -7548,6 +7549,11 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
             continue;
         }
 
+        const size_t framesReady = track->framesReady();
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INT(std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_NRDY)
+                    .append(track->getTraceSuffix()).c_str(), framesReady);
+        }
         if (track->isPausePending()) {
             track->pauseAck();
             // It is possible a track might have been flushed or stopped.
@@ -7606,7 +7612,7 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
                 // Do not handle new data in this iteration even if track->framesReady()
                 mixerStatus = MIXER_TRACKS_ENABLED;
             }
-        }  else if (track->framesReady() && track->isReady() &&
+        } else if (framesReady && track->isReady() &&
                 !track->isPaused() && !track->isTerminated() && !track->isStopping_2()) {
             ALOGVV("OffloadThread: track(%d) s=%08x [OK]", track->id(), cblk->mServer);
             if (track->fillingStatus() == IAfTrack::FS_FILLED) {
@@ -7872,6 +7878,7 @@ void DuplicatingThread::threadLoop_sleepTime()
 
 ssize_t DuplicatingThread::threadLoop_write()
 {
+    ATRACE_BEGIN("write");
     for (size_t i = 0; i < outputTracks.size(); i++) {
         const ssize_t actualWritten = outputTracks[i]->write(mSinkBuffer, writeFrames);
 
@@ -7890,6 +7897,7 @@ ssize_t DuplicatingThread::threadLoop_write()
 
         // TODO: Report correction for the other output tracks and show in the dump.
     }
+    ATRACE_END();
     if (mStandby) {
         mThreadMetrics.logBeginInterval();
         mThreadSnapshot.onBegin();
@@ -8249,6 +8257,7 @@ RecordThread::RecordThread(const sp<IAfThreadCallback>& afThreadCallback,
     , mBtNrecSuspended(false)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioIn_%X", id);
+    mFlagsAsString = toString(input->flags);
     mNBLogWriter = afThreadCallback->newWriter_l(kLogSize, mThreadName);
 
     if (mInput->audioHwDev != nullptr) {
@@ -8586,7 +8595,6 @@ reacquire_wakelock:
                     }
                     if (invalidate) {
                         activeTrack->invalidate();
-                        ALOG_ASSERT(fastTrackToRemove == 0);
                         fastTrackToRemove = activeTrack;
                         removeTrack_l(activeTrack);
                         mActiveTracks.remove(activeTrack);
@@ -8602,6 +8610,18 @@ reacquire_wakelock:
             }
 
             mActiveTracks.updatePowerState_l(this);
+
+            // check if traces have been enabled.
+            bool atraceEnabled = ATRACE_ENABLED();
+            if (atraceEnabled != mAtraceEnabled) [[unlikely]] {
+                mAtraceEnabled = atraceEnabled;
+                if (atraceEnabled) {
+                    const auto devices = patchSourcesToString(&mPatch);
+                    for (const auto& track : activeTracks) {
+                        track->logRefreshInterval(devices);
+                    }
+                }
+            }
 
             updateMetadata_l();
 
@@ -10409,13 +10429,13 @@ void MmapThread::configure_l(const audio_attributes_t* attr,
                                                 audio_stream_type_t streamType __unused,
                                                 audio_session_t sessionId,
                                                 const sp<MmapStreamCallback>& callback,
-                                                audio_port_handle_t deviceId,
+                                                const DeviceIdVector& deviceIds,
                                                 audio_port_handle_t portId)
 {
     mAttr = *attr;
     mSessionId = sessionId;
     mCallback = callback;
-    mDeviceId = deviceId;
+    mDeviceIds = deviceIds;
     mPortId = portId;
 }
 
@@ -10508,7 +10528,7 @@ status_t MmapThread::start(const AudioClient& client,
         audio_stream_type_t stream = streamType_l();
         audio_output_flags_t flags =
                 (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_DIRECT);
-        audio_port_handle_t deviceId = mDeviceId;
+        DeviceIdVector deviceIds = mDeviceIds;
         std::vector<audio_io_handle_t> secondaryOutputs;
         bool isSpatialized;
         bool isBitPerfect;
@@ -10519,7 +10539,7 @@ status_t MmapThread::start(const AudioClient& client,
                                             adjAttributionSource,
                                             &config,
                                             flags,
-                                            &deviceId,
+                                            &deviceIds,
                                             &portId,
                                             &secondaryOutputs,
                                             &isSpatialized,
@@ -10535,7 +10555,7 @@ status_t MmapThread::start(const AudioClient& client,
         config.sample_rate = mSampleRate;
         config.channel_mask = mChannelMask;
         config.format = mFormat;
-        audio_port_handle_t deviceId = mDeviceId;
+        audio_port_handle_t deviceId = getFirstDeviceId(mDeviceIds);
         mutex().unlock();
         ret = AudioSystem::getInputForAttr(&localAttr, &io,
                                               RECORD_RIID_INVALID,
@@ -10888,7 +10908,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
 
     // store new device and send to effects
     audio_devices_t type = AUDIO_DEVICE_NONE;
-    audio_port_handle_t deviceId;
+    DeviceIdVector deviceIds;
     AudioDeviceTypeAddrVector sinkDeviceTypeAddrs;
     AudioDeviceTypeAddr sourceDeviceTypeAddr;
     uint32_t numDevices = 0;
@@ -10902,12 +10922,12 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
             type = static_cast<audio_devices_t>(type | patch->sinks[i].ext.device.type);
             sinkDeviceTypeAddrs.emplace_back(patch->sinks[i].ext.device.type,
                     patch->sinks[i].ext.device.address);
+            deviceIds.push_back(patch->sinks[i].id);
         }
-        deviceId = patch->sinks[0].id;
         numDevices = mPatch.num_sinks;
     } else {
         type = patch->sources[0].ext.device.type;
-        deviceId = patch->sources[0].id;
+        deviceIds.push_back(patch->sources[0].id);
         numDevices = mPatch.num_sources;
         sourceDeviceTypeAddr.mType = patch->sources[0].ext.device.type;
         sourceDeviceTypeAddr.setAddress(patch->sources[0].ext.device.address);
@@ -10933,11 +10953,11 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
 
     // For mmap streams, once the routing has changed, they will be disconnected. It should be
     // okay to notify the client earlier before the new patch creation.
-    if (mDeviceId != deviceId) {
+    if (!areDeviceIdsEqual(deviceIds, mDeviceIds)) {
         if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
             // The aaudioservice handle the routing changed event asynchronously. In that case,
             // it is safe to hold the lock here.
-            callback->onRoutingChanged(deviceId);
+            callback->onRoutingChanged(deviceIds);
         }
     }
 
@@ -10957,7 +10977,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
         *handle = AUDIO_PATCH_HANDLE_NONE;
     }
 
-    if (numDevices == 0 || mDeviceId != deviceId) {
+    if (numDevices == 0 || (!areDeviceIdsEqual(deviceIds, mDeviceIds))) {
         if (isOutput()) {
             sendIoConfigEvent_l(AUDIO_OUTPUT_CONFIG_CHANGED);
             mOutDeviceTypeAddrs = sinkDeviceTypeAddrs;
@@ -10967,7 +10987,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
             mInDeviceTypeAddr = sourceDeviceTypeAddr;
         }
         mPatch = *patch;
-        mDeviceId = deviceId;
+        mDeviceIds = deviceIds;
     }
     // Force meteadata update after a route change
     mActiveTracks.setHasChanged();
@@ -11122,7 +11142,7 @@ void MmapThread::checkInvalidTracks_l()
             if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
                 // The aaudioservice handle the routing changed event asynchronously. In that case,
                 // it is safe to hold the lock here.
-                callback->onRoutingChanged(AUDIO_PORT_HANDLE_NONE);
+                callback->onRoutingChanged({});
             } else if (mNoCallbackWarningCount < kMaxNoCallbackWarnings) {
                 ALOGW("Could not notify MMAP stream tear down: no onRoutingChanged callback!");
                 mNoCallbackWarningCount++;
@@ -11184,6 +11204,7 @@ MmapPlaybackThread::MmapPlaybackThread(
       mOutput(output)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioMmapOut_%X", id);
+    mFlagsAsString = toString(output->flags);
     mChannelCount = audio_channel_count_from_out_mask(mChannelMask);
     mMasterVolume = afThreadCallback->masterVolume_l();
     mMasterMute = afThreadCallback->masterMute_l();
@@ -11214,11 +11235,11 @@ void MmapPlaybackThread::configure(const audio_attributes_t* attr,
                                                 audio_stream_type_t streamType,
                                                 audio_session_t sessionId,
                                                 const sp<MmapStreamCallback>& callback,
-                                                audio_port_handle_t deviceId,
+                                                const DeviceIdVector& deviceIds,
                                                 audio_port_handle_t portId)
 {
     audio_utils::lock_guard l(mutex());
-    MmapThread::configure_l(attr, streamType, sessionId, callback, deviceId, portId);
+    MmapThread::configure_l(attr, streamType, sessionId, callback, deviceIds, portId);
     mStreamType = streamType;
 }
 
@@ -11438,18 +11459,8 @@ ThreadBase::MetadataUpdate MmapPlaybackThread::updateMetadata_l()
 
 void MmapPlaybackThread::checkSilentMode_l()
 {
-    if (!mMasterMute) {
-        char value[PROPERTY_VALUE_MAX];
-        if (property_get("ro.audio.silent", value, "0") > 0) {
-            char *endptr;
-            unsigned long ul = strtoul(value, &endptr, 0);
-            if (*endptr == '\0' && ul != 0) {
-                ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
-                // The setprop command will not allow a property to be changed after
-                // the first time it is set, so we don't have to worry about un-muting.
-                setMasterMute_l(true);
-            }
-        }
+    if (property_get_bool("ro.audio.silent", false)) {
+        ALOGW("ro.audio.silent is now ignored");
     }
 }
 
@@ -11537,6 +11548,7 @@ MmapCaptureThread::MmapCaptureThread(
       mInput(input)
 {
     snprintf(mThreadName, kThreadNameLength, "AudioMmapIn_%X", id);
+    mFlagsAsString = toString(input->flags);
     mChannelCount = audio_channel_count_from_in_mask(mChannelMask);
 }
 

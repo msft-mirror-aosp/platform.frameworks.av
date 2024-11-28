@@ -110,10 +110,6 @@ constexpr auto kNoEffectsFactory = "Effects Factory is absent\n"sv;
 
 static constexpr char kAudioServiceName[] = "audio";
 
-// In order to avoid invalidating offloaded tracks each time a Visualizer is turned on and off
-// we define a minimum time during which a global effect is considered enabled.
-static const nsecs_t kMinGlobalEffectEnabletimeNs = seconds(7200);
-
 // Keep a strong reference to media.log service around forever.
 // The service is within our parent process so it can never die in a way that we could observe.
 // These two variables are const after initialization.
@@ -541,7 +537,7 @@ status_t MmapStreamInterface::openMmapStream(MmapStreamInterface::stream_directi
                                              const audio_attributes_t *attr,
                                              audio_config_base_t *config,
                                              const AudioClient& client,
-                                             audio_port_handle_t *deviceId,
+                                             DeviceIdVector *deviceIds,
                                              audio_session_t *sessionId,
                                              const sp<MmapStreamCallback>& callback,
                                              sp<MmapStreamInterface>& interface,
@@ -553,7 +549,7 @@ status_t MmapStreamInterface::openMmapStream(MmapStreamInterface::stream_directi
     status_t ret = NO_INIT;
     if (af != 0) {
         ret = af->openMmapStream(
-                direction, attr, config, client, deviceId,
+                direction, attr, config, client, deviceIds,
                 sessionId, callback, interface, handle);
     }
     return ret;
@@ -563,7 +559,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
                                       const audio_attributes_t *attr,
                                       audio_config_base_t *config,
                                       const AudioClient& client,
-                                      audio_port_handle_t *deviceId,
+                                      DeviceIdVector *deviceIds,
                                       audio_session_t *sessionId,
                                       const sp<MmapStreamCallback>& callback,
                                       sp<MmapStreamInterface>& interface,
@@ -636,7 +632,8 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
                                             &fullConfig,
                                             (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ |
                                                     AUDIO_OUTPUT_FLAG_DIRECT),
-                                            deviceId, &portId, &secondaryOutputs, &isSpatialized,
+                                            deviceIds, &portId, &secondaryOutputs,
+                                            &isSpatialized,
                                             &isBitPerfect,
                                             &volume,
                                             &muted);
@@ -648,12 +645,17 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
         ALOGW_IF(!secondaryOutputs.empty(),
                  "%s does not support secondary outputs, ignoring them", __func__);
     } else {
+        audio_port_handle_t deviceId = getFirstDeviceId(*deviceIds);
         ret = AudioSystem::getInputForAttr(&localAttr, &io,
                                               RECORD_RIID_INVALID,
                                               actualSessionId,
                                               adjAttributionSource,
                                               config,
-                                              AUDIO_INPUT_FLAG_MMAP_NOIRQ, deviceId, &portId);
+                                              AUDIO_INPUT_FLAG_MMAP_NOIRQ, &deviceId, &portId);
+        deviceIds->clear();
+        if (deviceId != AUDIO_PORT_HANDLE_NONE) {
+            deviceIds->push_back(deviceId);
+        }
     }
     if (ret != NO_ERROR) {
         return ret;
@@ -667,7 +669,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
     const sp<IAfMmapThread> thread = mMmapThreads.valueFor(io);
     if (thread != 0) {
         interface = IAfMmapThread::createMmapStreamInterfaceAdapter(thread);
-        thread->configure(&localAttr, streamType, actualSessionId, callback, *deviceId, portId);
+        thread->configure(&localAttr, streamType, actualSessionId, callback, *deviceIds, portId);
         *handle = portId;
         *sessionId = actualSessionId;
         config->sample_rate = thread->sampleRate();
@@ -1166,6 +1168,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
         adjAttributionSource = std::move(validatedAttrSource).unwrapInto();
     }
 
+    DeviceIdVector selectedDeviceIds;
     audio_session_t sessionId = input.sessionId;
     if (sessionId == AUDIO_SESSION_ALLOCATE) {
         sessionId = (audio_session_t) newAudioUniqueId(AUDIO_UNIQUE_ID_USE_SESSION);
@@ -1176,11 +1179,14 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
 
     output.sessionId = sessionId;
     output.outputId = AUDIO_IO_HANDLE_NONE;
-    output.selectedDeviceId = input.selectedDeviceId;
+    if (input.selectedDeviceId != AUDIO_PORT_HANDLE_NONE) {
+        selectedDeviceIds.push_back(input.selectedDeviceId);
+    }
     lStatus = AudioSystem::getOutputForAttr(&localAttr, &output.outputId, sessionId, &streamType,
                                             adjAttributionSource, &input.config, input.flags,
-                                            &output.selectedDeviceId, &portId, &secondaryOutputs,
+                                            &selectedDeviceIds, &portId, &secondaryOutputs,
                                             &isSpatialized, &isBitPerfect, &volume, &muted);
+    output.selectedDeviceIds = selectedDeviceIds;
 
     if (lStatus != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
         ALOGE("createTrack() getOutputForAttr() return error %d or invalid output handle", lStatus);
@@ -5009,11 +5015,6 @@ Exit:
 
 bool AudioFlinger::isNonOffloadableGlobalEffectEnabled_l() const
 {
-    if (mGlobalEffectEnableTime != 0 &&
-            ((systemTime() - mGlobalEffectEnableTime) < kMinGlobalEffectEnabletimeNs)) {
-        return true;
-    }
-
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
         const auto thread = mPlaybackThreads.valueAt(i);
         audio_utils::lock_guard l(thread->mutex());
@@ -5028,8 +5029,6 @@ bool AudioFlinger::isNonOffloadableGlobalEffectEnabled_l() const
 void AudioFlinger::onNonOffloadableGlobalEffectEnable()
 {
     audio_utils::lock_guard _l(mutex());
-
-    mGlobalEffectEnableTime = systemTime();
 
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
         const sp<IAfPlaybackThread> t = mPlaybackThreads.valueAt(i);

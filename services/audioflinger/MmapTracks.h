@@ -73,11 +73,12 @@ public:
         mVolume = volume;
     }
     void setPortMute(bool muted) override {
-        mMuteState.muteFromPortVolume = muted;
+        mMutedFromPort = muted;
     }
     float getPortVolume() const override { return mVolume; }
-    bool getPortMute() const override { return mMuteState.muteFromPortVolume; }
+    bool getPortMute() const override { return mMutedFromPort; }
 
+    std::string trackFlagsAsString() const final { return {}; }
 private:
     DISALLOW_COPY_AND_ASSIGN(MmapTrack);
 
@@ -101,6 +102,7 @@ private:
             /* GUARDED_BY(MmapPlaybackThread::mLock) */;
     mute_state_t mMuteState
             /* GUARDED_BY(MmapPlaybackThread::mLock) */;
+    bool mMutedFromPort;
 
     float mVolume = 0.0f;
 };  // end of Track
