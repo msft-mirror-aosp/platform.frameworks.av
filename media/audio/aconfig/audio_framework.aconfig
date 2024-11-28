@@ -30,6 +30,7 @@ flag {
        "New privileged permission to allow bypassing concurrent audio"
        "capture rules."
     bug: "374751406"
+    is_exported: true
 }
 
 flag {
@@ -82,6 +83,7 @@ flag {
     description: "Feature flag for Dolby AC-4 level 4 AudioFormat encoding."
     is_fixed_read_only: true
     bug: "266537650"
+    is_exported: true
 }
 
 # TODO remove
@@ -158,6 +160,7 @@ flag {
     namespace: "media_audio"
     description: "Playback monitoring flag used when player muted by port volume"
     bug: "319515324"
+    is_exported: true
 }
 
 flag {
@@ -204,6 +207,7 @@ flag {
         "Enable Java and native functions to get"
         "multiple routed device ids"
     bug: "367816690"
+    is_exported: true
 }
 
 flag {
@@ -218,6 +222,7 @@ flag {
     namespace: "media_audio"
     description: "spatializer reports effective channel masks"
     bug: "377582613"
+    is_exported: true
 }
 
 flag {
@@ -225,6 +230,7 @@ flag {
     namespace: "media_audio"
     description: "Support new AudioAttributes usage for speaker cleanup"
     bug: "355050846"
+    is_exported: true
 }
 
 flag {
@@ -232,6 +238,7 @@ flag {
     namespace: "media_audio"
     description: "Surface new API method for returning speaker layout channel mask for devices"
     bug: "337522902"
+    is_exported: true
 }
 
 # TODO remove
