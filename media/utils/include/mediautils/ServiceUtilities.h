@@ -115,7 +115,7 @@ bool modifyPhoneStateAllowed(const AttributionSourceState& attributionSource);
 bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSource);
 bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSource);
 void purgePermissionCache();
-bool mustAnonymizeBluetoothAddress(
+bool mustAnonymizeBluetoothAddressLegacy(
         const AttributionSourceState& attributionSource, const String16& caller);
 void anonymizeBluetoothAddress(char *address);
 
