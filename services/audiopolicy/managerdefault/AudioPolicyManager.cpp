@@ -3013,6 +3013,18 @@ AudioPolicyManager::getInputForAttr(audio_attributes_t attributes,
         }
         device = inputDesc->getDevice();
         ALOGV("%s reusing MMAP input %d for session %d", __FUNCTION__, requestedInput, session);
+        auto permRes = mpClientInterface->checkPermissionForInput(attributionSource, permReq);
+        if (!permRes.has_value()) return base::unexpected {permRes.error()};
+        if (!permRes.value()) {
+            return base::unexpected{Status::fromExceptionCode(
+                    EX_SECURITY, String8::format("%s: %s missing perms for source %d mix %d vdi %d"
+                        "hotword? %d callredir? %d", __func__, attributionSource.toString().c_str(),
+                                                 static_cast<int>(permReq.source),
+                                                 static_cast<int>(permReq.mixType),
+                                                 permReq.virtualDeviceId,
+                                                 permReq.isHotword,
+                                                 permReq.isCallRedir))};
+        }
     } else {
         if (attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX &&
                 extractAddressFromAudioAttributes(attributes).has_value()) {

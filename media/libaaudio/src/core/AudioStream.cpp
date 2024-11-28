@@ -26,6 +26,7 @@
 #include <sys/syscall.h>
 
 #include <aaudio/AAudio.h>
+#include <android-base/strings.h>
 
 #include "AudioStreamBuilder.h"
 #include "AudioStream.h"
@@ -657,6 +658,10 @@ aaudio_stream_state_t AudioStream::getStateExternal() const {
         return AAUDIO_STREAM_STATE_DISCONNECTED;
     }
     return getState();
+}
+
+std::string AudioStream::getTagsAsString() const {
+    return android::base::Join(mTags, AUDIO_ATTRIBUTES_TAGS_SEPARATOR);
 }
 
 void AudioStream::MyPlayerBase::registerWithAudioManager(const android::sp<AudioStream>& parent) {
