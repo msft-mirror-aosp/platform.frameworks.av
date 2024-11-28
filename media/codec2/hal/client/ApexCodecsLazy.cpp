@@ -64,6 +64,11 @@ class ApexCodecsLazyLoader {
 public:
     ApexCodecsLazyLoader() = default;
 
+    static ApexCodecsLazyLoader &Get() {
+        static ::android::base::NoDestructor<ApexCodecsLazyLoader> sLoader;
+        return *sLoader;
+    }
+
     void *getMethodAt(enum MethodIndex index) {
         RWLock::AutoRLock l(mLock);
         if (mInit) {
@@ -79,11 +84,6 @@ public:
     }
 
 private:
-    RWLock mLock;
-    // Table of methods pointers in libapexcodecs APIs.
-    void* mMethods[k_MethodCount];
-    bool mInit{false};
-
     static void* LoadLibapexcodecs(int dlopen_flags) {
         return dlopen("libapexcodecs.so", dlopen_flags);
     }
@@ -144,20 +144,20 @@ private:
         mInit = true;
         return true;
     }
-};
 
-static ApexCodecsLazyLoader &GetLoader() {
-    ::android::base::NoDestructor<ApexCodecsLazyLoader> sLoader;
-    return *sLoader;
-}
+    RWLock mLock;
+    // Table of methods pointers in libapexcodecs APIs.
+    void* mMethods[k_MethodCount];
+    bool mInit{false};
+};
 
 }  // anonymous namespace
 
-#define INVOKE_METHOD(name, returnIfNull, args...)              \
-    do {                                                        \
-        void* method = GetLoader().getMethodAt(k_##name);       \
-        if (!method) return (returnIfNull);                     \
-        return reinterpret_cast<decltype(&name)>(method)(args); \
+#define INVOKE_METHOD(name, returnIfNull, args...)                          \
+    do {                                                                    \
+        void* method = ApexCodecsLazyLoader::Get().getMethodAt(k_##name);   \
+        if (!method) return (returnIfNull);                                 \
+        return reinterpret_cast<decltype(&name)>(method)(args);             \
     } while (0)
 
 //
