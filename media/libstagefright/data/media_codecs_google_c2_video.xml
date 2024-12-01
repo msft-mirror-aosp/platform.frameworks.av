@@ -101,6 +101,7 @@
             <Limit name="bitrate" range="1-240000000"/>
             <Limit name="block-size" value="16x16" />
             <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
+            <Feature name="dynamic-color-aspects" />
             <Attribute name="software-codec"/>
          </MediaCodec>
     </Decoders>
