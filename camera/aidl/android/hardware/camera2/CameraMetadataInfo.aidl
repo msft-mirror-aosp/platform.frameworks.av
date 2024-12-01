@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,12 @@
  * limitations under the License.
  */
 
-/**
- * This is test support for AAudio.
- */
-#ifndef AAUDIO_AAUDIO_TESTING_H
-#define AAUDIO_AAUDIO_TESTING_H
+package android.hardware.camera2;
 
-#include <aaudio/AAudio.h>
+import android.hardware.camera2.impl.CameraMetadataNative;
 
-/************************************************************************************
- * These MMap functions were moved to AAudio.h
- ************************************************************************************/
-
-#endif //AAUDIO_AAUDIO_TESTING_H
-
-/** @} */
+/** @hide */
+union CameraMetadataInfo {
+    long fmqSize;
+    CameraMetadataNative metadata;
+}

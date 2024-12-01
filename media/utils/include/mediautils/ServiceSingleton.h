@@ -175,10 +175,14 @@ public:
                 if (service_new) {
                     mValid = true;
                     service = std::move(service_new);
-                    setDeathNotifier_l<Service>();
-                    auto service_fixed = service;  // we're releasing the mutex.
+                    // service is a reference, so we copy to service_fixed as
+                    // we're releasing the mutex.
+                    const auto service_fixed = service;
                     ul.unlock();
                     traits->onNewService(interfaceFromBase<Service>(service_fixed));
+                    ul.lock();
+                    setDeathNotifier_l<Service>(service_fixed);
+                    ul.unlock();
                     mCv.notify_all();
                     return service_fixed;
                 }
@@ -297,8 +301,10 @@ private:
                     if (originalService != service) {
                         mService = service;
                         mValid = true;
-                        setDeathNotifier_l<Service>();
+                        ul.unlock();
                         traits->onNewService(service);
+                        ul.lock();
+                        setDeathNotifier_l<Service>(service);
                     }
                     ul.unlock();
                     mCv.notify_all();
@@ -310,8 +316,12 @@ private:
 
     // sets the death notifier for mService (mService must be non-null).
     template <typename Service>
-    void setDeathNotifier_l() REQUIRES(mMutex) {
-        auto base = std::get<BaseInterfaceType<Service>>(mService);
+    void setDeathNotifier_l(const BaseInterfaceType<Service>& base) REQUIRES(mMutex) {
+        if (base != std::get<BaseInterfaceType<Service>>(mService)) {
+            ALOGW("%s: service has changed for %s, skipping death notification registration",
+                    __func__, toString(Service::descriptor).c_str());
+            return;
+        }
         auto service = interfaceFromBase<Service>(base);
         const auto binder = binderFromInterface(service);
         if (binder.get()) {
@@ -326,6 +336,8 @@ private:
                         }
                         traits->onServiceDied(service);
                     });
+            // Implementation detail: if the service has already died,
+            // we do not call the death notification, but log the issue here.
             ALOGW_IF(!mDeathNotificationHandle, "%s: cannot register death notification %s"
                                                 " (already died?)",
                     __func__, toString(Service::descriptor).c_str());
