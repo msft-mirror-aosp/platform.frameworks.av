@@ -43,7 +43,6 @@ class AsyncCallbackThread;
 
 class ThreadBase : public virtual IAfThreadBase, public Thread {
 public:
-    static const char *threadTypeToString(type_t type);
 
     // ThreadBase_ThreadLoop is a virtual mutex (always nullptr) that
     // guards methods and variables that ONLY run and are accessed
@@ -400,6 +399,8 @@ public:
         }
     }
 
+    std::string flagsAsString() const final {  return mFlagsAsString; }
+
     sp<IAfEffectHandle> createEffect_l(
                                     const sp<Client>& client,
                                     const sp<media::IEffectClient>& effectClient,
@@ -680,6 +681,9 @@ protected:
                 const sp<IAfThreadCallback>  mAfThreadCallback;
                 ThreadMetrics           mThreadMetrics;
                 const bool              mIsOut;
+
+    std::string mFlagsAsString;                                     // set in constructor.
+    bool mAtraceEnabled GUARDED_BY(ThreadBase_ThreadLoop) = false;  // checked in threadLoop.
 
     // mThreadBusy is checked under the ThreadBase_Mutex to ensure that
     // TrackHandle operations do not proceed while the ThreadBase is busy

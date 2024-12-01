@@ -83,7 +83,7 @@ cc_library {
 }
 
 cc_test {
-    name: "libaudiopermission_test",
+    name: "libaudiopermission_tests",
     host_supported: true,
     defaults: [
         "libmediautils_tests_config",
@@ -100,10 +100,7 @@ cc_test {
         "liblog",
         "libutils",
     ],
-    srcs: [
-        "tests/NativePermissionControllerTest.cpp",
-        "tests/ValidatedAttributionSourceStateTest.cpp",
-    ],
+    srcs: ["tests/*.cpp"],
     test_options: {
         unit_test: true,
     },

@@ -2571,6 +2571,34 @@ AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapPolicy(
 AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapExclusivePolicy(
         AAudio_DeviceType device, aaudio_direction_t direction) __INTRODUCED_IN(36);
 
+/**
+ * Control whether AAudioStreamBuilder_openStream() will use the new MMAP data path
+ * or the older "Legacy" data path.
+ *
+ * This will only affect the current process.
+ *
+ * If unspecified then the policy will be based on system properties or configuration.
+ *
+ * @param policy {@link #AAUDIO_UNSPECIFIED}, {@link #AAUDIO_POLICY_NEVER},
+ *               {@link #AAUDIO_POLICY_AUTO}, or {@link #AAUDIO_POLICY_ALWAYS}
+ * @return AAUDIO_OK or a negative error
+ */
+AAUDIO_API aaudio_result_t AAudio_setMMapPolicy(aaudio_policy_t policy) __INTRODUCED_IN(36);
+
+/**
+ * Get the current MMAP policy set by AAudio_setMMapPolicy().
+ *
+ * @return current policy or {@link #AAUDIO_UNSPECIFIED} if it is never set.
+ */
+AAUDIO_API aaudio_policy_t AAudio_getMMapPolicy() __INTRODUCED_IN(36);
+
+/**
+ * Return true if the stream uses the MMAP data path versus the legacy path.
+ *
+ * @return true if the stream uses the MMAP data path
+ */
+AAUDIO_API bool AAudioStream_isMMapUsed(AAudioStream* _Nonnull stream) __INTRODUCED_IN(36);
+
 #ifdef __cplusplus
 }
 #endif

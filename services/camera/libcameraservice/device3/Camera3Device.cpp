@@ -3882,12 +3882,6 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                             it != captureRequest->mSettingsList.end(); it++) {
                         if (parent->mUHRCropAndMeteringRegionMappers.find(it->cameraId) ==
                                 parent->mUHRCropAndMeteringRegionMappers.end()) {
-                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
-                                SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
-                                        "%d: %s (%d)", halRequest->frame_number, strerror(-res),
-                                        res);
-                                return INVALID_OPERATION;
-                            }
                             continue;
                         }
 
@@ -3902,12 +3896,6 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                                 return INVALID_OPERATION;
                             }
                             captureRequest->mUHRCropAndMeteringRegionsUpdated = true;
-                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
-                                SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
-                                        "%d: %s (%d)", halRequest->frame_number, strerror(-res),
-                                        res);
-                                return INVALID_OPERATION;
-                            }
                         }
                     }
 
@@ -3981,7 +3969,13 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                                     "%d: %s (%d)", halRequest->frame_number, strerror(-res), res);
                             return INVALID_OPERATION;
                         }
-
+                        res = removeFwkOnlyKeys(&(it->metadata));
+                        if (res != OK) {
+                            SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
+                                    "%d: %s (%d)", halRequest->frame_number, strerror(-res),
+                                    res);
+                            return INVALID_OPERATION;
+                        }
                         if (!parent->mSupportsExtensionKeys) {
                             res = filterExtensionKeys(&it->metadata);
                             if (res != OK) {
