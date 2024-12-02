@@ -696,7 +696,7 @@ DeviceVector AudioPolicyManager::selectBestRxSinkDevicesForCall(bool fromCache)
         // RX Telephony and Rx sink devices are declared by Primary Audio HAL
         if (isPrimaryModule(telephonyRxModule) && (telephonyRxModule->getHalVersionMajor() >= 3) &&
                 telephonyRxModule->supportsPatch(rxSourceDevice, rxSinkDevice)) {
-            ALOGW("%s() device %s using HW Bridge", __func__, rxSinkDevice->toString().c_str());
+            ALOGI("%s() device %s using HW Bridge", __func__, rxSinkDevice->toString().c_str());
             return DeviceVector(rxSinkDevice);
         }
     }
@@ -862,8 +862,8 @@ void AudioPolicyManager::connectTelephonyRxAudioSource(uint32_t delayMs)
                                        true /*internal*/, true /*isCallRx*/, delayMs);
     ALOGE_IF(status != OK, "%s: failed to start audio source (%d)", __func__, status);
     mCallRxSourceClient = mAudioSources.valueFor(portId);
-    ALOGV("%s portdID %d between source %s and sink %s", __func__, portId,
-        mCallRxSourceClient->srcDevice()->toString().c_str(),
+    ALOGV_IF(mCallRxSourceClient != nullptr, "%s portdID %d between source %s and sink %s",
+        __func__, portId, mCallRxSourceClient->srcDevice()->toString().c_str(),
         mCallRxSourceClient->sinkDevice()->toString().c_str());
     ALOGE_IF(mCallRxSourceClient == nullptr,
              "%s failed to start Telephony Rx AudioSource", __func__);
