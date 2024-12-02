@@ -73,6 +73,7 @@ using com::android::media::permission::PermissionEnum::CAPTURE_MEDIA_OUTPUT;
 using com::android::media::permission::PermissionEnum::CAPTURE_TUNER_AUDIO_INPUT;
 using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_ROUTING;
 using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_SETTINGS;
+using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_SETTINGS_PRIVILEGED;
 using com::android::media::permission::PermissionEnum::MODIFY_DEFAULT_AUDIO_EFFECTS;
 using com::android::media::permission::PermissionEnum::MODIFY_PHONE_STATE;
 using com::android::media::permission::PermissionEnum::RECORD_AUDIO;
@@ -439,6 +440,16 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
               : modifyAudioRoutingAllowed())) {
             ALOGE("%s: permission denied: SPEAKER_CLEANUP not allowed for uid %d pid %d",
                     __func__, attributionSource.uid, attributionSource.pid);
+            return binderStatusFromStatusT(PERMISSION_DENIED);
+        }
+    }
+
+    if (strlen(attr.tags) != 0) {
+        if (!(audioserver_permissions() ?
+              CHECK_PERM(MODIFY_AUDIO_SETTINGS_PRIVILEGED, attributionSource.uid)
+              : modifyAudioSettingsPrivilegedAllowed(attributionSource))) {
+            ALOGE("%s: permission denied: audio attributes tags not allowed for uid %d pid %d",
+                  __func__, attributionSource.uid, attributionSource.pid);
             return binderStatusFromStatusT(PERMISSION_DENIED);
         }
     }
