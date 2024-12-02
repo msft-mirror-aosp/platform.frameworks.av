@@ -1721,8 +1721,12 @@ typedef void (*AAudioStream_presentationEndCallback)(AAudioStream* _Nonnull stre
  * audio hardware) have been played.
  *
  * The presentation end callback must be used together with the data callback.
- * The presentation edn callback won't be called if the stream is closed before all the data
+ * The presentation end callback won't be called if the stream is closed before all the data
  * is played.
+ *
+ * The callback function will be called from the same thread as the data callback thread,
+ * which is a real-time thread owned by audio framework.
+ * The callback function will not be called after AAudioStream_close() is called.
  *
  * Available since API level 36.
  *
