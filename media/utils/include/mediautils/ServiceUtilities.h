@@ -110,12 +110,13 @@ bool modifyAudioRoutingAllowed();
 bool modifyAudioRoutingAllowed(const AttributionSourceState& attributionSource);
 bool modifyDefaultAudioEffectsAllowed();
 bool modifyDefaultAudioEffectsAllowed(const AttributionSourceState& attributionSource);
+bool modifyAudioSettingsPrivilegedAllowed(const AttributionSourceState& attributionSource);
 bool dumpAllowed();
 bool modifyPhoneStateAllowed(const AttributionSourceState& attributionSource);
 bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSource);
 bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSource);
 void purgePermissionCache();
-bool mustAnonymizeBluetoothAddress(
+bool mustAnonymizeBluetoothAddressLegacy(
         const AttributionSourceState& attributionSource, const String16& caller);
 void anonymizeBluetoothAddress(char *address);
 
