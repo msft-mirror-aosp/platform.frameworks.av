@@ -273,3 +273,10 @@ flag {
         purpose: PURPOSE_BUGFIX
     }
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "desktop_effects"
+    description: "Applies system controlled effects targetting video conferencing"
+    bug: "376797335"
+}
