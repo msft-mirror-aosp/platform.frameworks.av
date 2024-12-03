@@ -85,6 +85,11 @@ public:
     void onBufferAttached(uint32_t generation);
 
     /**
+     * Retrieve frame event history from the crurrent surface if any.
+     */
+    void pollForRenderedFrames(::android::FrameEventHistoryDelta* delta);
+
+    /**
      * Allocates a buffer.
      *
      * @param   width             width of the requested buffer.

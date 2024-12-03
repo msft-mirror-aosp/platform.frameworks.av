@@ -3407,7 +3407,11 @@ uint64_t Codec2Client::Component::configConsumerUsage(
 
 void Codec2Client::Component::pollForRenderedFrames(FrameEventHistoryDelta* delta) {
     if (mAidlBase) {
-        // TODO b/311348680
+        std::shared_ptr<AidlGraphicBufferAllocator> gba =
+                mGraphicBufferAllocators->current();
+        if (gba) {
+            gba->pollForRenderedFrames(delta);
+        }
         return;
     }
     mOutputBufferQueue->pollForRenderedFrames(delta);
