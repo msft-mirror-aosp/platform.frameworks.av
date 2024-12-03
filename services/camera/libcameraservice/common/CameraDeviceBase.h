@@ -44,10 +44,6 @@ namespace android {
 
 namespace camera3 {
 
-// TODO: Remove this once the GFX native dataspace
-// dependencies are available
-enum { HEIC_ULTRAHDR, ADATASPACE_HEIF_ULTRAHDR = 0x1006 };
-
 typedef enum camera_stream_configuration_mode {
     CAMERA_STREAM_CONFIGURATION_NORMAL_MODE = 0,
     CAMERA_STREAM_CONFIGURATION_CONSTRAINED_HIGH_SPEED_MODE = 1,
