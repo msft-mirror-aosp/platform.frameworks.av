@@ -1064,7 +1064,7 @@ namespace {
     // Use '01' for LSB bits 0 and 1 as Bluetooth MAC addresses are never multicast
     // and universaly administered
     constexpr std::array<uint8_t, 4> BTANON_PREFIX {0xFD, 0xFF, 0xFF, 0xFF};
-    // Keep sync with ServiceUtilities.cpp mustAnonymizeBluetoothAddress
+    // Keep sync with ServiceUtilities.cpp anonymizeBluetoothAddress
     constexpr const char * BTANON_PREFIX_STR = "XX:XX:XX:XX:";
 }
 
