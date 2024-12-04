@@ -1054,6 +1054,7 @@ bool HeicCompositeStream::getNextReadyInputLocked(int64_t *frameNumber /*out*/) 
             }
             if (it.second.gainmapFormat == nullptr && mGainmapFormat != nullptr){
                 it.second.gainmapFormat = mGainmapFormat->dup();
+                it.second.gainmapFormat->setInt32("gainmap", 1);
             }
             newInputAvailable = true;
             break;
@@ -1410,10 +1411,12 @@ status_t HeicCompositeStream::generateBaseImageAndGainmap(InputFrame &inputFrame
         ALOGE("%s: Failed HDR gainmap: %d", __FUNCTION__, res.error_code);
         return BAD_VALUE;
     }
-    // Ensure the gaimap U/V planes are all 0
+    // We can only generate a single channel gainmap at the moment. However only
+    // multi channel HEVC encoding (like YUV420) is required. Set the extra U/V
+    // planes to 128 to avoid encoding any actual color data.
     inputFrame.gainmapChroma = std::make_unique<uint8_t[]>(
             inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
-    memset(inputFrame.gainmapChroma.get(), 0, inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
+    memset(inputFrame.gainmapChroma.get(), 128, inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
 
     ultrahdr::uhdr_gainmap_metadata_frac iso_secondary_metadata;
     res = ultrahdr::uhdr_gainmap_metadata_frac::gainmapMetadataFloatToFraction(
@@ -1435,6 +1438,9 @@ status_t HeicCompositeStream::generateBaseImageAndGainmap(InputFrame &inputFrame
                 res.error_code);
         return BAD_VALUE;
     }
+    // 6.6.2.4.2 of ISO/IEC 23008-12:2024 expects the ISO 21496-1 gainmap to be
+    // preceded by an u8 version equal to 0
+    inputFrame.isoGainmapMetadata.insert(inputFrame.isoGainmapMetadata.begin(), 0);
 
     inputFrame.gainmapImage = std::make_unique<CpuConsumer::LockedBuffer>();
     *inputFrame.gainmapImage = inputFrame.yuvBuffer;

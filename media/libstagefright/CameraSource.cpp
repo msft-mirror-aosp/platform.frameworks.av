@@ -157,6 +157,7 @@ status_t CameraSource::isCameraAvailable(
         clientAttribution.uid = clientUid;
         clientAttribution.deviceId = kDefaultDeviceId;
         clientAttribution.packageName = clientName;
+        clientAttribution.token = sp<BBinder>::make();
 
         mCamera = Camera::connect(cameraId, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
