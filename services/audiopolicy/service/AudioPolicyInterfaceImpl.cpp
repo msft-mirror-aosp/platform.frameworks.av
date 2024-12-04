@@ -445,9 +445,18 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
     }
 
     if (strlen(attr.tags) != 0) {
-        if (!(audioserver_permissions() ?
-              CHECK_PERM(MODIFY_AUDIO_SETTINGS_PRIVILEGED, attributionSource.uid)
-              : modifyAudioSettingsPrivilegedAllowed(attributionSource))) {
+        const bool audioAttributesTagsAllowed = audioserver_permissions() ? (
+                CHECK_PERM(MODIFY_AUDIO_SETTINGS_PRIVILEGED, attributionSource.uid) ||
+                CHECK_PERM(MODIFY_AUDIO_ROUTING, attributionSource.uid) ||
+                CHECK_PERM(CALL_AUDIO_INTERCEPTION, attributionSource.uid) ||
+                CHECK_PERM(CAPTURE_MEDIA_OUTPUT, attributionSource.uid) ||
+                CHECK_PERM(CAPTURE_VOICE_COMMUNICATION_OUTPUT, attributionSource.uid))
+                : (modifyAudioSettingsPrivilegedAllowed(attributionSource) ||
+                   modifyAudioRoutingAllowed() ||
+                   callAudioInterceptionAllowed(attributionSource) ||
+                   captureMediaOutputAllowed(attributionSource) ||
+                   captureVoiceCommunicationOutputAllowed(attributionSource));
+        if (!audioAttributesTagsAllowed) {
             ALOGE("%s: permission denied: audio attributes tags not allowed for uid %d pid %d",
                   __func__, attributionSource.uid, attributionSource.pid);
             return binderStatusFromStatusT(PERMISSION_DENIED);
