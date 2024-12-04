@@ -3342,6 +3342,49 @@ TEST_F(AudioPolicyManagerPhoneTest, InitSuccess) {
     // SetUp must finish with no assertions.
 }
 
+TEST_F(AudioPolicyManagerPhoneTest, Dump) {
+    dumpToLog();
+}
+
+TEST_F(AudioPolicyManagerPhoneTest, NoPatchChangesDuringAlarmPlayback) {
+    audio_port_handle_t alarmPortId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t alarmOutput = AUDIO_IO_HANDLE_NONE;
+    {
+        // Uses STRATEGY_SONIFICATION, routed to AUDIO_DEVICE_OUT_SPEAKER_SAFE.
+        audio_attributes_t attr = {
+            .content_type = AUDIO_CONTENT_TYPE_UNKNOWN,
+            .usage = AUDIO_USAGE_ALARM,
+        };
+        audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+        ASSERT_NO_FATAL_FAILURE(getOutputForAttr(&selectedDeviceId, AUDIO_FORMAT_PCM_16_BIT,
+                        AUDIO_CHANNEL_OUT_STEREO, 48000,
+                        AUDIO_OUTPUT_FLAG_NONE,
+                        &alarmOutput, &alarmPortId, attr));
+        EXPECT_EQ(NO_ERROR, mManager->startOutput(alarmPortId));
+    }
+    const audio_patch lastPatchBefore = *(mClient->getLastAddedPatch());
+
+    {
+        // Uses STRATEGY_MEDIA, routed to AUDIO_DEVICE_OUT_SPEAKER.
+        audio_attributes_t attr = {
+            .content_type = AUDIO_CONTENT_TYPE_UNKNOWN,
+            .usage = AUDIO_USAGE_MEDIA,
+        };
+        audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+        audio_port_handle_t notifPortId = AUDIO_PORT_HANDLE_NONE;
+        audio_io_handle_t notifOutput = AUDIO_IO_HANDLE_NONE;
+        ASSERT_NO_FATAL_FAILURE(getOutputForAttr(&selectedDeviceId, AUDIO_FORMAT_PCM_16_BIT,
+                        AUDIO_CHANNEL_OUT_STEREO, 48000,
+                        AUDIO_OUTPUT_FLAG_NONE,
+                        &notifOutput, &notifPortId, attr));
+        EXPECT_EQ(NO_ERROR, mManager->startOutput(notifPortId));
+    }
+    dumpToLog();
+    const audio_patch lastPatchAfter = *(mClient->getLastAddedPatch());
+    EXPECT_TRUE(audio_patches_are_equal(&lastPatchBefore, &lastPatchAfter)) <<
+            "Unexpected change in patches detected";
+}
+
 enum {
     MIX_PORT_ATTR_EXPECTED_NAME_PARAMETER,
     MIX_PORT_ATTR_EXPECTED_NAME_WITH_DBFM_PARAMETER,
