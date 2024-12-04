@@ -2015,7 +2015,7 @@ Status AudioPolicyService::registerPolicyMixes(const std::vector<media::AudioMix
 
     if (needCaptureMediaOutput && !(audioserver_permissions() ?
                 CHECK_PERM(CAPTURE_MEDIA_OUTPUT, attributionSource.uid)
-                : modifyAudioRoutingAllowed())) {
+                : captureMediaOutputAllowed(attributionSource))) {
         return binderStatusFromStatusT(PERMISSION_DENIED);
     }
 
