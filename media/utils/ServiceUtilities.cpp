@@ -544,7 +544,7 @@ bool checkBluetoothPermission(const AttributionSourceState& attr) {
  * @param caller string identifying the caller for logging.
  * @return true if the MAC addresses must be anonymized, false otherwise.
  */
-bool mustAnonymizeBluetoothAddressLegacy(
+bool mustAnonymizeBluetoothAddress(
         const AttributionSourceState& attributionSource, const String16&) {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     bool res;
