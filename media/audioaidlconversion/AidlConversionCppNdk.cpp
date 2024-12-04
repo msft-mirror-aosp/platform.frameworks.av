@@ -803,6 +803,42 @@ const detail::AudioFormatPairs& getAudioFormatPairs() {
             {// Note: not in the IANA registry.
              AUDIO_FORMAT_APTX_ADAPTIVE_R4,
              make_AudioFormatDescription("audio/vnd.qcom.aptx.adaptive.r4")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_SIMPLE_OPUS, make_AudioFormatDescription(
+                     std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.opus")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_SIMPLE_AAC, make_AudioFormatDescription(
+                     std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.aac")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_SIMPLE_FLAC, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.flac")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_SIMPLE_PCM, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.pcm")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_OPUS, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.opus")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_AAC, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.aac")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_FLAC, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.flac")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_PCM, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.pcm")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_ENHANCED_OPUS, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.opus")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_ENHANCED_AAC, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.aac")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_ENHANCED_FLAC, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.flac")},
+            {// Note: not in the IANA registry.
+             AUDIO_FORMAT_IAMF_BASE_ENHANCED_PCM, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.pcm")},
     }};
     return pairs;
 }
@@ -1064,7 +1100,7 @@ namespace {
     // Use '01' for LSB bits 0 and 1 as Bluetooth MAC addresses are never multicast
     // and universaly administered
     constexpr std::array<uint8_t, 4> BTANON_PREFIX {0xFD, 0xFF, 0xFF, 0xFF};
-    // Keep sync with ServiceUtilities.cpp anonymizeBluetoothAddress
+    // Keep sync with ServiceUtilities.cpp mustAnonymizeBluetoothAddress
     constexpr const char * BTANON_PREFIX_STR = "XX:XX:XX:XX:";
 }
 
