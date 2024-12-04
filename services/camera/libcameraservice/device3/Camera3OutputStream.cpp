@@ -403,7 +403,8 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
         // Fix CameraBlob id type discrepancy between HIDL and AIDL, details : http://b/229688810
         if (getFormat() == HAL_PIXEL_FORMAT_BLOB && (getDataSpace() == HAL_DATASPACE_V0_JFIF ||
                     (getDataSpace() ==
-                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
+                     static_cast<android_dataspace_t>(
+                         aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) ||
                     (getDataSpace() ==
                      static_cast<android_dataspace_t>(
                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R)))) {

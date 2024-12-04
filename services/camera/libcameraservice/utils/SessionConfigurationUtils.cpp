@@ -177,7 +177,7 @@ bool roundBufferDimensionNearest(int32_t width, int32_t height,
     bool isJpegRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R));
     bool isHeicUltraHDRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
-                ADATASPACE_HEIF_ULTRAHDR));
+                ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR));
     camera_metadata_ro_entry streamConfigs =
             (isJpegRDataSpace) ? info.find(jpegRSizesTag) :
             (isHeicUltraHDRDataSpace) ? info.find(heicUltraHDRSizesTag) :
@@ -241,7 +241,8 @@ bool is10bitCompatibleFormat(int32_t format, android_dataspace_t dataSpace) {
             if (dataSpace == static_cast<android_dataspace_t>(
                         ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
                 return true;
-            } else if (dataSpace == static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) {
+            } else if (dataSpace == static_cast<android_dataspace_t>(
+                        ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) {
                 return true;
             }
 
@@ -353,8 +354,9 @@ bool isColorSpaceSupported(int32_t colorSpace, int32_t format, android_dataspace
                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
         format64 = static_cast<int64_t>(PublicFormat::JPEG_R);
     } else if (format == HAL_PIXEL_FORMAT_BLOB && dataSpace ==
-            static_cast<android_dataspace>(ADATASPACE_HEIF_ULTRAHDR)) {
-        format64 = static_cast<int64_t>(HEIC_ULTRAHDR);
+            static_cast<android_dataspace>(
+                ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) {
+        format64 = static_cast<int64_t>(PublicFormat::HEIC_ULTRAHDR);
     }
 
     camera_metadata_ro_entry_t entry =

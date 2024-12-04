@@ -60,8 +60,6 @@ struct C2SoftApvEnc final : public SimpleC2Component {
                               const std::unique_ptr<C2Work>& work);
     void setParams(oapve_param_t& param);
     int32_t getQpFromQuality(int quality);
-    C2Config::level_t decisionApvLevel(int32_t width, int32_t height, int32_t fps, int32_t bitrate,
-                                       int32_t band);
 
     void showEncoderParams(oapve_cdesc_t* cdsc);
 
