@@ -125,6 +125,11 @@ public:
             const ::android::IGraphicBufferProducer::QueueBufferInput& input,
             ::android::IGraphicBufferProducer::QueueBufferOutput *output);
 
+    /**
+     * Notify stop()/release() is in progress.
+     */
+    void onRequestStop();
+
     ~GraphicBufferAllocator();
 
     /**

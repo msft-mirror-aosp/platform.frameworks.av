@@ -119,6 +119,10 @@ c2_status_t GraphicBufferAllocator::displayBuffer(
     return mGraphicsTracker->render(block, input, output);
 }
 
+void GraphicBufferAllocator::onRequestStop() {
+    mGraphicsTracker->onRequestStop();
+}
+
 GraphicBufferAllocator::~GraphicBufferAllocator() {}
 
 std::shared_ptr<GraphicBufferAllocator> GraphicBufferAllocator::CreateGraphicBufferAllocator(
