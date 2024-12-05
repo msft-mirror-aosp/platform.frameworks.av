@@ -163,6 +163,7 @@ public:
     virtual audio_channel_mask_t mixerChannelMask() const = 0;
     virtual audio_format_t format() const = 0;
     virtual uint32_t channelCount() const = 0;
+    virtual std::string flagsAsString() const = 0;
 
     // Called by AudioFlinger::frameCount(audio_io_handle_t output) and effects,
     // and returns the [normal mix] buffer's frame count.
@@ -661,7 +662,7 @@ public:
             audio_stream_type_t streamType,
             audio_session_t sessionId,
             const sp<MmapStreamCallback>& callback,
-            audio_port_handle_t deviceId,
+            const DeviceIdVector& deviceIds,
             audio_port_handle_t portId) EXCLUDES_ThreadBase_Mutex = 0;
     virtual void disconnect() EXCLUDES_ThreadBase_Mutex = 0;
 

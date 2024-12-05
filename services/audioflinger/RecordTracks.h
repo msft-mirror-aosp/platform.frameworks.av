@@ -98,6 +98,8 @@ public:
         return mResamplerBufferProvider;
     }
 
+    std::string trackFlagsAsString() const final { return toString(mFlags); }
+
 private:
     DISALLOW_COPY_AND_ASSIGN(RecordTrack);
 
