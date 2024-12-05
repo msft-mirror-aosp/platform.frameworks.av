@@ -2595,11 +2595,11 @@ status_t StagefrightRecorder::setInputDevice(audio_port_handle_t deviceId) {
     return NO_ERROR;
 }
 
-status_t StagefrightRecorder::getRoutedDeviceId(audio_port_handle_t* deviceId) {
-    ALOGV("getRoutedDeviceId");
+status_t StagefrightRecorder::getRoutedDeviceIds(DeviceIdVector& deviceIds) {
+    ALOGV("getRoutedDeviceIds");
 
     if (mAudioSourceNode != 0) {
-        status_t status = mAudioSourceNode->getRoutedDeviceId(deviceId);
+        status_t status = mAudioSourceNode->getRoutedDeviceIds(deviceIds);
         return status;
     }
     return NO_INIT;

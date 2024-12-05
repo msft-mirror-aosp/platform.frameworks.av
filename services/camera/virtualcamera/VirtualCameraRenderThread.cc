@@ -223,21 +223,6 @@ std::chrono::nanoseconds getMaxFrameDuration(
       static_cast<uint64_t>(1e9 / VirtualCameraDevice::kMinFps));
 }
 
-class FrameAvailableListenerProxy : public ConsumerBase::FrameAvailableListener {
- public:
-  FrameAvailableListenerProxy(std::function<void()> callback)
-      : mOnFrameAvailableCallback(callback) {
-  }
-
-  virtual void onFrameAvailable(const BufferItem&) override {
-    ALOGV("%s: onFrameAvailable", __func__);
-    mOnFrameAvailableCallback();
-  }
-
- private:
-  std::function<void()> mOnFrameAvailableCallback;
-};
-
 }  // namespace
 
 CaptureRequestBuffer::CaptureRequestBuffer(int streamId, int bufferId,
@@ -383,10 +368,8 @@ void VirtualCameraRenderThread::threadLoop() {
       EglTextureProgram::TextureFormat::RGBA);
   mEglSurfaceTexture = std::make_unique<EglSurfaceTexture>(
       mInputSurfaceSize.width, mInputSurfaceSize.height);
-  sp<FrameAvailableListenerProxy> frameAvailableListener =
-      sp<FrameAvailableListenerProxy>::make(
-          [this]() { requestTextureUpdate(); });
-  mEglSurfaceTexture->setFrameAvailableListener(frameAvailableListener);
+  mEglSurfaceTexture->setFrameAvailableListener(
+      [this]() { requestTextureUpdate(); });
 
   mInputSurfacePromise.set_value(mEglSurfaceTexture->getSurface());
 
@@ -524,16 +507,18 @@ std::chrono::nanoseconds VirtualCameraRenderThread::getSurfaceTimestamp(
     std::chrono::nanoseconds timeSinceLastFrame) {
   std::chrono::nanoseconds surfaceTimestamp = mEglSurfaceTexture->getTimestamp();
   uint64_t lastSurfaceTimestamp = mLastSurfaceTimestampNanoseconds.load();
-  if (surfaceTimestamp.count() < 0 ||
-      surfaceTimestamp.count() == lastSurfaceTimestamp) {
-    if (lastSurfaceTimestamp > 0) {
-      // The timestamps were provided by the producer but we are
-      // repeating the last frame, so we increase the previous timestamp by
-      // the elapsed time sinced its capture, otherwise the camera framework
-      // will discard the frame.
-      surfaceTimestamp = std::chrono::nanoseconds(lastSurfaceTimestamp +
-                                                  timeSinceLastFrame.count());
-    }
+  if (lastSurfaceTimestamp > 0 &&
+      surfaceTimestamp.count() <= lastSurfaceTimestamp) {
+    // The timestamps were provided by the producer but we are
+    // repeating the last frame, so we increase the previous timestamp by
+    // the elapsed time sinced its capture, otherwise the camera framework
+    // will discard the frame.
+    surfaceTimestamp = std::chrono::nanoseconds(lastSurfaceTimestamp +
+                                                timeSinceLastFrame.count());
+    ALOGI(
+        "Surface's timestamp is stall. Artificially increasing the surface "
+        "timestamp by %lld",
+        timeSinceLastFrame.count());
   }
   mLastSurfaceTimestampNanoseconds.store(surfaceTimestamp.count(),
                                          std::memory_order_relaxed);

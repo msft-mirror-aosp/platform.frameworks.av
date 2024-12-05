@@ -58,10 +58,4 @@ cc_fuzz {
         users: "multi_user",
         fuzzed_code_usage: "shipped",
     },
-    sanitize: {
-        misc_undefined: [
-            "signed-integer-overflow",
-            "unsigned-integer-overflow",
-        ],
-    },
 }

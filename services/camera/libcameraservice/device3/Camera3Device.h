@@ -195,6 +195,19 @@ class Camera3Device :
 
     status_t deleteStream(int id) override;
 
+    virtual status_t beginConfigure() override {return OK;};
+
+    virtual status_t getSharedStreamId(const OutputConfiguration& /*config*/,
+            int* /*streamId*/) override {return INVALID_OPERATION;};
+
+    virtual status_t addSharedSurfaces(int /*streamId*/,
+            const std::vector<android::camera3::OutputStreamInfo>& /*outputInfo*/,
+            const std::vector<SurfaceHolder>& /*surfaces*/,
+            std::vector<int>* /*surfaceIds*/) override {return INVALID_OPERATION;};
+
+    virtual status_t removeSharedSurfaces(int /*streamId*/,
+            const std::vector<size_t>& /*surfaceIds*/) override {return INVALID_OPERATION;};
+
     status_t configureStreams(const CameraMetadata& sessionParams,
             int operatingMode =
             camera_stream_configuration_mode_t::CAMERA_STREAM_CONFIGURATION_NORMAL_MODE) override;
@@ -367,7 +380,7 @@ class Camera3Device :
 
   protected:
     status_t disconnectImpl();
-    static status_t removeFwkOnlyRegionKeys(CameraMetadata *request);
+    static status_t removeFwkOnlyKeys(CameraMetadata *request);
 
     float getMaxPreviewFps(sp<camera3::Camera3OutputStreamInterface> stream);
 
@@ -1275,8 +1288,8 @@ class Camera3Device :
             bool callback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
             bool isFixedFps, const std::set<std::set<std::string>>& physicalCameraIds,
             bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
-            const std::set<std::string>& cameraIdsWithZoom, const SurfaceMap& outputSurfaces,
-            nsecs_t requestTimeNs);
+            const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
+            const SurfaceMap& outputSurfaces, nsecs_t requestTimeNs);
 
     /**
      * Tracking for idle detection
