@@ -108,12 +108,12 @@ cc_library_static {
         "-Werror",
     ],
 
-    sanitize: {
-        misc_undefined: [
-            "signed-integer-overflow",
-            "unsigned-integer-overflow",
-        ],
-    },
+    //addressing b/25409744
+    //sanitize: {
+    //    misc_undefined: [
+    //        "signed-integer-overflow",
+    //    ],
+    //},
 
     shared_libs: ["libstagefright_amrnb_common"],
 
@@ -144,10 +144,10 @@ cc_test {
 
     shared_libs: ["libstagefright_amrnb_common"],
 
-    sanitize: {
-        misc_undefined: [
-            "signed-integer-overflow",
-            "unsigned-integer-overflow",
-        ],
-    },
+    //addressing b/25409744
+    //sanitize: {
+    //    misc_undefined: [
+    //        "signed-integer-overflow",
+    //    ],
+    //},
 }

@@ -103,8 +103,8 @@ IAudioFlinger::CreateTrackOutput::toAidl() const {
     aidl.flags = VALUE_OR_RETURN(legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
     aidl.frameCount = VALUE_OR_RETURN(convertIntegral<int64_t>(frameCount));
     aidl.notificationFrameCount = VALUE_OR_RETURN(convertIntegral<int64_t>(notificationFrameCount));
-    aidl.selectedDeviceId = VALUE_OR_RETURN(
-            legacy2aidl_audio_port_handle_t_int32_t(selectedDeviceId));
+    aidl.selectedDeviceIds = VALUE_OR_RETURN(convertContainer<std::vector<int32_t>>(
+            selectedDeviceIds, legacy2aidl_audio_port_handle_t_int32_t));
     aidl.sessionId = VALUE_OR_RETURN(legacy2aidl_audio_session_t_int32_t(sessionId));
     aidl.sampleRate = VALUE_OR_RETURN(convertIntegral<int32_t>(sampleRate));
     aidl.streamType =  VALUE_OR_RETURN(
@@ -132,8 +132,8 @@ IAudioFlinger::CreateTrackOutput::fromAidl(
     legacy.frameCount = VALUE_OR_RETURN(convertIntegral<size_t>(aidl.frameCount));
     legacy.notificationFrameCount = VALUE_OR_RETURN(
             convertIntegral<size_t>(aidl.notificationFrameCount));
-    legacy.selectedDeviceId = VALUE_OR_RETURN(
-            aidl2legacy_int32_t_audio_port_handle_t(aidl.selectedDeviceId));
+    legacy.selectedDeviceIds = VALUE_OR_RETURN(convertContainer<DeviceIdVector>(
+            aidl.selectedDeviceIds, aidl2legacy_int32_t_audio_port_handle_t));
     legacy.sessionId = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_session_t(aidl.sessionId));
     legacy.sampleRate = VALUE_OR_RETURN(convertIntegral<uint32_t>(aidl.sampleRate));
     legacy.streamType = VALUE_OR_RETURN(

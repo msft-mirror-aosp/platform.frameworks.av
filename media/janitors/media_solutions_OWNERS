@@ -4,6 +4,7 @@
 andrewlewis@google.com
 bachinger@google.com
 claincly@google.com
+dancho@google.com
 ibaker@google.com
 ivanbuper@google.com
 jbibik@google.com
@@ -16,3 +17,8 @@ tonihei@google.com
 
 # MediaRouter and native mirroring only:
 aquilescanta@google.com
+
+# Emergency rollbacks and fixes outside LON timezone
+jmtrivi@google.com # US-MTV
+lajos@google.com # US-MTV
+scottnien@google.com # TW-NTC
