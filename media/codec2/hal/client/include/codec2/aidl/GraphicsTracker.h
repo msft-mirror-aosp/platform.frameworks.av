@@ -35,6 +35,7 @@ namespace aidl::android::hardware::media::c2::implementation {
 
 using ::android::IGraphicBufferProducer;
 using ::android::GraphicBuffer;
+using ::android::FrameEventHistoryDelta;
 using ::android::Fence;
 using ::android::PixelFormat;
 using ::android::sp;
@@ -131,6 +132,11 @@ public:
     c2_status_t render(const C2ConstGraphicBlock& block,
                        const IGraphicBufferProducer::QueueBufferInput& input,
                        IGraphicBufferProducer::QueueBufferOutput *output);
+
+    /**
+     * Retrieve frame event history from the crurrent surface if any.
+     */
+    void pollForRenderedFrames(FrameEventHistoryDelta* delta);
 
     /**
      * Notifies when a Buffer is ready to allocate from Graphics.

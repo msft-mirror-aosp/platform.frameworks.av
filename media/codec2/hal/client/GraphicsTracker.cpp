@@ -1056,6 +1056,19 @@ c2_status_t GraphicsTracker::render(const C2ConstGraphicBlock& blk,
     return C2_OK;
 }
 
+void GraphicsTracker::pollForRenderedFrames(FrameEventHistoryDelta* delta) {
+    sp<IGraphicBufferProducer> igbp;
+    {
+        std::unique_lock<std::mutex> l(mLock);
+        if (mBufferCache) {
+            igbp = mBufferCache->mIgbp;
+        }
+    }
+    if (igbp) {
+        igbp->getFrameTimestamps(delta);
+    }
+}
+
 void GraphicsTracker::onReleased(uint32_t generation) {
     bool updateDequeue = false;
     {
