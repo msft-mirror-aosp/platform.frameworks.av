@@ -299,9 +299,15 @@ private:
                     audio_utils::unique_lock ul(mMutex);
                     auto originalService = std::get<BaseInterfaceType<Service>>(mService);
                     if (originalService != service) {
+                        if (originalService != nullptr) {
+                            invalidateService_l<Service>();
+                        }
                         mService = service;
                         mValid = true;
                         ul.unlock();
+                        if (originalService != nullptr) {
+                            traits->onServiceDied(interfaceFromBase<Service>(originalService));
+                        }
                         traits->onNewService(service);
                         ul.lock();
                         setDeathNotifier_l<Service>(service);
