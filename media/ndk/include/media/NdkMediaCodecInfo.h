@@ -93,7 +93,7 @@ bool AMediaCodecInfo_isVendor(const AMediaCodecInfo *info) __INTRODUCED_IN(36);
 /**
  * The type of codecs.
  */
-enum AMediaCodecType : int32_t {
+typedef enum AMediaCodecType : int32_t {
     /**
      * Not a codec type. Used for indicating an invalid operation occurred.
      */
@@ -121,7 +121,7 @@ enum AMediaCodecType : int32_t {
      * Mainly referring to software codecs provided by vendors.
      */
     SOFTWARE_WITH_DEVICE_ACCESS = 3,
-};
+} AMediaCodecType;
 
 /**
  * Query if the codec is SOFTWARE_ONLY, HARDWARE_ACCELERATED or SOFTWARE_WITH_DEVICE_ACCESS.
@@ -601,12 +601,12 @@ media_status_t ACodecEncoderCapabilities_getComplexityRange(
 /**
  * Encoder bitrate modes.
  */
-enum ABiterateMode : int32_t {
+typedef enum ABiterateMode : int32_t {
     BITRATE_MODE_CQ = 0,
     BITRATE_MODE_VBR = 1,
     BITRATE_MODE_CBR = 2,
     BITRATE_MODE_CBR_FD = 3
-};
+} ABiterateMode;
 
 /**
  * Query whether a bitrate mode is supported.
