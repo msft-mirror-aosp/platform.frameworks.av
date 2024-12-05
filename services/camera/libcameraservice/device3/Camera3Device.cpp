@@ -58,8 +58,10 @@
 #include <android/hardware/camera/device/3.7/ICameraInjectionSession.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
 #include <com_android_internal_camera_flags.h>
+#include <com_android_window_flags.h>
 
 #include "CameraService.h"
+#include "FwkOnlyMetadataTags.h"
 #include "aidl/android/hardware/graphics/common/Dataspace.h"
 #include "aidl/AidlUtils.h"
 #include "device3/Camera3Device.h"
@@ -83,6 +85,8 @@ using namespace android::hardware::camera;
 using namespace android::hardware::cameraservice::utils::conversion::aidl;
 
 namespace flags = com::android::internal::camera::flags;
+namespace wm_flags = com::android::window::flags;
+
 namespace android {
 
 Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
@@ -2562,7 +2566,8 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
                                                                 // always occupy the initial entry.
             if ((outputStream->data_space == HAL_DATASPACE_V0_JFIF) ||
                     (outputStream->data_space ==
-                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
+                     static_cast<android_dataspace_t>(
+                         aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) ||
                     (outputStream->data_space ==
                      static_cast<android_dataspace_t>(
                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R))) {
@@ -2885,7 +2890,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
         bool hasAppCallback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
         bool isFixedFps, const std::set<std::set<std::string>>& physicalCameraIds,
         bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
-        const std::set<std::string>& cameraIdsWithZoom,
+        const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
         const SurfaceMap& outputSurfaces, nsecs_t requestTimeNs) {
     ATRACE_CALL();
     std::lock_guard<std::mutex> l(mInFlightLock);
@@ -2894,7 +2899,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
     res = mInFlightMap.add(frameNumber, InFlightRequest(numBuffers, resultExtras, hasInput,
             hasAppCallback, minExpectedDuration, maxExpectedDuration, isFixedFps, physicalCameraIds,
             isStillCapture, isZslCapture, rotateAndCropAuto, autoframingAuto, cameraIdsWithZoom,
-            requestTimeNs, outputSurfaces));
+            requestTimeNs, useZoomRatio, outputSurfaces));
     if (res < 0) return res;
 
     if (mInFlightMap.size() == 1) {
@@ -3793,16 +3798,13 @@ bool Camera3Device::RequestThread::threadLoop() {
     return submitRequestSuccess;
 }
 
-status_t Camera3Device::removeFwkOnlyRegionKeys(CameraMetadata *request) {
-    static const std::array<uint32_t, 4> kFwkOnlyRegionKeys = {ANDROID_CONTROL_AF_REGIONS_SET,
-        ANDROID_CONTROL_AE_REGIONS_SET, ANDROID_CONTROL_AWB_REGIONS_SET,
-        ANDROID_SCALER_CROP_REGION_SET};
+status_t Camera3Device::removeFwkOnlyKeys(CameraMetadata *request) {
     if (request == nullptr) {
         ALOGE("%s request metadata nullptr", __FUNCTION__);
         return BAD_VALUE;
     }
     status_t res = OK;
-    for (const auto &key : kFwkOnlyRegionKeys) {
+    for (const auto &key : kFwkOnlyMetadataKeys) {
         if (request->exists(key)) {
             res = request->erase(key);
             if (res != OK) {
@@ -3881,12 +3883,6 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                             it != captureRequest->mSettingsList.end(); it++) {
                         if (parent->mUHRCropAndMeteringRegionMappers.find(it->cameraId) ==
                                 parent->mUHRCropAndMeteringRegionMappers.end()) {
-                            if (removeFwkOnlyRegionKeys(&(it->metadata)) != OK) {
-                                SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
-                                        "%d: %s (%d)", halRequest->frame_number, strerror(-res),
-                                        res);
-                                return INVALID_OPERATION;
-                            }
                             continue;
                         }
 
@@ -3901,12 +3897,6 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                                 return INVALID_OPERATION;
                             }
                             captureRequest->mUHRCropAndMeteringRegionsUpdated = true;
-                            if (removeFwkOnlyRegionKeys(&(it->metadata)) != OK) {
-                                SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
-                                        "%d: %s (%d)", halRequest->frame_number, strerror(-res),
-                                        res);
-                                return INVALID_OPERATION;
-                            }
                         }
                     }
 
@@ -3980,7 +3970,13 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                                     "%d: %s (%d)", halRequest->frame_number, strerror(-res), res);
                             return INVALID_OPERATION;
                         }
-
+                        res = removeFwkOnlyKeys(&(it->metadata));
+                        if (res != OK) {
+                            SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
+                                    "%d: %s (%d)", halRequest->frame_number, strerror(-res),
+                                    res);
+                            return INVALID_OPERATION;
+                        }
                         if (!parent->mSupportsExtensionKeys) {
                             res = filterExtensionKeys(&it->metadata);
                             if (res != OK) {
@@ -4182,6 +4178,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
         }
         bool isStillCapture = false;
         bool isZslCapture = false;
+        bool useZoomRatio = false;
         const camera_metadata_t* settings = halRequest->settings;
         bool shouldUnlockSettings = false;
         if (settings == nullptr) {
@@ -4201,6 +4198,14 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
             if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_ENABLE_ZSL_TRUE)) {
                 isZslCapture = true;
             }
+
+            if (flags::zoom_method()) {
+                e = camera_metadata_ro_entry_t();
+                find_camera_metadata_ro_entry(settings, ANDROID_CONTROL_ZOOM_METHOD, &e);
+                if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_ZOOM_METHOD_ZOOM_RATIO)) {
+                    useZoomRatio = true;
+                }
+            }
         }
         bool passSurfaceMap =
                 mUseHalBufManager || containsHalBufferManagedStream;
@@ -4214,7 +4219,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
                 expectedDurationInfo.isFixedFps,
                 requestedPhysicalCameras, isStillCapture, isZslCapture,
                 captureRequest->mRotateAndCropAuto, captureRequest->mAutoframingAuto,
-                mPrevCameraIdsWithZoom,
+                mPrevCameraIdsWithZoom, useZoomRatio,
                 passSurfaceMap ? uniqueSurfaceIdMap :
                                       SurfaceMap{}, captureRequest->mRequestTimeNs);
         ALOGVV("%s: registered in flight requestId = %" PRId32 ", frameNumber = %" PRId64
@@ -5811,7 +5816,13 @@ void Camera3Device::overrideStreamUseCaseLocked() {
 status_t Camera3Device::deriveAndSetTransformLocked(
         Camera3OutputStreamInterface& stream, int mirrorMode, int surfaceId) {
     int transform = -1;
-    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode, &transform);
+    bool enableTransformInverseDisplay = true;
+    using hardware::ICameraService::ROTATION_OVERRIDE_ROTATION_ONLY;
+    if (wm_flags::enable_camera_compat_for_desktop_windowing()) {
+        enableTransformInverseDisplay = (mRotationOverride != ROTATION_OVERRIDE_ROTATION_ONLY);
+    }
+    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode,
+            enableTransformInverseDisplay, &transform);
     if (res != OK) {
         return res;
     }

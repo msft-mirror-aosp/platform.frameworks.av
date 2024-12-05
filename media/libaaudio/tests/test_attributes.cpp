@@ -14,15 +14,19 @@
  * limitations under the License.
  */
 
-// Test AAudio attributes such as Usage, ContentType and InputPreset.
+// Test AAudio attributes such as Usage, ContentType, InputPreset and Tags.
 
 // TODO Many of these tests are duplicates of CTS tests in
 // "test_aaudio_attributes.cpp". That other file is more current.
 // So these tests could be deleted.
+// Also note audio attributes tags, which is system api, it cannot be tested
+// from the CTS. In that case, please do not delete audio attributes tags test.
 
+#include <algorithm>
 #include <memory>
 #include <stdio.h>
 #include <unistd.h>
+#include <vector>
 
 #include <aaudio/AAudio.h>
 #include <gtest/gtest.h>
@@ -38,17 +42,18 @@ constexpr int32_t DONT_SET = -1000;
 static void checkAttributes(aaudio_performance_mode_t perfMode,
                             aaudio_usage_t usage,
                             aaudio_content_type_t contentType,
-                            const char * tags = nullptr,
+                            std::vector<const char*>* tags = nullptr,
                             aaudio_input_preset_t preset = DONT_SET,
                             aaudio_allowed_capture_policy_t capturePolicy = DONT_SET,
                             int privacyMode = DONT_SET,
-                            aaudio_direction_t direction = AAUDIO_DIRECTION_OUTPUT) {
+                            aaudio_direction_t direction = AAUDIO_DIRECTION_OUTPUT,
+                            const char* tagToBeCleared = "TagsToBeCleared") {
 
     std::unique_ptr<float[]> buffer(new float[kNumFrames * kChannelCount]);
 
     AAudioStreamBuilder *aaudioBuilder = nullptr;
     AAudioStream *aaudioStream = nullptr;
-    aaudio_result_t expectedSetTagsResult = AAUDIO_OK;
+    aaudio_result_t expectedAddTagResult = AAUDIO_OK;
 
     // Use an AAudioStreamBuilder to contain requested parameters.
     ASSERT_EQ(AAUDIO_OK, AAudio_createStreamBuilder(&aaudioBuilder));
@@ -64,11 +69,32 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
     if (contentType != DONT_SET) {
         AAudioStreamBuilder_setContentType(aaudioBuilder, contentType);
     }
+    std::set<std::string> addedTags;
     if (tags != nullptr) {
-        aaudio_result_t result = AAudioStreamBuilder_setTags(aaudioBuilder, tags);
-        expectedSetTagsResult =  (strlen(tags) >= AUDIO_ATTRIBUTES_TAGS_MAX_SIZE) ?
-                AAUDIO_ERROR_ILLEGAL_ARGUMENT : AAUDIO_OK;
-        EXPECT_EQ(result, expectedSetTagsResult);
+        EXPECT_EQ(AAUDIO_OK, AAudioStreamBuilder_addTag(aaudioBuilder, tagToBeCleared));
+        AAudioStreamBuilder_clearTags(aaudioBuilder);
+        int totalLength = 0;
+        for (int i = 0; i < tags->size(); ++i) {
+            if (tags->at(i) == nullptr) {
+                EXPECT_EQ(AAUDIO_ERROR_ILLEGAL_ARGUMENT,
+                          AAudioStreamBuilder_addTag(aaudioBuilder, tags->at(i)));
+                continue;
+            }
+            // When sending all tags across the framework and the HAL, all tags are joined as a
+            // string. In that case, a delimiter will be added if the tag is not the last added
+            // tag or NULL terminator will be added if the tag is the last added tag.
+            int lengthToAdd = strlen(tags->at(i)) + 1;
+            totalLength += lengthToAdd;
+            aaudio_result_t result = AAudioStreamBuilder_addTag(aaudioBuilder, tags->at(i));
+            expectedAddTagResult = (totalLength > AUDIO_ATTRIBUTES_TAGS_MAX_SIZE) ?
+                                   AAUDIO_ERROR_OUT_OF_RANGE : AAUDIO_OK;
+            EXPECT_EQ(result, expectedAddTagResult) << "total length=" << totalLength;
+            if (expectedAddTagResult != AAUDIO_OK) {
+                totalLength -= lengthToAdd;
+            } else {
+                addedTags.insert(tags->at(i));
+            }
+        }
     }
     if (preset != DONT_SET) {
         AAudioStreamBuilder_setInputPreset(aaudioBuilder, preset);
@@ -97,19 +123,16 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
             : contentType;
     EXPECT_EQ(expectedContentType, AAudioStream_getContentType(aaudioStream));
 
-    char readTags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE] = {};
-    EXPECT_EQ(AAUDIO_OK, AAudioStream_getTags(aaudioStream, readTags))
-            << "Expected tags=" << (tags != nullptr ? tags : "null") << ", got tags=" << readTags;;
-    EXPECT_LT(strlen(readTags), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE)
-            << "expected tags len " << strlen(readTags) << " less than "
-            << AUDIO_ATTRIBUTES_TAGS_MAX_SIZE;
-
-    // Null tags or failed to set, empty tags expected (default initializer)
-    const char * expectedTags = tags == nullptr ?
-                "" : (expectedSetTagsResult != AAUDIO_OK ? "" : tags);
-    // Oversized tags will be discarded
-    EXPECT_TRUE(std::strcmp(expectedTags, readTags) == 0)
-                << "Expected tags=" << expectedTags << ", got tags=" << readTags;
+    char** readTags = nullptr;
+    const int32_t numOfTagsRead = AAudioStream_obtainTags(aaudioStream, &readTags);
+    EXPECT_EQ(addedTags.size(), numOfTagsRead);
+    EXPECT_EQ(numOfTagsRead == 0, readTags == nullptr);
+    std::set<std::string> readTagsSet;
+    for (int i = 0; i < numOfTagsRead; ++i) {
+        readTagsSet.insert(readTags[i]);
+    }
+    EXPECT_EQ(addedTags, readTagsSet);
+    AAudioStream_releaseTags(aaudioStream, readTags);
 
     aaudio_input_preset_t expectedPreset =
             (preset == DONT_SET || preset == AAUDIO_UNSPECIFIED)
@@ -167,7 +190,8 @@ static const std::string oversizedTags2 = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_
 static const std::string oversizedTags = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE, 'B');
 static const std::string maxSizeTags = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1, 'C');
 
-static const char * const sTags[] = {
+static const int TOTAL_TAGS = 7;
+static const char * const sTags[TOTAL_TAGS] = {
     nullptr,
     "",
     "oem=routing_extension",
@@ -225,8 +249,13 @@ static void checkAttributesContentType(aaudio_performance_mode_t perfMode) {
 }
 
 static void checkAttributesTags(aaudio_performance_mode_t perfMode) {
-    for (const char * const tags : sTags) {
-        checkAttributes(perfMode, DONT_SET, DONT_SET, tags);
+    checkAttributes(perfMode, DONT_SET, DONT_SET, nullptr /*tags*/);
+    for (int i = 0; i < TOTAL_TAGS; ++i) {
+        std::vector<const char*> tags = {sTags[i]};
+        if (i > 0) {
+            tags.push_back(sTags[i-1]);
+        }
+        checkAttributes(perfMode, DONT_SET, DONT_SET, &tags);
     }
 }
 

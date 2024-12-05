@@ -27,51 +27,62 @@ extern "C" {
 #endif
 
 /**
- * The tags string attributes allows OEMs to extend the
- * <a href="/reference/android/media/AudioAttributes">AudioAttributes</a>.
+ * Add one vendor extension tag that the output stream will carry.
  *
- * Note that the maximum length includes all tags combined with delimiters and null terminator.
+ * The total size of all added tags, plus one for each tag terminator, must not be greater than
+ * <a href="/reference/android/system/media/audio">AUDIO_ATTRIBUTES_TAGS_MAX_SIZE</a>.
  *
- * Note that it matches the equivalent value in
- * <a href="/reference/android/system/media/audio">AUDIO_ATTRIBUTES_TAGS_MAX_SIZE</a>
- * in the Android native API.
- */
-#define AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE 256
-
-/**
- * Set one or more vendor extension tags that the output stream will carry.
- *
- * The tags can be used by the audio policy engine for routing purpose.
+ * The tag can be used by the audio policy engine for routing purpose.
  * Routing is based on audio attributes, translated into legacy stream type.
  * The stream types cannot be extended, so the product strategies have been introduced to allow
  * vendor extension of routing capabilities.
  * This could, for example, affect how volume and routing is handled for the stream.
  *
- * The tags can also be used by a System App to pass vendor specific information through the
+ * The tag can also be used by a System App to pass vendor specific information through the
  * framework to the HAL. That info could affect routing, ducking or other audio behavior in the HAL.
  *
  * By default, audio attributes tags are empty if this method is not called.
  *
+ * When opening a stream with audio attributes tags, the client should hold
+ * MODIFY_AUDIO_SETTINGS_PRIVILEGED permission. Otherwise, the stream will fail to open.
+ *
  * @param builder reference provided by AAudio_createStreamBuilder()
- * @param tags the desired tags to add, which must be UTF-8 format and null-terminated. The size
- *             of the tags must be at most {@link #AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE}. Multiple tags
- *             must be separated by semicolons.
+ * @param tag the desired tag to add, which must be UTF-8 format and null-terminated.
  * @return {@link #AAUDIO_OK} on success or {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT} if the given
- *         tags is null or its length is greater than {@link #AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE}.
+ *         tags is null or {@link #AAUDIO_ERROR_OUT_OF_RANGE} if there is not room for more tags.
  */
-aaudio_result_t AAudioStreamBuilder_setTags(AAudioStreamBuilder* _Nonnull builder,
-                                            const char* _Nonnull tags);
+aaudio_result_t AAudioStreamBuilder_addTag(AAudioStreamBuilder* _Nonnull builder,
+                                           const char* _Nonnull tag);
 
 /**
- * Read the audio attributes' tags for the stream into a buffer.
- * The caller is responsible for allocating and freeing the returned data.
+ * Clear all the tags that has been added from calling
+ * {@link #AAudioStreamBuilder_addTag}.
+ *
+ * @param builder reference provided by AAudio_createStreamBuilder()
+ */
+void AAudioStreamBuilder_clearTags(AAudioStreamBuilder* _Nonnull builder);
+
+/**
+ * Allocate and read the audio attributes' tags for the stream into a buffer.
+ * The client is responsible to free the memory for tags by calling
+ * {@link #AAudioStream_releaseTags} unless the number of tags is 0.
  *
  * @param stream reference provided by AAudioStreamBuilder_openStream()
- * @param tags pointer to write the value to in UTF-8 that containing OEM extension tags. It must
- *             be sized with {@link #AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE}.
- * @return {@link #AAUDIO_OK} or {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT} if the given tags is null.
+ * @param tags a pointer to a variable that will be set to a pointer to an array of char* pointers
+ * @return number of tags or
+ *         {@link #AAUDIO_ERROR_NO_MEMORY} if it fails to allocate memory for tags.
  */
-aaudio_result_t AAudioStream_getTags(AAudioStream* _Nonnull stream, char* _Nonnull tags);
+int32_t AAudioStream_obtainTags(AAudioStream* _Nonnull stream,
+                                char* _Nullable* _Nullable* _Nonnull tags);
+
+/**
+ * Free the memory containing the tags that is allocated when calling
+ * {@link #AAudioStream_obtainTags}.
+ *
+ * @param stream reference provided by AAudioStreamBuilder_openStream()
+ * @param tags reference provided by AAudioStream_obtainTags()
+ */
+void AAudioStream_releaseTags(AAudioStream* _Nonnull stream, char* _Nonnull * _Nullable tags);
 
 #ifdef __cplusplus
 }

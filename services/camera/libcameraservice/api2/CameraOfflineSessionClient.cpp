@@ -299,13 +299,19 @@ void CameraOfflineSessionClient::onResultAvailable(const CaptureResult& result) 
     ALOGV("%s", __FUNCTION__);
 
     if (mRemoteCallback.get() != NULL) {
-        mRemoteCallback->onResultReceived(result.mMetadata, result.mResultExtras,
+        using hardware::camera2::CameraMetadataInfo;
+        CameraMetadataInfo resultInfo;
+        resultInfo.set<CameraMetadataInfo::metadata>(result.mMetadata);
+        mRemoteCallback->onResultReceived(resultInfo, result.mResultExtras,
                 result.mPhysicalMetadatas);
     }
 
     for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
         mCompositeStreamMap.valueAt(i)->onResultAvailable(result);
     }
+}
+
+void CameraOfflineSessionClient::notifyClientSharedAccessPriorityChanged(bool /*primaryClient*/) {
 }
 
 void CameraOfflineSessionClient::notifyShutter(const CaptureResultExtras& resultExtras,

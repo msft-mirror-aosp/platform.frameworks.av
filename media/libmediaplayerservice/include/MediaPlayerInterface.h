@@ -26,6 +26,7 @@
 #include <utils/RefBase.h>
 
 #include <media/mediaplayer.h>
+#include <media/AudioContainers.h>
 #include <media/AudioResamplerPublic.h>
 #include <media/AudioTimestamp.h>
 #include <media/AVSyncSettings.h>
@@ -185,7 +186,7 @@ public:
 
         // AudioRouting
         virtual status_t    setOutputDevice(audio_port_handle_t deviceId) = 0;
-        virtual status_t    getRoutedDeviceId(audio_port_handle_t* deviceId) = 0;
+        virtual status_t    getRoutedDeviceIds(DeviceIdVector& deviceIds) = 0;
         virtual status_t    enableAudioDeviceCallback(bool enabled) = 0;
     };
 
