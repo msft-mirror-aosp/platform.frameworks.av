@@ -293,6 +293,46 @@ camera_status_t ACameraManager_openCamera(
         /*out*/ACameraDevice** device) __INTRODUCED_IN(24);
 
 /**
+ * Open a shared connection to a camera with the given ID. The opened camera device will be
+ * returned in the `device` parameter. The behavior of this method matches that of
+ * {@link ACameraManager_openCamera(ACameraManager*, const char*, ACameraDevice_StateCallbacks*,
+ * ACameraDevice**)} except that it opens the camera in shared mode so that more
+ * than one client can access the camera at the same time.
+ *
+ * <p>Processes need to have android.permission.SYSTEM_CAMERA in addition to
+ * android.permission.CAMERA in order to connect to this camera device in shared
+ * mode.</p>
+ *
+ * @param manager the {@link ACameraManager} of interest.
+ * @param cameraId the ID string of the camera device to be opened.
+ * @param callback the {@link ACameraDevice_StateCallbacks} associated with the opened camera
+ *                 device.
+ * @param device the opened {@link ACameraDevice} will be filled here if the method call succeeds.
+ * @param primaryClient will return as true if the client is primaryClient.
+ *
+ * @return <ul>
+ *         <li>{@link ACAMERA_OK} if the method call succeeds.</li>
+ *         <li>{@link ACAMERA_ERROR_INVALID_PARAMETER} if manager, cameraId, callback, or device
+ *                  is NULL, or cameraId does not match any camera devices connected.</li>
+ *         <li>{@link ACAMERA_ERROR_CAMERA_DISCONNECTED} if connection to camera service fails.</li>
+ *         <li>{@link ACAMERA_ERROR_NOT_ENOUGH_MEMORY} if allocating memory fails.</li>
+ *         <li>{@link ACAMERA_ERROR_CAMERA_IN_USE} if camera device is being used by a higher
+ *                   priority camera API client.</li>
+ *         <li>{@link ACAMERA_ERROR_MAX_CAMERA_IN_USE} if the system-wide limit for number of open
+ *                   cameras or camera resources has been reached, and more camera devices cannot be
+ *                   opened until previous instances are closed.</li>
+ *         <li>{@link ACAMERA_ERROR_CAMERA_DISABLED} if the camera is disabled due to a device
+ *                   policy, and cannot be opened.</li>
+ *         <li>{@link ACAMERA_ERROR_PERMISSION_DENIED} if the application does not have permission
+ *                   to open camera.</li>
+ *         <li>{@link ACAMERA_ERROR_UNKNOWN} if the method fails for some other reasons.</li></ul>
+ */
+camera_status_t ACameraManager_openSharedCamera(
+        ACameraManager* manager, const char* cameraId,
+        ACameraDevice_StateCallbacks* callback,
+        /*out*/ACameraDevice** device,/*out*/bool* isPrimaryClient) __INTRODUCED_IN(36);
+
+/**
  * Definition of camera access permission change callback.
  *
  * <p>Notification that camera access priorities have changed and the camera may
@@ -396,6 +436,27 @@ camera_status_t ACameraManager_registerExtendedAvailabilityCallback(
 camera_status_t ACameraManager_unregisterExtendedAvailabilityCallback(
         ACameraManager* manager,
         const ACameraManager_ExtendedAvailabilityCallbacks* callback) __INTRODUCED_IN(29);
+
+
+/**
+ * Checks if a camera can be opened in shared mode by multiple clients.
+ *
+ * @param manager the {@link ACameraManager} of interest.
+ * @param cameraId the ID string of the camera device of interest.
+ * @param isSharingSupported output will be filled here if the method succeeds.
+ *        This will be true if camera can be opened in shared mode, false
+ *        otherwise.
+ *
+ * @return <ul>
+ *         <li>{@link ACAMERA_OK} if the method call succeeds.</li>
+ *         <li>{@link ACAMERA_ERROR_INVALID_PARAMETER} if any parameter is not
+ *         valid.</li>
+ *         </ul>
+ */
+camera_status_t ACameraManager_isCameraDeviceSharingSupported(
+        ACameraManager *manager,
+        const char *cameraId,
+        bool *isSharingSupported) __INTRODUCED_IN(36);
 
 #ifdef __ANDROID_VNDK__
 /**

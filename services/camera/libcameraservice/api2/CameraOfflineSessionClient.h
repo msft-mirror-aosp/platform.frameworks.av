@@ -30,6 +30,12 @@ namespace android {
 using android::hardware::camera2::ICameraDeviceCallbacks;
 using camera3::CompositeStream;
 
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+typedef uint64_t SurfaceKey;
+#else
+typedef sp<IBinder> SurfaceKey;
+#endif
+
 // Client for offline session. Note that offline session client does not affect camera service's
 // client arbitration logic. It is camera HAL's decision to decide whether a normal camera
 // client is conflicting with existing offline client(s).
@@ -45,17 +51,18 @@ class CameraOfflineSessionClient :
 public:
     CameraOfflineSessionClient(
             const sp<CameraService>& cameraService, sp<CameraOfflineSessionBase> session,
-            const KeyedVector<sp<IBinder>, sp<CompositeStream>>& offlineCompositeStreamMap,
+            const KeyedVector<SurfaceKey, sp<CompositeStream>>& offlineCompositeStreamMap,
             const sp<ICameraDeviceCallbacks>& remoteCallback,
             std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
             const AttributionSourceState& clientAttribution, int callingPid,
-            const std::string& cameraIdStr, int cameraFacing, int sensorOrientation, int servicePid)
+            const std::string& cameraIdStr, int cameraFacing, int sensorOrientation, int servicePid,
+            bool sharedMode)
         : CameraService::BasicClient(cameraService, IInterface::asBinder(remoteCallback),
                                      attributionAndPermissionUtils,
                                      // (v)ndk doesn't have offline session support
                                      clientAttribution, callingPid, /*overridePackageName*/ false,
                                      cameraIdStr, cameraFacing, sensorOrientation, servicePid,
-                                     hardware::ICameraService::ROTATION_OVERRIDE_NONE),
+                                     hardware::ICameraService::ROTATION_OVERRIDE_NONE, sharedMode),
         mRemoteCallback(remoteCallback),
         mOfflineSession(session),
         mCompositeStreamMap(offlineCompositeStreamMap) {}
@@ -119,6 +126,7 @@ public:
     void notifyRepeatingRequestError(long lastFrameNumber) override;
     status_t injectCamera(const std::string& injectedCamId,
             sp<CameraProviderManager> manager) override;
+    void notifyClientSharedAccessPriorityChanged(bool primaryClient) override;
     status_t stopInjection() override;
     status_t injectSessionParams(
         const hardware::camera2::impl::CameraMetadataNative& sessionParams) override;
@@ -133,7 +141,7 @@ private:
     sp<camera2::FrameProcessorBase> mFrameProcessor;
 
     // Offline composite stream map, output surface -> composite stream
-    KeyedVector<sp<IBinder>, sp<CompositeStream>> mCompositeStreamMap;
+    KeyedVector<SurfaceKey, sp<CompositeStream>> mCompositeStreamMap;
 };
 
 } // namespace android

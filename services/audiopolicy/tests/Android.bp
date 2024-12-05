@@ -21,6 +21,7 @@ cc_test {
     ],
 
     shared_libs: [
+        "audiopolicy-aidl-cpp",
         "framework-permission-aidl-cpp",
         "libaudioclient",
         "libaudiofoundation",
@@ -32,6 +33,7 @@ cc_test {
         "libhidlbase",
         "liblog",
         "libmedia_helper",
+        "libstagefright_foundation",
         "libutils",
         "libxml2",
         "server_configurable_flags",
@@ -42,6 +44,7 @@ cc_test {
         "audioclient-types-aidl-cpp",
         "com.android.media.audio-aconfig-cc",
         "com.android.media.audioserver-aconfig-cc",
+        "libaudio_aidl_conversion_common_cpp",
         "libaudiopolicycomponents",
         "libflagtest",
         "libgmock",

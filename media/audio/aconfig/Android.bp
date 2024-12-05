@@ -120,6 +120,7 @@ aconfig_declarations {
         "//frameworks/base/api",
         "//frameworks/base/core/res",
     ],
+    exportable: true,
 }
 
 aconfig_declarations {
@@ -149,6 +150,20 @@ java_aconfig_library {
     name: "android.media.audio-aconfig-java",
     aconfig_declarations: "android.media.audio-aconfig",
     defaults: ["framework-minus-apex-aconfig-java-defaults"],
+}
+
+java_aconfig_library {
+    name: "android.media.audio-aconfig-exported-java",
+    aconfig_declarations: "android.media.audio-aconfig",
+    defaults: ["framework-minus-apex-aconfig-java-defaults"],
+    min_sdk_version: "Tiramisu",
+    mode: "exported",
+    apex_available: [
+        "com.android.btservices",
+    ],
+    visibility: [
+        "//packages/modules/Bluetooth:__subpackages__",
+    ],
 }
 
 java_aconfig_library {
