@@ -985,6 +985,8 @@ public:
         // TODO(b/375280520) consider registerClient() within mMutex lock.
         const int64_t token = IPCThreadState::self()->clearCallingIdentity();
         aps->registerClient(client);
+        aps->setAudioPortCallbacksEnabled(client->isAudioPortCbEnabled());
+        aps->setAudioVolumeGroupCallbacksEnabled(client->isAudioVolumeGroupCbEnabled());
         IPCThreadState::self()->restoreCallingIdentity(token);
     }
 

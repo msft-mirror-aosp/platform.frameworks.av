@@ -62,8 +62,7 @@ class EglSurfaceTexture {
   // Returns false on timeout, true if new frame was received before timeout.
   bool waitForNextFrame(std::chrono::nanoseconds timeout);
 
-  void setFrameAvailableListener(
-      const wp<ConsumerBase::FrameAvailableListener>& listener);
+  void setFrameAvailableListener(const std::function<void()>& listener);
 
   // Update the texture with the most recent submitted buffer.
   // Most be called on thread with EGL context.
@@ -99,6 +98,8 @@ class EglSurfaceTexture {
   GLuint mTextureId;
   const uint32_t mWidth;
   const uint32_t mHeight;
+  std::atomic_bool mIsFirstFrameDrawn = false;
+  sp<ConsumerBase::FrameAvailableListener> mFrameAvailableListener;
 };
 
 }  // namespace virtualcamera

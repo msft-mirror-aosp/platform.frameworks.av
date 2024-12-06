@@ -696,7 +696,7 @@ DeviceVector AudioPolicyManager::selectBestRxSinkDevicesForCall(bool fromCache)
         // RX Telephony and Rx sink devices are declared by Primary Audio HAL
         if (isPrimaryModule(telephonyRxModule) && (telephonyRxModule->getHalVersionMajor() >= 3) &&
                 telephonyRxModule->supportsPatch(rxSourceDevice, rxSinkDevice)) {
-            ALOGW("%s() device %s using HW Bridge", __func__, rxSinkDevice->toString().c_str());
+            ALOGI("%s() device %s using HW Bridge", __func__, rxSinkDevice->toString().c_str());
             return DeviceVector(rxSinkDevice);
         }
     }
@@ -862,8 +862,8 @@ void AudioPolicyManager::connectTelephonyRxAudioSource(uint32_t delayMs)
                                        true /*internal*/, true /*isCallRx*/, delayMs);
     ALOGE_IF(status != OK, "%s: failed to start audio source (%d)", __func__, status);
     mCallRxSourceClient = mAudioSources.valueFor(portId);
-    ALOGV("%s portdID %d between source %s and sink %s", __func__, portId,
-        mCallRxSourceClient->srcDevice()->toString().c_str(),
+    ALOGV_IF(mCallRxSourceClient != nullptr, "%s portdID %d between source %s and sink %s",
+        __func__, portId, mCallRxSourceClient->srcDevice()->toString().c_str(),
         mCallRxSourceClient->sinkDevice()->toString().c_str());
     ALOGE_IF(mCallRxSourceClient == nullptr,
              "%s failed to start Telephony Rx AudioSource", __func__);
@@ -1559,7 +1559,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
         for (auto &secondaryMix : secondaryMixes) {
             sp<SwAudioOutputDescriptor> outputDesc = secondaryMix->getOutput();
             if (outputDesc != nullptr &&
-                outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE) {
+                outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE &&
+                outputDesc->mIoHandle != *output) {
                 secondaryOutputs->push_back(outputDesc->mIoHandle);
                 weakSecondaryOutputDescs.push_back(outputDesc);
             }
@@ -3012,6 +3013,18 @@ AudioPolicyManager::getInputForAttr(audio_attributes_t attributes,
         }
         device = inputDesc->getDevice();
         ALOGV("%s reusing MMAP input %d for session %d", __FUNCTION__, requestedInput, session);
+        auto permRes = mpClientInterface->checkPermissionForInput(attributionSource, permReq);
+        if (!permRes.has_value()) return base::unexpected {permRes.error()};
+        if (!permRes.value()) {
+            return base::unexpected{Status::fromExceptionCode(
+                    EX_SECURITY, String8::format("%s: %s missing perms for source %d mix %d vdi %d"
+                        "hotword? %d callredir? %d", __func__, attributionSource.toString().c_str(),
+                                                 static_cast<int>(permReq.source),
+                                                 static_cast<int>(permReq.mixType),
+                                                 permReq.virtualDeviceId,
+                                                 permReq.isHotword,
+                                                 permReq.isCallRedir))};
+        }
     } else {
         if (attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX &&
                 extractAddressFromAudioAttributes(attributes).has_value()) {
@@ -7655,7 +7668,8 @@ void AudioPolicyManager::checkSecondaryOutputs() {
             for (auto &secondaryMix : secondaryMixes) {
                 sp<SwAudioOutputDescriptor> outputDesc = secondaryMix->getOutput();
                 if (outputDesc != nullptr &&
-                    outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE) {
+                    outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE &&
+                    outputDesc != outputDescriptor) {
                     secondaryDescs.push_back(outputDesc);
                 }
             }

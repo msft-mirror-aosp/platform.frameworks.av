@@ -55,6 +55,8 @@ static const String16 sAndroidPermissionRecordAudio("android.permission.RECORD_A
 static const String16 sModifyPhoneState("android.permission.MODIFY_PHONE_STATE");
 static const String16 sModifyAudioRouting("android.permission.MODIFY_AUDIO_ROUTING");
 static const String16 sCallAudioInterception("android.permission.CALL_AUDIO_INTERCEPTION");
+static const String16 sModifyAudioSettingsPrivileged(
+        "android.permission.MODIFY_AUDIO_SETTINGS_PRIVILEGED");
 
 static String16 resolveCallingPackage(PermissionController& permissionController,
         const std::optional<String16> opPackageName, uid_t uid) {
@@ -384,6 +386,17 @@ bool modifyDefaultAudioEffectsAllowed(const AttributionSourceState& attributionS
     bool ok = PermissionCache::checkPermission(sModifyDefaultAudioEffectsAllowed, pid, uid);
     ALOGE_IF(!ok, "%s(): android.permission.MODIFY_DEFAULT_AUDIO_EFFECTS denied for uid %d",
             __func__, uid);
+    return ok;
+}
+
+bool modifyAudioSettingsPrivilegedAllowed(const AttributionSourceState& attributionSource) {
+    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+    pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
+    if (isAudioServerUid(uid)) return true;
+    // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
+    bool ok = PermissionCache::checkPermission(sModifyAudioSettingsPrivileged, pid, uid);
+    if (!ok) ALOGE("%s(): android.permission.MODIFY_AUDIO_SETTINGS_PRIVILEGED denied for uid %d",
+                   __func__, uid);
     return ok;
 }
 
