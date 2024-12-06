@@ -341,6 +341,8 @@ C2ENUM(C2Config::api_feature_t, uint64_t,
     API_SAME_INPUT_BUFFER = (1U << 16),   ///< supporting multiple input buffers
                                           ///< backed by the same allocation
 
+    API_BLOCK_FENCES     = (1U << 17),    ///< supporting block fences
+
     API_STREAMS          = (1ULL << 32),  ///< supporting variable number of streams
 
     API_TUNNELING        = (1ULL << 48)   ///< tunneling API
