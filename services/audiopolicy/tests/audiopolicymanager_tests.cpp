@@ -179,6 +179,7 @@ class AudioPolicyManagerTest : public testing::Test {
     void SetUp() override;
     void TearDown() override;
     virtual void SetUpManagerConfig();
+    virtual std::string getEngineConfigFilePath() const { return sTestEngineConfig; }
 
     void dumpToLog();
     // When explicit routing is needed, selectedDeviceId needs to be set as the wanted port
@@ -217,6 +218,7 @@ class AudioPolicyManagerTest : public testing::Test {
             const std::string &address, audio_port_v7 *foundPort);
     static audio_port_handle_t getDeviceIdFromPatch(const struct audio_patch* patch);
     virtual AudioPolicyManagerTestClient* getClient() { return new AudioPolicyManagerTestClient; }
+    void verifyBuiltInStrategyIdsAreValid();
 
     sp<AudioPolicyConfig> mConfig;
     std::unique_ptr<AudioPolicyManagerTestClient> mClient;
@@ -231,7 +233,7 @@ const std::string AudioPolicyManagerTest::sTestEngineConfig =
 void AudioPolicyManagerTest::SetUp() {
     mClient.reset(getClient());
     ASSERT_NO_FATAL_FAILURE(SetUpManagerConfig());  // Subclasses may want to customize the config.
-    mManager.reset(new AudioPolicyTestManager(mConfig, mClient.get(), sTestEngineConfig));
+    mManager.reset(new AudioPolicyTestManager(mConfig, mClient.get(), getEngineConfigFilePath()));
     ASSERT_EQ(NO_ERROR, mManager->initialize());
     ASSERT_EQ(NO_ERROR, mManager->initCheck());
 }
@@ -397,6 +399,16 @@ audio_port_handle_t AudioPolicyManagerTest::getDeviceIdFromPatch(
     return AUDIO_PORT_HANDLE_NONE;
 }
 
+void AudioPolicyManagerTest::verifyBuiltInStrategyIdsAreValid() {
+    AudioProductStrategyVector strategies;
+    ASSERT_EQ(NO_ERROR, mManager->listAudioProductStrategies(strategies));
+    for (const auto& strategy : strategies) {
+        // Since ids are unsigned, this will also cover the case when the id is 'NONE' which is -1.
+        EXPECT_LT(strategy.getId(),
+                  media::audio::common::AudioHalProductStrategy::VENDOR_STRATEGY_ID_START)
+                << strategy.getName();
+    }
+}
 
 TEST_F(AudioPolicyManagerTest, InitSuccess) {
     // SetUp must finish with no assertions.
@@ -453,6 +465,20 @@ TEST_F(AudioPolicyManagerTest, CreateAudioPatchFromMix) {
 }
 
 // TODO: Add patch creation tests that involve already existing patch
+
+TEST_F(AudioPolicyManagerTest, BuiltInStrategyIdsAreValid) {
+    verifyBuiltInStrategyIdsAreValid();
+}
+
+class AudioPolicyManagerTestWithDefaultEngineConfig : public AudioPolicyManagerTest {
+  protected:
+    // The APM will use the default engine config from EngineDefaultConfig.h.
+    std::string getEngineConfigFilePath() const override { return ""; }
+};
+
+TEST_F(AudioPolicyManagerTestWithDefaultEngineConfig, BuiltInStrategyIdsAreValid) {
+    verifyBuiltInStrategyIdsAreValid();
+}
 
 enum
 {
@@ -3430,6 +3456,49 @@ void AudioPolicyManagerPhoneTest::verifyMixPortNameAndFlags(audio_io_handle_t ou
 
 TEST_F(AudioPolicyManagerPhoneTest, InitSuccess) {
     // SetUp must finish with no assertions.
+}
+
+TEST_F(AudioPolicyManagerPhoneTest, Dump) {
+    dumpToLog();
+}
+
+TEST_F(AudioPolicyManagerPhoneTest, NoPatchChangesDuringAlarmPlayback) {
+    audio_port_handle_t alarmPortId = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t alarmOutput = AUDIO_IO_HANDLE_NONE;
+    {
+        // Uses STRATEGY_SONIFICATION, routed to AUDIO_DEVICE_OUT_SPEAKER_SAFE.
+        audio_attributes_t attr = {
+            .content_type = AUDIO_CONTENT_TYPE_UNKNOWN,
+            .usage = AUDIO_USAGE_ALARM,
+        };
+        DeviceIdVector selectedDeviceIds;
+        ASSERT_NO_FATAL_FAILURE(getOutputForAttr(&selectedDeviceIds, AUDIO_FORMAT_PCM_16_BIT,
+                        AUDIO_CHANNEL_OUT_STEREO, 48000,
+                        AUDIO_OUTPUT_FLAG_NONE,
+                        &alarmOutput, &alarmPortId, attr));
+        EXPECT_EQ(NO_ERROR, mManager->startOutput(alarmPortId));
+    }
+    const audio_patch lastPatchBefore = *(mClient->getLastAddedPatch());
+
+    {
+        // Uses STRATEGY_MEDIA, routed to AUDIO_DEVICE_OUT_SPEAKER.
+        audio_attributes_t attr = {
+            .content_type = AUDIO_CONTENT_TYPE_UNKNOWN,
+            .usage = AUDIO_USAGE_MEDIA,
+        };
+        DeviceIdVector selectedDeviceIds;
+        audio_port_handle_t notifPortId = AUDIO_PORT_HANDLE_NONE;
+        audio_io_handle_t notifOutput = AUDIO_IO_HANDLE_NONE;
+        ASSERT_NO_FATAL_FAILURE(getOutputForAttr(&selectedDeviceIds, AUDIO_FORMAT_PCM_16_BIT,
+                        AUDIO_CHANNEL_OUT_STEREO, 48000,
+                        AUDIO_OUTPUT_FLAG_NONE,
+                        &notifOutput, &notifPortId, attr));
+        EXPECT_EQ(NO_ERROR, mManager->startOutput(notifPortId));
+    }
+    dumpToLog();
+    const audio_patch lastPatchAfter = *(mClient->getLastAddedPatch());
+    EXPECT_TRUE(audio_patches_are_equal(&lastPatchBefore, &lastPatchAfter)) <<
+            "Unexpected change in patches detected";
 }
 
 enum {
