@@ -149,7 +149,7 @@ cc_defaults {
         "audio-permission-aidl-cpp",
         "audioclient-types-aidl-cpp",
         "audioflinger-aidl-cpp",
-        "audiopermissioncontroller",
+        "libaudiopermission",
         "av-types-aidl-cpp",
         "com.android.media.audio-aconfig-cc",
         "com.android.media.audioserver-aconfig-cc",
@@ -233,6 +233,22 @@ cc_library {
     export_shared_lib_headers: [
         "libpermission",
     ],
+
+    export_static_lib_headers: [
+        "libpshutils",
+    ],
+
+    shared: {
+        static_libs: [
+            "libpshutils",
+        ],
+    },
+
+    static: {
+        whole_static_libs: [
+            "libpshutils",
+        ],
+    },
 
     cflags: [
         "-Wall",

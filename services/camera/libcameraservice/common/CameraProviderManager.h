@@ -88,6 +88,7 @@ enum SystemCameraKind {
 #define CAMERA_DEVICE_API_VERSION_1_0 HARDWARE_DEVICE_API_VERSION(1, 0)
 #define CAMERA_DEVICE_API_VERSION_1_2 HARDWARE_DEVICE_API_VERSION(1, 2)
 #define CAMERA_DEVICE_API_VERSION_1_3 HARDWARE_DEVICE_API_VERSION(1, 3)
+#define CAMERA_DEVICE_API_VERSION_1_4 HARDWARE_DEVICE_API_VERSION(1, 4)
 #define CAMERA_DEVICE_API_VERSION_3_0 HARDWARE_DEVICE_API_VERSION(3, 0)
 #define CAMERA_DEVICE_API_VERSION_3_1 HARDWARE_DEVICE_API_VERSION(3, 1)
 #define CAMERA_DEVICE_API_VERSION_3_2 HARDWARE_DEVICE_API_VERSION(3, 2)
@@ -431,6 +432,11 @@ public:
     // LocalRegistrationCallback::onServiceRegistration
     virtual void onServiceRegistration(const String16& name, const sp<IBinder> &binder) override;
 
+    /*
+     * Return list of provider pid
+     */
+    std::set<pid_t> getProviderPids();
+
     /**
      * Dump out information about available providers and devices
      */
@@ -465,6 +471,9 @@ public:
 
     static const float kDepthARTolerance;
     static const bool kFrameworkJpegRDisabled;
+    static const bool kFrameworkHeicUltraHDRDisabled;
+    static const bool kFrameworkHeicAllowSWCodecs;
+
 private:
     // All private members, unless otherwise noted, expect mInterfaceMutex to be locked before use
     mutable std::mutex mInterfaceMutex;
@@ -624,6 +633,7 @@ private:
             bool hasFlashUnit() const { return mHasFlashUnit; }
             bool supportNativeZoomRatio() const { return mSupportNativeZoomRatio; }
             bool isCompositeJpegRDisabled() const { return mCompositeJpegRDisabled; }
+            bool isCompositeHeicUltraHDRDisabled() const { return mCompositeHeicUltraHDRDisabled; }
             virtual status_t setTorchMode(bool enabled) = 0;
             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
             virtual status_t getTorchStrengthLevel(int32_t *torchStrength) = 0;
@@ -680,14 +690,15 @@ private:
                     mParentProvider(parentProvider), mTorchStrengthLevel(0),
                     mTorchMaximumStrengthLevel(0), mTorchDefaultStrengthLevel(0),
                     mHasFlashUnit(false), mSupportNativeZoomRatio(false),
-                    mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false) {}
+                    mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false),
+                    mCompositeHeicUltraHDRDisabled(false) {}
             virtual ~DeviceInfo() {}
         protected:
 
             bool mHasFlashUnit; // const after constructor
             bool mSupportNativeZoomRatio; // const after constructor
             const std::vector<std::string>& mPublicCameraIds;
-            bool mCompositeJpegRDisabled;
+            bool mCompositeJpegRDisabled, mCompositeHeicUltraHDRDisabled;
         };
         std::vector<std::unique_ptr<DeviceInfo>> mDevices;
         std::unordered_set<std::string> mUniqueCameraIds;
@@ -752,11 +763,27 @@ private:
             status_t addDynamicDepthTags(bool maxResolution = false);
             status_t deriveHeicTags(bool maxResolution = false);
             status_t deriveJpegRTags(bool maxResolution = false);
+            status_t deriveHeicUltraHDRTags(bool maxResolution = false);
+            status_t deriveBlobDurationEntries(
+                    const CameraMetadata& c, bool maxResolution,
+                    const std::vector<std::tuple<size_t, size_t>>& filteredSizes,
+                    std::vector<int64_t>* filteredStallDurations /*out*/,
+                    std::vector<int64_t>* filteredMinDurations /*out*/);
+            status_t insertStreamConfigTags(int32_t sizeTag, int32_t minFrameDurationTag,
+                                            int32_t stallDurationTag,
+                                            const std::vector<int32_t>& sizeEntries,
+                                            const std::vector<int64_t>& minFrameDurationEntries,
+                                            const std::vector<int64_t>& stallDurationEntries,
+                                            CameraMetadata* c /*out*/);
             status_t addRotateCropTags();
             status_t addAutoframingTags();
             status_t addPreCorrectionActiveArraySize();
             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
+            status_t addColorCorrectionAvailableModesTag(CameraMetadata& ch);
+            status_t addAePriorityModeTags();
             status_t addSessionConfigQueryVersionTag();
+            status_t addSharedSessionConfigurationTags();
+            bool isAutomotiveDevice();
 
             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
                     android_pixel_format_t format,
@@ -913,6 +940,9 @@ private:
     std::vector<sp<ProviderInfo>> mProviders;
     // Provider names of AIDL providers with retrieved binders.
     std::set<std::string> mAidlProviderWithBinders;
+
+    std::mutex mProviderPidMapLock;
+    std::map<std::string, pid_t> mProviderPidMap;
 
     static const char* deviceStatusToString(
         const hardware::camera::common::V1_0::CameraDeviceStatus&);

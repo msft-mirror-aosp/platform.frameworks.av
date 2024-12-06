@@ -52,6 +52,13 @@ struct Component;
 using ::aidl::android::hardware::media::bufferpool2::IClientManager;
 
 struct ComponentStore : public BnComponentStore {
+    /**
+     * Constructor for ComponentStore.
+     *
+     * IMPORTANT: SetPreferredCodec2ComponentStore() is called in the constructor.
+     * Be careful about the order of SetPreferredCodec2ComponentStore() and
+     * ComponentStore() in the code.
+     */
     ComponentStore(const std::shared_ptr<C2ComponentStore>& store);
     virtual ~ComponentStore();
 
@@ -119,6 +126,9 @@ protected:
     c2_status_t mInit;
     std::shared_ptr<C2ComponentStore> mStore;
     std::vector<std::shared_ptr<C2ParamReflector>> mParamReflectors;
+
+    // Reflector helper for MultiAccessUnitHelper
+    std::shared_ptr<C2ReflectorHelper> mMultiAccessUnitReflector;
 
     std::map<C2Param::CoreIndex, std::shared_ptr<C2StructDescriptor>> mStructDescriptors;
     std::set<C2Param::CoreIndex> mUnsupportedStructDescriptors;
