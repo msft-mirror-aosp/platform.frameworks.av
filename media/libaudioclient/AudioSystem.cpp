@@ -35,6 +35,7 @@
 #include <media/TypeConverter.h>
 #include <mediautils/ServiceSingleton.h>
 #include <math.h>
+#include <private/android_filesystem_config.h>
 
 #include <system/audio.h>
 #include <android/media/GetInputForAttrResponse.h>
@@ -169,9 +170,14 @@ public:
             if (!mDisableThreadPoolStart) {
                 ProcessState::self()->startThreadPool();
             }
-            mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
-            mWaitMs = std::chrono::milliseconds(
-                property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
+            if (multiuser_get_app_id(getuid()) == AID_AUDIOSERVER) {
+                mediautils::skipService<media::IAudioFlingerService>(mediautils::SkipMode::kWait);
+                mWaitMs = std::chrono::milliseconds(INT32_MAX);
+            } else {
+                mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
+                mWaitMs = std::chrono::milliseconds(
+                        property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
+            }
             init = true;
         }
         if (mValid) return mService;
@@ -1015,9 +1021,14 @@ public:
             if (!mDisableThreadPoolStart) {
                 ProcessState::self()->startThreadPool();
             }
-            mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
-            mWaitMs = std::chrono::milliseconds(
-                    property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
+            if (multiuser_get_app_id(getuid()) == AID_AUDIOSERVER) {
+                mediautils::skipService<IAudioPolicyService>(mediautils::SkipMode::kWait);
+                mWaitMs = std::chrono::milliseconds(INT32_MAX);
+            } else {
+                mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
+                mWaitMs = std::chrono::milliseconds(
+                        property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
+            }
             init = true;
         }
         if (mValid) return mService;
