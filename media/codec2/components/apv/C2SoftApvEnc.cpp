@@ -1056,10 +1056,20 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                                          input->width(), input->width(), input->width(),
                                          input->width(), input->width(), input->height(),
                                          CONV_FORMAT_I420);
-            } else if (IsYUV420(*input)) {
-                return C2_BAD_VALUE;
             } else if (IsI420(*input)) {
-                return C2_BAD_VALUE;
+                uint8_t  *srcY  = (uint8_t*)input->data()[0];
+                uint8_t  *srcU  = (uint8_t*)input->data()[1];
+                uint8_t  *srcV  = (uint8_t*)input->data()[2];
+                uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
+                uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+                convertPlanar8ToP210(dstY, dstUV, srcY, srcU, srcV,
+                                        layout.planes[C2PlanarLayout::PLANE_Y].rowInc,
+                                        layout.planes[C2PlanarLayout::PLANE_U].rowInc,
+                                        layout.planes[C2PlanarLayout::PLANE_V].rowInc,
+                                        input->width(), input->width(),
+                                        input->width(), input->height(),
+                                        CONV_FORMAT_I420);
+
             } else {
                 ALOGE("Not supported color format. %d", mColorFormat);
                 return C2_BAD_VALUE;
@@ -1317,10 +1327,6 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
         return;
     }
 
-    if (work->input.buffers.empty()) {
-        return;
-    }
-
     std::shared_ptr<C2GraphicView> view;
     std::shared_ptr<C2Buffer> inputBuffer = nullptr;
     if (!work->input.buffers.empty()) {
@@ -1332,7 +1338,19 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
             work->workletsProcessed = 1u;
             return;
         }
+    } else {
+        ALOGV("Empty input Buffer");
+        uint32_t flags = 0;
+        if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
+            flags |= C2FrameData::FLAG_END_OF_STREAM;
+        }
+        work->worklets.front()->output.flags = (C2FrameData::flags_t)flags;
+        work->worklets.front()->output.buffers.clear();
+        work->worklets.front()->output.ordinal = work->input.ordinal;
+        work->workletsProcessed = 1u;
+        return;
     }
+
     if (!inputBuffer) {
         fillEmptyWork(work);
         return;
@@ -1361,6 +1379,7 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
 
     error = setEncodeArgs(&mInputFrames, view.get(), workIndex);
     if (error != C2_OK) {
+        ALOGE("setEncodeArgs has failed. err = %d", error);
         mSignalledError = true;
         work->result = error;
         work->workletsProcessed = 1u;
@@ -1382,6 +1401,7 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
         int32_t status =
                 oapve_encode(mEncoderId, &mInputFrames, mMetaId, bits.get(), &stat, &mReconFrames);
         if (status != C2_OK) {
+            ALOGE("oapve_encode has failed. err = %d", status);
             mSignalledError = true;
             work->result = C2_CORRUPTED;
             work->workletsProcessed = 1u;
