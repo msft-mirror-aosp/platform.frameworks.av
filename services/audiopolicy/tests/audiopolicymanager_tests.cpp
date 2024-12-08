@@ -44,6 +44,7 @@
 #include "AudioPolicyManagerTestClient.h"
 #include "AudioPolicyTestClient.h"
 #include "AudioPolicyTestManager.h"
+#include "test_execution_tracer.h"
 
 using namespace android;
 using testing::UnorderedElementsAre;
@@ -4145,3 +4146,9 @@ INSTANTIATE_TEST_CASE_P(
         testing::Values(AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
                         AUDIO_USAGE_ALARM)
 );
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
+    return RUN_ALL_TESTS();
+}
