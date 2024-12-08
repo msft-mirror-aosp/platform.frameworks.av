@@ -299,6 +299,21 @@ camera_status_t ACameraManager_openCamera(
  * ACameraDevice**)} except that it opens the camera in shared mode so that more
  * than one client can access the camera at the same time.
  *
+ * <p>When camera is opened in shared mode, the highest priority client among all the clients will
+ * be the primary client while the others would be secondary clients. Primary clients can create
+ * capture requests, modify any capture parameters and send them to the capture session for a
+ * one-shot capture or as a repeating request.</p>
+ *
+ * <p>Secondary clients cannot create a capture request and modify any capture parameters. However,
+ * they can start the camera streaming to desired surface targets using
+ * {@link ACameraCaptureSessionShared_startStreaming}. Once the streaming has successfully started,
+ * then they can stop the streaming using {@link ACameraCaptureSessionShared_stopStreaming}.</p>
+ *
+ * <p>The priority of client access is determined by considering two factors: its current process
+ * state and its "out of memory" score. Clients operating in the background are assigned a lower
+ * priority. In contrast, clients running in the foreground, along with system-level clients, are
+ * given a higher priority.</p>
+ *
  * <p>Processes need to have android.permission.SYSTEM_CAMERA in addition to
  * android.permission.CAMERA in order to connect to this camera device in shared
  * mode.</p>
@@ -308,7 +323,7 @@ camera_status_t ACameraManager_openCamera(
  * @param callback the {@link ACameraDevice_StateCallbacks} associated with the opened camera
  *                 device.
  * @param device the opened {@link ACameraDevice} will be filled here if the method call succeeds.
- * @param primaryClient will return as true if the client is primaryClient.
+ * @param isPrimaryClient will return as true if the client is a primary client.
  *
  * @return <ul>
  *         <li>{@link ACAMERA_OK} if the method call succeeds.</li>
@@ -449,8 +464,8 @@ camera_status_t ACameraManager_unregisterExtendedAvailabilityCallback(
  *
  * @return <ul>
  *         <li>{@link ACAMERA_OK} if the method call succeeds.</li>
- *         <li>{@link ACAMERA_ERROR_INVALID_PARAMETER} if any parameter is not
- *         valid.</li>
+ *         <li>{@link ACAMERA_ERROR_INVALID_PARAMETER} if manager, cameraId, or isSharingSupported
+ *                  is NULL, or cameraId does not match any camera devices connected.</li>
  *         </ul>
  */
 camera_status_t ACameraManager_isCameraDeviceSharingSupported(
