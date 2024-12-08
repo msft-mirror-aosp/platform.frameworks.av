@@ -338,7 +338,8 @@ private:
     static const uhdr_color_transfer kUltraHdrOutputTransfer = UHDR_CT_SRGB;
     static const uhdr_color_range kUltraHdrOutputRange = UHDR_CR_FULL_RANGE;
 
-    static const auto kUltraHDRDataSpace = ADATASPACE_HEIF_ULTRAHDR;
+    static const auto kUltraHDRDataSpace =
+        aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR;
 
     // MediaMuxer/Codec color and format aspects for base image and gainmap metadata
     static const int32_t kCodecColorFormat = COLOR_FormatYUV420Flexible;
