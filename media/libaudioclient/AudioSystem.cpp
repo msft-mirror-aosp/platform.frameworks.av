@@ -35,7 +35,6 @@
 #include <media/TypeConverter.h>
 #include <mediautils/ServiceSingleton.h>
 #include <math.h>
-#include <private/android_filesystem_config.h>
 
 #include <system/audio.h>
 #include <android/media/GetInputForAttrResponse.h>
@@ -146,25 +145,12 @@ public:
         onNewServiceWithAdapter(createServiceAdapter(afs));
     }
 
-    static void onServiceDied(const sp<media::IAudioFlingerService>& service) {
-        ALOGW("%s: %s service died %p", __func__, getServiceName(), service.get());
+    static void onServiceDied(const sp<media::IAudioFlingerService>&) {
+        ALOGW("%s: %s service died", __func__, getServiceName());
         {
             std::lock_guard l(mMutex);
-            if (!mValid) {
-                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
-                return;
-            }
-            if (!mService || mService->getDelegate() != service) {
-                ALOGW("%s: %s unmatched service death pointers, ignoring",
-                        __func__, getServiceName());
-                return;
-            }
             mValid = false;
-            if (mClient) {
-                mClient->clearIoCache();
-            } else {
-                ALOGW("%s: null client", __func__);
-            }
+            mClient->clearIoCache();
         }
         AudioSystem::reportError(DEAD_OBJECT);
     }
@@ -183,14 +169,9 @@ public:
             if (!mDisableThreadPoolStart) {
                 ProcessState::self()->startThreadPool();
             }
-            if (multiuser_get_app_id(getuid()) == AID_AUDIOSERVER) {
-                mediautils::skipService<media::IAudioFlingerService>(mediautils::SkipMode::kWait);
-                mWaitMs = std::chrono::milliseconds(INT32_MAX);
-            } else {
-                mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
-                mWaitMs = std::chrono::milliseconds(
-                        property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
-            }
+            mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
+            mWaitMs = std::chrono::milliseconds(
+                property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
             init = true;
         }
         if (mValid) return mService;
@@ -228,18 +209,12 @@ public:
     static status_t setLocalService(const sp<IAudioFlinger>& af) {
         mediautils::skipService<media::IAudioFlingerService>();
         sp<IAudioFlinger> old;
-
-        audio_utils::unique_lock ul(mMutex);
-        old = mService;
-        if (old) {
-            ul.unlock();
-            onServiceDied(old->getDelegate());
-            ul.lock();
-            ALOGW_IF(old != mService,
-                    "%s: service changed during callback, continuing.", __func__);
+        {
+            std::lock_guard l(mMutex);
+            old = mService;
+            mService = af;
         }
-        mService = af;
-        ul.unlock();
+        if (old) onServiceDied({});
         if (af) onNewServiceWithAdapter(af);
         return OK;
     }
@@ -270,8 +245,6 @@ private:
         bool reportNoError = false;
         {
             std::lock_guard l(mMutex);
-            ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
-                    __func__, getServiceName());
             if (mClient == nullptr) {
                 mClient = sp<AudioSystem::AudioFlingerClient>::make();
             } else {
@@ -1002,8 +975,6 @@ public:
         sp<AudioSystem::AudioPolicyServiceClient> client;
         {
             std::lock_guard l(mMutex);
-            ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
-                    __func__, getServiceName());
             if (mClient == nullptr) {
                 mClient = sp<AudioSystem::AudioPolicyServiceClient>::make();
             }
@@ -1019,28 +990,15 @@ public:
         IPCThreadState::self()->restoreCallingIdentity(token);
     }
 
-    static void onServiceDied(const sp<IAudioPolicyService>& service) {
-        ALOGW("%s: %s service died %p", __func__, getServiceName(), service.get());
+    static void onServiceDied(const sp<IAudioPolicyService>&) {
+        ALOGW("%s: %s service died", __func__, getServiceName());
         sp<AudioSystem::AudioPolicyServiceClient> client;
         {
             std::lock_guard l(mMutex);
-            if (!mValid) {
-                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
-                return;
-            }
-            if (mService != service) {
-                ALOGW("%s: %s unmatched service death pointers, ignoring",
-                        __func__, getServiceName());
-                return;
-            }
             mValid = false;
             client = mClient;
         }
-        if (client) {
-            client->onServiceDied();
-        } else {
-            ALOGW("%s: null client", __func__);
-        }
+        client->onServiceDied();
     }
 
     static constexpr mediautils::ServiceOptions options() {
@@ -1057,14 +1015,9 @@ public:
             if (!mDisableThreadPoolStart) {
                 ProcessState::self()->startThreadPool();
             }
-            if (multiuser_get_app_id(getuid()) == AID_AUDIOSERVER) {
-                mediautils::skipService<IAudioPolicyService>(mediautils::SkipMode::kWait);
-                mWaitMs = std::chrono::milliseconds(INT32_MAX);
-            } else {
-                mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
-                mWaitMs = std::chrono::milliseconds(
-                        property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
-            }
+            mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
+            mWaitMs = std::chrono::milliseconds(
+                    property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
             init = true;
         }
         if (mValid) return mService;
@@ -1097,19 +1050,12 @@ public:
     static status_t setLocalService(const sp<IAudioPolicyService>& aps) {
         mediautils::skipService<IAudioPolicyService>();
         sp<IAudioPolicyService> old;
-        audio_utils::unique_lock ul(mMutex);
-        old = mService;
-        if (old) {
-            ul.unlock();
-            onServiceDied(old);
-            ul.lock();
-            if (mService != old) {
-                ALOGD("%s: service changed during callback, ignoring.", __func__);
-                return OK;
-            }
+        {
+            std::lock_guard l(mMutex);
+            old = mService;
+            mService = aps;
         }
-        mService = aps;
-        ul.unlock();
+        if (old) onServiceDied(old);
         if (aps) onNewService(aps);
         return OK;
     }

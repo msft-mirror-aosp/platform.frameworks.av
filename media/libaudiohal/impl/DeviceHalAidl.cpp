@@ -79,13 +79,13 @@ using aidl::android::hardware::audio::core::ModuleDebug;
 using aidl::android::hardware::audio::core::VendorParameter;
 
 #define RETURN_IF_MODULE_NOT_INIT(retVal)         \
-    if (!isModuleInitialized()) {                 \
+    if (mModule == nullptr) {                     \
         AUGMENT_LOG(E, "module not initialized"); \
         return retVal;                            \
     }
 
 #define RETURN_IF_TELEPHONY_NOT_INIT(retVal)         \
-    if (!isTelephonyInitialized()) {                  \
+    if (mTelephony == nullptr) {                     \
         AUGMENT_LOG(E, "telephony not initialized"); \
         return retVal;                               \
     }
@@ -124,12 +124,12 @@ DeviceHalAidl::DeviceHalAidl(const std::string& instance, const std::shared_ptr<
                              const std::shared_ptr<IHalAdapterVendorExtension>& vext)
     : ConversionHelperAidl("DeviceHalAidl", instance),
       mModule(module),
+      mVendorExt(vext),
       mTelephony(retrieveSubInterface<ITelephony>(module, &IModule::getTelephony)),
       mBluetooth(retrieveSubInterface<IBluetooth>(module, &IModule::getBluetooth)),
       mBluetoothA2dp(retrieveSubInterface<IBluetoothA2dp>(module, &IModule::getBluetoothA2dp)),
       mBluetoothLe(retrieveSubInterface<IBluetoothLe>(module, &IModule::getBluetoothLe)),
       mSoundDose(retrieveSubInterface<ISoundDose>(module, &IModule::getSoundDose)),
-      mVendorExt(vext),
       mMapper(instance, module),
       mMapperAccessor(mMapper, mLock) {}
 
@@ -154,11 +154,8 @@ status_t DeviceHalAidl::getSupportedModes(std::vector<media::audio::common::Audi
         return BAD_VALUE;
     }
     std::vector<AudioMode> aidlModes;
-    {
-        std::lock_guard l(mLock);
-        RETURN_STATUS_IF_ERROR(
-                statusTFromBinderStatus(mTelephony->getSupportedAudioModes(&aidlModes)));
-    }
+    RETURN_STATUS_IF_ERROR(
+            statusTFromBinderStatus(mTelephony->getSupportedAudioModes(&aidlModes)));
     *modes = VALUE_OR_RETURN_STATUS(
             ::aidl::android::convertContainer<std::vector<media::audio::common::AudioMode>>(
                     aidlModes, ndk2cpp_AudioMode));
@@ -185,11 +182,8 @@ status_t DeviceHalAidl::setVoiceVolume(float volume) {
     RETURN_IF_TELEPHONY_NOT_INIT(INVALID_OPERATION);
 
     ITelephony::TelecomConfig inConfig{.voiceVolume = Float{volume}}, outConfig;
-    {
-        std::lock_guard l(mLock);
-        RETURN_STATUS_IF_ERROR(
-                statusTFromBinderStatus(mTelephony->setTelecomConfig(inConfig, &outConfig)));
-    }
+    RETURN_STATUS_IF_ERROR(
+            statusTFromBinderStatus(mTelephony->setTelecomConfig(inConfig, &outConfig)));
     AUGMENT_LOG_IF(
             W, outConfig.voiceVolume.has_value() && volume != outConfig.voiceVolume.value().value,
             "the resulting voice volume %f is not the same as requested %f",
@@ -202,7 +196,6 @@ status_t DeviceHalAidl::setMasterVolume(float volume) {
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->setMasterVolume(volume));
 }
 
@@ -214,7 +207,6 @@ status_t DeviceHalAidl::getMasterVolume(float *volume) {
         AUGMENT_LOG(E, "uninitialized volumes");
         return BAD_VALUE;
     }
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->getMasterVolume(volume));
 }
 
@@ -224,7 +216,6 @@ status_t DeviceHalAidl::setMode(audio_mode_t mode) {
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     AudioMode audioMode = VALUE_OR_FATAL(::aidl::android::legacy2aidl_audio_mode_t_AudioMode(mode));
-    std::lock_guard l(mLock);
     if (mTelephony != nullptr) {
         RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mTelephony->switchAudioMode(audioMode)));
     }
@@ -236,7 +227,6 @@ status_t DeviceHalAidl::setMicMute(bool state) {
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->setMicMute(state));
 }
 
@@ -249,7 +239,6 @@ status_t DeviceHalAidl::getMicMute(bool *state) {
         AUGMENT_LOG(E, "uninitialized mute state");
         return BAD_VALUE;
     }
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->getMicMute(state));
 }
 
@@ -258,7 +247,6 @@ status_t DeviceHalAidl::setMasterMute(bool state) {
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->setMasterMute(state));
 }
 
@@ -271,7 +259,6 @@ status_t DeviceHalAidl::getMasterMute(bool *state) {
         AUGMENT_LOG(E, "uninitialized mute state");
         return BAD_VALUE;
     }
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->getMasterMute(state));
 }
 
@@ -299,7 +286,6 @@ status_t DeviceHalAidl::setParameters(const String8& kvPairs) {
     if (status_t status = filterAndUpdateTelephonyParameters(parameters); status != OK) {
         AUGMENT_LOG(W, "filterAndUpdateTelephonyParameters failed: %d", status);
     }
-    std::lock_guard l(mLock);
     return parseAndSetVendorParameters(mVendorExt, mModule, parameters);
 }
 
@@ -320,7 +306,6 @@ status_t DeviceHalAidl::getParameters(const String8& keys, String8 *values) {
         AUGMENT_LOG(W, "filterAndRetrieveBtLeParameters failed: %d", status);
     }
     *values = result.toString();
-    std::lock_guard l(mLock);
     return parseAndGetVendorParameters(mVendorExt, mModule, parameterKeys, values);
 }
 
@@ -541,10 +526,7 @@ status_t DeviceHalAidl::openOutputStream(
     args.eventCallback = eventCb;
     args.sourceMetadata = aidlMetadata;
     ::aidl::android::hardware::audio::core::IModule::OpenOutputStreamReturn ret;
-    {
-        std::lock_guard l(mLock);
-        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->openOutputStream(args, &ret)));
-    }
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->openOutputStream(args, &ret)));
     StreamContextAidl context(ret.desc, isOffload, aidlHandle);
     if (!context.isValid()) {
         AUGMENT_LOG(E, "Failed to created a valid stream context from the descriptor: %s",
@@ -623,10 +605,7 @@ status_t DeviceHalAidl::openInputStream(
     args.sinkMetadata.tracks.push_back(std::move(aidlTrackMetadata));
     args.bufferSizeFrames = aidlConfig.frameCount;
     ::aidl::android::hardware::audio::core::IModule::OpenInputStreamReturn ret;
-    {
-        std::lock_guard l(mLock);
-        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->openInputStream(args, &ret)));
-    }
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->openInputStream(args, &ret)));
     StreamContextAidl context(ret.desc, false /*isAsynchronous*/, aidlHandle);
     if (!context.isValid()) {
         AUGMENT_LOG(E, "Failed to created a valid stream context from the descriptor: %s",
@@ -925,11 +904,8 @@ status_t DeviceHalAidl::addDeviceEffect(
                     requestedPortConfig, {} /*destinationPortIds*/, &devicePortConfig, &cleanups));
     }
     auto aidlEffect = sp<effect::EffectHalAidl>::cast(effect);
-    {
-        std::lock_guard l(mLock);
-        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
-                mModule->addDeviceEffect(devicePortConfig.id, aidlEffect->getIEffect())));
-    }
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->addDeviceEffect(
+                            devicePortConfig.id, aidlEffect->getIEffect())));
     cleanups.disarmAll();
     return OK;
 }
@@ -960,7 +936,6 @@ status_t DeviceHalAidl::removeDeviceEffect(
                         &devicePortConfig));
     }
     auto aidlEffect = sp<effect::EffectHalAidl>::cast(effect);
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->removeDeviceEffect(
                     devicePortConfig.id, aidlEffect->getIEffect()));
 }
@@ -978,10 +953,9 @@ status_t DeviceHalAidl::getMmapPolicyInfos(
 
     std::vector<AudioMMapPolicyInfo> mmapPolicyInfos;
 
-    {
-        std::lock_guard l(mLock);
-        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
-                        mModule->getMmapPolicyInfos(mmapPolicyType, &mmapPolicyInfos)));
+    if (status_t status = statusTFromBinderStatus(
+            mModule->getMmapPolicyInfos(mmapPolicyType, &mmapPolicyInfos)); status != OK) {
+        return status;
     }
 
     *policyInfos = VALUE_OR_RETURN_STATUS(
@@ -996,8 +970,10 @@ int32_t DeviceHalAidl::getAAudioMixerBurstCount() {
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     int32_t mixerBurstCount = 0;
-    std::lock_guard l(mLock);
-    return mModule->getAAudioMixerBurstCount(&mixerBurstCount).isOk() ? mixerBurstCount : 0;
+    if (mModule->getAAudioMixerBurstCount(&mixerBurstCount).isOk()) {
+        return mixerBurstCount;
+    }
+    return 0;
 }
 
 int32_t DeviceHalAidl::getAAudioHardwareBurstMinUsec() {
@@ -1006,9 +982,10 @@ int32_t DeviceHalAidl::getAAudioHardwareBurstMinUsec() {
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     int32_t hardwareBurstMinUsec = 0;
-    std::lock_guard l(mLock);
-    return mModule->getAAudioHardwareBurstMinUsec(&hardwareBurstMinUsec).isOk() ?
-            hardwareBurstMinUsec : 0;
+    if (mModule->getAAudioHardwareBurstMinUsec(&hardwareBurstMinUsec).isOk()) {
+        return hardwareBurstMinUsec;
+    }
+    return 0;
 }
 
 error::Result<audio_hw_sync_t> DeviceHalAidl::getHwAvSync() {
@@ -1017,7 +994,6 @@ error::Result<audio_hw_sync_t> DeviceHalAidl::getHwAvSync() {
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     int32_t aidlHwAvSync;
-    std::lock_guard l(mLock);
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->generateHwAvSyncId(&aidlHwAvSync)));
     return VALUE_OR_RETURN_STATUS(
             ::aidl::android::aidl2legacy_int32_t_audio_hw_sync_t(aidlHwAvSync));
@@ -1025,10 +1001,9 @@ error::Result<audio_hw_sync_t> DeviceHalAidl::getHwAvSync() {
 
 status_t DeviceHalAidl::dump(int fd, const Vector<String16>& args) {
     TIME_CHECK();
-    if (!isModuleInitialized()) return NO_INIT;
+    if (mModule == nullptr) return NO_INIT;
     Vector<String16> newArgs = args;
     newArgs.push(String16(kDumpFromAudioServerArgument));
-    std::lock_guard l(mLock);
     return mModule->dump(fd, Args(newArgs).args(), newArgs.size());
 }
 
@@ -1040,7 +1015,6 @@ status_t DeviceHalAidl::supportsBluetoothVariableLatency(bool* supports) {
     if (supports == nullptr) {
         return BAD_VALUE;
     }
-    std::lock_guard l(mLock);
     return statusTFromBinderStatus(mModule->supportsVariableLatency(supports));
 }
 
@@ -1054,15 +1028,15 @@ status_t DeviceHalAidl::getSoundDoseInterface([[maybe_unused]] const std::string
     }
     if (mSoundDose == nullptr) {
         AUGMENT_LOG(E, "failed to retrieve the sound dose interface");
-        return NO_INIT;
+        return BAD_VALUE;
     }
 
-    *soundDoseBinder = mSoundDose->asBinder();
-    if (soundDoseBinder == nullptr) {
+    if (mSoundDose == nullptr) {
         AUGMENT_LOG(E, "failed to return the sound dose interface not implemented");
         return NO_INIT;
     }
 
+    *soundDoseBinder = mSoundDose->asBinder();
     AUGMENT_LOG(I, "using audio AIDL HAL sound dose interface");
     return OK;
 }
@@ -1142,8 +1116,10 @@ status_t DeviceHalAidl::setSimulateDeviceConnections(bool enabled) {
     AUGMENT_LOG(V);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
-    std::lock_guard l(mLock);
-    mMapper.resetUnusedPatchesAndPortConfigs();
+    {
+        std::lock_guard l(mLock);
+        mMapper.resetUnusedPatchesAndPortConfigs();
+    }
     ModuleDebug debug{ .simulateDeviceConnections = enabled };
     status_t status = statusTFromBinderStatus(mModule->setModuleDebug(debug));
     // This is important to log as it affects HAL behavior.
@@ -1159,7 +1135,6 @@ status_t DeviceHalAidl::filterAndRetrieveBtA2dpParameters(
         AudioParameter &keys, AudioParameter *result) {
     if (String8 key = String8(AudioParameter::keyReconfigA2dpSupported); keys.containsKey(key)) {
         keys.remove(key);
-        std::lock_guard l(mLock);
         if (mBluetoothA2dp != nullptr) {
             bool supports;
             RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
@@ -1177,7 +1152,6 @@ status_t DeviceHalAidl::filterAndRetrieveBtLeParameters(
         AudioParameter &keys, AudioParameter *result) {
     if (String8 key = String8(AudioParameter::keyReconfigLeSupported); keys.containsKey(key)) {
         keys.remove(key);
-        std::lock_guard l(mLock);
         if (mBluetoothLe != nullptr) {
             bool supports;
             RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
@@ -1218,7 +1192,6 @@ status_t DeviceHalAidl::filterAndUpdateBtA2dpParameters(AudioParameter &paramete
                 reconfigureOffload = std::move(result);
                 return OK;
             }));
-    std::lock_guard l(mLock);
     if (mBluetoothA2dp != nullptr && a2dpEnabled.has_value()) {
         return statusTFromBinderStatus(mBluetoothA2dp->setEnabled(a2dpEnabled.value()));
     }
@@ -1259,7 +1232,6 @@ status_t DeviceHalAidl::filterAndUpdateBtHfpParameters(AudioParameter &parameter
                 }
                 return BAD_VALUE;
             }));
-    std::lock_guard l(mLock);
     if (mBluetooth != nullptr && hfpConfig != IBluetooth::HfpConfig{}) {
         IBluetooth::HfpConfig newHfpConfig;
         return statusTFromBinderStatus(mBluetooth->setHfpConfig(hfpConfig, &newHfpConfig));
@@ -1298,7 +1270,6 @@ status_t DeviceHalAidl::filterAndUpdateBtLeParameters(AudioParameter &parameters
                 }
                 return OK;
             }));
-    std::lock_guard l(mLock);
     if (mBluetoothLe != nullptr && leEnabled.has_value()) {
         return statusTFromBinderStatus(mBluetoothLe->setEnabled(leEnabled.value()));
     }
@@ -1359,7 +1330,6 @@ status_t DeviceHalAidl::filterAndUpdateBtScoParameters(AudioParameter &parameter
                             AudioParameter::keyBtScoWb, onOrOff.c_str());
                 return BAD_VALUE;
             }));
-    std::lock_guard l(mLock);
     if (mBluetooth != nullptr && scoConfig != IBluetooth::ScoConfig{}) {
         IBluetooth::ScoConfig newScoConfig;
         return statusTFromBinderStatus(mBluetooth->setScoConfig(scoConfig, &newScoConfig));
@@ -1382,7 +1352,6 @@ status_t DeviceHalAidl::filterAndUpdateScreenParameters(AudioParameter &paramete
                                 AudioParameter::keyScreenState, onOrOff.c_str());
                     return BAD_VALUE;
                 }
-                std::lock_guard l(mLock);
                 return statusTFromBinderStatus(mModule->updateScreenState(isTurnedOn.value()));
             }));
     (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
@@ -1407,7 +1376,6 @@ status_t DeviceHalAidl::filterAndUpdateScreenParameters(AudioParameter &paramete
                                     AudioParameter::keyScreenRotation, rotationDegrees);
                         return BAD_VALUE;
                 }
-                std::lock_guard l(mLock);
                 return statusTFromBinderStatus(mModule->updateScreenRotation(rotation));
             }));
     return OK;
@@ -1450,7 +1418,6 @@ status_t DeviceHalAidl::filterAndUpdateTelephonyParameters(AudioParameter &param
                             AudioParameter::keyHacSetting, onOrOff.c_str());
                 return BAD_VALUE;
             }));
-    std::lock_guard l(mLock);
     if (mTelephony != nullptr && telConfig != ITelephony::TelecomConfig{}) {
         ITelephony::TelecomConfig newTelConfig;
         return statusTFromBinderStatus(mTelephony->setTelecomConfig(telConfig, &newTelConfig));

@@ -181,8 +181,6 @@ public:
         fromAidl(const media::CreateRecordResponse& aidl);
     };
 
-    virtual sp<media::IAudioFlingerService> getDelegate() const { return {}; }
-
     /* create an audio track and registers it with AudioFlinger.
      * The audioTrack field will be null if the track cannot be created and the status will reflect
      * failure.
@@ -415,8 +413,6 @@ public:
 class AudioFlingerClientAdapter : public IAudioFlinger {
 public:
     explicit AudioFlingerClientAdapter(const sp<media::IAudioFlingerService> delegate);
-
-    sp<media::IAudioFlingerService> getDelegate() const final { return mDelegate; }
 
     status_t createTrack(const media::CreateTrackRequest& input,
                          media::CreateTrackResponse& output) override;
