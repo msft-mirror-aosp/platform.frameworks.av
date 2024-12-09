@@ -5891,19 +5891,21 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                             /*muteState=*/{masterVolume == 0.f,
                                            mStreamTypes[track->streamType()].volume == 0.f,
                                            mStreamTypes[track->streamType()].mute,
-                                           track->isPlaybackRestricted(),
+                                           track->isPlaybackRestrictedOp(),
                                            vlf == 0.f && vrf == 0.f,
                                            vh == 0.f,
-                                           /*muteFromPortVolume=*/false});
+                                           /*muteFromPortVolume=*/false,
+                                           track->isPlaybackRestrictedControl()});
                 } else {
                     track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
                             /*muteState=*/{masterVolume == 0.f,
                                            track->getPortVolume() == 0.f,
                                            /* muteFromStreamMuted= */ false,
-                                           track->isPlaybackRestricted(),
+                                           track->isPlaybackRestrictedOp(),
                                            vlf == 0.f && vrf == 0.f,
                                            vh == 0.f,
-                                           track->getPortMute()});
+                                           track->getPortMute(),
+                                           track->isPlaybackRestrictedControl()});
                 }
                 vlf *= volume;
                 vrf *= volume;
@@ -6093,19 +6095,21 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                             /*muteState=*/{masterVolume == 0.f,
                                            mStreamTypes[track->streamType()].volume == 0.f,
                                            mStreamTypes[track->streamType()].mute,
-                                           track->isPlaybackRestricted(),
+                                           track->isPlaybackRestrictedOp(),
                                            vlf == 0.f && vrf == 0.f,
                                            vh == 0.f,
-                                           /*muteFromPortVolume=*/false});
+                                           /*muteFromPortVolume=*/false,
+                                           track->isPlaybackRestrictedControl()});
                 } else {
                     track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
                             /*muteState=*/{masterVolume == 0.f,
                                            track->getPortVolume() == 0.f,
                                            /* muteFromStreamMuted= */ false,
-                                           track->isPlaybackRestricted(),
+                                           track->isPlaybackRestrictedOp(),
                                            vlf == 0.f && vrf == 0.f,
                                            vh == 0.f,
-                                           track->getPortMute()});
+                                           track->getPortMute(),
+                                           track->isPlaybackRestrictedControl()});
                 }
                 // now apply the master volume and stream type volume and shaper volume
                 vlf *= v * vh;
@@ -6861,10 +6865,11 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
                 /*muteState=*/{mMasterMute,
                                mStreamTypes[track->streamType()].volume == 0.f,
                                mStreamTypes[track->streamType()].mute,
-                               track->isPlaybackRestricted(),
+                               track->isPlaybackRestrictedOp(),
                                clientVolumeMute,
                                shaperVolume == 0.f,
-                               /*muteFromPortVolume=*/false});
+                               /*muteFromPortVolume=*/false,
+                               track->isPlaybackRestrictedControl()});
     } else {
         if (mMasterMute || track->isPlaybackRestricted()) {
             left = right = 0;
@@ -6890,10 +6895,11 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
                 /*muteState=*/{mMasterMute,
                                track->getPortVolume() == 0.f,
                                /* muteFromStreamMuted= */ false,
-                               track->isPlaybackRestricted(),
+                               track->isPlaybackRestrictedOp(),
                                clientVolumeMute,
                                shaperVolume == 0.f,
-                               track->getPortMute()});
+                               track->getPortMute(),
+                               track->isPlaybackRestrictedControl()});
     }
 
     if (lastTrack) {
