@@ -73,10 +73,12 @@ using com::android::media::permission::PermissionEnum::CAPTURE_MEDIA_OUTPUT;
 using com::android::media::permission::PermissionEnum::CAPTURE_TUNER_AUDIO_INPUT;
 using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_ROUTING;
 using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_SETTINGS;
+using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_SETTINGS_PRIVILEGED;
 using com::android::media::permission::PermissionEnum::MODIFY_DEFAULT_AUDIO_EFFECTS;
 using com::android::media::permission::PermissionEnum::MODIFY_PHONE_STATE;
 using com::android::media::permission::PermissionEnum::RECORD_AUDIO;
 using com::android::media::permission::PermissionEnum::WRITE_SECURE_SETTINGS;
+using com::android::media::permission::PermissionEnum::BLUETOOTH_CONNECT;
 using com::android::media::permission::PermissionEnum::BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION;
 using content::AttributionSourceState;
 using media::audio::common::AudioConfig;
@@ -97,6 +99,33 @@ constexpr int kDefaultVirtualDeviceId = 0;
 namespace {
 constexpr auto PERMISSION_HARD_DENIED = permission::PermissionChecker::PERMISSION_HARD_DENIED;
 constexpr auto PERMISSION_GRANTED = permission::PermissionChecker::PERMISSION_GRANTED;
+
+bool mustAnonymizeBluetoothAddress(const AttributionSourceState& attributionSource,
+                                   const String16& caller,
+                                   const IPermissionProvider& provider) {
+    if (audioserver_permissions()) {
+        switch(multiuser_get_app_id(attributionSource.uid)) {
+            // out of caution, to prevent regression
+            case AID_ROOT:
+            case AID_SYSTEM:
+            case AID_AUDIOSERVER:
+            case AID_RADIO:
+            case AID_BLUETOOTH:
+            case AID_MEDIA:
+                return false;
+        }
+        const auto res = provider.checkPermission(BLUETOOTH_CONNECT, attributionSource.uid);
+        if (res.has_value()) {
+            return !(*res);
+        } else {
+            ALOGE("%s: error: %s", __func__, res.error().toString8().c_str());
+            return true;
+        }
+    } else {
+        return mustAnonymizeBluetoothAddressLegacy(attributionSource, caller);
+    }
+}
+
 }
 
 const std::vector<audio_usage_t>& SYSTEM_USAGES = {
@@ -439,6 +468,25 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
               : modifyAudioRoutingAllowed())) {
             ALOGE("%s: permission denied: SPEAKER_CLEANUP not allowed for uid %d pid %d",
                     __func__, attributionSource.uid, attributionSource.pid);
+            return binderStatusFromStatusT(PERMISSION_DENIED);
+        }
+    }
+
+    if (strlen(attr.tags) != 0) {
+        const bool audioAttributesTagsAllowed = audioserver_permissions() ? (
+                CHECK_PERM(MODIFY_AUDIO_SETTINGS_PRIVILEGED, attributionSource.uid) ||
+                CHECK_PERM(MODIFY_AUDIO_ROUTING, attributionSource.uid) ||
+                CHECK_PERM(CALL_AUDIO_INTERCEPTION, attributionSource.uid) ||
+                CHECK_PERM(CAPTURE_MEDIA_OUTPUT, attributionSource.uid) ||
+                CHECK_PERM(CAPTURE_VOICE_COMMUNICATION_OUTPUT, attributionSource.uid))
+                : (modifyAudioSettingsPrivilegedAllowed(attributionSource) ||
+                   modifyAudioRoutingAllowed() ||
+                   callAudioInterceptionAllowed(attributionSource) ||
+                   captureMediaOutputAllowed(attributionSource) ||
+                   captureVoiceCommunicationOutputAllowed(attributionSource));
+        if (!audioAttributesTagsAllowed) {
+            ALOGE("%s: permission denied: audio attributes tags not allowed for uid %d pid %d",
+                  __func__, attributionSource.uid, attributionSource.pid);
             return binderStatusFromStatusT(PERMISSION_DENIED);
         }
     }
@@ -1770,7 +1818,8 @@ Status AudioPolicyService::listAudioPorts(media::AudioPortRole roleAidl,
         numPortsReq = std::min(numPortsReq, num_ports);
     }
 
-    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__),
+                                      getPermissionProvider())) {
         for (size_t i = 0; i < numPortsReq; ++i) {
             anonymizePortBluetoothAddress(ports[i]);
         }
@@ -1812,7 +1861,8 @@ Status AudioPolicyService::getAudioPort(int portId,
         RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(mAudioPolicyManager->getAudioPort(&port)));
     }
 
-    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__),
+                                      getPermissionProvider())) {
         anonymizePortBluetoothAddress(port);
     }
 
@@ -1892,7 +1942,8 @@ Status AudioPolicyService::listAudioPatches(Int* count,
         numPatchesReq = std::min(numPatchesReq, num_patches);
     }
 
-    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__),
+                                      getPermissionProvider())) {
         for (size_t i = 0; i < numPatchesReq; ++i) {
             for (size_t j = 0; j < patches[i].num_sources; ++j) {
                 anonymizePortBluetoothAddress(patches[i].sources[j]);
@@ -2004,7 +2055,7 @@ Status AudioPolicyService::registerPolicyMixes(const std::vector<media::AudioMix
 
     if (needCaptureMediaOutput && !(audioserver_permissions() ?
                 CHECK_PERM(CAPTURE_MEDIA_OUTPUT, attributionSource.uid)
-                : modifyAudioRoutingAllowed())) {
+                : captureMediaOutputAllowed(attributionSource))) {
         return binderStatusFromStatusT(PERMISSION_DENIED);
     }
 
