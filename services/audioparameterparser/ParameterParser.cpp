@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-#include "ParameterParser.h"
-
 #define LOG_TAG "Audio_ParameterParser"
 #include <android-base/logging.h>
+
+#include "ParameterParser.h"
 
 namespace vendor::audio::parserservice {
 
