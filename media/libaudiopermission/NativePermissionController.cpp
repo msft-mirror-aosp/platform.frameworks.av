@@ -128,8 +128,8 @@ BinderResult<bool> NativePermissionController::validateUidPackagePair(
     uid = uid % AID_USER_OFFSET;
     const auto fixed_package_opt = getFixedPackageName(uid);
     if (fixed_package_opt.has_value()) {
-        return (uid == AID_ROOT || uid == AID_SYSTEM) ? true :
-                packageName == fixed_package_opt.value();
+        return (uid == AID_ROOT || uid == AID_SYSTEM) ? true
+                                                      : packageName == fixed_package_opt.value();
     }
     std::lock_guard l{m_};
     if (!is_package_populated_) {
