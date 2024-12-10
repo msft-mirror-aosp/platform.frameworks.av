@@ -48,7 +48,7 @@ struct C2SoftApvEnc final : public SimpleC2Component {
     c2_status_t drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool) override;
 
   private:
-    c2_status_t reset();
+    c2_status_t resetEncoder();
     c2_status_t initEncoder();
     c2_status_t releaseEncoder();
     c2_status_t setEncodeArgs(oapv_frms_t* imgb_inp, const C2GraphicView* const input,
