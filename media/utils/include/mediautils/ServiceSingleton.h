@@ -331,6 +331,9 @@ private:
                         traits->onNewService(service);
                         ul.lock();
                         setDeathNotifier_l<Service>(service);
+                    } else {
+                        ALOGW("%s: ignoring duplicated service: %p",
+                                __func__, originalService.get());
                     }
                     ul.unlock();
                     mCv.notify_all();
@@ -358,6 +361,14 @@ private:
                         // we do not need to generation count.
                         {
                             std::lock_guard l(mMutex);
+                            const auto currentService =
+                                    std::get<BaseInterfaceType<Service>>(mService);
+                            if (currentService != service) {
+                                ALOGW("%s: ignoring death as current service "
+                                        "%p != registered death service %p", __func__,
+                                        currentService.get(), service.get());
+                                return;
+                            }
                             invalidateService_l<Service>();
                         }
                         traits->onServiceDied(service);
