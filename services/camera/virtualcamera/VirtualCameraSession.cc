@@ -518,7 +518,7 @@ ndk::ScopedAStatus VirtualCameraSession::isReconfigurationRequired(
 ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
     const std::vector<CaptureRequest>& in_requests,
     const std::vector<BufferCache>& in_cachesToRemove, int32_t* _aidl_return) {
-  ALOGV("%s", __func__);
+  ALOGV("%s: request count: %zu", __func__, in_requests.size());
 
   if (!in_cachesToRemove.empty()) {
     mSessionContext.removeBufferCaches(in_cachesToRemove);
@@ -575,7 +575,7 @@ std::set<int> VirtualCameraSession::getStreamIds() const {
 
 ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
     const CaptureRequest& request) {
-  ALOGV("%s: request: %s", __func__, request.toString().c_str());
+  ALOGV("%s: CaptureRequest { frameNumber:%d }", __func__, request.frameNumber);
 
   std::shared_ptr<ICameraDeviceCallback> cameraCallback = nullptr;
   RequestSettings requestSettings;
