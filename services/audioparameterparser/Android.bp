@@ -41,7 +41,6 @@ cc_defaults {
     shared_libs: [
         "libbase",
         "libbinder_ndk",
-        "libmediautils",
     ],
 
     cflags: [
