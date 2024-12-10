@@ -435,11 +435,11 @@ ApexCodec_Status ApexCodec_SupportedValues_getTypeAndValues(
         uint32_t *_Nonnull outNumValues) __INTRODUCED_IN(36);
 
 /**
- * Release the supported values object. No-op if |values| is nullptr.
+ * Destroy the supported values object. No-op if |values| is nullptr.
  *
  * \param values the supported values object
  */
-void ApexCodec_SupportedValues_release(
+void ApexCodec_SupportedValues_destroy(
         ApexCodec_SupportedValues *_Nullable values) __INTRODUCED_IN(36);
 
 /**
@@ -537,11 +537,11 @@ ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
         size_t *_Nonnull outNumConflicts) __INTRODUCED_IN(36);
 
 /**
- * Release the setting result object. No-op if |results| is nullptr.
+ * Destroy the setting result object. No-op if |results| is nullptr.
  *
  * \param result the setting result object
  */
-void ApexCodec_SettingResults_release(
+void ApexCodec_SettingResults_destroy(
         ApexCodec_SettingResults *_Nullable results) __INTRODUCED_IN(36);
 
 /**
@@ -599,7 +599,7 @@ ApexCodec_Status ApexCodec_Component_process(
  * \param outResult     the result of the configuration.
  *                      the client should call ApexCodec_SettingResult_getResultAtIndex()
  *                      to extract the result. The result object is owned by the client and should
- *                      be released with ApexCodec_SettingResult_release().
+ *                      be released with ApexCodec_SettingResult_destroy().
  *                      |result| may be nullptr if empty.
  * \return APEXCODEC_STATUS_OK         if successful
  * \return APEXCODEC_STATUS_BAD_VALUE  if the config is invalid
@@ -710,11 +710,11 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
         size_t *_Nonnull outNumDependencies) __INTRODUCED_IN(36);
 
 /**
- * Release the param descriptors object.
+ * Destroy the param descriptors object.
  *
  * \param descriptors the param descriptors object
  */
-ApexCodec_Status ApexCodec_ParamDescriptors_release(
+ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
         ApexCodec_ParamDescriptors *_Nullable descriptors) __INTRODUCED_IN(36);
 
 /**
@@ -722,7 +722,7 @@ ApexCodec_Status ApexCodec_ParamDescriptors_release(
  *
  * \param comp              the handle for the component
  * \param outDescriptors    the pointer to be filled with the param descriptors object
- *                          the object should be released with ApexCodec_ParamDescriptors_release().
+ *                          the object should be released with ApexCodec_ParamDescriptors_destroy().
  * \return APEXCODEC_STATUS_OK          if successful
  * \return APEXCODEC_STATUS_BAD_VALUE   if parameters are bad. e.g. |descriptors| is nullptr.
  */
@@ -752,7 +752,7 @@ typedef struct ApexCodec_SupportedValuesQuery {
     /** status of the query */
     ApexCodec_Status status;
 
-    /** supported values. must be released with ApexCodec_SupportedValues_release(). */
+    /** supported values. must be released with ApexCodec_SupportedValues_destroy(). */
     ApexCodec_SupportedValues *_Nullable values;
 } ApexCodec_SupportedValuesQuery;
 
