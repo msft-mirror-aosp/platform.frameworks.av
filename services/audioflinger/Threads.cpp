@@ -7866,7 +7866,8 @@ void DuplicatingThread::removeOutputTrack(IAfPlaybackThread* thread)
 // caller must hold mutex()
 void DuplicatingThread::updateWaitTime_l()
 {
-    mWaitTimeMs = UINT_MAX;
+    // Initialize mWaitTimeMs according to the mixer buffer size.
+    mWaitTimeMs = mNormalFrameCount * 2 * 1000 / mSampleRate;
     for (size_t i = 0; i < mOutputTracks.size(); i++) {
         const auto strong = mOutputTracks[i]->thread().promote();
         if (strong != 0) {
@@ -8457,6 +8458,10 @@ reacquire_wakelock:
 
             timestampCorrectionEnabled = isTimestampCorrectionEnabled_l();
             lockEffectChains_l(effectChains);
+            // We're exiting locked scope with non empty activeTracks, make sure
+            // that we're not in standby mode which we could have entered if some
+            // tracks were muted/unmuted.
+            mStandby = false;
         }
 
         // thread mutex is now unlocked, mActiveTracks unknown, activeTracks.size() > 0
