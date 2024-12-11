@@ -17,6 +17,8 @@
 #pragma once
 
 #include <android-base/thread_annotations.h>
+#include <binder/IAppOpsCallback.h>
+#include <cutils/android_filesystem_config.h>
 #include <log/log.h>
 #include <media/ValidatedAttributionSourceState.h>
 #include <utils/RefBase.h>
@@ -28,8 +30,28 @@ namespace android::media::permission {
 using ValidatedAttributionSourceState =
         com::android::media::permission::ValidatedAttributionSourceState;
 
+/**
+ * Tracking ops for the following uids are pointless -- system always has ops and isn't tracked,
+ * and native only services don't have packages which is what appops tracks over.
+ * So, we skip tracking, and always permit access.
+ * Notable omissions are AID_SHELL, AID_RADIO, and AID_BLUETOOTH, which are non-app uids which
+ * interface with us, but are associated with packages so can still be attributed to.
+ */
+inline bool skipOpsForUid(uid_t uid) {
+    switch (uid % AID_USER_OFFSET) {
+        case AID_ROOT:
+        case AID_SYSTEM:
+        case AID_MEDIA:
+        case AID_AUDIOSERVER:
+        case AID_CAMERASERVER:
+            return true;
+        default:
+            return false;
+    }
+}
+
 struct Ops {
-    int attributedOp = -1;
+    int attributedOp = -1;  // same as OP_NONE
     int additionalOp = -1;
 };
 
@@ -154,4 +176,37 @@ class AppOpsSession {
     bool mDeliveryPermitted GUARDED_BY(mLock);
 };
 
-}  // namespace com::android::media::permission
+class DefaultAppOpsFacade {
+  public:
+    bool startAccess(const ValidatedAttributionSourceState&, Ops);
+    void stopAccess(const ValidatedAttributionSourceState&, Ops);
+    bool checkAccess(const ValidatedAttributionSourceState&, Ops);
+    uintptr_t addChangeCallback(const ValidatedAttributionSourceState&, Ops,
+                                std::function<void(bool)> cb);
+    void removeChangeCallback(uintptr_t);
+
+    class OpMonitor : public BnAppOpsCallback {
+      public:
+        OpMonitor(ValidatedAttributionSourceState attr, Ops ops, std::function<void(bool)> cb)
+            : mAttr(attr), mOps(ops), mCb(cb) {}
+
+        void opChanged(int32_t op, const String16& packageName) override;
+
+        void stopListening() {
+            std::lock_guard l_{mLock};
+            mCb = nullptr;
+        }
+
+      private:
+        const ValidatedAttributionSourceState mAttr;
+        const Ops mOps;
+        std::mutex mLock;
+        std::function<void(bool)> mCb GUARDED_BY(mLock);
+    };
+
+  private:
+    static inline std::mutex sMapLock{};
+    static inline std::unordered_map<uintptr_t, sp<OpMonitor>> sCbMap{};
+};
+
+}  // namespace android::media::permission
