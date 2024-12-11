@@ -29,10 +29,12 @@
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/AHandler.h>
 #include <media/stagefright/foundation/AMessage.h>
+#include <media/stagefright/foundation/Mutexed.h>
 #include <media/stagefright/CodecErrorLog.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <media/stagefright/MediaHistogram.h>
 #include <media/stagefright/PlaybackDurationAccumulator.h>
+#include <media/stagefright/ResourceInfo.h>
 #include <media/stagefright/VideoRenderQualityTracker.h>
 #include <utils/Vector.h>
 
@@ -153,64 +155,6 @@ struct MediaCodec : public AHandler {
             pid_t pid = kNoPid, uid_t uid = kNoUid);
 
     static sp<PersistentSurface> CreatePersistentInputSurface();
-
-    /**
-     * Abstraction for the Global Codec resources.
-     * This encapsulates all the available codec resources on the device.
-     */
-    struct GlobalResourceInfo {
-        /**
-         * Name of the Resource type.
-         */
-        std::string mName;
-        /**
-         * Total count/capacity of resources of this type.
-         */
-        int mCapacity;
-        /**
-         * Available count of this resource type.
-         */
-        int mAvailable;
-
-        GlobalResourceInfo(const std::string& name, int capacity, int available) :
-                mName(name),
-                mCapacity(capacity),
-                mAvailable(available) {}
-
-        GlobalResourceInfo(const GlobalResourceInfo& info) :
-                mName(info.mName),
-                mCapacity(info.mCapacity),
-                mAvailable(info.mAvailable) {}
-    };
-
-    /**
-     * Abstraction for the resources associated with a codec instance.
-     * This encapsulates the required codec resources for a configured codec instance.
-     */
-    struct InstanceResourceInfo {
-        /**
-         * Name of the Resource type.
-         */
-        std::string mName;
-        /**
-         * Required resource count of this type.
-         */
-        int mStaticCount;
-        /**
-         * Per frame resource requirement of this resource type.
-         */
-        int mPerFrameCount;
-
-        InstanceResourceInfo(const std::string& name, int staticCount, int perFrameCount) :
-                mName(name),
-                mStaticCount(staticCount),
-                mPerFrameCount(perFrameCount) {}
-
-        InstanceResourceInfo(const InstanceResourceInfo& info) :
-                mName(info.mName),
-                mStaticCount(info.mStaticCount),
-                mPerFrameCount(info.mPerFrameCount) {}
-    };
 
     /**
      * Get a list of Globally available device codec resources.
@@ -874,7 +818,7 @@ private:
 
     CodecErrorLog mErrorLog;
     // Required resource info for this codec.
-    std::vector<InstanceResourceInfo> mRequiredResourceInfo;
+    Mutexed<std::vector<InstanceResourceInfo>> mRequiredResourceInfo;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
 };
