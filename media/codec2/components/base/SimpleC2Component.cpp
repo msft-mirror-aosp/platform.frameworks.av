@@ -713,6 +713,39 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
   }
 }
 
+void convertPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
+                              const uint8_t *srcY, const uint8_t *srcU, const uint8_t *srcV,
+                              size_t srcYStride, size_t srcUStride, size_t srcVStride,
+                              size_t dstYStride, size_t dstUVStride,
+                              uint32_t width, uint32_t height,
+                              CONV_FORMAT_T format) {
+  if (format != CONV_FORMAT_I420) {
+    ALOGE("No support for planar8 to P210. format is %d", format);
+    return;
+  }
+
+  for (int32_t y = 0; y < height; ++y) {
+    for (int32_t x = 0; x < width; ++x) {
+      dstY[x] = ((uint16_t)((double)srcY[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
+    }
+    dstY += dstYStride;
+    srcY += srcYStride;
+  }
+
+  for (int32_t y = 0; y < height / 2; ++y) {
+    for (int32_t x = 0; x < width / 2; ++x) {
+      dstUV[x<<1] = dstUV[(x<<1) + dstUVStride] =
+                ((uint16_t)((double)srcU[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
+      dstUV[(x<<1) + 1] = dstUV[(x<<1) + dstUVStride + 1] =
+                ((uint16_t)((double)srcV[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
+    }
+    dstUV += dstUVStride << 1;
+    srcU += srcUStride;
+    srcV += srcVStride;
+  }
+}
+
+
 std::unique_ptr<C2Work> SimpleC2Component::WorkQueue::pop_front() {
     std::unique_ptr<C2Work> work = std::move(mQueue.front().work);
     mQueue.pop_front();

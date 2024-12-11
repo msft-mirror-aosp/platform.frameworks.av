@@ -269,7 +269,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexSuspendAt, // input-surface, struct
     kParamIndexResumeAt, // input-surface, struct
     kParamIndexStopAt, // input-surface, struct
-    kParamIndexTimeOffset, // input-surface, struct
+    kParamIndexTimeOffset, // input-surface, int64_t
     kParamIndexMinFrameRate, // input-surface, float
     kParamIndexTimestampGapAdjustment, // input-surface, struct
 
@@ -299,6 +299,10 @@ enum C2ParamIndexKind : C2Param::type_index_t {
 
     // allow tunnel peek behavior to be unspecified for app compatibility
     kParamIndexTunnelPeekMode, // tunnel mode, enum
+
+    // input surface
+    kParamIndexCaptureFrameRate, // input-surface, float
+    kParamIndexStopTimeOffset, // input-surface, int64_t
 };
 
 }
@@ -2651,6 +2655,14 @@ typedef C2PortParam<C2Tuning, C2FloatValue, kParamIndexMinFrameRate> C2PortMinFr
 constexpr char C2_PARAMKEY_INPUT_SURFACE_MIN_FRAME_RATE[] = "input-surface.min-frame-rate";
 
 /**
+ * Maximum fps for input surface.
+ *
+ * Drop frame to meet this.
+ */
+typedef C2PortParam<C2Tuning, C2FloatValue, kParamIndexMaxFrameRate> C2PortMaxFrameRateTuning;
+constexpr char C2_PARAMKEY_INPUT_SURFACE_MAX_FRAME_RATE[] = "input-surface.max-frame-rate";
+
+/**
  * Timestamp adjustment (override) for input surface buffers. These control the input timestamp
  * fed to the codec, but do not impact the output timestamp.
  */
@@ -2680,8 +2692,25 @@ C2ENUM(C2TimestampGapAdjustmentStruct::mode_t, uint32_t,
 inline C2TimestampGapAdjustmentStruct::C2TimestampGapAdjustmentStruct()
     : mode(C2TimestampGapAdjustmentStruct::NONE), value(0) { }
 
-typedef C2PortParam<C2Tuning, C2TimestampGapAdjustmentStruct> C2PortTimestampGapTuning;
+typedef C2PortParam<C2Tuning, C2TimestampGapAdjustmentStruct, kParamIndexTimestampGapAdjustment>
+        C2PortTimestampGapTuning;
 constexpr char C2_PARAMKEY_INPUT_SURFACE_TIMESTAMP_ADJUSTMENT[] = "input-surface.timestamp-adjustment";
+
+/**
+ * Capture frame rate for input surface. During timelapse or slowmo encoding,
+ * this represents the frame rate of input surface.
+ */
+typedef C2PortParam<C2Tuning, C2FloatValue, kParamIndexCaptureFrameRate>
+        C2PortCaptureFrameRateTuning;
+constexpr char C2_PARAMKEY_INPUT_SURFACE_CAPTURE_FRAME_RATE[] = "input-surface.capture-frame-rate";
+
+/**
+ * Stop time offset for input surface. Stop time offset is the elapsed time
+ * offset to the last frame time from the stop time. This could be returned from
+ * IInputSurface when it is queried.
+ */
+typedef C2PortParam<C2Tuning, C2Int64Value, kParamIndexStopTimeOffset> C2PortStopTimeOffset;
+constexpr char C2_PARAMKEY_INPUT_SURFACE_STOP_TIME_OFFSET[] = "input-surface.stop-time-offset";
 
 /* ===================================== TUNNELED CODEC ==================================== */
 
