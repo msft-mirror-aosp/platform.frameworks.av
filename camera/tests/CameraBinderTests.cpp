@@ -548,10 +548,9 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
                   opaqueConsumer->setDefaultBufferFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED));
 
         sp<Surface> surface = opaqueConsumer->getSurface();
-
-        sp<IGraphicBufferProducer> producer = surface->getIGraphicBufferProducer();
+        ParcelableSurfaceType pSurface = flagtools::surfaceToParcelableSurfaceType(surface);
         std::string noPhysicalId;
-        OutputConfiguration output(producer, /*rotation*/ 0, noPhysicalId);
+        OutputConfiguration output(pSurface, /*rotation*/ 0, noPhysicalId);
 #else
         sp<IGraphicBufferProducer> gbProducer;
         sp<IGraphicBufferConsumer> gbConsumer;
