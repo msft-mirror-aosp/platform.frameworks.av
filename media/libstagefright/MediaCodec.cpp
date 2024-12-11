@@ -416,6 +416,7 @@ struct MediaCodec::ResourceManagerServiceProxy :
     ~ResourceManagerServiceProxy();
     status_t init();
     void addResource(const MediaResourceParcel &resource);
+    void addResource(const std::vector<MediaResourceParcel>& resources);
     void removeResource(const MediaResourceParcel &resource);
     void removeClient();
     void markClientForPendingRemoval();
@@ -628,16 +629,22 @@ void MediaCodec::ResourceManagerServiceProxy::BinderUnlinkedCallback(void* cooki
 
 void MediaCodec::ResourceManagerServiceProxy::addResource(
         const MediaResourceParcel &resource) {
+    std::vector<MediaResourceParcel> resources;
+    resources.push_back(resource);
+    addResource(resources);
+}
+
+void MediaCodec::ResourceManagerServiceProxy::addResource(
+        const std::vector<MediaResourceParcel>& resources) {
     std::scoped_lock lock{mLock};
     std::shared_ptr<IResourceManagerService> service = getService_l();
     if (service == nullptr) {
         ALOGW("Service isn't available");
         return;
     }
-    std::vector<MediaResourceParcel> resources;
-    resources.push_back(resource);
     service->addResource(getClientInfo(), mClient, resources);
-    mMediaResourceParcel.emplace(resource);
+    std::copy(resources.begin(), resources.end(),
+              std::inserter(mMediaResourceParcel, mMediaResourceParcel.end()));
 }
 
 void MediaCodec::ResourceManagerServiceProxy::removeResource(
@@ -1192,16 +1199,63 @@ sp<PersistentSurface> MediaCodec::CreatePersistentInputSurface() {
     return new PersistentSurface(bufferProducer, bufferSource);
 }
 
+inline MediaResourceType getResourceType(const std::string& resourceName) {
+    // Extract id from the resource name ==> resource name = "componentStoreName-id"
+    std::size_t pos = resourceName.rfind("-");
+    if (pos != std::string::npos) {
+        return static_cast<MediaResourceType>(std::atoi(resourceName.substr(pos).c_str()));
+    }
+
+    ALOGE("Resource ID missing in resource Name: [%s]!", resourceName.c_str());
+    return MediaResourceType::kUnspecified;
+}
+
 //static
 status_t MediaCodec::getGloballyAvailableResources(std::vector<GlobalResourceInfo>& resources) {
     resources.clear();
     // Make sure codec availability feature is on.
-    if (!android::media::codec::codec_availability()) {
+    if (!android::media::codec::codec_availability() ||
+        !android::media::codec::codec_availability_support()) {
         return ERROR_UNSUPPORTED;
     }
-    // TODO: For now this is just an empty function.
-    // The actual implementation should use component store to query the
-    // available resources from hal, and fill in resources with the same.
+
+    // Get binder interface to resource manager.
+    ::ndk::SpAIBinder binder(AServiceManager_waitForService("media.resource_manager"));
+    std::shared_ptr<IResourceManagerService> service = IResourceManagerService::fromBinder(binder);
+    if (service == nullptr) {
+        ALOGE("Failed to get ResourceManagerService");
+        return INVALID_OPERATION;
+    }
+
+    // Since Codec availability is implemented only through C2 hal,
+    // we aren't tracking (accounting for) any resources for omx based codecs.
+    // But:
+    // - if c2 component store is implemented, then we can query for the system resource
+    // - if no such hal, resources will be empty and this function returns with
+    // ERROR_UNSUPPORTED
+    resources = CCodec::GetGloballyAvailableResources();
+    if (!resources.empty()) {
+        // Get the current resource usage.
+        std::vector<MediaResourceParcel> currentResourceUsage;
+        service->getMediaResourceUsageReport(&currentResourceUsage);
+
+        // Subtract the current usage from the globally available resources.
+        for (GlobalResourceInfo& res : resources) {
+            MediaResourceType type = getResourceType(res.mName);
+            auto used = std::find_if(currentResourceUsage.begin(),
+                                     currentResourceUsage.end(),
+                                     [type](const MediaResourceParcel& item) {
+                                         return item.type == type; });
+
+            if (used != currentResourceUsage.end() && used->value > 0) {
+                // Exclude the used resources.
+                res.mAvailable -= used->value;
+            }
+        }
+
+        return OK;
+    }
+
     return ERROR_UNSUPPORTED;
 }
 
@@ -2572,7 +2626,8 @@ status_t MediaCodec::configure(
 status_t MediaCodec::getRequiredResources(std::vector<InstanceResourceInfo>& resources) {
     resources.clear();
     // Make sure codec availability feature is on.
-    if (!android::media::codec::codec_availability()) {
+    if (!android::media::codec::codec_availability() ||
+        !android::media::codec::codec_availability_support()) {
         return ERROR_UNSUPPORTED;
     }
     // Make sure that the codec was configured already.
@@ -2582,15 +2637,13 @@ status_t MediaCodec::getRequiredResources(std::vector<InstanceResourceInfo>& res
         return INVALID_OPERATION;
     }
 
-    if (!mRequiredResourceInfo.empty()) {
-        resources = mRequiredResourceInfo;
+    Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(mRequiredResourceInfo);
+    std::vector<InstanceResourceInfo>& requiredResourceInfo = *resourcesLocked;
+    if (!requiredResourceInfo.empty()) {
+        resources = requiredResourceInfo;
         return OK;
     }
 
-    // TODO: For now this is just an empty function.
-    // The actual implementation should use component interface
-    // (for example, through mCodec->getRequiredDeviceResources) to query the
-    // the required resources for this configuration, and fill in resources with the same.
     return ERROR_UNSUPPORTED;
 }
 
@@ -4033,6 +4086,16 @@ inline void MediaCodec::initClientConfigParcel(ClientConfigParcel& clientConfig)
     clientConfig.id = mCodecId;
 }
 
+inline MediaResourceParcel getMediaResourceParcel(const InstanceResourceInfo& resourceInfo) {
+    MediaResourceParcel resource;
+    resource.type = getResourceType(resourceInfo.mName);
+    resource.value = resourceInfo.mStaticCount;
+    // TODO: How do we use this info and pass it on to RM to track?
+    //resource.value = resourceInfo.mPerFrameCount;
+
+    return resource;
+}
+
 void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
     switch (msg->what()) {
         case kWhatCodecNotify:
@@ -4332,6 +4395,15 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                             && usingSwRenderer) {
                         mFlags |= kFlagUsesSoftwareRenderer;
                     }
+
+                    if (android::media::codec::codec_availability() &&
+                        android::media::codec::codec_availability_support()) {
+                        // Get the required system resources now.
+                        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
+                                mRequiredResourceInfo);
+                        *resourcesLocked = mCodec->getRequiredSystemResources();
+                    }
+
                     setState(CONFIGURED);
                     postPendingRepliesAndDeferredMessages("kWhatComponentConfigured");
 
@@ -4470,9 +4542,23 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                     }
 
                     CHECK_EQ(mState, STARTING);
+
+                    std::vector<MediaResourceParcel> resources;
                     if (mDomain == DOMAIN_VIDEO || mDomain == DOMAIN_IMAGE) {
-                        mResourceManagerProxy->addResource(
+                        resources.push_back(
                                 MediaResource::GraphicMemoryResource(getGraphicBufferSize()));
+                    }
+                    if (android::media::codec::codec_availability() &&
+                        android::media::codec::codec_availability_support()) {
+                        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
+                                mRequiredResourceInfo);
+                        std::vector<InstanceResourceInfo>& requiredResourceInfo = *resourcesLocked;
+                        for (const InstanceResourceInfo& resource : requiredResourceInfo) {
+                            resources.push_back(getMediaResourceParcel(resource));
+                        }
+                    }
+                    if (!resources.empty()) {
+                        mResourceManagerProxy->addResource(resources);
                     }
                     // Notify the RM that the codec is in use (has been started).
                     ClientConfigParcel clientConfig;
@@ -7084,9 +7170,15 @@ void MediaCodec::onOutputFormatChanged() {
 
 void MediaCodec::onRequiredResourcesChanged(
         const std::vector<InstanceResourceInfo>& resourceInfo) {
-    mRequiredResourceInfo = resourceInfo;
+    bool canIssueCallback = false;
+    if (android::media::codec::codec_availability() &&
+        android::media::codec::codec_availability_support()) {
+        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(mRequiredResourceInfo);
+        *resourcesLocked = resourceInfo;
+        canIssueCallback = true;
+    }
     // Make sure codec availability feature is on.
-    if (mCallback != nullptr && android::media::codec::codec_availability()) {
+    if (mCallback != nullptr && canIssueCallback) {
         // Post the callback
         sp<AMessage> msg = mCallback->dup();
         msg->setInt32("callbackID", CB_REQUIRED_RESOURCES_CHANGED);
