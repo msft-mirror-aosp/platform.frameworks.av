@@ -40,8 +40,10 @@
 #include <fakeservicemanager/FakeServiceManager.h>
 #include <fuzzbinder/random_binder.h>
 #include <gui/BufferItemConsumer.h>
-#include <gui/Flags.h>
+#include <gui/Flags.h> // remove with COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+#if not COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 #include <gui/IGraphicBufferProducer.h>
+#endif
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
 #include <media/IAudioFlinger.h>
@@ -848,10 +850,10 @@ void Camera2Fuzzer::process() {
 
         std::string noPhysicalId;
         size_t rotations = sizeof(kRotations) / sizeof(int32_t) - 1;
-        sp<IGraphicBufferProducer> igbp = surface->getIGraphicBufferProducer();
+        ParcelableSurfaceType pSurface = flagtools::surfaceToParcelableSurfaceType(surface);
         OutputConfiguration output(
-                igbp, kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
-                noPhysicalId);
+            pSurface, kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
+            noPhysicalId);
 #else
         sp<IGraphicBufferProducer> gbProducer;
         sp<IGraphicBufferConsumer> gbConsumer;
