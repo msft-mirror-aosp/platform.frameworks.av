@@ -198,13 +198,17 @@ const T *ParameterManagerWrapper::getElement(const string &name, const std::map<
     return it != elementsMap.end() ? it->second : NULL;
 }
 
-bool ParameterManagerWrapper::isStarted()
+bool ParameterManagerWrapper::isStarted() const
 {
     return mPfwConnector && mPfwConnector->isStarted();
 }
 
 status_t ParameterManagerWrapper::setPhoneState(audio_mode_t mode)
 {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gPhoneStateCriterionName, mPolicyCriteria);
     if (criterion == NULL) {
@@ -222,6 +226,10 @@ status_t ParameterManagerWrapper::setPhoneState(audio_mode_t mode)
 
 audio_mode_t ParameterManagerWrapper::getPhoneState() const
 {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return AUDIO_MODE_NORMAL;
+    }
     const ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gPhoneStateCriterionName, mPolicyCriteria);
     if (criterion == NULL) {
@@ -238,7 +246,10 @@ status_t ParameterManagerWrapper::setForceUse(audio_policy_force_use_t usage,
     if (usage > AUDIO_POLICY_FORCE_USE_CNT) {
         return BAD_VALUE;
     }
-
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gForceUseCriterionTag[usage], mPolicyCriteria);
     if (criterion == NULL) {
@@ -258,6 +269,10 @@ audio_policy_forced_cfg_t ParameterManagerWrapper::getForceUse(audio_policy_forc
 {
     // @todo: return an error on a unsupported value
     if (usage > AUDIO_POLICY_FORCE_USE_CNT) {
+        return AUDIO_POLICY_FORCE_NONE;
+    }
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return AUDIO_POLICY_FORCE_NONE;
     }
     const ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
@@ -281,6 +296,10 @@ bool ParameterManagerWrapper::isValueValidForCriterion(ISelectionCriterionInterf
 status_t ParameterManagerWrapper::setDeviceConnectionState(
         audio_devices_t type, const std::string &address, audio_policy_dev_state_t state)
 {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     std::string criterionName = audio_is_output_device(type) ?
             capEngineConfig::gOutputDeviceAddressCriterionName :
             capEngineConfig::gInputDeviceAddressCriterionName;
@@ -313,6 +332,10 @@ status_t ParameterManagerWrapper::setDeviceConnectionState(
 }
 
 status_t ParameterManagerWrapper::setAvailableInputDevices(const DeviceTypeSet &types) {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gInputDeviceCriterionName, mPolicyCriteria);
     if (criterion == NULL) {
@@ -326,6 +349,10 @@ status_t ParameterManagerWrapper::setAvailableInputDevices(const DeviceTypeSet &
 }
 
 status_t ParameterManagerWrapper::setAvailableOutputDevices(const DeviceTypeSet &types) {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gOutputDeviceCriterionName, mPolicyCriteria);
     if (criterion == NULL) {

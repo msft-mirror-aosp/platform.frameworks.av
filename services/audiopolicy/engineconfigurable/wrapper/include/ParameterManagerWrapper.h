@@ -76,7 +76,7 @@ public:
      *
      * @return true if platform state is started correctly, false otherwise.
      */
-    bool isStarted();
+    bool isStarted() const;
 
     /**
      * Set Telephony Mode.

@@ -99,9 +99,10 @@ status_t Engine::loadFromHalConfigWithFallback(
     };
     loadCriteria(capResult.parsedConfig->capCriteria);
     std::string error;
-    if (mPolicyParameterMgr == nullptr || mPolicyParameterMgr->start(error) != NO_ERROR) {
-        ALOGE("%s: could not start Policy PFW: %s", __FUNCTION__, error.c_str());
-        return NO_INIT;
+    if (mPolicyParameterMgr->start(error) != NO_ERROR) {
+        ALOGE("%s: could not start Policy PFW: %s, fallback on default", __func__ , error.c_str());
+        auto result = parseAndSetDefaultConfiguration();
+        return result.nbSkippedElement == 0 ? NO_ERROR : BAD_VALUE;
     }
     return mPolicyParameterMgr->setConfiguration(capResult);
 #endif
@@ -112,9 +113,10 @@ status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath)
     mPolicyParameterMgr = new ParameterManagerWrapper(/* useLegacyVendorFile= */ true);
     status_t status = loadWithFallback(xmlFilePath);
     std::string error;
-    if (mPolicyParameterMgr == nullptr || mPolicyParameterMgr->start(error) != NO_ERROR) {
-        ALOGE("%s: could not start Policy PFW: %s", __FUNCTION__, error.c_str());
-        return NO_INIT;
+    if (mPolicyParameterMgr->start(error) != NO_ERROR) {
+        ALOGE("%s: could not start Policy PFW: %s, fallback on default", __func__ , error.c_str());
+        auto result = parseAndSetDefaultConfiguration();
+        return result.nbSkippedElement == 0 ? NO_ERROR : BAD_VALUE;
     }
     return status;
 }
