@@ -78,6 +78,8 @@ public:
 
     Status notifyClientConfigChanged(const ClientConfigParcel& clientConfig) override;
 
+    Status getMediaResourceUsageReport(std::vector<MediaResourceParcel>* resources) override;
+
     binder_status_t dump(int fd, const char** args, uint32_t numArgs) override;
 
     friend class ResourceTracker;
