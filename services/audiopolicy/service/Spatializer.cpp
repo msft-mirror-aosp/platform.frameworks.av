@@ -418,11 +418,13 @@ status_t Spatializer::loadEngineConfiguration(sp<EffectHalInterface> effect) {
                                    &spatializedChannelMasks);
     if (status != NO_ERROR) {
         ALOGW("%s: cannot get SPATIALIZER_PARAM_SPATIALIZED_CHANNEL_MASKS", __func__);
-        return status;
+        // do not return an error yet as spatializer implementations may not have been
+        // updated yet to support this parameter
     }
     if (spatializedChannelMasks.empty()) {
         ALOGW("%s: SPATIALIZER_PARAM_SPATIALIZED_CHANNEL_MASKS reports empty", __func__);
-        return BAD_VALUE;
+        // do not return an error yet as spatializer implementations may not have been
+        // updated yet to support this parameter
     }
     for (const audio_channel_mask_t spatializedMask : spatializedChannelMasks) {
         // spatialized masks must be contained in the supported input masks

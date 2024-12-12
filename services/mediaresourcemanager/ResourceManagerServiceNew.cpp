@@ -21,6 +21,8 @@
 #include <binder/IPCThreadState.h>
 #include <mediautils/ProcessInfo.h>
 
+#include <android_media_codec.h>
+
 #include "DefaultResourceModel.h"
 #include "ClientImportanceReclaimPolicy.h"
 #include "ProcessPriorityReclaimPolicy.h"
@@ -221,6 +223,24 @@ Status ResourceManagerServiceNew::notifyClientConfigChanged(
         mResourceTracker->updateResource(clientConfig.clientInfo);
     }
     return ResourceManagerService::notifyClientConfigChanged(clientConfig);
+}
+
+Status ResourceManagerServiceNew::getMediaResourceUsageReport(
+        std::vector<MediaResourceParcel>* resources) {
+    if (!resources) {
+        return Status::fromStatus(INVALID_OPERATION);
+    }
+
+    resources->clear();
+    if (!android::media::codec::codec_availability() ||
+        !android::media::codec::codec_availability_support()) {
+        return Status::fromStatus(INVALID_OPERATION);
+    }
+
+    std::scoped_lock lock{mLock};
+    mResourceTracker->getMediaResourceUsageReport(resources);
+
+    return Status::ok();
 }
 
 void ResourceManagerServiceNew::getResourceDump(std::string& resourceLog) const {
