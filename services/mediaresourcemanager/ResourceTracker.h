@@ -211,6 +211,9 @@ public:
         return mMap;
     }
 
+    // For each MediaResourceType, get amount of resource being used at the moment.
+    void getMediaResourceUsageReport(std::vector<MediaResourceParcel>* resources) const;
+
 private:
     // Get ResourceInfos associated with the given process.
     // If none exists, this method will create and associate an empty object and return it.
