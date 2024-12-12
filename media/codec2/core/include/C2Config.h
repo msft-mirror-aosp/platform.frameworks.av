@@ -1300,6 +1300,7 @@ struct C2SystemResourceStruct {
                            C2Config::resource_kind_t kind_,
                            uint64_t amount_)
         : id(id_), kind(kind_), amount(amount_) { }
+    C2SystemResourceStruct() : C2SystemResourceStruct(0, CONST, 0) {}
     uint32_t id;
     C2Config::resource_kind_t kind;
     uint64_t amount;

@@ -771,4 +771,20 @@ bool ResourceTracker::isCallingPriorityHigher(int callingPid, int pid) {
     return (callingPidPriority < priority);
 }
 
+void ResourceTracker::getMediaResourceUsageReport(
+        std::vector<MediaResourceParcel>* resources) const {
+    ResourceList resourceUsageList;
+
+    // Add up all the resource usage by every process into resourceUsageList
+    for (const auto& [pid, /* ResourceInfos */ infos] : mMap) {
+        for (const auto& [infoKey, /* ResourceInfo */ info] : infos) {
+            for (const MediaResourceParcel& res : info.resources.getResources()) {
+                resourceUsageList.add(res);
+            }
+        }
+    }
+
+    *resources = resourceUsageList.getResources();
+}
+
 } // namespace android
