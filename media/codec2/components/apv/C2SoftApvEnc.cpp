@@ -781,7 +781,7 @@ C2SoftApvEnc::C2SoftApvEnc(const char* name, c2_node_id_t id,
       mSignalledEos(false),
       mSignalledError(false),
       mOutBlock(nullptr) {
-    reset();
+    resetEncoder();
 }
 
 C2SoftApvEnc::~C2SoftApvEnc() {
@@ -798,7 +798,7 @@ c2_status_t C2SoftApvEnc::onStop() {
 
 void C2SoftApvEnc::onReset() {
     releaseEncoder();
-    reset();
+    resetEncoder();
 }
 
 void C2SoftApvEnc::onRelease() {
@@ -828,7 +828,7 @@ int32_t C2SoftApvEnc::getQpFromQuality(int32_t quality) {
     return qp;
 }
 
-c2_status_t C2SoftApvEnc::reset() {
+c2_status_t C2SoftApvEnc::resetEncoder() {
     ALOGV("reset");
     mInitEncoder = false;
     mStarted = false;

@@ -17,6 +17,8 @@
 //#define LOG_NDEBUG 0
 #define LOG_TAG "ResourceManagerService_test"
 
+#include <sstream>
+
 #include <utils/Log.h>
 
 #include "ResourceManagerServiceTestUtils.h"
@@ -1829,6 +1831,132 @@ public:
         // aren't any lower priority clients or lower priority processes.
         EXPECT_FALSE(doReclaimResource(lowPriPidClientInfos[0]));
     }
+
+    // Gets 5 types of HW resources of random count (11 - 110)
+    std::vector<MediaResourceParcel> getHwResources() {
+        const int32_t resourceType = static_cast<int32_t>(MediaResourceType::kHwResourceTypeMin);
+        static const std::vector<std::pair<int32_t, uint64_t>> hwResources =
+            { {resourceType + 1, 10},
+              {resourceType + 2, 10},
+              {resourceType + 3, 10},
+              {resourceType + 4, 10},
+              {resourceType + 5, 10},
+            };
+
+        // Seed the random number generator with the current time
+        srand(time(0));
+        // Generate a random number between 1 and 100
+        int random_num = rand() % 100 + 1;
+
+        std::vector<MediaResourceParcel> resources;
+        for (const auto& resource : hwResources) {
+            MediaResourceParcel res;
+            res.type = static_cast<MediaResourceType>(resource.first);
+            res.value = resource.second + random_num++;
+            resources.push_back(res);
+        }
+
+        return resources;
+    }
+
+    void addResources(const std::vector<MediaResourceParcel>& rhs,
+                      std::vector<MediaResourceParcel>& lhs) {
+        for (MediaResourceParcel& res : lhs) {
+            auto found = std::find_if(rhs.begin(), rhs.end(),
+                                      [res](const MediaResourceParcel& item) {
+                                          return item.type == res.type; });
+
+            if (found != rhs.end() && found->value > 0) {
+                res.value += found->value;
+            }
+        }
+    }
+
+    void subtractResources(const std::vector<MediaResourceParcel>& rhs,
+                           std::vector<MediaResourceParcel>& lhs) {
+        for (MediaResourceParcel& res : lhs) {
+            auto found = std::find_if(rhs.begin(), rhs.end(),
+                                      [res](const MediaResourceParcel& item) {
+                                          return item.type == res.type; });
+
+            if (found != rhs.end() && found->value > 0) {
+                res.value -= found->value;
+            }
+        }
+    }
+
+    void displayResources(const char* what, const std::vector<MediaResourceParcel>& resources) {
+        std::stringstream debug;
+        debug << what << ": ";
+        for (const MediaResourceParcel& res : resources) {
+            debug << "{ " << static_cast<int32_t>(res.type) << " : " << res.value << " } ";
+        }
+        ALOGI("%s", debug.str().c_str());
+    }
+
+    // Verifies the resource usage among all clients.
+    void testResourceUsage() {
+        // Create 2 clients for a low priority pid.
+        std::vector<std::shared_ptr<IResourceManagerClient>> lowPriPidClients;
+        lowPriPidClients.push_back(createTestClient(kLowPriorityPid, kTestUid1));
+        lowPriPidClients.push_back(createTestClient(kLowPriorityPid, kTestUid1));
+        // Create 2 clients for a high priority pid.
+        std::vector<std::shared_ptr<IResourceManagerClient>> highPriPidClients;
+        highPriPidClients.push_back(createTestClient(kHighPriorityPid, kTestUid2));
+        highPriPidClients.push_back(createTestClient(kHighPriorityPid, kTestUid2));
+
+        // Add non secure video codec resources for all these clients.
+        std::vector<ClientInfoParcel> clientInfos;
+        for (auto& client : lowPriPidClients) {
+            addNonSecureVideoCodecResource(client, clientInfos);
+        }
+        // Add non secure video codec resources for all the 3 clients of high priority pid.
+        for (auto& client : highPriPidClients) {
+            addNonSecureVideoCodecResource(client, clientInfos);
+        }
+
+        // Now randomly add some HW resources for these clients.
+        std::vector<MediaResourceParcel> addedResources;
+        for (auto& clientInfo : clientInfos) {
+            std::vector<MediaResourceParcel> resources = getHwResources();
+            mService->addResource(clientInfo, nullptr, resources);
+            if (addedResources.empty()) {
+                addedResources = resources;
+            } else {
+                addResources(resources, addedResources);
+            }
+            displayResources("Resources", resources);
+            displayResources("Added Resources", addedResources);
+        }
+
+        // Query the RM about current resource usage.
+        std::vector<MediaResourceParcel> currentResourceUsage;
+        mService->getMediaResourceUsageReport(&currentResourceUsage);
+        displayResources("Current Resources", currentResourceUsage);
+
+        // If we subtract the resources added, it should be left with 0 now.
+        subtractResources(addedResources, currentResourceUsage);
+        displayResources("To Verify Resources", currentResourceUsage);
+
+        // Create a set of added HW resource types.
+        std::set<MediaResourceType> addedResourceTypes;
+        for (const auto& res : addedResources) {
+            addedResourceTypes.insert(res.type);
+        }
+
+        for (const auto& res : currentResourceUsage) {
+            if (addedResourceTypes.find(res.type) == addedResourceTypes.end()) {
+                // Ignore the resource thats not added by us now.
+                continue;
+            }
+            bool isZero = (res.value == 0);
+            if (!isZero) {
+                ALOGE("%s: Expected resource [%d] to be zero, but its %jd",
+                      __func__, res.type, res.value);
+                EXPECT_TRUE(isZero);
+            }
+        }
+    }
 };
 
 class ResourceManagerServiceNewTest : public ResourceManagerServiceTest {
@@ -2019,6 +2147,10 @@ TEST_F(ResourceManagerServiceNewTest, concurrentCodecs) {
 
 TEST_F(ResourceManagerServiceNewTest, reclaimPolicies) {
     testReclaimPolicies();
+}
+
+TEST_F(ResourceManagerServiceNewTest, resourceUsage) {
+    testResourceUsage();
 }
 
 } // namespace android
