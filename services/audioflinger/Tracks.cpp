@@ -367,7 +367,8 @@ audio_utils::trace::Object TrackBase::createDeviceIntervalTrace(const std::strin
             .set(AUDIO_TRACE_OBJECT_KEY_FLAGS, trackFlagsAsString())
             .set(AUDIO_TRACE_OBJECT_KEY_FORMAT, IAfThreadBase::formatToString(mFormat))
             .set(AUDIO_TRACE_OBJECT_KEY_FRAMECOUNT, static_cast<int64_t>(mFrameCount))
-            .set(AUDIO_TRACE_OBJECT_KEY_PID, static_cast<int32_t>(mClient->pid()))
+            .set(AUDIO_TRACE_OBJECT_KEY_PID, static_cast<int32_t>(
+                    mClient ? mClient->pid() : getpid()))
             .set(AUDIO_TRACE_OBJECT_KEY_SAMPLE_RATE, static_cast<int32_t>(sampleRate()));
     if (const auto thread = mThread.promote()) {
         trace // continue in alphabetical order
