@@ -31,6 +31,7 @@
 #include <media/stagefright/foundation/AHandler.h>
 #include <media/stagefright/foundation/ColorUtils.h>
 #include <media/stagefright/MediaErrors.h>
+#include <media/stagefright/ResourceInfo.h>
 #include <system/graphics.h>
 #include <utils/NativeHandle.h>
 
@@ -327,6 +328,13 @@ struct CodecBase : public AHandler, /* static */ ColorUtils {
      *         ERROR_UNSUPPORTED if not supported.
      */
     virtual status_t unsubscribeFromParameters(const std::vector<std::string> &names);
+
+    /**
+     * Get the required resources for the compomemt at the current
+     * configuration.
+     *
+     */
+    virtual std::vector<InstanceResourceInfo> getRequiredSystemResources();
 
     typedef CodecBase *(*CreateCodecFunc)(void);
     typedef PersistentSurface *(*CreateInputSurfaceFunc)(void);
