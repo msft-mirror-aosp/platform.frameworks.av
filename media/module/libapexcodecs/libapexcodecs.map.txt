@@ -12,13 +12,13 @@ LIBAPEXCODECS_36 { # introduced=36
     ApexCodec_Configurable_querySupportedParams; # apex
     ApexCodec_Configurable_querySupportedValues; # apex
     ApexCodec_GetComponentStore; # apex
+    ApexCodec_ParamDescriptors_destroy; # apex
     ApexCodec_ParamDescriptors_getDescriptor; # apex
     ApexCodec_ParamDescriptors_getIndices; # apex
-    ApexCodec_ParamDescriptors_release; # apex
+    ApexCodec_SettingResults_destroy; # apex
     ApexCodec_SettingResults_getResultAtIndex; # apex
-    ApexCodec_SettingResults_release; # apex
+    ApexCodec_SupportedValues_destroy; # apex
     ApexCodec_SupportedValues_getTypeAndValues; # apex
-    ApexCodec_SupportedValues_release; # apex
     ApexCodec_Traits_get; # apex
 
   local:
