@@ -23,6 +23,7 @@
 #include <android/api-level.h>
 #include <android/hardware_buffer.h>
 #include <android/versioning.h>
+#include <apex/ApexCodecsParam.h>
 
 __BEGIN_DECLS
 
@@ -131,11 +132,11 @@ typedef struct ApexCodec_ComponentTraits {
     /**
      * The name of the component.
      */
-    const char *name;
+    const char *_Nonnull name;
     /**
      * The supported media type of the component.
      */
-    const char *mediaType;
+    const char *_Nonnull mediaType;
     /**
      * The kind of the component.
      */
@@ -158,7 +159,7 @@ typedef struct ApexCodec_ComponentStore ApexCodec_ComponentStore;
  *
  * \return component store object.
  */
-ApexCodec_ComponentStore *ApexCodec_GetComponentStore()
+ApexCodec_ComponentStore *_Nullable ApexCodec_GetComponentStore()
         __INTRODUCED_IN(36);
 
 /**
@@ -174,8 +175,8 @@ ApexCodec_ComponentStore *ApexCodec_GetComponentStore()
  * \param index index of the traits object to query
  * \return traits object at the index, or nullptr if the index is out of bounds.
  */
-ApexCodec_ComponentTraits *ApexCodec_Traits_get(
-        ApexCodec_ComponentStore *store, size_t index) __INTRODUCED_IN(36);
+ApexCodec_ComponentTraits *_Nullable ApexCodec_Traits_get(
+        ApexCodec_ComponentStore *_Nonnull store, size_t index) __INTRODUCED_IN(36);
 
 /**
  * An opaque struct that represents a codec.
@@ -187,13 +188,14 @@ typedef struct ApexCodec_Component ApexCodec_Component;
  *
  * \param store the component store
  * \param name the name of the component
- * \param component out-param to be filled with the component; must not be null
+ * \param outComponent out-param to be filled with the component; must not be null
  * \return  APEXCODEC_STATUS_OK         if successful
  *          APEXCODEC_STATUS_NOT_FOUND  if the name is not found
  */
 ApexCodec_Status ApexCodec_Component_create(
-        ApexCodec_ComponentStore *store, const char *name, ApexCodec_Component **comp)
-        __INTRODUCED_IN(36);
+        ApexCodec_ComponentStore *_Nonnull store,
+        const char *_Nonnull name,
+        ApexCodec_Component *_Nullable *_Nonnull outComponent) __INTRODUCED_IN(36);
 
 /**
  * Destroy the component by the handle. It is invalid to call component methods on the handle
@@ -201,7 +203,7 @@ ApexCodec_Status ApexCodec_Component_create(
  *
  * \param comp the handle for the component
  */
-void ApexCodec_Component_destroy(ApexCodec_Component *comp) __INTRODUCED_IN(36);
+void ApexCodec_Component_destroy(ApexCodec_Component *_Nullable comp) __INTRODUCED_IN(36);
 
 /**
  * Start the component. The component is ready to process buffers after this call.
@@ -209,7 +211,7 @@ void ApexCodec_Component_destroy(ApexCodec_Component *comp) __INTRODUCED_IN(36);
  * \param comp the handle for the component
  */
 ApexCodec_Status ApexCodec_Component_start(
-        ApexCodec_Component *comp) __INTRODUCED_IN(36);
+        ApexCodec_Component *_Nonnull comp) __INTRODUCED_IN(36);
 
 /**
  * Flush the component's internal states. This operation preserves the existing configurations.
@@ -217,7 +219,7 @@ ApexCodec_Status ApexCodec_Component_start(
  * \param comp the handle for the component
  */
 ApexCodec_Status ApexCodec_Component_flush(
-        ApexCodec_Component *comp) __INTRODUCED_IN(36);
+        ApexCodec_Component *_Nonnull comp) __INTRODUCED_IN(36);
 
 /**
  * Resets the component to the initial state, right after creation. Note that the configuration
@@ -227,7 +229,7 @@ ApexCodec_Status ApexCodec_Component_flush(
  * \param comp the handle for the component
  */
 ApexCodec_Status ApexCodec_Component_reset(
-        ApexCodec_Component *comp) __INTRODUCED_IN(36);
+        ApexCodec_Component *_Nonnull comp) __INTRODUCED_IN(36);
 
 /**
  * An opaque struct that represents a configurable part of the component.
@@ -243,8 +245,8 @@ typedef struct ApexCodec_Configurable ApexCodec_Configurable;
  * \param comp the handle for the component
  * \return the configurable object handle
  */
-ApexCodec_Configurable *ApexCodec_Component_getConfigurable(
-        ApexCodec_Component *comp) __INTRODUCED_IN(36);
+ApexCodec_Configurable *_Nonnull ApexCodec_Component_getConfigurable(
+        ApexCodec_Component *_Nonnull comp) __INTRODUCED_IN(36);
 
 /**
  * Enum that represents the flags for ApexCodec_Buffer.
@@ -285,7 +287,7 @@ typedef struct ApexCodec_LinearBuffer {
     /**
      * A pointer to the start of the buffer. This is not aligned.
      */
-    uint8_t *data;
+    uint8_t *_Nullable data;
     /**
      * Size of the buffer. The memory region between |data| (inclusive) and
      * |data + size| (exclusive) is assumed to be valid for read/write.
@@ -323,7 +325,7 @@ typedef struct ApexCodec_Buffer {
      */
     union {
         ApexCodec_LinearBuffer linear;
-        AHardwareBuffer *graphic;
+        AHardwareBuffer *_Nullable graphic;
     } memory;
     /**
      * Config updates associated with the buffer. For input buffers these are sent to the component
@@ -332,74 +334,6 @@ typedef struct ApexCodec_Buffer {
      */
     ApexCodec_LinearBuffer configUpdates;
 } ApexCodec_Buffer;
-
-/**
- * Enum that represents the query type for the supported values.
- *
- * Introduced in API 36.
- */
-typedef enum ApexCodec_SupportedValuesQueryType : uint32_t {
-    /** Query all possible supported values regardless of current configuration */
-    APEXCODEC_SUPPORTED_VALUES_QUERY_POSSIBLE,
-    /** Query supported values at current configuration */
-    APEXCODEC_SUPPORTED_VALUES_QUERY_CURRENT,
-} ApexCodec_SupportedValuesQueryType;
-
-/**
- * Enum that represents the type of the supported values.
- *
- * Introduced in API 36.
- */
-typedef enum ApexCodec_SupportedValuesType : uint32_t {
-    /** The supported values are empty. */
-    APEXCODEC_SUPPORTED_VALUES_EMPTY,
-    /**
-     * The supported values are represented by a range defined with {min, max, step, num, den}.
-     *
-     * If step is 0 and num and denom are both 1, the supported values are any value, for which
-     * min <= value <= max.
-     *
-     * Otherwise, the range represents a geometric/arithmetic/multiply-accumulate series, where
-     * successive supported values can be derived from previous values (starting at min), using the
-     * following formula:
-     *  v[0] = min
-     *  v[i] = v[i-1] * num / denom + step for i >= 1, while min < v[i] <= max.
-     */
-    APEXCODEC_SUPPORTED_VALUES_RANGE,
-    /** The supported values are represented by a list of values. */
-    APEXCODEC_SUPPORTED_VALUES_VALUES,
-    /** The supported values are represented by a list of flags. */
-    APEXCODEC_SUPPORTED_VALUES_FLAGS,
-} ApexCodec_SupportedValuesType;
-
-/**
- * Enum that represents numeric types of the supported values.
- *
- * Introduced in API 36.
- */
-typedef enum ApexCodec_SupportedValuesNumberType : uint32_t {
-    APEXCODEC_SUPPORTED_VALUES_TYPE_NONE   = 0,
-    APEXCODEC_SUPPORTED_VALUES_TYPE_INT32  = 1,
-    APEXCODEC_SUPPORTED_VALUES_TYPE_UINT32 = 2,
-    // RESERVED                            = 3,
-    APEXCODEC_SUPPORTED_VALUES_TYPE_INT64  = 4,
-    APEXCODEC_SUPPORTED_VALUES_TYPE_UINT64 = 5,
-    // RESERVED                            = 6,
-    APEXCODEC_SUPPORTED_VALUES_TYPE_FLOAT  = 7,
-} ApexCodec_SupportedValuesNumberType;
-
-/**
- * Union of primitive types.
- *
- * Introduced in API 36.
- */
-typedef union {
-    int32_t i32;
-    uint32_t u32;
-    int64_t i64;
-    uint64_t u64;
-    float f;
-} ApexCodec_Value;
 
 /**
  * An opaque struct that represents the supported values of a parameter.
@@ -411,35 +345,35 @@ typedef struct ApexCodec_SupportedValues ApexCodec_SupportedValues;
 /**
  * Extract information from ApexCodec_SupportedValues object.
  *
- * \param [in] supportedValues the supported values object
- * \param [out] type        pointer to be filled with the type of the supported values
- * \param [out] numberType  pointer to be filled with the numeric type of the supported values
- * \param [out] values      pointer to be filled with the array of the actual supported values.
+ * \param supportedValues   the supported values object
+ * \param outType           pointer to be filled with the type of the supported values
+ * \param outNumberType     pointer to be filled with the numeric type of the supported values
+ * \param outValues         pointer to be filled with the array of the actual supported values.
  *                          if type == APEXCODEC_SUPPORTED_VALUES_EMPTY: nullptr
  *                          if type == APEXCODEC_SUPPORTED_VALUES_RANGE: {min, max, step, num, den}
  *                          if type == APEXCODEC_SUPPORTED_VALUES_VALUES/_FLAGS:
  *                              the array of supported values/flags
  *                          the array is owned by the |supportedValues| object and the client
  *                          should not free it.
- * \param [out] numValues   pointer to be filled with the number of values.
+ * \param outNumValues      pointer to be filled with the number of values.
  *                          if type == APEXCODEC_SUPPORTED_VALUES_EMPTY: 0
  *                          if type == APEXCODEC_SUPPORTED_VALUES_RANGE: 5
  *                          if type == APEXCODEC_SUPPORTED_VALUES_VALUES/_FLAGS: varies
  */
 ApexCodec_Status ApexCodec_SupportedValues_getTypeAndValues(
-        ApexCodec_SupportedValues *supportedValues,
-        ApexCodec_SupportedValuesType *type,
-        ApexCodec_SupportedValuesNumberType *numberType,
-        ApexCodec_Value **values,
-        uint32_t *numValues) __INTRODUCED_IN(36);
+        ApexCodec_SupportedValues *_Nonnull supportedValues,
+        ApexCodec_SupportedValuesType *_Nonnull outType,
+        ApexCodec_SupportedValuesNumberType *_Nonnull outNumberType,
+        ApexCodec_Value *_Nullable *_Nonnull outValues,
+        uint32_t *_Nonnull outNumValues) __INTRODUCED_IN(36);
 
 /**
- * Release the supported values object.
+ * Destroy the supported values object. No-op if |values| is nullptr.
  *
  * \param values the supported values object
  */
-void ApexCodec_SupportedValues_release(
-        ApexCodec_SupportedValues *values) __INTRODUCED_IN(36);
+void ApexCodec_SupportedValues_destroy(
+        ApexCodec_SupportedValues *_Nullable values) __INTRODUCED_IN(36);
 
 /**
  * Struct that represents the result of ApexCodec_Configurable_config.
@@ -449,99 +383,40 @@ void ApexCodec_SupportedValues_release(
 typedef struct ApexCodec_SettingResults ApexCodec_SettingResults;
 
 /**
- * Enum that represents the failure code of ApexCodec_SettingResults.
- *
- * Introduced in API 36.
- */
-typedef enum ApexCodec_SettingResultFailure : uint32_t {
-    /** parameter type is not supported */
-    APEXCODEC_SETTING_RESULT_BAD_TYPE,
-    /** parameter is not supported on the specific port */
-    APEXCODEC_SETTING_RESULT_BAD_PORT,
-    /** parameter is not supported on the specific stream */
-    APEXCODEC_SETTING_RESULT_BAD_INDEX,
-    /** parameter is read-only */
-    APEXCODEC_SETTING_RESULT_READ_ONLY,
-    /** parameter mismatches input data */
-    APEXCODEC_SETTING_RESULT_MISMATCH,
-    /** strict parameter does not accept value for the field at all */
-    APEXCODEC_SETTING_RESULT_BAD_VALUE,
-    /** strict parameter field value conflicts with another settings */
-    APEXCODEC_SETTING_RESULT_CONFLICT,
-    /** strict parameter field is out of range due to other settings */
-    APEXCODEC_SETTING_RESULT_UNSUPPORTED,
-    /**
-     * field does not accept the requested parameter value at all. It has been corrected to
-     * the closest supported value. This failure mode is provided to give guidance as to what
-     * are the currently supported values for this field (which may be a subset of the at-all-
-     * potential values)
-     */
-    APEXCODEC_SETTING_RESULT_INFO_BAD_VALUE,
-    /**
-     * requested parameter value is in conflict with an/other setting(s)
-     * and has been corrected to the closest supported value. This failure
-     * mode is given to provide guidance as to what are the currently supported values as well
-     * as to optionally provide suggestion to the client as to how to enable the requested
-     * parameter value.
-     */
-    APEXCODEC_SETTING_RESULT_INFO_CONFLICT,
-} ApexCodec_SettingResultFailure;
-
-/**
- * Struct that represents a field and its supported values of a parameter.
- *
- * The offset and size of the field are where the field is located in the blob representation of
- * the parameter, as used in the ApexCodec_Configurable_query() and ApexCodec_Configurable_config(),
- * for example.
- *
- * Introduced in API 36.
- */
-typedef struct ApexCodec_ParamFieldValues {
-    /** index of the param */
-    uint32_t index;
-    /** offset of the param field */
-    uint32_t offset;
-    /** size of the param field */
-    uint32_t size;
-    /** currently supported values of the param field */
-    ApexCodec_SupportedValues *values;
-} ApexCodec_ParamFieldValues;
-
-/**
  * Extract the result of ApexCodec_Configurable_config.
  * The client can iterate through the results with index starting from 0 until this function returns
  * APEXCODEC_STATUS_NOT_FOUND.
  *
- * \param [in]  result  the result object
- * \param [in]  index   the index of the result to extract, starts from 0.
- * \param [out] failure pointer to be filled with the failure code
- * \param [out] field   pointer to be filled with the field that failed.
+ * \param result        the result object
+ * \param index         the index of the result to extract, starts from 0.
+ * \param outFailure    pointer to be filled with the failure code
+ * \param outField      pointer to be filled with the field that failed.
  *                      |field->value| is owned by the |result| object and the client should not
  *                      free it.
- * \param [out] conflicts   pointer to be filled with the array of conflicts.
+ * \param outConflicts      pointer to be filled with the array of conflicts.
  *                          nullptr if |numConflicts| is 0.
  *                          the array and its content is owned by the |result| object and the client
  *                          should not free it.
- * \param [out] numConflicts pointer to be filled with the number of conflicts
+ * \param outNumConflicts   pointer to be filled with the number of conflicts
  *                          may be 0 if there are no conflicts
  * \return APEXCODEC_STATUS_OK         if successful
  * \return APEXCODEC_STATUS_NOT_FOUND  if index is out of range
  */
 ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
-        ApexCodec_SettingResults *results,
+        ApexCodec_SettingResults *_Nonnull results,
         size_t index,
-        ApexCodec_SettingResultFailure *failure,
-        ApexCodec_ParamFieldValues *field,
-        ApexCodec_ParamFieldValues **conflicts,
-        size_t *numConflicts) __INTRODUCED_IN(36);
+        ApexCodec_SettingResultFailure *_Nonnull outFailure,
+        ApexCodec_ParamFieldValues *_Nonnull outField,
+        ApexCodec_ParamFieldValues *_Nullable *_Nonnull outConflicts,
+        size_t *_Nonnull outNumConflicts) __INTRODUCED_IN(36);
 
 /**
- * Release the setting result object.
+ * Destroy the setting result object. No-op if |results| is nullptr.
  *
  * \param result the setting result object
  */
-void ApexCodec_SettingResults_release(
-        ApexCodec_SettingResults *results) __INTRODUCED_IN(36);
+void ApexCodec_SettingResults_destroy(
+        ApexCodec_SettingResults *_Nullable results) __INTRODUCED_IN(36);
 
 /**
  * Process one frame from |input|, and produce one frame to |output| if possible.
@@ -549,16 +424,18 @@ void ApexCodec_SettingResults_release(
  * output size, in case of linear buffers. |input->configUpdates| is applied with the input
  * buffer; |output->configUpdates| contains config updates as a result of processing the frame.
  *
- * \param comp      the component to process the buffers
- * \param input     the input buffer; when nullptr, the component should fill |output| if there are
- *                  any pending output buffers.
- * \param output    the output buffer, should not be nullptr.
- * \param consumed  the number of consumed bytes from the input buffer
- *                  set to 0 if no input buffer has been consumed, including |input| is nullptr.
- *                  for graphic buffers, any non-zero value means that the input buffer is consumed.
- * \param produced  the number of bytes produced on the output buffer
- *                  set to 0 if no output buffer has been produced.
- *                  for graphic buffers, any non-zero value means that the output buffer is filled.
+ * \param comp          the component to process the buffers
+ * \param input         the input buffer; when nullptr, the component should fill |output|
+ *                      if there are any pending output buffers.
+ * \param output        the output buffer, should not be nullptr.
+ * \param outConsumed   the number of consumed bytes from the input buffer
+ *                      set to 0 if no input buffer has been consumed, including |input| is nullptr.
+ *                      for graphic buffers, any non-zero value means that
+ *                      the input buffer is consumed.
+ * \param outProduced   the number of bytes produced on the output buffer
+ *                      set to 0 if no output buffer has been produced.
+ *                      for graphic buffers, any non-zero value means that
+ *                      the output buffer is filled.
  * \return APEXCODEC_STATUS_OK         if successful
  * \return APEXCODEC_STATUS_NO_MEMORY  if the output buffer is not suitable to hold the output frame
  *                                     the client should retry with a new output buffer;
@@ -570,11 +447,11 @@ void ApexCodec_SettingResults_release(
  * \return APEXCODEC_STATUS_CORRUPTED  if unexpected error has occurred
  */
 ApexCodec_Status ApexCodec_Component_process(
-        ApexCodec_Component *comp,
-        const ApexCodec_Buffer *input,
-        ApexCodec_Buffer *output,
-        size_t *consumed,
-        size_t *produced) __INTRODUCED_IN(36);
+        ApexCodec_Component *_Nonnull comp,
+        const ApexCodec_Buffer *_Nullable input,
+        ApexCodec_Buffer *_Nonnull output,
+        size_t *_Nonnull outConsumed,
+        size_t *_Nonnull outProduced) __INTRODUCED_IN(36);
 
 /**
  * Configure the component with the given config.
@@ -590,48 +467,50 @@ ApexCodec_Status ApexCodec_Component_process(
  * information about the failures. See ApexCodec_SettingResultFailure and ApexCodec_SettingResults
  * for more details.
  *
- * \param [in]    comp   the handle for the component
- * \param [inout] config the config blob; after the call, the config blob is updated to the actual
- *                       config by the component.
- * \param [out]   result the result of the configuration.
- *                       the client should call ApexCodec_SettingResult_getResultAtIndex()
- *                       to extract the result. The result object is owned by the client and should
- *                       be released with ApexCodec_SettingResult_release().
- *                       |result| may be nullptr if empty.
+ * \param comp          the handle for the component
+ * \param inoutConfig   the config blob; after the call, the config blob is updated to the actual
+ *                      config by the component.
+ * \param outResult     the result of the configuration.
+ *                      the client should call ApexCodec_SettingResult_getResultAtIndex()
+ *                      to extract the result. The result object is owned by the client and should
+ *                      be released with ApexCodec_SettingResult_destroy().
+ *                      |result| may be nullptr if empty.
  * \return APEXCODEC_STATUS_OK         if successful
  * \return APEXCODEC_STATUS_BAD_VALUE  if the config is invalid
  * \return APEXCODEC_STATUS_BAD_STATE  if the component is not in the right state to be configured
  * \return APEXCODEC_STATUS_CORRUPTED  if unexpected error has occurred
  */
 ApexCodec_Status ApexCodec_Configurable_config(
-        ApexCodec_Configurable *comp,
-        ApexCodec_LinearBuffer *config,
-        ApexCodec_SettingResults **results) __INTRODUCED_IN(36);
+        ApexCodec_Configurable *_Nonnull comp,
+        ApexCodec_LinearBuffer *_Nonnull inoutConfig,
+        ApexCodec_SettingResults *_Nullable *_Nonnull outResults) __INTRODUCED_IN(36);
 
 /**
  * Query the component for the given indices.
  *
  * Parameter indices are defined in frameworks/av/media/codec2/core/include/C2Config.h.
  *
- * \param [in] comp         the handle for the component
- * \param [in] indices      the array of indices to query
- * \param [in] numIndices   the size of the indices array
- * \param [inout] config    the output buffer for the config blob, allocated by the client.
- *                          if the |config->size| was insufficient, it is set to the required size
- *                          and |config->data| remains unchanged.
- * \param [out] written     the number of bytes written to |config|.
+ * \param comp          the handle for the component
+ * \param indices       the array of indices to query
+ * \param numIndices    the size of the indices array
+ * \param inoutConfig   the output buffer for the config blob, allocated by the client.
+ *                      it can be null to query the required size.
+ * \param outWrittenOrRequired      the number of bytes written to |config|.
+ *                                  if the |config->size| was insufficient, it is set to the
+ *                                  required size.
+ *
  * \return APEXCODEC_STATUS_OK          if successful
- * \return APEXCODEC_STATUS_NO_MEMORY   if |config.size| is too small; |config.size| is updated to the
- *                                      requested buffer size.
- * \return APEXCODEC_STATUS_BAD_VALUE   if the parameters are bad. e.g. |indices|, |config|,
- *                                      |config->data| or |written| is nullptr.
+ * \return APEXCODEC_STATUS_NO_MEMORY   if |config.size| is too small; |config.size| is updated
+ *                                      to the requested buffer size.
+ * \return APEXCODEC_STATUS_BAD_VALUE   if the parameters are bad. e.g. |indices| or
+ *                                      |written| is nullptr.
  */
 ApexCodec_Status ApexCodec_Configurable_query(
-        ApexCodec_Configurable *comp,
-        uint32_t indices[],
+        ApexCodec_Configurable *_Nonnull comp,
+        uint32_t indices[_Nonnull],
         size_t numIndices,
-        ApexCodec_LinearBuffer *config,
-        size_t *written) __INTRODUCED_IN(36);
+        ApexCodec_LinearBuffer *_Nullable inoutConfig,
+        size_t *_Nonnull outWrittenOrRequired) __INTRODUCED_IN(36);
 
 /**
  * Struct that represents a parameter descriptor.
@@ -641,89 +520,67 @@ ApexCodec_Status ApexCodec_Configurable_query(
 typedef struct ApexCodec_ParamDescriptors ApexCodec_ParamDescriptors;
 
 /**
- * Enum that represents the attributes of a parameter.
- *
- * Introduced in API 36.
- */
-typedef enum ApexCodec_ParamAttribute : uint32_t {
-    /** parameter is required to be specified */
-    APEXCODEC_PARAM_IS_REQUIRED   = 1u << 0,
-    /** parameter retains its value */
-    APEXCODEC_PARAM_IS_PERSISTENT = 1u << 1,
-    /** parameter is strict */
-    APEXCODEC_PARAM_IS_STRICT     = 1u << 2,
-    /** parameter is read-only */
-    APEXCODEC_PARAM_IS_READ_ONLY  = 1u << 3,
-    /** parameter shall not be visible to clients */
-    APEXCODEC_PARAM_IS_HIDDEN     = 1u << 4,
-    /** parameter shall not be used by framework (other than testing) */
-    APEXCODEC_PARAM_IS_INTERNAL   = 1u << 5,
-    /** parameter is publicly const (hence read-only) */
-    APEXCODEC_PARAM_IS_CONST      = 1u << 6 | APEXCODEC_PARAM_IS_READ_ONLY,
-} ApexCodec_ParamAttribute;
-
-/**
  * Get the parameter indices of the param descriptors.
  *
- * \param [in] descriptors the param descriptors object
- * \param [out] indices the pointer to be filled with the array of the indices;
+ * \param descriptors   the param descriptors object
+ * \param outIndices    the pointer to be filled with the array of the indices;
  *                      the array is owned by |descriptors| and should not be freed by the client.
- * \param [out] numIndices the size of the indices array
+ * \param outNumIndices the size of the indices array
  * \return APEXCODEC_STATUS_OK          if successful
  * \return APEXCODEC_STATUS_BAD_VALUE   if parameters are bad. e.g. |descriptors|, |indices| or
  *                                  |numIndices| is nullptr.
  */
 ApexCodec_Status ApexCodec_ParamDescriptors_getIndices(
-        ApexCodec_ParamDescriptors *descriptors,
-        uint32_t **indices,
-        size_t *numIndices) __INTRODUCED_IN(36);
+        ApexCodec_ParamDescriptors *_Nonnull descriptors,
+        uint32_t *_Nullable *_Nonnull outIndices,
+        size_t *_Nonnull outNumIndices) __INTRODUCED_IN(36);
 
 /**
  * Get the descriptor of the param.
  *
- * \param [in] descriptors the param descriptors object
- * \param [in] index the index of the param
- * \param [out] attr the attribute of the param
- * \param [out] name    the pointer to be filled with the name of the param
+ * \param descriptors   the param descriptors object
+ * \param index         the index of the param
+ * \param outAttr       the attribute of the param
+ * \param outName       the pointer to be filled with the name of the param
  *                      the string is owned by |descriptors| and should not be freed by the client.
- * \param [out] dependencies the pointer to be filled with an array of the parameter indices
+ * \param outDependencies the pointer to be filled with an array of the parameter indices
  *                        that the parameter with |index| depends on.
  *                        may be null if empty.
  *                        the array is owned by |descriptors| and should not be freed by the client.
- * \param [out] numDependencies the number of dependencies
+ * \param outNumDependencies the number of dependencies
  * \return APEXCODEC_STATUS_OK          if successful
  * \return APEXCODEC_STATUS_BAD_VALUE   if parameters are bad. e.g. |descriptors|, |attr|, |name|,
  *                                  |dependencies| or |numDependencies| is nullptr.
  * \return APEXCODEC_STATUS_BAD_INDEX   if the index is not included in the param descriptors.
  */
 ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
-        ApexCodec_ParamDescriptors *descriptors,
+        ApexCodec_ParamDescriptors *_Nonnull descriptors,
         uint32_t index,
-        ApexCodec_ParamAttribute *attr,
-        const char **name,
-        uint32_t **dependencies,
-        size_t *numDependencies) __INTRODUCED_IN(36);
+        ApexCodec_ParamAttribute *_Nonnull outAttr,
+        const char *_Nullable *_Nonnull outName,
+        uint32_t *_Nullable *_Nonnull outDependencies,
+        size_t *_Nonnull outNumDependencies) __INTRODUCED_IN(36);
 
 /**
- * Release the param descriptors object.
+ * Destroy the param descriptors object.
  *
  * \param descriptors the param descriptors object
  */
-ApexCodec_Status ApexCodec_ParamDescriptors_release(
-        ApexCodec_ParamDescriptors *descriptors) __INTRODUCED_IN(36);
+ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
+        ApexCodec_ParamDescriptors *_Nullable descriptors) __INTRODUCED_IN(36);
 
 /**
  * Query the component for the supported parameters.
  *
- * \param comp the handle for the component
- * \param descriptors   the pointer to be filled with the param descriptors object
- *                      the object should be released with ApexCodec_ParamDescriptors_release().
+ * \param comp              the handle for the component
+ * \param outDescriptors    the pointer to be filled with the param descriptors object
+ *                          the object should be released with ApexCodec_ParamDescriptors_destroy().
  * \return APEXCODEC_STATUS_OK          if successful
  * \return APEXCODEC_STATUS_BAD_VALUE   if parameters are bad. e.g. |descriptors| is nullptr.
  */
 ApexCodec_Status ApexCodec_Configurable_querySupportedParams(
-        ApexCodec_Configurable *comp,
-        ApexCodec_ParamDescriptors **descriptors) __INTRODUCED_IN(36);
+        ApexCodec_Configurable *_Nonnull comp,
+        ApexCodec_ParamDescriptors *_Nullable *_Nonnull outDescriptors) __INTRODUCED_IN(36);
 
 /**
  * Struct that represents the query for the supported values of a parameter.
@@ -747,22 +604,22 @@ typedef struct ApexCodec_SupportedValuesQuery {
     /** status of the query */
     ApexCodec_Status status;
 
-    /** supported values. must be released with ApexCodec_SupportedValues_release(). */
-    ApexCodec_SupportedValues *values;
+    /** supported values. must be released with ApexCodec_SupportedValues_destroy(). */
+    ApexCodec_SupportedValues *_Nullable values;
 } ApexCodec_SupportedValuesQuery;
 
 /**
  * Query the component for the supported values of the given indices.
  *
  * \param comp the handle for the component
- * \param queries the array of queries
+ * \param inoutQueries the array of queries
  * \param numQueries the size of the queries array
  * \return  APEXCODEC_STATUS_OK         if successful
  *          APEXCODEC_STATUS_CORRUPTED  if unexpected error has occurred
  */
 ApexCodec_Status ApexCodec_Configurable_querySupportedValues(
-        ApexCodec_Configurable *comp,
-        ApexCodec_SupportedValuesQuery *queries,
+        ApexCodec_Configurable *_Nonnull comp,
+        ApexCodec_SupportedValuesQuery *_Nonnull inoutQueries,
         size_t numQueries) __INTRODUCED_IN(36);
 
 __END_DECLS
