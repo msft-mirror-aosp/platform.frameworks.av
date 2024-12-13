@@ -25,6 +25,7 @@
 #include <utils/KeyedVector.h>
 #include <utils/Timers.h>
 #include <utils/List.h>
+#include <gui/Flags.h>
 
 #include "hardware/camera2.h"
 #include "camera/CameraMetadata.h"
@@ -305,9 +306,14 @@ class CameraDeviceBase : public virtual FrameProducer {
      */
     virtual void getOfflineStreamIds(std::vector<int> *offlineStreamIds) = 0;
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    // get the surface of the input stream
+    virtual status_t getInputSurface(sp<Surface> *surface) = 0;
+#else
     // get the buffer producer of the input stream
     virtual status_t getInputBufferProducer(
             sp<IGraphicBufferProducer> *producer) = 0;
+#endif
 
     /**
      * Create a metadata buffer with fields that the HAL device believes are

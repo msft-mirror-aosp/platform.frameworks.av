@@ -40,6 +40,7 @@ cc_defaults {
 
     static_libs: [
         "android.hardware.common-V2-ndk",
+        "android.hardware.drm.common-V1-ndk",
         "android.hardware.drm-V1-ndk",
         "libbase",
         "libclearkeybase",
