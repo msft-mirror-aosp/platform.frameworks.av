@@ -4212,13 +4212,23 @@ status_t MPEG4Writer::Track::threadEntry() {
                 trackProgressStatus(timestampUs);
             }
         }
-        if (!hasMultipleTracks || isGainmapMeta || isGainmap) {
+
+        if (flags_camera::camera_heif_gainmap() && mOwner->mHasGainmap) {
+            Mutex::Autolock lock(mOwner->mLock);
+            size_t bytesWritten;
+            off64_t offset = mOwner->addSample_l(copy, usePrefix, tiffHdrOffset, &bytesWritten);
+            addItemOffsetAndSize(offset, bytesWritten, isExif, isGainmapMeta, isGainmap);
+            copy->release();
+            copy = NULL;
+            continue;
+        }
+
+        if (!hasMultipleTracks) {
             size_t bytesWritten;
             off64_t offset = mOwner->addSample_l(
                     copy, usePrefix, tiffHdrOffset, &bytesWritten);
-
             if (mIsHeif) {
-                addItemOffsetAndSize(offset, bytesWritten, isExif, isGainmapMeta, isGainmap);
+                addItemOffsetAndSize(offset, bytesWritten, isExif);
             } else {
                 if (mCo64TableEntries->count() == 0) {
                     addChunkOffset(offset);

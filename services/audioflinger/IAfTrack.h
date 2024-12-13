@@ -395,6 +395,11 @@ public:
     virtual bool isDisabled() const = 0;
 
     virtual int& fastIndex() = 0;
+
+    // Restricted due to OP_PLAY_AUDIO
+    virtual bool isPlaybackRestrictedOp() const = 0;
+    // Restricted due to OP_AUDIO_CONTROL_SOFT
+    virtual bool isPlaybackRestrictedControl() const = 0;
     virtual bool isPlaybackRestricted() const = 0;
 
     // Used by thread only

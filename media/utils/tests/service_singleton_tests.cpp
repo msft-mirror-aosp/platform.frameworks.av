@@ -299,6 +299,42 @@ TEST(service_singleton_tests, one_and_only) {
     EXPECT_EQ(4, sServiceDied);
     EXPECT_EQ(4, listenerServiceCreated);  // our listener picks it up.
 
+    {
+        // in default mode (kNull) a null is returned when the service is skipped and
+        // wait time is ignored.
+
+        const auto ref1 = std::chrono::steady_clock::now();
+        auto service = mediautils::getService<IServiceSingletonTest>(std::chrono::seconds(2));
+        EXPECT_FALSE(service);
+        const auto ref2 = std::chrono::steady_clock::now();
+        EXPECT_LT(ref2 - ref1, std::chrono::seconds(1));
+
+        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>(
+                std::chrono::seconds(2));
+        EXPECT_FALSE(service2);
+        const auto ref3 = std::chrono::steady_clock::now();
+        EXPECT_LT(ref3 - ref2, std::chrono::seconds(1));
+    }
+
+    // Cancel the singleton cache but use wait mode.
+    mediautils::skipService<IServiceSingletonTest>(mediautils::SkipMode::kWait);
+    mediautils::skipService<aidl::IServiceSingletonTest>(mediautils::SkipMode::kWait);
+
+    {
+        // in wait mode, the timeouts are respected
+        const auto ref1 = std::chrono::steady_clock::now();
+        auto service = mediautils::getService<IServiceSingletonTest>(std::chrono::seconds(1));
+        EXPECT_FALSE(service);
+        const auto ref2 = std::chrono::steady_clock::now();
+        EXPECT_GT(ref2 - ref1, std::chrono::seconds(1));
+
+        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>(
+                std::chrono::seconds(1));
+        EXPECT_FALSE(service2);
+        const auto ref3 = std::chrono::steady_clock::now();
+        EXPECT_GT(ref3 - ref2, std::chrono::seconds(1));
+    }
+
     // remove service
     remoteWorker->putc('b');
     EXPECT_EQ('b', remoteWorker->getc());
