@@ -18,6 +18,7 @@
 
 #include <android-base/no_destructor.h>
 #include <apex/ApexCodecs.h>
+#include <apex/ApexCodecsParam.h>
 
 // TODO: remove when we have real implementations
 #pragma clang diagnostic push
@@ -71,7 +72,7 @@ ApexCodec_Status ApexCodec_SupportedValues_getTypeAndValues(
     return APEXCODEC_STATUS_OMITTED;
 }
 
-void ApexCodec_SupportedValues_release(ApexCodec_SupportedValues *values) {}
+void ApexCodec_SupportedValues_destroy(ApexCodec_SupportedValues *values) {}
 
 ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
         ApexCodec_SettingResults *results,
@@ -83,7 +84,7 @@ ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
     return APEXCODEC_STATUS_OMITTED;
 }
 
-void ApexCodec_SettingResults_release(ApexCodec_SettingResults *results) {}
+void ApexCodec_SettingResults_destroy(ApexCodec_SettingResults *results) {}
 
 ApexCodec_Status ApexCodec_Component_process(
         ApexCodec_Component *comp,
@@ -106,7 +107,7 @@ ApexCodec_Status ApexCodec_Configurable_query(
         uint32_t indices[],
         size_t numIndices,
         ApexCodec_LinearBuffer *config,
-        size_t *written) {
+        size_t *writtenOrRequired) {
     return APEXCODEC_STATUS_OMITTED;
 }
 
@@ -127,7 +128,7 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
     return APEXCODEC_STATUS_OMITTED;
 }
 
-ApexCodec_Status ApexCodec_ParamDescriptors_release(
+ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
         ApexCodec_ParamDescriptors *descriptors) {
     return APEXCODEC_STATUS_OMITTED;
 }
