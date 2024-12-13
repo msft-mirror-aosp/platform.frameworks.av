@@ -168,6 +168,9 @@ struct AidlProviderInfo : public CameraProviderManager::ProviderInfo {
                 *halCameraIdsAndStreamCombinations,
         bool *earlyExit);
     std::shared_ptr<AidlProviderCallbacks> mCallbacks = nullptr;
+    struct AIBinderCookie {
+        wp<AidlProviderInfo> providerInfo;
+    };
     ndk::ScopedAIBinder_DeathRecipient mDeathRecipient;
 
 };

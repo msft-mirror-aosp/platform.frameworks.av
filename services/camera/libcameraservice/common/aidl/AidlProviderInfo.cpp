@@ -134,10 +134,14 @@ status_t AidlProviderInfo::initializeAidlProvider(
     }
 
     mDeathRecipient = ndk::ScopedAIBinder_DeathRecipient(AIBinder_DeathRecipient_new(binderDied));
+    AIBinder_DeathRecipient_setOnUnlinked(mDeathRecipient.get(), /*onUnlinked*/ [](void *cookie) {
+            AIBinderCookie *binderCookie = reinterpret_cast<AIBinderCookie *>(cookie);
+            delete binderCookie;
+        });
 
     if (!vd_flags::virtual_camera_service_discovery() || interface->isRemote()) {
-        binder_status_t link =
-                AIBinder_linkToDeath(interface->asBinder().get(), mDeathRecipient.get(), this);
+        binder_status_t link = AIBinder_linkToDeath(
+            interface->asBinder().get(), mDeathRecipient.get(), new AIBinderCookie{this});
         if (link != STATUS_OK) {
             ALOGW("%s: Unable to link to provider '%s' death notifications (%d)", __FUNCTION__,
                   mProviderName.c_str(), link);
@@ -201,9 +205,12 @@ status_t AidlProviderInfo::initializeAidlProvider(
 }
 
 void AidlProviderInfo::binderDied(void *cookie) {
-    AidlProviderInfo *provider = reinterpret_cast<AidlProviderInfo *>(cookie);
-    ALOGI("Camera provider '%s' has died; removing it", provider->mProviderInstance.c_str());
-    provider->mManager->removeProvider(std::string(provider->mProviderInstance));
+    AIBinderCookie* binderCookie = reinterpret_cast<AIBinderCookie*>(cookie);
+    sp<AidlProviderInfo> provider = binderCookie->providerInfo.promote();
+    if (provider != nullptr) {
+        ALOGI("Camera provider '%s' has died; removing it", provider->mProviderInstance.c_str());
+        provider->mManager->removeProvider(provider->mProviderInstance);
+    }
 }
 
 status_t AidlProviderInfo::setUpVendorTags() {
@@ -317,7 +324,7 @@ const std::shared_ptr<ICameraProvider> AidlProviderInfo::startProviderInterface(
 
     interface->setCallback(mCallbacks);
     auto link = AIBinder_linkToDeath(interface->asBinder().get(), mDeathRecipient.get(),
-            this);
+            new AIBinderCookie{this});
     if (link != STATUS_OK) {
         ALOGW("%s: Unable to link to provider '%s' death notifications",
                 __FUNCTION__, mProviderName.c_str());
