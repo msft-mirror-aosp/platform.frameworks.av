@@ -303,7 +303,7 @@ status_t HidlCamera3Device::initialize(sp<CameraProviderManager> manager,
     }
     mNeedFixupMonochromeTags = (isMonochrome && deviceVersion < CAMERA_DEVICE_API_VERSION_3_5);
 
-    return initializeCommonLocked();
+    return initializeCommonLocked(manager);
 }
 
 hardware::Return<void> HidlCamera3Device::requestStreamBuffers(

@@ -616,13 +616,12 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
                 __FUNCTION__, strerror(-res), res);
         return;
     }
-    if (flags::camera_manual_flash_strength_control()) {
-        res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
-        if (OK != res) {
-            ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-            return;
-        }
+
+    res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
+    if (OK != res) {
+        ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+        return;
     }
 
     auto stat = addDynamicDepthTags();
@@ -693,12 +692,10 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
         mHasFlashUnit = false;
     }
 
-    if (flags::feature_combination_query()) {
-        res = addSessionConfigQueryVersionTag();
-        if (OK != res) {
-            ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-        }
+    res = addSessionConfigQueryVersionTag();
+    if (OK != res) {
+        ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
     }
 
     camera_metadata_entry entry =
@@ -782,13 +779,11 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
                         __FUNCTION__, strerror(-res), res);
             }
 
-            if (flags::camera_manual_flash_strength_control()) {
-                res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
-                if (OK != res) {
-                    ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
-                            __FUNCTION__, strerror(-res), res);
-                    return;
-                }
+            res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            if (OK != res) {
+                ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                        __FUNCTION__, strerror(-res), res);
+                return;
             }
         }
     }
