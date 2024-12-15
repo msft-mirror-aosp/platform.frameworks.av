@@ -111,6 +111,12 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
                               size_t dstYStride, size_t dstUVStride,
                               uint32_t width, uint32_t height,
                               CONV_FORMAT_T format);
+void convertPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
+                              const uint8_t *srcY, const uint8_t *srcU, const uint8_t *srcV,
+                              size_t srcYStride, size_t srcUStride, size_t srcVStride,
+                              size_t dstYStride, size_t dstUVStride,
+                              uint32_t width, uint32_t height,
+                              CONV_FORMAT_T format);
 
 class SimpleC2Component
         : public C2Component, public std::enable_shared_from_this<SimpleC2Component> {
