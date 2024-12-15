@@ -112,6 +112,8 @@ public:
 
     Status notifyClientConfigChanged(const ClientConfigParcel& clientConfig) override;
 
+    Status getMediaResourceUsageReport(std::vector<MediaResourceParcel>* resources) override;
+
 protected:
     // To get notifications when a resource is added for the first time.
     void onFirstAdded(const MediaResourceParcel& res, uid_t uid);
