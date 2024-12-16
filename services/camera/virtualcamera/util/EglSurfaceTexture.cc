@@ -24,7 +24,6 @@
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferQueue.h>
 #include <gui/GLConsumer.h>
-#include <gui/IGraphicBufferProducer.h>
 #include <hardware/gralloc.h>
 
 #include <cstdint>
