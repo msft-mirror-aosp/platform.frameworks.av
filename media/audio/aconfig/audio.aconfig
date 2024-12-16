@@ -99,6 +99,13 @@ flag {
 }
 
 flag {
+    name: "optimize_bt_device_switch"
+    namespace: "media_audio"
+    description: "Optimize the Bluetooth active device switch sequence"
+    bug: "373867402"
+}
+
+flag {
     name: "port_to_piid_simplification"
     namespace: "media_audio"
     description: "PAM only needs for each piid the last portId mapping"
