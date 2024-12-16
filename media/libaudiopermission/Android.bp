@@ -13,6 +13,7 @@ cc_library {
     name: "libaudiopermission",
 
     srcs: [
+        "AppOpsSession.cpp",
         "NativePermissionController.cpp",
         "ValidatedAttributionSourceState.cpp",
     ],
@@ -35,6 +36,7 @@ cc_library {
         "libbase",
         "libbinder",
         "liblog",
+        "libpermission",
         "libutils",
     ],
 
@@ -98,6 +100,7 @@ cc_test {
         "libbase",
         "libbinder",
         "liblog",
+        "libpermission",
         "libutils",
     ],
     srcs: ["tests/*.cpp"],

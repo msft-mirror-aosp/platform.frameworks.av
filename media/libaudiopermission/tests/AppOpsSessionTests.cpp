@@ -29,8 +29,8 @@ using ::com::android::media::permission::ValidatedAttributionSourceState;
 
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
-using ::testing::Ne;
 using ::testing::IsEmpty;
+using ::testing::Ne;
 
 class AppOpsSessionTests;
 
