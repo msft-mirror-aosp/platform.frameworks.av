@@ -240,6 +240,7 @@ private:
 
     bool mHasFileLevelMeta;
     bool mIsAvif; // used to differentiate HEIC and AVIF under the same OUTPUT_FORMAT_HEIF
+    bool mHasGainmap;
     uint64_t mFileLevelMetaDataSize;
     bool mHasMoovBox;
     uint32_t mPrimaryItemId;

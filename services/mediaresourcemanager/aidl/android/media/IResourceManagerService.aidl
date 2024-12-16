@@ -168,4 +168,13 @@ interface IResourceManagerService {
      * @param clientConfig Configuration information of the client.
      */
     void notifyClientConfigChanged(in ClientConfigParcel clientConfig);
+
+    /**
+     * Get a list of all the MediaResources currently being used.
+     *
+     * This provides information on current resource usage by the system.
+     *
+     * @param resources List of resources being used when this call is made.
+     */
+    void getMediaResourceUsageReport(out MediaResourceParcel[] resources);
 }

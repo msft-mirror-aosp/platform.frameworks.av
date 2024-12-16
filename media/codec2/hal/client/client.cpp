@@ -1066,7 +1066,7 @@ c2_status_t Codec2ConfigurableClient::ApexImpl::config(
                 mBase, &config, &result);
         base::ScopeGuard guard([result] {
             if (result) {
-                ApexCodec_SettingResults_release(result);
+                ApexCodec_SettingResults_destroy(result);
             }
         });
         size_t index = 0;
@@ -1115,7 +1115,7 @@ c2_status_t Codec2ConfigurableClient::ApexImpl::querySupportedParams(
         ApexCodec_Configurable_querySupportedParams(mBase, &paramDescs);
         base::ScopeGuard guard([paramDescs] {
             if (paramDescs) {
-                ApexCodec_ParamDescriptors_release(paramDescs);
+                ApexCodec_ParamDescriptors_destroy(paramDescs);
             }
         });
         uint32_t *indices = nullptr;
@@ -1173,7 +1173,7 @@ c2_status_t Codec2ConfigurableClient::ApexImpl::querySupportedValues(
             fields[i].status = (c2_status_t)queries[i].status;
             FromApex(queries[i].values, &fields[i].values);
             if (queries[i].values) {
-                ApexCodec_SupportedValues_release(queries[i].values);
+                ApexCodec_SupportedValues_destroy(queries[i].values);
                 queries[i].values = nullptr;
             }
         }
@@ -3170,6 +3170,11 @@ c2_status_t Codec2Client::Component::start() {
 
 c2_status_t Codec2Client::Component::stop() {
     if (mAidlBase) {
+        std::shared_ptr<AidlGraphicBufferAllocator> gba =
+                mGraphicBufferAllocators->current();
+        if (gba) {
+            gba->onRequestStop();
+        }
         ::ndk::ScopedAStatus transStatus = mAidlBase->stop();
         return GetC2Status(transStatus, "stop");
     }
@@ -3220,6 +3225,11 @@ c2_status_t Codec2Client::Component::release() {
         }
     }
     if (mAidlBase) {
+        std::shared_ptr<AidlGraphicBufferAllocator> gba =
+                mGraphicBufferAllocators->current();
+        if (gba) {
+            gba->onRequestStop();
+        }
         ::ndk::ScopedAStatus transStatus = mAidlBase->release();
         return GetC2Status(transStatus, "release");
     }
@@ -3407,7 +3417,11 @@ uint64_t Codec2Client::Component::configConsumerUsage(
 
 void Codec2Client::Component::pollForRenderedFrames(FrameEventHistoryDelta* delta) {
     if (mAidlBase) {
-        // TODO b/311348680
+        std::shared_ptr<AidlGraphicBufferAllocator> gba =
+                mGraphicBufferAllocators->current();
+        if (gba) {
+            gba->pollForRenderedFrames(delta);
+        }
         return;
     }
     mOutputBufferQueue->pollForRenderedFrames(delta);

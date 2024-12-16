@@ -43,7 +43,7 @@ public:
             wp<AudioPolicyService::AudioCommandThread> commandThread);
 
 private:
-    OpRecordAudioMonitor(const AttributionSourceState &attributionSource,
+    OpRecordAudioMonitor(AttributionSourceState attributionSource,
                          uint32_t virtualDeviceId,
                          const audio_attributes_t &attr,
                          int32_t appOp,
@@ -71,7 +71,7 @@ private:
     void checkOp(bool updateUidStates = false);
 
     std::atomic_bool mHasOp;
-    AttributionSourceState mAttributionSource;
+    const AttributionSourceState mAttributionSource;
     const uint32_t mVirtualDeviceId;
     const audio_attributes_t mAttr;
     const int32_t mAppOp;

@@ -580,6 +580,7 @@ void MPEG4Writer::initInternal(int fd, bool isFirstSession) {
     mTimeScale = -1;
     mHasFileLevelMeta = false;
     mIsAvif = false;
+    mHasGainmap = false;
     mFileLevelMetaDataSize = 0;
     mPrimaryItemId = 0;
     mAssociationEntryCount = 0;
@@ -735,6 +736,13 @@ status_t MPEG4Writer::addSource(const sp<MediaSource> &source) {
     int32_t isBackgroundMode;
     if (meta && meta->findInt32(kKeyBackgroundMode, &isBackgroundMode)) {
         mIsBackgroundMode |= isBackgroundMode;
+    }
+
+    if (flags_camera::camera_heif_gainmap()) {
+        int32_t gainmap = 0;
+        if (meta && meta->findInt32(kKeyGainmap, &gainmap)) {
+            mHasGainmap |= gainmap;
+        }
     }
 
     if (!strcmp(mime, MEDIA_MIMETYPE_VIDEO_DOLBY_VISION)) {
@@ -1600,6 +1608,9 @@ void MPEG4Writer::writeFtypBox(MetaData *param) {
             } else {
                 writeFourcc("mif1");
                 writeFourcc("heic");
+                if (flags_camera::camera_heif_gainmap() && mHasGainmap) {
+                    writeFourcc("tmap");
+                }
             }
         }
         if (mHasMoovBox) {
@@ -3919,7 +3930,7 @@ status_t MPEG4Writer::Track::threadEntry() {
         if (isExif) {
             copy->meta_data().setInt32(kKeyExifTiffOffset, tiffHdrOffset);
         }
-        bool usePrefix = this->usePrefix() && !isExif;
+        bool usePrefix = this->usePrefix() && !isExif && !isGainmapMeta;
         if (sampleFileOffset == -1 && usePrefix) {
             StripStartcode(copy);
         }
@@ -4201,13 +4212,23 @@ status_t MPEG4Writer::Track::threadEntry() {
                 trackProgressStatus(timestampUs);
             }
         }
-        if (!hasMultipleTracks || isGainmapMeta || isGainmap) {
+
+        if (flags_camera::camera_heif_gainmap() && mOwner->mHasGainmap) {
+            Mutex::Autolock lock(mOwner->mLock);
+            size_t bytesWritten;
+            off64_t offset = mOwner->addSample_l(copy, usePrefix, tiffHdrOffset, &bytesWritten);
+            addItemOffsetAndSize(offset, bytesWritten, isExif, isGainmapMeta, isGainmap);
+            copy->release();
+            copy = NULL;
+            continue;
+        }
+
+        if (!hasMultipleTracks) {
             size_t bytesWritten;
             off64_t offset = mOwner->addSample_l(
                     copy, usePrefix, tiffHdrOffset, &bytesWritten);
-
             if (mIsHeif) {
-                addItemOffsetAndSize(offset, bytesWritten, isExif, isGainmapMeta, isGainmap);
+                addItemOffsetAndSize(offset, bytesWritten, isExif);
             } else {
                 if (mCo64TableEntries->count() == 0) {
                     addChunkOffset(offset);

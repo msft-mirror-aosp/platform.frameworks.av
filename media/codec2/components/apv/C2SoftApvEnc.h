@@ -48,7 +48,7 @@ struct C2SoftApvEnc final : public SimpleC2Component {
     c2_status_t drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool) override;
 
   private:
-    c2_status_t reset();
+    c2_status_t resetEncoder();
     c2_status_t initEncoder();
     c2_status_t releaseEncoder();
     c2_status_t setEncodeArgs(oapv_frms_t* imgb_inp, const C2GraphicView* const input,
@@ -60,8 +60,6 @@ struct C2SoftApvEnc final : public SimpleC2Component {
                               const std::unique_ptr<C2Work>& work);
     void setParams(oapve_param_t& param);
     int32_t getQpFromQuality(int quality);
-    C2Config::level_t decisionApvLevel(int32_t width, int32_t height, int32_t fps, int32_t bitrate,
-                                       int32_t band);
 
     void showEncoderParams(oapve_cdesc_t* cdsc);
 

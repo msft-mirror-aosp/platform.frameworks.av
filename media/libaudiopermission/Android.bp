@@ -13,6 +13,7 @@ cc_library {
     name: "libaudiopermission",
 
     srcs: [
+        "AppOpsSession.cpp",
         "NativePermissionController.cpp",
         "ValidatedAttributionSourceState.cpp",
     ],
@@ -35,6 +36,7 @@ cc_library {
         "libbase",
         "libbinder",
         "liblog",
+        "libpermission",
         "libutils",
     ],
 
@@ -83,7 +85,7 @@ cc_library {
 }
 
 cc_test {
-    name: "libaudiopermission_test",
+    name: "libaudiopermission_tests",
     host_supported: true,
     defaults: [
         "libmediautils_tests_config",
@@ -98,12 +100,10 @@ cc_test {
         "libbase",
         "libbinder",
         "liblog",
+        "libpermission",
         "libutils",
     ],
-    srcs: [
-        "tests/NativePermissionControllerTest.cpp",
-        "tests/ValidatedAttributionSourceStateTest.cpp",
-    ],
+    srcs: ["tests/*.cpp"],
     test_options: {
         unit_test: true,
     },

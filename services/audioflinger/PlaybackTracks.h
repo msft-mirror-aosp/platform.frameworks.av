@@ -291,9 +291,20 @@ protected:
     bool isDisabled() const final;
 
     int& fastIndex() final { return mFastIndex; }
-    bool isPlaybackRestricted() const final {
+
+    bool isPlaybackRestrictedOp() const final {
         // The monitor is only created for tracks that can be silenced.
-        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false; }
+        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false;
+    }
+
+    bool isPlaybackRestrictedControl() const final {
+        return false;
+        // return mOpAudioControlSoftMonitor ? !mOpAudioControlSoftMonitor->hasOp() : false;
+    }
+
+    bool isPlaybackRestricted() const final {
+        return isPlaybackRestrictedOp() || isPlaybackRestrictedControl();
+    }
 
     const sp<AudioTrackServerProxy>& audioTrackServerProxy() const final {
         return mAudioTrackServerProxy;

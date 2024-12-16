@@ -222,6 +222,7 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
                              .build());
         std::vector<uint32_t> pixelFormats = {
             HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
+            HAL_PIXEL_FORMAT_YCBCR_420_888,
         };
         if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
             pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
@@ -231,7 +232,7 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
         }
         addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
                              .withDefault(new C2StreamPixelFormatInfo::input(
-                                     0u, HAL_PIXEL_FORMAT_YCBCR_P010))
+                                     0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
                              .withFields({C2F(mPixelFormat, value).oneOf({pixelFormats})})
                              .withSetter((Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps))
                              .build());
@@ -272,6 +273,13 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
         if (!me.F(me.v.level).supportsAtAll(me.v.level)) {
             me.set().level = LEVEL_APV_1_BAND_0;
         }
+
+        int32_t bandIdc = me.v.level <= LEVEL_APV_7_1_BAND_0 ? 0 :
+                          me.v.level <= LEVEL_APV_7_1_BAND_1 ? 1 :
+                          me.v.level <= LEVEL_APV_7_1_BAND_2 ? 2 : 3;
+
+        me.set().level = decisionApvLevel(size.v.width, size.v.height, frameRate.v.value,
+                                            (uint64_t)bitrate.v.value, bandIdc);
         return C2R::Ok();
     }
 
@@ -302,6 +310,119 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
         return C2R::Ok();
     }
 
+    static C2Config::level_t decisionApvLevel(int32_t width, int32_t height, int32_t fps,
+                                                    uint64_t bitrate, int32_t band) {
+        C2Config::level_t level = C2Config::LEVEL_APV_1_BAND_0;
+        struct LevelLimits {
+            C2Config::level_t level;
+            uint64_t samplesPerSec;
+            uint64_t kbpsOfBand;
+        };
+
+        constexpr LevelLimits kLimitsBand0[] = {
+                {LEVEL_APV_1_BAND_0, 3'041'280, 7'000},
+                {LEVEL_APV_1_1_BAND_0, 6'082'560, 14'000},
+                {LEVEL_APV_2_BAND_0, 15'667'200, 36'000},
+                {LEVEL_APV_2_1_BAND_0, 31'334'400, 71'000},
+                {LEVEL_APV_3_BAND_0, 66'846'720, 101'000},
+                {LEVEL_APV_3_1_BAND_0, 133'693'440, 201'000},
+                {LEVEL_APV_4_BAND_0, 265'420'800, 401'000},
+                {LEVEL_APV_4_1_BAND_0, 530'841'600, 780'000},
+                {LEVEL_APV_5_BAND_0, 1'061'683'200, 1'560'000},
+                {LEVEL_APV_5_1_BAND_0, 2'123'366'400, 3'324'000},
+                {LEVEL_APV_6_BAND_0, 4'777'574'400, 6'648'000},
+                {LEVEL_APV_6_1_BAND_0, 8'493'465'600, 13'296'000},
+                {LEVEL_APV_7_BAND_0, 16'986'931'200, 26'592'000},
+                {LEVEL_APV_7_1_BAND_0, 33'973'862'400, 53'184'000},
+        };
+
+        constexpr LevelLimits kLimitsBand1[] = {
+                {LEVEL_APV_1_BAND_1, 3'041'280, 11'000},
+                {LEVEL_APV_1_1_BAND_1, 6'082'560, 21'000},
+                {LEVEL_APV_2_BAND_1, 15'667'200, 53'000},
+                {LEVEL_APV_2_1_BAND_1, 31'334'400, 106'00},
+                {LEVEL_APV_3_BAND_1, 66'846'720, 151'000},
+                {LEVEL_APV_3_1_BAND_1, 133'693'440, 301'000},
+                {LEVEL_APV_4_BAND_1, 265'420'800, 602'000},
+                {LEVEL_APV_4_1_BAND_1, 530'841'600, 1'170'000},
+                {LEVEL_APV_5_BAND_1, 1'061'683'200, 2'340'000},
+                {LEVEL_APV_5_1_BAND_1, 2'123'366'400, 4'986'000},
+                {LEVEL_APV_6_BAND_1, 4'777'574'400, 9'972'000},
+                {LEVEL_APV_6_1_BAND_1, 8'493'465'600, 19'944'000},
+                {LEVEL_APV_7_BAND_1, 16'986'931'200, 39'888'000},
+                {LEVEL_APV_7_1_BAND_1, 33'973'862'400, 79'776'000},
+        };
+
+        constexpr LevelLimits kLimitsBand2[] = {
+                {LEVEL_APV_1_BAND_2, 3'041'280, 14'000},
+                {LEVEL_APV_1_1_BAND_2, 6'082'560, 28'000},
+                {LEVEL_APV_2_BAND_2, 15'667'200, 71'000},
+                {LEVEL_APV_2_1_BAND_2, 31'334'400, 141'000},
+                {LEVEL_APV_3_BAND_2, 66'846'720, 201'000},
+                {LEVEL_APV_3_1_BAND_2, 133'693'440, 401'000},
+                {LEVEL_APV_4_BAND_2, 265'420'800, 780'000},
+                {LEVEL_APV_4_1_BAND_2, 530'841'600, 1'560'000},
+                {LEVEL_APV_5_BAND_2, 1'061'683'200, 3'324'000},
+                {LEVEL_APV_5_1_BAND_2, 2'123'366'400, 6'648'000},
+                {LEVEL_APV_6_BAND_2, 4'777'574'400, 13'296'000},
+                {LEVEL_APV_6_1_BAND_2, 8'493'465'600, 26'592'000},
+                {LEVEL_APV_7_BAND_2, 16'986'931'200, 53'184'000},
+                {LEVEL_APV_7_1_BAND_2, 33'973'862'400, 106'368'000},
+        };
+
+        constexpr LevelLimits kLimitsBand3[] = {
+                {LEVEL_APV_1_BAND_3, 3'041'280, 21'000},
+                {LEVEL_APV_1_1_BAND_3, 6'082'560, 42'000},
+                {LEVEL_APV_2_BAND_3, 15'667'200, 106'000},
+                {LEVEL_APV_2_1_BAND_3, 31'334'400, 212'000},
+                {LEVEL_APV_3_BAND_3, 66'846'720, 301'000},
+                {LEVEL_APV_3_1_BAND_3, 133'693'440, 602'000},
+                {LEVEL_APV_4_BAND_3, 265'420'800, 1'170'000},
+                {LEVEL_APV_4_1_BAND_3, 530'841'600, 2'340'000},
+                {LEVEL_APV_5_BAND_3, 1'061'683'200, 4'986'000},
+                {LEVEL_APV_5_1_BAND_3, 2'123'366'400, 9'972'000},
+                {LEVEL_APV_6_BAND_3, 4'777'574'400, 19'944'000},
+                {LEVEL_APV_6_1_BAND_3, 8'493'465'600, 39'888'000},
+                {LEVEL_APV_7_BAND_3, 16'986'931'200, 79'776'000},
+                {LEVEL_APV_7_1_BAND_3, 33'973'862'400, 159'552'000},
+        };
+
+        uint64_t samplesPerSec = width * height * fps;
+        if (band == 0) {
+            for (const LevelLimits& limit : kLimitsBand0) {
+                if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.kbpsOfBand * 1000) {
+                    level = limit.level;
+                    break;
+                }
+            }
+        } else if (band == 1) {
+            for (const LevelLimits& limit : kLimitsBand1) {
+                if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.kbpsOfBand * 1000) {
+                    level = limit.level;
+                    break;
+                }
+            }
+        } else if (band == 2) {
+            for (const LevelLimits& limit : kLimitsBand2) {
+                if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.kbpsOfBand * 1000) {
+                    level = limit.level;
+                    break;
+                }
+            }
+        } else if (band == 3) {
+            for (const LevelLimits& limit : kLimitsBand3) {
+                if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.kbpsOfBand * 1000) {
+                    level = limit.level;
+                    break;
+                }
+            }
+        } else {
+            ALOGE("Invalid band_idc on calculte level");
+        }
+
+        return level;
+    }
+
     uint32_t getProfile_l() const {
         int32_t profile = PROFILE_UNUSED;
 
@@ -328,7 +449,7 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
                 profile = 99;
                 break;
             default:
-                ALOGD("Unrecognized profile: %x", mProfileLevel->profile);
+                ALOGW("Unrecognized profile: %x", mProfileLevel->profile);
         }
         return profile;
     }
@@ -339,52 +460,262 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
         // TODO: Add Band settings
         switch (mProfileLevel->level) {
             case C2Config::LEVEL_APV_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_BAND_3:
                 level = 10;
                 break;
             case C2Config::LEVEL_APV_1_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_1_BAND_3:
                 level = 11;
                 break;
             case C2Config::LEVEL_APV_2_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_BAND_3:
                 level = 20;
                 break;
             case C2Config::LEVEL_APV_2_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_1_BAND_3:
                 level = 21;
                 break;
             case C2Config::LEVEL_APV_3_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_BAND_3:
                 level = 30;
                 break;
             case C2Config::LEVEL_APV_3_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_1_BAND_3:
                 level = 31;
                 break;
             case C2Config::LEVEL_APV_4_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_BAND_3:
                 level = 40;
                 break;
             case C2Config::LEVEL_APV_4_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_1_BAND_3:
                 level = 41;
                 break;
             case C2Config::LEVEL_APV_5_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_BAND_3:
                 level = 50;
                 break;
             case C2Config::LEVEL_APV_5_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_1_BAND_3:
                 level = 51;
                 break;
             case C2Config::LEVEL_APV_6_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_BAND_3:
                 level = 60;
                 break;
             case C2Config::LEVEL_APV_6_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_1_BAND_3:
                 level = 61;
                 break;
             case C2Config::LEVEL_APV_7_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_BAND_3:
                 level = 70;
                 break;
             case C2Config::LEVEL_APV_7_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_1_BAND_3:
                 level = 71;
                 break;
             default:
-                ALOGD("Unrecognized level: %x", mProfileLevel->level);
+                ALOGW("Unrecognized level: %x", mProfileLevel->level);
         }
         // Convert to APV level_idc according to APV spec
         return level * 3;
+    }
+
+    uint32_t getBandIdc_l() const {
+        uint32_t bandIdc = 0;
+
+        switch (mProfileLevel->level) {
+            case C2Config::LEVEL_APV_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_1_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_BAND_0:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_1_BAND_0:
+                bandIdc = 0;
+                break;
+            case C2Config::LEVEL_APV_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_1_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_BAND_1:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_1_BAND_1:
+                bandIdc = 1;
+                break;
+            case C2Config::LEVEL_APV_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_1_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_BAND_2:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_1_BAND_2:
+                bandIdc = 2;
+                break;
+            case C2Config::LEVEL_APV_1_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_1_1_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_2_1_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_3_1_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_4_1_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_5_1_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_6_1_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_BAND_3:
+                [[fallthrough]];
+            case C2Config::LEVEL_APV_7_1_BAND_3:
+                bandIdc = 3;
+                break;
+            default:
+                ALOGW("Unrecognized bandIdc through level: %x", mProfileLevel->level);
+        }
+        return bandIdc;
     }
 
     int32_t getBitrateMode_l() const {
@@ -450,7 +781,7 @@ C2SoftApvEnc::C2SoftApvEnc(const char* name, c2_node_id_t id,
       mSignalledEos(false),
       mSignalledError(false),
       mOutBlock(nullptr) {
-    reset();
+    resetEncoder();
 }
 
 C2SoftApvEnc::~C2SoftApvEnc() {
@@ -467,7 +798,7 @@ c2_status_t C2SoftApvEnc::onStop() {
 
 void C2SoftApvEnc::onReset() {
     releaseEncoder();
-    reset();
+    resetEncoder();
 }
 
 void C2SoftApvEnc::onRelease() {
@@ -497,7 +828,7 @@ int32_t C2SoftApvEnc::getQpFromQuality(int32_t quality) {
     return qp;
 }
 
-c2_status_t C2SoftApvEnc::reset() {
+c2_status_t C2SoftApvEnc::resetEncoder() {
     ALOGV("reset");
     mInitEncoder = false;
     mStarted = false;
@@ -636,7 +967,7 @@ void C2SoftApvEnc::setParams(oapve_param_t& param) {
     param.h = mSize->height;
     param.fps_num = (int)(mFrameRate->value * 100);
     param.fps_den = 100;
-    param.bitrate = mBitrate->value / 1000;
+    param.bitrate = (int)(mBitrate->value / 1000);
     param.rc_type = mIntf->getBitrateMode_l();
 
     int ApvQP = kApvDefaultQP;
@@ -646,14 +977,8 @@ void C2SoftApvEnc::setParams(oapve_param_t& param) {
               mQuality->value, ApvQP);
     }
     param.qp = ApvQP;
-    param.band_idc = 0;  // TODO: Get from the Level setting
+    param.band_idc = mIntf->getBandIdc_l();
     param.profile_idc = mIntf->getProfile_l();
-    C2Config::level_t level = decisionApvLevel(
-            param.w, param.h, (int)(param.fps_num / param.fps_den), param.bitrate, param.band_idc);
-    if (mProfileLevel->level != level) {
-        mProfileLevel->level = level;
-        ALOGI("Need to update level to %d", mIntf->getLevel_l());
-    }
     param.level_idc = mIntf->getLevel_l();
 }
 
@@ -731,10 +1056,20 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                                          input->width(), input->width(), input->width(),
                                          input->width(), input->width(), input->height(),
                                          CONV_FORMAT_I420);
-            } else if (IsYUV420(*input)) {
-                return C2_BAD_VALUE;
             } else if (IsI420(*input)) {
-                return C2_BAD_VALUE;
+                uint8_t  *srcY  = (uint8_t*)input->data()[0];
+                uint8_t  *srcU  = (uint8_t*)input->data()[1];
+                uint8_t  *srcV  = (uint8_t*)input->data()[2];
+                uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
+                uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+                convertPlanar8ToP210(dstY, dstUV, srcY, srcU, srcV,
+                                        layout.planes[C2PlanarLayout::PLANE_Y].rowInc,
+                                        layout.planes[C2PlanarLayout::PLANE_U].rowInc,
+                                        layout.planes[C2PlanarLayout::PLANE_V].rowInc,
+                                        input->width(), input->width(),
+                                        input->width(), input->height(),
+                                        CONV_FORMAT_I420);
+
             } else {
                 ALOGE("Not supported color format. %d", mColorFormat);
                 return C2_BAD_VALUE;
@@ -748,120 +1083,6 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
     }
 
     return C2_OK;
-}
-
-C2Config::level_t C2SoftApvEnc::decisionApvLevel(int32_t width, int32_t height, int32_t fps,
-                                                 int32_t bitrate, int32_t band) {
-    C2Config::level_t level = C2Config::LEVEL_APV_1_BAND_0;
-
-    struct LevelLimits {
-        C2Config::level_t level;
-        uint64_t samplesPerSec;
-        uint32_t bitratesOfBand;
-    };
-
-    constexpr LevelLimits kLimitsBand0[] = {
-            {LEVEL_APV_1_BAND_0, 3'041'280, 7'000},
-            {LEVEL_APV_1_1_BAND_0, 6'082'560, 14'000},
-            {LEVEL_APV_2_BAND_0, 15'667'200, 36'000},
-            {LEVEL_APV_2_1_BAND_0, 31'334'400, 71'000},
-            {LEVEL_APV_3_BAND_0, 66'846'720, 101'000},
-            {LEVEL_APV_3_1_BAND_0, 133'693'440, 201'000},
-            {LEVEL_APV_4_BAND_0, 265'420'800, 401'000},
-            {LEVEL_APV_4_1_BAND_0, 530'841'600, 780'000},
-            {LEVEL_APV_5_BAND_0, 1'061'683'200, 1'560'000},
-            {LEVEL_APV_5_1_BAND_0, 2'123'366'400, 3'324'000},
-            {LEVEL_APV_6_BAND_0, 4'777'574'400, 6'648'000},
-            {LEVEL_APV_6_1_BAND_0, 8'493'465'600, 13'296'000},
-            {LEVEL_APV_7_BAND_0, 16'986'931'200, 26'592'000},
-            {LEVEL_APV_7_1_BAND_0, 33'973'862'400, 53'184'000},
-    };
-
-    constexpr LevelLimits kLimitsBand1[] = {
-            {LEVEL_APV_1_BAND_1, 3'041'280, 11'000},
-            {LEVEL_APV_1_1_BAND_1, 6'082'560, 21'000},
-            {LEVEL_APV_2_BAND_1, 15'667'200, 53'000},
-            {LEVEL_APV_2_1_BAND_1, 31'334'400, 106'00},
-            {LEVEL_APV_3_BAND_1, 66'846'720, 151'000},
-            {LEVEL_APV_3_1_BAND_1, 133'693'440, 301'000},
-            {LEVEL_APV_4_BAND_1, 265'420'800, 602'000},
-            {LEVEL_APV_4_1_BAND_1, 530'841'600, 1'170'000},
-            {LEVEL_APV_5_BAND_1, 1'061'683'200, 2'340'000},
-            {LEVEL_APV_5_1_BAND_1, 2'123'366'400, 4'986'000},
-            {LEVEL_APV_6_BAND_1, 4'777'574'400, 9'972'000},
-            {LEVEL_APV_6_1_BAND_1, 8'493'465'600, 19'944'000},
-            {LEVEL_APV_7_BAND_1, 16'986'931'200, 39'888'000},
-            {LEVEL_APV_7_1_BAND_1, 33'973'862'400, 79'776'000},
-    };
-
-    constexpr LevelLimits kLimitsBand2[] = {
-            {LEVEL_APV_1_BAND_2, 3'041'280, 14'000},
-            {LEVEL_APV_1_1_BAND_2, 6'082'560, 28'000},
-            {LEVEL_APV_2_BAND_2, 15'667'200, 71'000},
-            {LEVEL_APV_2_1_BAND_2, 31'334'400, 141'000},
-            {LEVEL_APV_3_BAND_2, 66'846'720, 201'000},
-            {LEVEL_APV_3_1_BAND_2, 133'693'440, 401'000},
-            {LEVEL_APV_4_BAND_2, 265'420'800, 780'000},
-            {LEVEL_APV_4_1_BAND_2, 530'841'600, 1'560'000},
-            {LEVEL_APV_5_BAND_2, 1'061'683'200, 3'324'000},
-            {LEVEL_APV_5_1_BAND_2, 2'123'366'400, 6'648'000},
-            {LEVEL_APV_6_BAND_2, 4'777'574'400, 13'296'000},
-            {LEVEL_APV_6_1_BAND_2, 8'493'465'600, 26'592'000},
-            {LEVEL_APV_7_BAND_2, 16'986'931'200, 53'184'000},
-            {LEVEL_APV_7_1_BAND_2, 33'973'862'400, 106'368'000},
-    };
-
-    constexpr LevelLimits kLimitsBand3[] = {
-            {LEVEL_APV_1_BAND_3, 3'041'280, 21'000},
-            {LEVEL_APV_1_1_BAND_3, 6'082'560, 42'000},
-            {LEVEL_APV_2_BAND_3, 15'667'200, 106'000},
-            {LEVEL_APV_2_1_BAND_3, 31'334'400, 212'000},
-            {LEVEL_APV_3_BAND_3, 66'846'720, 301'000},
-            {LEVEL_APV_3_1_BAND_3, 133'693'440, 602'000},
-            {LEVEL_APV_4_BAND_3, 265'420'800, 1'170'000},
-            {LEVEL_APV_4_1_BAND_3, 530'841'600, 2'340'000},
-            {LEVEL_APV_5_BAND_3, 1'061'683'200, 4'986'000},
-            {LEVEL_APV_5_1_BAND_3, 2'123'366'400, 9'972'000},
-            {LEVEL_APV_6_BAND_3, 4'777'574'400, 19'944'000},
-            {LEVEL_APV_6_1_BAND_3, 8'493'465'600, 39'888'000},
-            {LEVEL_APV_7_BAND_3, 16'986'931'200, 79'776'000},
-            {LEVEL_APV_7_1_BAND_3, 33'973'862'400, 159'552'000},
-    };
-
-    uint64_t samplesPerSec = width * height * fps;
-    if (band == 0) {
-        for (const LevelLimits& limit : kLimitsBand0) {
-            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
-                level = limit.level;
-                break;
-            }
-        }
-    } else if (band == 1) {
-        for (const LevelLimits& limit : kLimitsBand1) {
-            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
-                level = limit.level;
-                break;
-            }
-        }
-    } else if (band == 2) {
-        for (const LevelLimits& limit : kLimitsBand2) {
-            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
-                level = limit.level;
-                break;
-            }
-        }
-    } else if (band == 3) {
-        for (const LevelLimits& limit : kLimitsBand3) {
-            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
-                level = limit.level;
-                break;
-            }
-        }
-    } else {
-        ALOGE("Invalid band_idc on calculte level");
-    }
-
-    return level;
 }
 
 void C2SoftApvEnc::ColorConvertP010ToYUV422P10le(const C2GraphicView* const input,
@@ -1106,10 +1327,6 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
         return;
     }
 
-    if (work->input.buffers.empty()) {
-        return;
-    }
-
     std::shared_ptr<C2GraphicView> view;
     std::shared_ptr<C2Buffer> inputBuffer = nullptr;
     if (!work->input.buffers.empty()) {
@@ -1121,7 +1338,19 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
             work->workletsProcessed = 1u;
             return;
         }
+    } else {
+        ALOGV("Empty input Buffer");
+        uint32_t flags = 0;
+        if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
+            flags |= C2FrameData::FLAG_END_OF_STREAM;
+        }
+        work->worklets.front()->output.flags = (C2FrameData::flags_t)flags;
+        work->worklets.front()->output.buffers.clear();
+        work->worklets.front()->output.ordinal = work->input.ordinal;
+        work->workletsProcessed = 1u;
+        return;
     }
+
     if (!inputBuffer) {
         fillEmptyWork(work);
         return;
@@ -1150,6 +1379,7 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
 
     error = setEncodeArgs(&mInputFrames, view.get(), workIndex);
     if (error != C2_OK) {
+        ALOGE("setEncodeArgs has failed. err = %d", error);
         mSignalledError = true;
         work->result = error;
         work->workletsProcessed = 1u;
@@ -1171,6 +1401,7 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
         int32_t status =
                 oapve_encode(mEncoderId, &mInputFrames, mMetaId, bits.get(), &stat, &mReconFrames);
         if (status != C2_OK) {
+            ALOGE("oapve_encode has failed. err = %d", status);
             mSignalledError = true;
             work->result = C2_CORRUPTED;
             work->workletsProcessed = 1u;

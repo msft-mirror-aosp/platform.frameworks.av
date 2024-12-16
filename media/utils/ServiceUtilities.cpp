@@ -55,6 +55,8 @@ static const String16 sAndroidPermissionRecordAudio("android.permission.RECORD_A
 static const String16 sModifyPhoneState("android.permission.MODIFY_PHONE_STATE");
 static const String16 sModifyAudioRouting("android.permission.MODIFY_AUDIO_ROUTING");
 static const String16 sCallAudioInterception("android.permission.CALL_AUDIO_INTERCEPTION");
+static const String16 sModifyAudioSettingsPrivileged(
+        "android.permission.MODIFY_AUDIO_SETTINGS_PRIVILEGED");
 
 static String16 resolveCallingPackage(PermissionController& permissionController,
         const std::optional<String16> opPackageName, uid_t uid) {
@@ -78,9 +80,7 @@ static String16 resolveCallingPackage(PermissionController& permissionController
 }
 
 // NOTE/TODO(b/379754682):
-// AUDIO_SOURCE_VOICE_DOWNLINK and AUDIO_SOURCE_VOICE_CALL are handled specially:
-// DOWNLINK is an output source, but we still require RecordOp in addition to
-// OP_RECORD_INCOMING_PHONE_AUDIO
+// AUDIO_SOURCE_VOICE_CALL is handled specially:
 // CALL includes both uplink and downlink, but we attribute RECORD_OP (only), since
 // there is not support for noting multiple ops.
 int32_t getOpForSource(audio_source_t source) {
@@ -108,7 +108,7 @@ bool isRecordOpRequired(audio_source_t source) {
     case AUDIO_SOURCE_FM_TUNER:
     case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
     case AUDIO_SOURCE_REMOTE_SUBMIX:
-    // case AUDIO_SOURCE_VOICE_DOWNLINK:
+    case AUDIO_SOURCE_VOICE_DOWNLINK:
         return false;
     default:
       return true;
@@ -387,6 +387,17 @@ bool modifyDefaultAudioEffectsAllowed(const AttributionSourceState& attributionS
     return ok;
 }
 
+bool modifyAudioSettingsPrivilegedAllowed(const AttributionSourceState& attributionSource) {
+    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+    pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
+    if (isAudioServerUid(uid)) return true;
+    // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
+    bool ok = PermissionCache::checkPermission(sModifyAudioSettingsPrivileged, pid, uid);
+    if (!ok) ALOGE("%s(): android.permission.MODIFY_AUDIO_SETTINGS_PRIVILEGED denied for uid %d",
+                   __func__, uid);
+    return ok;
+}
+
 bool dumpAllowed() {
     static const String16 sDump("android.permission.DUMP");
     // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
@@ -531,7 +542,7 @@ bool checkBluetoothPermission(const AttributionSourceState& attr) {
  * @param caller string identifying the caller for logging.
  * @return true if the MAC addresses must be anonymized, false otherwise.
  */
-bool mustAnonymizeBluetoothAddress(
+bool mustAnonymizeBluetoothAddressLegacy(
         const AttributionSourceState& attributionSource, const String16&) {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     bool res;

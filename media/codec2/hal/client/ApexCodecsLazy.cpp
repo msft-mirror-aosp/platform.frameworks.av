@@ -47,13 +47,13 @@ enum MethodIndex {
     k_ApexCodec_Configurable_querySupportedParams,
     k_ApexCodec_Configurable_querySupportedValues,
     k_ApexCodec_GetComponentStore,
+    k_ApexCodec_ParamDescriptors_destroy,
     k_ApexCodec_ParamDescriptors_getDescriptor,
     k_ApexCodec_ParamDescriptors_getIndices,
-    k_ApexCodec_ParamDescriptors_release,
+    k_ApexCodec_SettingResults_destroy,
     k_ApexCodec_SettingResults_getResultAtIndex,
-    k_ApexCodec_SettingResults_release,
+    k_ApexCodec_SupportedValues_destroy,
     k_ApexCodec_SupportedValues_getTypeAndValues,
-    k_ApexCodec_SupportedValues_release,
     k_ApexCodec_Traits_get,
 
     // Marker for count of methods
@@ -63,6 +63,11 @@ enum MethodIndex {
 class ApexCodecsLazyLoader {
 public:
     ApexCodecsLazyLoader() = default;
+
+    static ApexCodecsLazyLoader &Get() {
+        static ::android::base::NoDestructor<ApexCodecsLazyLoader> sLoader;
+        return *sLoader;
+    }
 
     void *getMethodAt(enum MethodIndex index) {
         RWLock::AutoRLock l(mLock);
@@ -79,11 +84,6 @@ public:
     }
 
 private:
-    RWLock mLock;
-    // Table of methods pointers in libapexcodecs APIs.
-    void* mMethods[k_MethodCount];
-    bool mInit{false};
-
     static void* LoadLibapexcodecs(int dlopen_flags) {
         return dlopen("libapexcodecs.so", dlopen_flags);
     }
@@ -124,13 +124,13 @@ private:
         BIND_SYMBOL(ApexCodec_Configurable_querySupportedParams);
         BIND_SYMBOL(ApexCodec_Configurable_querySupportedValues);
         BIND_SYMBOL(ApexCodec_GetComponentStore);
+        BIND_SYMBOL(ApexCodec_ParamDescriptors_destroy);
         BIND_SYMBOL(ApexCodec_ParamDescriptors_getDescriptor);
         BIND_SYMBOL(ApexCodec_ParamDescriptors_getIndices);
-        BIND_SYMBOL(ApexCodec_ParamDescriptors_release);
+        BIND_SYMBOL(ApexCodec_SettingResults_destroy);
         BIND_SYMBOL(ApexCodec_SettingResults_getResultAtIndex);
-        BIND_SYMBOL(ApexCodec_SettingResults_release);
+        BIND_SYMBOL(ApexCodec_SupportedValues_destroy);
         BIND_SYMBOL(ApexCodec_SupportedValues_getTypeAndValues);
-        BIND_SYMBOL(ApexCodec_SupportedValues_release);
         BIND_SYMBOL(ApexCodec_Traits_get);
 #undef BIND_SYMBOL
 
@@ -144,20 +144,20 @@ private:
         mInit = true;
         return true;
     }
-};
 
-static ApexCodecsLazyLoader &GetLoader() {
-    ::android::base::NoDestructor<ApexCodecsLazyLoader> sLoader;
-    return *sLoader;
-}
+    RWLock mLock;
+    // Table of methods pointers in libapexcodecs APIs.
+    void* mMethods[k_MethodCount];
+    bool mInit{false};
+};
 
 }  // anonymous namespace
 
-#define INVOKE_METHOD(name, returnIfNull, args...)              \
-    do {                                                        \
-        void* method = GetLoader().getMethodAt(k_##name);       \
-        if (!method) return (returnIfNull);                     \
-        return reinterpret_cast<decltype(&name)>(method)(args); \
+#define INVOKE_METHOD(name, returnIfNull, args...)                          \
+    do {                                                                    \
+        void* method = ApexCodecsLazyLoader::Get().getMethodAt(k_##name);   \
+        if (!method) return (returnIfNull);                                 \
+        return reinterpret_cast<decltype(&name)>(method)(args);             \
     } while (0)
 
 //
@@ -209,8 +209,8 @@ ApexCodec_Status ApexCodec_SupportedValues_getTypeAndValues(
                   supportedValues, type, numberType, values, numValues);
 }
 
-void ApexCodec_SupportedValues_release(ApexCodec_SupportedValues *values) {
-    INVOKE_METHOD(ApexCodec_SupportedValues_release, void(), values);
+void ApexCodec_SupportedValues_destroy(ApexCodec_SupportedValues *values) {
+    INVOKE_METHOD(ApexCodec_SupportedValues_destroy, void(), values);
 }
 
 ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
@@ -224,8 +224,8 @@ ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
                   results, index, failure, field, conflicts, numConflicts);
 }
 
-void ApexCodec_SettingResults_release(ApexCodec_SettingResults *results) {
-    INVOKE_METHOD(ApexCodec_SettingResults_release, void(), results);
+void ApexCodec_SettingResults_destroy(ApexCodec_SettingResults *results) {
+    INVOKE_METHOD(ApexCodec_SettingResults_destroy, void(), results);
 }
 
 ApexCodec_Status ApexCodec_Component_process(
@@ -274,9 +274,9 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
                   descriptors, index, attr, name, dependencies, numDependencies);
 }
 
-ApexCodec_Status ApexCodec_ParamDescriptors_release(
+ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
         ApexCodec_ParamDescriptors *descriptors) {
-    INVOKE_METHOD(ApexCodec_ParamDescriptors_release, APEXCODEC_STATUS_OMITTED, descriptors);
+    INVOKE_METHOD(ApexCodec_ParamDescriptors_destroy, APEXCODEC_STATUS_OMITTED, descriptors);
 }
 
 ApexCodec_Status ApexCodec_Configurable_querySupportedParams(

@@ -395,6 +395,11 @@ public:
     virtual bool isDisabled() const = 0;
 
     virtual int& fastIndex() = 0;
+
+    // Restricted due to OP_PLAY_AUDIO
+    virtual bool isPlaybackRestrictedOp() const = 0;
+    // Restricted due to OP_AUDIO_CONTROL_SOFT
+    virtual bool isPlaybackRestrictedControl() const = 0;
     virtual bool isPlaybackRestricted() const = 0;
 
     // Used by thread only
@@ -560,6 +565,7 @@ public:
     virtual status_t setPreferredMicrophoneFieldDimension(float zoom) = 0;
     virtual status_t shareAudioHistory(
             const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) = 0;
+    virtual status_t setParameters(const String8& keyValuePairs) = 0;
     virtual int32_t startFrames() const = 0;
 
     static bool checkServerLatencySupported(audio_format_t format, audio_input_flags_t flags) {

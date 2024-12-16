@@ -177,7 +177,7 @@ bool roundBufferDimensionNearest(int32_t width, int32_t height,
     bool isJpegRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R));
     bool isHeicUltraHDRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
-                ADATASPACE_HEIF_ULTRAHDR));
+                ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR));
     camera_metadata_ro_entry streamConfigs =
             (isJpegRDataSpace) ? info.find(jpegRSizesTag) :
             (isHeicUltraHDRDataSpace) ? info.find(heicUltraHDRSizesTag) :
@@ -241,7 +241,8 @@ bool is10bitCompatibleFormat(int32_t format, android_dataspace_t dataSpace) {
             if (dataSpace == static_cast<android_dataspace_t>(
                         ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
                 return true;
-            } else if (dataSpace == static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) {
+            } else if (dataSpace == static_cast<android_dataspace_t>(
+                        ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) {
                 return true;
             }
 
@@ -353,8 +354,9 @@ bool isColorSpaceSupported(int32_t colorSpace, int32_t format, android_dataspace
                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
         format64 = static_cast<int64_t>(PublicFormat::JPEG_R);
     } else if (format == HAL_PIXEL_FORMAT_BLOB && dataSpace ==
-            static_cast<android_dataspace>(ADATASPACE_HEIF_ULTRAHDR)) {
-        format64 = static_cast<int64_t>(HEIC_ULTRAHDR);
+            static_cast<android_dataspace>(
+                ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) {
+        format64 = static_cast<int64_t>(PublicFormat::HEIC_ULTRAHDR);
     }
 
     camera_metadata_ro_entry_t entry =
@@ -442,15 +444,15 @@ bool isStreamUseCaseSupported(int64_t streamUseCase,
     return false;
 }
 
-binder::Status createSurfaceFromGbp(
+binder::Status createConfiguredSurface(
         OutputStreamInfo& streamInfo, bool isStreamInfoValid,
-        sp<Surface>& surface, const sp<IGraphicBufferProducer>& gbp,
+        sp<Surface>& out_surface, const sp<SurfaceType>& surface,
         const std::string &logicalCameraId, const CameraMetadata &physicalCameraMetadata,
         const std::vector<int32_t> &sensorPixelModesUsed, int64_t dynamicRangeProfile,
         int64_t streamUseCase, int timestampBase, int mirrorMode,
         int32_t colorSpace, bool respectSurfaceSize) {
     // bufferProducer must be non-null
-    if (gbp == nullptr) {
+    if ( flagtools::isSurfaceTypeValid(surface) == false ) {
         std::string msg = fmt::sprintf("Camera %s: Surface is NULL", logicalCameraId.c_str());
         ALOGW("%s: %s", __FUNCTION__, msg.c_str());
         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
@@ -461,7 +463,7 @@ binder::Status createSurfaceFromGbp(
     bool useAsync = false;
     uint64_t consumerUsage = 0;
     status_t err;
-    if ((err = gbp->getConsumerUsage(&consumerUsage)) != OK) {
+    if ((err = surface->getConsumerUsage(&consumerUsage)) != OK) {
         std::string msg = fmt::sprintf("Camera %s: Failed to query Surface consumer usage: %s (%d)",
                 logicalCameraId.c_str(), strerror(-err), err);
         ALOGE("%s: %s", __FUNCTION__, msg.c_str());
@@ -481,8 +483,9 @@ binder::Status createSurfaceFromGbp(
     bool flexibleConsumer = (consumerUsage & disallowedFlags) == 0 &&
             (consumerUsage & allowedFlags) != 0;
 
-    surface = new Surface(gbp, useAsync);
-    ANativeWindow *anw = surface.get();
+    out_surface = new Surface(flagtools::surfaceTypeToIGBP(surface), useAsync);
+
+    ANativeWindow *anw = out_surface.get();
 
     int width, height, format;
     android_dataspace dataSpace;
@@ -921,15 +924,11 @@ convertToHALStreamCombination(
         for (auto& surface_type : surfaces) {
             sp<Surface> surface;
             int mirrorMode = it.getMirrorMode(surface_type);
-            res = createSurfaceFromGbp(streamInfo, isStreamInfoValid, surface,
-                                       surface_type
-#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
-                                       .graphicBufferProducer
-#endif
-                                       , logicalCameraId,
-                                       metadataChosen, sensorPixelModesUsed, dynamicRangeProfile,
-                                       streamUseCase, timestampBase, mirrorMode, colorSpace,
-                                       /*respectSurfaceSize*/ true);
+            res = createConfiguredSurface(streamInfo, isStreamInfoValid, surface,
+                                    flagtools::convertParcelableSurfaceTypeToSurface(surface_type),
+                                    logicalCameraId,  metadataChosen, sensorPixelModesUsed,
+                                    dynamicRangeProfile, streamUseCase, timestampBase, mirrorMode,
+                                    colorSpace, /*respectSurfaceSize*/ true);
 
             if (!res.isOk()) return res;
 

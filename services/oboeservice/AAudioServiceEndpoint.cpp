@@ -196,14 +196,14 @@ audio_attributes_t AAudioServiceEndpoint::getAudioAttributesFrom(
             ? AAudioConvert_inputPresetToAudioSource(params->getInputPreset())
             : AUDIO_SOURCE_DEFAULT;
     audio_flags_mask_t flags;
-    std::optional<std::string> optTags = {};
+    std::string tags;
     if (direction == AAUDIO_DIRECTION_OUTPUT) {
         flags = AAudio_computeAudioFlagsMask(
                         params->getAllowedCapturePolicy(),
                         params->getSpatializationBehavior(),
                         params->isContentSpatialized(),
                         AUDIO_OUTPUT_FLAG_FAST);
-        optTags = params->getTags();
+        tags = params->getTagsAsString();
     } else {
         flags = static_cast<audio_flags_mask_t>(AUDIO_FLAG_LOW_LATENCY
                 | AAudioConvert_privacySensitiveToAudioFlagsMask(params->isPrivacySensitive()));
@@ -215,9 +215,9 @@ audio_attributes_t AAudioServiceEndpoint::getAudioAttributesFrom(
             .flags = flags,
             .tags = ""
     };
-    if (optTags.has_value() && !optTags->empty()) {
-        strncpy(nativeAttributes.tags, optTags.value().c_str(), AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
-        nativeAttributes.tags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1] = '\0';
+    if (!tags.empty()) {
+        strncpy(nativeAttributes.tags, tags.c_str(), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
+        nativeAttributes.tags[AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1] = '\0';
     }
     return nativeAttributes;
 }
