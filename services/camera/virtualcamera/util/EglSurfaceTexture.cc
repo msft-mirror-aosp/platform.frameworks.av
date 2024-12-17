@@ -15,10 +15,9 @@
  */
 
 // #define LOG_NDEBUG 0
-#include <chrono>
-
-#include "utils/Timers.h"
 #define LOG_TAG "EglSurfaceTexture"
+
+#include "EglSurfaceTexture.h"
 
 #include <GLES/gl.h>
 #include <com_android_graphics_libgui_flags.h>
@@ -27,9 +26,10 @@
 #include <gui/IGraphicBufferProducer.h>
 #include <hardware/gralloc.h>
 
+#include <chrono>
 #include <cstdint>
+#include <mutex>
 
-#include "EglSurfaceTexture.h"
 #include "EglUtil.h"
 
 namespace android {
@@ -40,22 +40,27 @@ namespace {
 // Maximal number of buffers producer can dequeue without blocking.
 constexpr int kBufferProducerMaxDequeueBufferCount = 64;
 
-class FrameAvailableListenerProxy : public ConsumerBase::FrameAvailableListener {
- public:
-  FrameAvailableListenerProxy(const std::function<void()>& callback)
-      : mOnFrameAvailableCallback(callback) {
-  }
+}  // namespace
 
-  virtual void onFrameAvailable(const BufferItem&) override {
-    ALOGV("%s: onFrameAvailable", __func__);
+EglSurfaceTexture::FrameAvailableListenerProxy::FrameAvailableListenerProxy(
+    EglSurfaceTexture* surface)
+    : mSurface(*surface) {
+}
+
+void EglSurfaceTexture::FrameAvailableListenerProxy::setCallback(
+    const std::function<void()>& callback) {
+  mOnFrameAvailableCallback = callback;
+}
+
+void EglSurfaceTexture::FrameAvailableListenerProxy::onFrameAvailable(
+    const BufferItem&) {
+  long frameNumber = mSurface.mGlConsumer->getFrameNumber();
+  ALOGV("%s: onFrameAvailable frameNumber %ld", __func__, frameNumber);
+  mSurface.mFrameAvailableCondition.notify_all();
+  if (mOnFrameAvailableCallback) {
     mOnFrameAvailableCallback();
   }
-
- private:
-  std::function<void()> mOnFrameAvailableCallback;
-};
-
-}  // namespace
+}
 
 EglSurfaceTexture::EglSurfaceTexture(const uint32_t width, const uint32_t height)
     : mWidth(width), mHeight(height) {
@@ -90,6 +95,8 @@ EglSurfaceTexture::EglSurfaceTexture(const uint32_t width, const uint32_t height
 
   mSurface = sp<Surface>::make(mBufferProducer);
 #endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+  mFrameAvailableListenerProxy = sp<FrameAvailableListenerProxy>::make(this);
+  mGlConsumer->setFrameAvailableListener(mFrameAvailableListenerProxy);
 }
 
 EglSurfaceTexture::~EglSurfaceTexture() {
@@ -108,17 +115,29 @@ sp<GraphicBuffer> EglSurfaceTexture::getCurrentBuffer() {
 
 void EglSurfaceTexture::setFrameAvailableListener(
     const std::function<void()>& listener) {
-  mFrameAvailableListener =
-      sp<FrameAvailableListenerProxy>::make([this, listener]() {
-        mIsFirstFrameDrawn.store(true);
-        listener();
-      });
-  mGlConsumer->setFrameAvailableListener(mFrameAvailableListener);
+  mFrameAvailableListenerProxy->setCallback(listener);
 }
 
 bool EglSurfaceTexture::waitForNextFrame(const std::chrono::nanoseconds timeout) {
-  return mSurface->waitForNextFrame(mGlConsumer->getFrameNumber(),
-                                    static_cast<nsecs_t>(timeout.count()));
+  std::unique_lock<std::mutex> lock(mWaitForFrameMutex);
+  mGlConsumer->updateTexImage();
+  const long lastRenderedFrame = mGlConsumer->getFrameNumber();
+  const long lastWaitedForFrame = mLastWaitedFrame.exchange(lastRenderedFrame);
+  ALOGV("%s lastRenderedFrame:%ld lastWaitedForFrame: %ld", __func__,
+        lastRenderedFrame, lastWaitedForFrame);
+  if (lastRenderedFrame > lastWaitedForFrame) {
+    return true;
+  }
+  ALOGV(
+      "%s waiting for max %lld ns. Last waited frame:%ld, last rendered "
+      "frame:%ld",
+      __func__, timeout.count(), lastWaitedForFrame, lastRenderedFrame);
+  return mFrameAvailableCondition.wait_for(lock, timeout, [this]() {
+    // Call updateTexImage to update the frame number.
+    mGlConsumer->updateTexImage();
+    const long lastRenderedFrame = mGlConsumer->getFrameNumber();
+    return lastRenderedFrame > mLastWaitedFrame.exchange(lastRenderedFrame);
+  });
 }
 
 std::chrono::nanoseconds EglSurfaceTexture::getTimestamp() {
@@ -126,7 +145,7 @@ std::chrono::nanoseconds EglSurfaceTexture::getTimestamp() {
 }
 
 bool EglSurfaceTexture::isFirstFrameDrawn() {
-  return mIsFirstFrameDrawn.load();
+  return mGlConsumer->getFrameNumber() > 0;
 }
 
 GLuint EglSurfaceTexture::updateTexture() {
