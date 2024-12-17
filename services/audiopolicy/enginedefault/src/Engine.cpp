@@ -450,20 +450,18 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                 excludedDevices.push_back(AUDIO_DEVICE_OUT_AUX_DIGITAL);
             }
             if ((getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) != AUDIO_POLICY_FORCE_NO_BT_A2DP)) {
-                // Get the last connected device of wired and bluetooth a2dp
-                devices2 = availableOutputDevices.getFirstDevicesFromTypes(
-                        getLastRemovableMediaDevices(GROUP_NONE, excludedDevices));
                 if (com::android::media::audioserver::use_bt_sco_for_media()) {
-                    if (isBtScoActive(availableOutputDevices)
-                         && !(devices2.getDevicesFromTypes(
-                                 getAudioDeviceOutAllA2dpSet()).isEmpty()
-                             && devices2.getDevicesFromTypes(
-                                     getAudioDeviceOutAllBleSet()).isEmpty())) {
+                    if (isBtScoActive(availableOutputDevices)) {
                         devices2 = availableOutputDevices.getFirstDevicesFromTypes(
                                 { AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT,
-                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
-                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
+                                AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
+                                AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
                     }
+                }
+                if (devices2.isEmpty()) {
+                    // Get the last connected device of wired and bluetooth a2dp
+                    devices2 = availableOutputDevices.getFirstDevicesFromTypes(
+                            getLastRemovableMediaDevices(GROUP_NONE, excludedDevices));
                 }
             } else {
                 // Get the last connected device of wired except bluetooth a2dp
