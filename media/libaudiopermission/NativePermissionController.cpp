@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+// #define LOG_NDEBUG 0
+#define LOG_TAG "NativePermissionController"
+
 #include <media/NativePermissionController.h>
 
 #include <algorithm>
@@ -23,6 +26,7 @@
 #include <android-base/expected.h>
 #include <cutils/android_filesystem_config.h>
 #include <utils/Errors.h>
+#include <utils/Log.h>
 
 using ::android::binder::Status;
 using ::android::error::BinderResult;
@@ -85,6 +89,7 @@ Status NativePermissionController::updatePackagesForUid(const UidPackageState& n
 
 Status NativePermissionController::populatePermissionState(PermissionEnum perm,
                                                            const std::vector<int>& uids) {
+    ALOGV("%s, %d", __func__, static_cast<int>(perm));
     if (perm >= PermissionEnum::ENUM_SIZE || static_cast<int>(perm) < 0) {
         return Status::fromExceptionCode(Status::EX_ILLEGAL_ARGUMENT);
     }
@@ -145,11 +150,15 @@ BinderResult<bool> NativePermissionController::validateUidPackagePair(
 
 BinderResult<bool> NativePermissionController::checkPermission(PermissionEnum perm,
                                                                uid_t uid) const {
+    ALOGV("%s: checking %d for %u", __func__, static_cast<int>(perm), uid);
     if (uid == AID_ROOT || uid == AID_SYSTEM || uid == getuid()) return true;
     std::lock_guard l{m_};
     const auto& uids = permission_map_[static_cast<size_t>(perm)];
     if (!uids.empty()) {
-        return std::binary_search(uids.begin(), uids.end(), uid);
+        const bool ret = std::binary_search(uids.begin(), uids.end(), uid);
+        // Log locally until all call-sites log errors well
+        ALOGW_IF(!ret, "%s: missing %d for %u", __func__, static_cast<int>(perm), uid);
+        return ret;
     } else {
         return unexpectedExceptionCode(
                 Status::EX_ILLEGAL_STATE,

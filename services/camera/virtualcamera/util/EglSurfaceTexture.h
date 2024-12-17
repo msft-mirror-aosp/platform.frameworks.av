@@ -22,7 +22,9 @@
 #include <gui/Surface.h>
 #include <utils/RefBase.h>
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 
 namespace android {
@@ -88,6 +90,20 @@ class EglSurfaceTexture {
   // Returns true is a frame has ever been drawn on this surface.
   bool isFirstFrameDrawn();
 
+  class FrameAvailableListenerProxy
+      : public ConsumerBase::FrameAvailableListener {
+   public:
+    FrameAvailableListenerProxy(EglSurfaceTexture* surface);
+
+    void setCallback(const std::function<void()>& callback);
+
+    virtual void onFrameAvailable(const BufferItem&) override;
+
+   private:
+    EglSurfaceTexture& mSurface;
+    std::function<void()> mOnFrameAvailableCallback;
+  };
+
  private:
 #if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<IGraphicBufferProducer> mBufferProducer;
@@ -98,8 +114,11 @@ class EglSurfaceTexture {
   GLuint mTextureId;
   const uint32_t mWidth;
   const uint32_t mHeight;
-  std::atomic_bool mIsFirstFrameDrawn = false;
+  std::atomic_long mLastWaitedFrame = 0;
+  sp<FrameAvailableListenerProxy> mFrameAvailableListenerProxy;
   sp<ConsumerBase::FrameAvailableListener> mFrameAvailableListener;
+  std::condition_variable mFrameAvailableCondition;
+  std::mutex mWaitForFrameMutex;
 };
 
 }  // namespace virtualcamera
