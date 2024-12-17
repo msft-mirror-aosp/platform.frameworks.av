@@ -35,24 +35,25 @@ void DefaultAppOpsFacade::OpMonitor::opChanged(int32_t, const String16&) {
 
 bool DefaultAppOpsFacade::startAccess(const ValidatedAttributionSourceState& attr_, Ops ops) {
     const AttributionSourceState& attr = attr_;
-    // TODO no support for additional op at the moment
+    // TODO(b/384845037) no support for additional op at the moment
     if (ops.attributedOp == AppOpsManager::OP_NONE) return true;  // nothing to do
-    // TODO caching and sync up-call marking
+    // TODO(b/384845037) caching and sync up-call marking
     AppOpsManager ap{};
     return ap.startOpNoThrow(
         /*op=*/ ops.attributedOp,
         /*uid=*/ attr.uid,
-        /*packageName=*/ String16{attr.packageName.value_or("").c_str()},
-        /*startModeIfDefault=*/ false,
+        /*callingPackage=*/ String16{attr.packageName.value_or("").c_str()},
+        /*startIfModeDefault=*/ false,
         /*attributionTag=*/ attr.attributionTag.has_value() ?
             String16{attr.attributionTag.value().c_str()}
                                             : String16{},
-        /*msg=*/ String16{"AppOpsSession start"});
+        /*message=*/ String16{"AppOpsSession start"})
+    == AppOpsManager::MODE_ALLOWED;
 }
 
 void DefaultAppOpsFacade::stopAccess(const ValidatedAttributionSourceState& attr_, Ops ops) {
     const AttributionSourceState& attr = attr_;
-    // TODO caching and sync up-call marking
+    // TODO(b/384845037) caching and sync up-call marking
     AppOpsManager ap{};
     return ap.finishOp(
         /*op=*/ ops.attributedOp,

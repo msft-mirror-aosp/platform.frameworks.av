@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <android/content/AttributionSourceState.h>
 #include <media/AppOpsSession.h>
 #include <media/ValidatedAttributionSourceState.h>
 
@@ -28,7 +29,6 @@ using ::android::media::permission::Ops;
 using ::com::android::media::permission::ValidatedAttributionSourceState;
 
 using ::testing::ElementsAreArray;
-using ::testing::Eq;
 using ::testing::IsEmpty;
 using ::testing::Ne;
 
