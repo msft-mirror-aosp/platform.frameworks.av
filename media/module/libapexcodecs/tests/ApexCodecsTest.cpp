@@ -2,6 +2,7 @@
 #include <C2Component.h>
 
 #include <apex/ApexCodecs.h>
+#include <apex/ApexCodecsParam.h>
 
 // static_asserts for enum values match
 static_assert((uint32_t)APEXCODEC_STATUS_OK        == (uint32_t)C2_OK);

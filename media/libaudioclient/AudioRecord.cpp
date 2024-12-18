@@ -282,6 +282,13 @@ status_t AudioRecord::set(
 
     mTracker.reset(new RecordingActivityTracker());
 
+    sp<IBinder> binder = defaultServiceManager()->checkService(String16("audio"));
+    if (binder != nullptr) {
+        // Barrier to ensure runtime permission update propagates to audioflinger
+        // Must be client-side
+        interface_cast<IAudioManager>(binder)->permissionUpdateBarrier();
+    }
+
     mSelectedDeviceId = selectedDeviceId;
     mSelectedMicDirection = selectedMicDirection;
     mSelectedMicFieldDimension = microphoneFieldDimension;
@@ -708,6 +715,17 @@ status_t AudioRecord::setInputDevice(audio_port_handle_t deviceId) {
     AutoMutex lock(mLock);
     ALOGV("%s(%d): deviceId=%d mSelectedDeviceId=%d",
             __func__, mPortId, deviceId, mSelectedDeviceId);
+    const int64_t beginNs = systemTime();
+    mediametrics::Defer defer([&] {
+        mediametrics::LogItem(mMetricsId)
+                .set(AMEDIAMETRICS_PROP_CALLERNAME,
+                     mCallerName.empty()
+                     ? AMEDIAMETRICS_PROP_CALLERNAME_VALUE_UNKNOWN
+                     : mCallerName.c_str())
+                .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_SETPREFERREDDEVICE)
+                .set(AMEDIAMETRICS_PROP_EXECUTIONTIMENS, (int64_t)(systemTime() - beginNs))
+                .set(AMEDIAMETRICS_PROP_SELECTEDDEVICEID, (int32_t)deviceId)
+                .record(); });
 
     if (mSelectedDeviceId != deviceId) {
         mSelectedDeviceId = deviceId;
@@ -1220,6 +1238,21 @@ audio_io_handle_t AudioRecord::getInputPrivate() const
 {
     AutoMutex lock(mLock);
     return mInput;
+}
+
+status_t AudioRecord::setParameters(const String8& keyValuePairs) {
+    AutoMutex lock(mLock);
+    if (mInput == AUDIO_IO_HANDLE_NONE || mAudioRecord == nullptr) {
+        return NO_INIT;
+    }
+    return statusTFromBinderStatus(mAudioRecord->setParameters(keyValuePairs.c_str()));
+}
+
+String8 AudioRecord::getParameters(const String8& keys) {
+    AutoMutex lock(mLock);
+    return mInput != AUDIO_IO_HANDLE_NONE
+               ? AudioSystem::getParameters(mInput, keys)
+               : String8();
 }
 
 // -------------------------------------------------------------------------
