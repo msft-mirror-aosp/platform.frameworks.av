@@ -22,8 +22,10 @@
 
 #include <afutils/NBAIO_Tee.h>
 #include <android-base/macros.h>  // DISALLOW_COPY_AND_ASSIGN
+#include <audio_utils/Trace.h>
 #include <datapath/TrackMetrics.h>
 #include <mediautils/BatteryNotifier.h>
+#include <psh_utils/AudioPowerManager.h>
 
 #include <atomic>    // avoid transitive dependency
 #include <list>      // avoid transitive dependency
@@ -209,16 +211,16 @@ public:
         }
     }
 
+    const std::string& getTraceSuffix() const final { return mTraceSuffix; }
     // Called by the PlaybackThread to indicate that the track is becoming active
     // and a new interval should start with a given device list.
-    void logBeginInterval(const std::string& devices) final {
-        mTrackMetrics.logBeginInterval(devices);
-    }
+    void logBeginInterval(const std::string& devices) final;
 
     // Called by the PlaybackThread to indicate the track is no longer active.
-    void logEndInterval() final {
-        mTrackMetrics.logEndInterval();
-    }
+    void logEndInterval() final;
+
+    // Called by the PlaybackThread when ATRACE is enabled.
+    void logRefreshInterval(const std::string& devices) final;
 
     // Called to tally underrun frames in playback.
     void tallyUnderrunFrames(size_t /* frames */) override {}
@@ -240,17 +242,13 @@ public:
      * Called when a track moves to active state to record its contribution to battery usage.
      * Track state transitions should eventually be handled within the track class.
      */
-    void beginBatteryAttribution() final {
-        mBatteryStatsHolder.emplace(uid());
-    }
+    void beginBatteryAttribution() final;
 
     /**
      * Called when a track moves out of the active state to record its contribution
      * to battery usage.
      */
-    void endBatteryAttribution() final {
-        mBatteryStatsHolder.reset();
-    }
+    void endBatteryAttribution() final;
 
 protected:
     DISALLOW_COPY_AND_ASSIGN(TrackBase);
@@ -336,6 +334,10 @@ protected:
     void deferRestartIfDisabled();
     virtual void restartIfDisabled() {}
 
+    virtual std::string trackFlagsAsString() const = 0;
+
+    audio_utils::trace::Object createDeviceIntervalTrace(const std::string& devices);
+
     const wp<IAfThreadBase> mThread;
     const alloc_type     mAllocType;
     /*const*/ sp<Client> mClient;   // see explanation at ~TrackBase() why not const
@@ -387,6 +389,7 @@ protected:
 
     bool                mLogForceVolumeUpdate = true; // force volume update to TrackMetrics.
 
+    audio_utils::trace::Object mLastTrace;  // accessed by PlaybackThread or RecordThread
     TrackMetrics        mTrackMetrics;
 
     bool                mServerLatencySupported = false;
@@ -396,10 +399,15 @@ protected:
     const pid_t         mCreatorPid;  // can be different from mclient->pid() for instance
                                       // when created by NuPlayer on behalf of a client
 
+    const std::string mTraceSuffix;
+    const std::string mTraceActionId;
+    const std::string mTraceIntervalId;
+
     // If the last track change was notified to the client with readAndClearHasChanged
     std::atomic_flag    mChangeNotified = ATOMIC_FLAG_INIT;
     // RAII object for battery stats book-keeping
     std::optional<mediautils::BatteryStatsAudioHandle> mBatteryStatsHolder;
+    std::unique_ptr<media::psh_utils::Token> mTrackToken;
 };
 
 class PatchTrackBase : public PatchProxyBufferProvider, public virtual IAfPatchTrackBase

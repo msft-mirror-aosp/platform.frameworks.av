@@ -205,12 +205,16 @@ public:
 
     virtual const char* getTrackStateAsString() const = 0;
 
+    virtual const std::string& getTraceSuffix() const = 0;
     // Called by the PlaybackThread to indicate that the track is becoming active
     // and a new interval should start with a given device list.
     virtual void logBeginInterval(const std::string& devices) = 0;
 
     // Called by the PlaybackThread to indicate the track is no longer active.
     virtual void logEndInterval() = 0;
+
+    // Called by the PlaybackThread when ATRACE is enabled.
+    virtual void logRefreshInterval(const std::string& devices) = 0;
 
     // Called to tally underrun frames in playback.
     virtual void tallyUnderrunFrames(size_t frames) = 0;
@@ -291,7 +295,18 @@ public:
             float speed = 1.0f,
             bool isSpatialized = false,
             bool isBitPerfect = false,
-            float volume = 0.0f);
+            float volume = 0.0f,
+            bool muted = false);
+
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
+                        "  Format Chn mask  SRate "
+                        "ST Usg CT "
+                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted "
+                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
+                        "   Latency\n"sv;
+    }
 
     virtual void pause() = 0;
     virtual void flush() = 0;
@@ -380,6 +395,11 @@ public:
     virtual bool isDisabled() const = 0;
 
     virtual int& fastIndex() = 0;
+
+    // Restricted due to OP_PLAY_AUDIO
+    virtual bool isPlaybackRestrictedOp() const = 0;
+    // Restricted due to OP_AUDIO_CONTROL_SOFT
+    virtual bool isPlaybackRestrictedControl() const = 0;
     virtual bool isPlaybackRestricted() const = 0;
 
     // Used by thread only
@@ -466,7 +486,14 @@ public:
             const android::content::AttributionSourceState& attributionSource,
             pid_t creatorPid,
             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
-            float volume = 0.0f);
+            float volume = 0.0f,
+            bool muted = false);
+
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Client(pid/uid) Session Port Id"
+                "   Format Chn mask  SRate Flags Usg/Src PortVol dB PortMuted\n"sv;
+    };
 
     // protected by MMapThread::mLock
     virtual void setSilenced_l(bool silenced) = 0;
@@ -511,6 +538,13 @@ public:
             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
             int32_t startFrames = -1);
 
+    static constexpr std::string_view getLogHeader() {
+        using namespace std::literals;
+        return "Active     Id Client(pid/uid) Session Port Id  S  Flags  "
+                        " Format Chn mask  SRate Source  "
+                        " Server FrmCnt FrmRdy Sil   Latency\n"sv;
+    }
+
     // clear the buffer overflow flag
     virtual void clearOverflow() = 0;
     // set the buffer overflow flag and return previous value
@@ -531,6 +565,7 @@ public:
     virtual status_t setPreferredMicrophoneFieldDimension(float zoom) = 0;
     virtual status_t shareAudioHistory(
             const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) = 0;
+    virtual status_t setParameters(const String8& keyValuePairs) = 0;
     virtual int32_t startFrames() const = 0;
 
     static bool checkServerLatencySupported(audio_format_t format, audio_input_flags_t flags) {
@@ -587,7 +622,8 @@ public:
                                              *  the lowest possible latency
                                              *  even if it might glitch. */
             float speed = 1.0f,
-            float volume = 1.0f);
+            float volume = 1.0f,
+            bool muted = false);
 };
 
 class IAfPatchRecord : public virtual IAfRecordTrack, public virtual IAfPatchTrackBase {

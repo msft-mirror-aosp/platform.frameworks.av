@@ -8,44 +8,48 @@ package {
     default_applicable_licenses: ["frameworks_av_license"],
 }
 
-cc_benchmark {
-    name: "audio_powerstats_benchmark",
+cc_defaults {
+    name: "audio_psh_utils_benchmark_defaults",
 
-    srcs: ["audio_powerstats_benchmark.cpp"],
     cflags: [
         "-Wall",
         "-Werror",
     ],
     static_libs: [
-        "libaudioutils",
         "libpshutils",
     ],
     shared_libs: [
+        "libaudioutils",
         "libbase",
+        "libbinder",
         "libbinder_ndk",
         "libcutils",
         "liblog",
+        "libmediautils",
         "libutils",
     ],
 }
 
 cc_benchmark {
+    name: "audio_powerstats_benchmark",
+
+    defaults: ["audio_psh_utils_benchmark_defaults"],
+
+    srcs: ["audio_powerstats_benchmark.cpp"],
+}
+
+cc_benchmark {
     name: "audio_powerstatscollector_benchmark",
 
+    defaults: ["audio_psh_utils_benchmark_defaults"],
+
     srcs: ["audio_powerstatscollector_benchmark.cpp"],
-    cflags: [
-        "-Wall",
-        "-Werror",
-    ],
-    static_libs: [
-        "libaudioutils",
-        "libpshutils",
-    ],
-    shared_libs: [
-        "libbase",
-        "libbinder_ndk",
-        "libcutils",
-        "liblog",
-        "libutils",
-    ],
+}
+
+cc_benchmark {
+    name: "audio_token_benchmark",
+
+    defaults: ["audio_psh_utils_benchmark_defaults"],
+
+    srcs: ["audio_token_benchmark.cpp"],
 }

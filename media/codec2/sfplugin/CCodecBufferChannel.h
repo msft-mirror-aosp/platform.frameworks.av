@@ -193,12 +193,15 @@ public:
     /**
      * Notify input client about work done.
      *
-     * @param workItems   finished work item.
+     * @param workItems    finished work item.
+     * @param inputFormat  input format
      * @param outputFormat new output format if it has changed, otherwise nullptr
-     * @param initData    new init data (CSD) if it has changed, otherwise nullptr
+     * @param initData     new init data (CSD) if it has changed, otherwise nullptr
      */
     void onWorkDone(
-            std::unique_ptr<C2Work> work, const sp<AMessage> &outputFormat,
+            std::unique_ptr<C2Work> work,
+            const sp<AMessage> &inputFormat,
+            const sp<AMessage> &outputFormat,
             const C2StreamInitDataInfo::output *initData);
 
     /**
@@ -311,7 +314,9 @@ private:
                                       std::shared_ptr<C2LinearBlock> encryptedBlock = nullptr,
                                       size_t blockSize = 0);
     bool handleWork(
-            std::unique_ptr<C2Work> work, const sp<AMessage> &outputFormat,
+            std::unique_ptr<C2Work> work,
+            const sp<AMessage> &inputFormat,
+            const sp<AMessage> &outputFormat,
             const C2StreamInitDataInfo::output *initData);
     void sendOutputBuffers();
     void ensureDecryptDestination(size_t size);
@@ -391,7 +396,21 @@ private:
     };
     Mutexed<BlockPools> mBlockPools;
 
-    Mutexed<std::shared_ptr<InputSurfaceWrapper>> mInputSurface;
+    std::atomic_bool mHasInputSurface;
+    struct InputSurface {
+        std::shared_ptr<InputSurfaceWrapper> surface;
+        // This variable tracks the number of buffers processing
+        // in the input surface and codec by counting the # of buffers to
+        // be filled in and queued from the input surface and the # of
+        // buffers generated from the codec.
+        //
+        // Note that this variable can go below 0, because it does not take
+        // account the number of buffers initially in the buffer queue at
+        // start. This is okay, as we only track how many more we allow
+        // from the initial state.
+        int64_t numProcessingBuffersBalance;
+    };
+    Mutexed<InputSurface> mInputSurface;
 
     MetaMode mMetaMode;
 

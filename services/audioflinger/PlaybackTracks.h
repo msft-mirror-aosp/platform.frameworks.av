@@ -97,7 +97,8 @@ public:
                                 float speed = 1.0f,
                                 bool isSpatialized = false,
                                 bool isBitPerfect = false,
-                                float volume = 0.0f);
+                                float volume = 0.0f,
+                                bool muted = false);
     ~Track() override;
     status_t initCheck() const final;
     void appendDumpHeader(String8& result) const final;
@@ -226,7 +227,11 @@ public:
 
     // VolumePortInterface implementation
     void setPortVolume(float volume) override;
+    void setPortMute(bool muted) override;
     float getPortVolume() const override { return mVolume; }
+    bool getPortMute() const override { return mMutedFromPort; }
+
+    std::string trackFlagsAsString() const final { return toString(mFlags); }
 
 protected:
 
@@ -286,9 +291,20 @@ protected:
     bool isDisabled() const final;
 
     int& fastIndex() final { return mFastIndex; }
-    bool isPlaybackRestricted() const final {
+
+    bool isPlaybackRestrictedOp() const final {
         // The monitor is only created for tracks that can be silenced.
-        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false; }
+        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false;
+    }
+
+    bool isPlaybackRestrictedControl() const final {
+        return false;
+        // return mOpAudioControlSoftMonitor ? !mOpAudioControlSoftMonitor->hasOp() : false;
+    }
+
+    bool isPlaybackRestricted() const final {
+        return isPlaybackRestrictedOp() || isPlaybackRestrictedControl();
+    }
 
     const sp<AudioTrackServerProxy>& audioTrackServerProxy() const final {
         return mAudioTrackServerProxy;
@@ -410,9 +426,10 @@ private:
     // TODO: replace PersistableBundle with own struct
     // access these two variables only when holding player thread lock.
     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
-    mute_state_t        mMuteState;
-    bool                mInternalMute = false;
-    std::atomic<float> mVolume = 0.0f;
+    std::atomic<mute_state_t> mMuteState;
+    std::atomic<bool>         mMutedFromPort;
+    bool                      mInternalMute = false;
+    std::atomic<float>        mVolume = 0.0f;
 };  // end of Track
 
 
@@ -510,7 +527,8 @@ public:
                                                                     *  the lowest possible latency
                                                                     *  even if it might glitch. */
                                    float speed = 1.0f,
-                                   float volume = 1.0f);
+                                   float volume = 1.0f,
+                                   bool muted = false);
     ~PatchTrack() override;
 
     size_t framesReady() const final;

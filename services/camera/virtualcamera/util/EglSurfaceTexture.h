@@ -22,7 +22,9 @@
 #include <gui/Surface.h>
 #include <utils/RefBase.h>
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 
 namespace android {
@@ -62,8 +64,7 @@ class EglSurfaceTexture {
   // Returns false on timeout, true if new frame was received before timeout.
   bool waitForNextFrame(std::chrono::nanoseconds timeout);
 
-  void setFrameAvailableListener(
-      const wp<ConsumerBase::FrameAvailableListener>& listener);
+  void setFrameAvailableListener(const std::function<void()>& listener);
 
   // Update the texture with the most recent submitted buffer.
   // Most be called on thread with EGL context.
@@ -82,6 +83,27 @@ class EglSurfaceTexture {
   // See SurfaceTexture.getTransformMatrix for more details.
   std::array<float, 16> getTransformMatrix();
 
+  // Retrieves the timestamp associated with the texture image
+  // set by the most recent call to updateTexture.
+  std::chrono::nanoseconds getTimestamp();
+
+  // Returns true is a frame has ever been drawn on this surface.
+  bool isFirstFrameDrawn();
+
+  class FrameAvailableListenerProxy
+      : public ConsumerBase::FrameAvailableListener {
+   public:
+    FrameAvailableListenerProxy(EglSurfaceTexture* surface);
+
+    void setCallback(const std::function<void()>& callback);
+
+    virtual void onFrameAvailable(const BufferItem&) override;
+
+   private:
+    EglSurfaceTexture& mSurface;
+    std::function<void()> mOnFrameAvailableCallback;
+  };
+
  private:
 #if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<IGraphicBufferProducer> mBufferProducer;
@@ -92,6 +114,11 @@ class EglSurfaceTexture {
   GLuint mTextureId;
   const uint32_t mWidth;
   const uint32_t mHeight;
+  std::atomic_long mLastWaitedFrame = 0;
+  sp<FrameAvailableListenerProxy> mFrameAvailableListenerProxy;
+  sp<ConsumerBase::FrameAvailableListener> mFrameAvailableListener;
+  std::condition_variable mFrameAvailableCondition;
+  std::mutex mWaitForFrameMutex;
 };
 
 }  // namespace virtualcamera

@@ -16,6 +16,7 @@
 
 #define LOG_TAG "APM_Config"
 
+#include <android-base/properties.h>
 #include <AudioPolicyConfig.h>
 #include <IOProfile.h>
 #include <Serializer.h>
@@ -271,6 +272,9 @@ status_t AudioPolicyConfig::loadFromAidl(const media::AudioPolicyConfig& aidl) {
     mSource = kAidlConfigSource;
     if (aidl.engineConfig.capSpecificConfig.has_value()) {
         setEngineLibraryNameSuffix(kCapEngineLibraryNameSuffix);
+        if (!aidl.engineConfig.capSpecificConfig.value().domains.has_value()) {
+            mSource = kHybridAidlConfigSource;
+        }
     }
     // No need to augmentData() as AIDL HAL must provide correct mic addresses.
     return NO_ERROR;
@@ -341,7 +345,13 @@ void AudioPolicyConfig::setDefaultSurroundFormats() {
                 AUDIO_FORMAT_AAC_XHE}},
         {AUDIO_FORMAT_DOLBY_TRUEHD, {}},
         {AUDIO_FORMAT_E_AC3_JOC, {}},
-        {AUDIO_FORMAT_AC4, {}}};
+        {AUDIO_FORMAT_AC4, {}},     // L0-3
+        {AUDIO_FORMAT_AC4_L4, {}}};
+}
+
+bool AudioPolicyConfig::useDeepBufferForMedia() const {
+    if (mUseDeepBufferForMediaOverride.has_value()) return *mUseDeepBufferForMediaOverride;
+    return property_get_bool("audio.deep_buffer.media", false /* default_value */);
 }
 
 } // namespace android

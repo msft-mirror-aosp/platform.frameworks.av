@@ -16,10 +16,10 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 #include <DeviceDescriptor.h>
 #include <HwModule.h>
@@ -45,6 +45,8 @@ public:
 
     // The source used to indicate the configuration from the AIDL HAL.
     static const constexpr char* const kAidlConfigSource = "AIDL HAL";
+    // The source used to indicate the configuration from the AIDL HAL but engine still use XML.
+    static const constexpr char* const kHybridAidlConfigSource = "AIDL HAL Hybrid CAP";
     // The source used to indicate the default fallback configuration.
     static const constexpr char* const kDefaultConfigSource = "AudioPolicyConfig::setDefault";
     // The suffix of the "engine default" implementation shared library name.
@@ -141,6 +143,12 @@ public:
 
     void setDefault();
 
+    void setUseDeepBufferForMediaOverrideForTests(bool useDeepBufferForMedia)
+    {
+        mUseDeepBufferForMediaOverride = useDeepBufferForMedia;
+    }
+    bool useDeepBufferForMedia() const;
+
 private:
     friend class sp<AudioPolicyConfig>;
 
@@ -158,6 +166,7 @@ private:
     sp<DeviceDescriptor> mDefaultOutputDevice;
     bool mIsCallScreenModeSupported = false;
     SurroundFormats mSurroundFormats;
+    std::optional<bool> mUseDeepBufferForMediaOverride;
 };
 
 } // namespace android

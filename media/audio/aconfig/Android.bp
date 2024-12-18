@@ -50,6 +50,23 @@ cc_aconfig_library {
 }
 
 cc_aconfig_library {
+    name: "com.android.media.audioserver-aconfig-cc-ro",
+    aconfig_declarations: "com.android.media.audioserver-aconfig",
+    defaults: ["audio-aconfig-cc-defaults"],
+    double_loadable: true,
+    host_supported: true,
+    product_available: true,
+    vendor_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.media",
+        "com.android.media.swcodec",
+    ],
+    min_sdk_version: "29",
+    mode: "force-read-only",
+}
+
+cc_aconfig_library {
     name: "com.android.media.audio-aconfig-cc",
     aconfig_declarations: "com.android.media.audio-aconfig",
     defaults: ["audio-aconfig-cc-defaults"],
@@ -99,7 +116,11 @@ aconfig_declarations {
     package: "android.media.audio",
     container: "system",
     srcs: ["audio_framework.aconfig"],
-    visibility: ["//frameworks/base/api"],
+    visibility: [
+        "//frameworks/base/api",
+        "//frameworks/base/core/res",
+    ],
+    exportable: true,
 }
 
 aconfig_declarations {
@@ -132,6 +153,20 @@ java_aconfig_library {
 }
 
 java_aconfig_library {
+    name: "android.media.audio-aconfig-exported-java",
+    aconfig_declarations: "android.media.audio-aconfig",
+    defaults: ["framework-minus-apex-aconfig-java-defaults"],
+    min_sdk_version: "Tiramisu",
+    mode: "exported",
+    apex_available: [
+        "com.android.btservices",
+    ],
+    visibility: [
+        "//packages/modules/Bluetooth:__subpackages__",
+    ],
+}
+
+java_aconfig_library {
     name: "android.media.audiopolicy-aconfig-java",
     aconfig_declarations: "android.media.audiopolicy-aconfig",
     defaults: ["framework-minus-apex-aconfig-java-defaults"],
@@ -152,6 +187,12 @@ java_aconfig_library {
     name: "android.media.soundtrigger-aconfig-java",
     aconfig_declarations: "android.media.soundtrigger-aconfig",
     defaults: ["framework-minus-apex-aconfig-java-defaults"],
+}
+
+cc_aconfig_library {
+    name: "android.media.audio-aconfig-cc",
+    aconfig_declarations: "android.media.audio-aconfig",
+    defaults: ["audio-aconfig-cc-defaults"],
 }
 
 cc_aconfig_library {

@@ -73,7 +73,7 @@ public:
     bool isDirect() const final
                                 { return (mFlags & AUDIO_INPUT_FLAG_DIRECT) != 0; }
 
-    void setSilenced(bool silenced) final { if (!isPatchTrack()) mSilenced = silenced; }
+    void setSilenced(bool silenced) final;
     bool isSilenced() const final { return mSilenced; }
 
     status_t getActiveMicrophones(
@@ -83,6 +83,7 @@ public:
     status_t setPreferredMicrophoneFieldDimension(float zoom) final;
     status_t shareAudioHistory(const std::string& sharedAudioPackageName,
             int64_t sharedAudioStartMs) final;
+    status_t setParameters(const String8& keyValuePairs) final;
     int32_t startFrames() const final { return mStartFrames; }
 
     using SinkMetadatas = std::vector<record_track_metadata_v7_t>;
@@ -97,6 +98,8 @@ public:
     ResamplerBufferProvider* resamplerBufferProvider() const final {
         return mResamplerBufferProvider;
     }
+
+    std::string trackFlagsAsString() const final { return toString(mFlags); }
 
 private:
     DISALLOW_COPY_AND_ASSIGN(RecordTrack);

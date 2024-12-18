@@ -29,10 +29,12 @@
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/AHandler.h>
 #include <media/stagefright/foundation/AMessage.h>
+#include <media/stagefright/foundation/Mutexed.h>
 #include <media/stagefright/CodecErrorLog.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <media/stagefright/MediaHistogram.h>
 #include <media/stagefright/PlaybackDurationAccumulator.h>
+#include <media/stagefright/ResourceInfo.h>
 #include <media/stagefright/VideoRenderQualityTracker.h>
 #include <utils/Vector.h>
 
@@ -123,6 +125,18 @@ struct MediaCodec : public AHandler {
         CB_RESOURCE_RECLAIMED = 5,
         CB_CRYPTO_ERROR = 6,
         CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
+
+        /** Callback ID for when the metrics for this codec have been flushed
+         * due to the start of a new subsession. The associated AMessage will
+         * contain an sp<WrapperObject<std::unique_ptr<mediametrics::Item>>>
+         * Object at the "metrics" key.
+         */
+        CB_METRICS_FLUSHED = 8,
+
+        /** Callback ID to notify the change in resource requirement
+         * for the codec component.
+         */
+        CB_REQUIRED_RESOURCES_CHANGED = 9,
     };
 
     static const pid_t kNoPid = -1;
@@ -142,6 +156,15 @@ struct MediaCodec : public AHandler {
 
     static sp<PersistentSurface> CreatePersistentInputSurface();
 
+    /**
+     * Get a list of Globally available device codec resources.
+     *
+     * It will return INVALID_OPERATION if:
+     *  - HAL does not implement codec availability API
+     *  - codec_availability feature flag isn't defined.
+     */
+    static status_t getGloballyAvailableResources(std::vector<GlobalResourceInfo>& resources);
+
     status_t configure(
             const sp<AMessage> &format,
             const sp<Surface> &nativeWindow,
@@ -154,6 +177,19 @@ struct MediaCodec : public AHandler {
             const sp<ICrypto> &crypto,
             const sp<IDescrambler> &descrambler,
             uint32_t flags);
+
+    /**
+     * Get a list of required codec resources.
+     *
+     * This may only be called after configuring the codec.
+     *
+     * Calling this while the codec wasn't configured, will result in
+     * returning INVALID_OPERATION error code.
+     * It will also return INVALID_OPERATION if:
+     *  - HAL does not implement codec availability API
+     *  - codec_availability feature flag isn't defined.
+     */
+    status_t getRequiredResources(std::vector<InstanceResourceInfo>& resources);
 
     status_t releaseCrypto();
 
@@ -484,12 +520,21 @@ private:
 
     Mutex mMetricsLock;
     mediametrics_handle_t mMetricsHandle = 0;
+    mediametrics_handle_t mLastMetricsHandle = 0; // only accessed from the looper or destructor
     bool mMetricsToUpload = false;
     nsecs_t mLifetimeStartNs = 0;
     void initMediametrics();
     void updateMediametrics();
     void flushMediametrics();
     void resetMetricsFields();
+
+    // Reset the metrics fields for a new subsession.
+    void resetSubsessionMetricsFields();
+
+    // Start a new subsession (for metrics). This includes flushing the current
+    // metrics, notifying the client and resetting the session fields.
+    void handleStartingANewSubsession();
+
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
     void updateCodecImportance(const sp<AMessage>& msg);
@@ -551,6 +596,7 @@ private:
         int32_t setOutputSurfaceCount;
         int32_t resolutionChangeCount;
     } mReliabilityContextMetrics;
+    int32_t mSubsessionCount;
 
     // initial create parameters
     AString mInitName;
@@ -671,6 +717,7 @@ private:
     void onCryptoError(const sp<AMessage> &msg);
     void onError(status_t err, int32_t actionCode, const char *detail = NULL);
     void onOutputFormatChanged();
+    void onRequiredResourcesChanged(const std::vector<InstanceResourceInfo>& resourceInfo);
 
     status_t onSetParameters(const sp<AMessage> &params);
 
@@ -770,6 +817,8 @@ private:
     friend class MediaTestHelper;
 
     CodecErrorLog mErrorLog;
+    // Required resource info for this codec.
+    Mutexed<std::vector<InstanceResourceInfo>> mRequiredResourceInfo;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
 };

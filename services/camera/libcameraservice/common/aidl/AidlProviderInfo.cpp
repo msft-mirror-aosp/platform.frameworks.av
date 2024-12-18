@@ -30,6 +30,7 @@
 
 #include "device3/DistortionMapper.h"
 #include "device3/ZoomRatioMapper.h"
+#include <utils/AttributionAndPermissionUtils.h>
 #include <utils/SessionConfigurationUtils.h>
 #include <utils/Trace.h>
 
@@ -109,11 +110,8 @@ status_t AidlProviderInfo::initializeAidlProvider(
         std::shared_ptr<ICameraProvider>& interface, int64_t currentDeviceState) {
 
     using aidl::android::hardware::camera::provider::ICameraProvider;
-    std::string parsedProviderName = mProviderName;
-    if (flags::lazy_aidl_wait_for_service()) {
-        parsedProviderName =
+    std::string parsedProviderName =
                 mProviderName.substr(std::string(ICameraProvider::descriptor).size() + 1);
-    }
 
     status_t res = parseProviderName(parsedProviderName, &mType, &mId);
     if (res != OK) {
@@ -136,10 +134,14 @@ status_t AidlProviderInfo::initializeAidlProvider(
     }
 
     mDeathRecipient = ndk::ScopedAIBinder_DeathRecipient(AIBinder_DeathRecipient_new(binderDied));
+    AIBinder_DeathRecipient_setOnUnlinked(mDeathRecipient.get(), /*onUnlinked*/ [](void *cookie) {
+            AIBinderCookie *binderCookie = reinterpret_cast<AIBinderCookie *>(cookie);
+            delete binderCookie;
+        });
 
     if (!vd_flags::virtual_camera_service_discovery() || interface->isRemote()) {
-        binder_status_t link =
-                AIBinder_linkToDeath(interface->asBinder().get(), mDeathRecipient.get(), this);
+        binder_status_t link = AIBinder_linkToDeath(
+            interface->asBinder().get(), mDeathRecipient.get(), new AIBinderCookie{this});
         if (link != STATUS_OK) {
             ALOGW("%s: Unable to link to provider '%s' death notifications (%d)", __FUNCTION__,
                   mProviderName.c_str(), link);
@@ -203,9 +205,12 @@ status_t AidlProviderInfo::initializeAidlProvider(
 }
 
 void AidlProviderInfo::binderDied(void *cookie) {
-    AidlProviderInfo *provider = reinterpret_cast<AidlProviderInfo *>(cookie);
-    ALOGI("Camera provider '%s' has died; removing it", provider->mProviderInstance.c_str());
-    provider->mManager->removeProvider(provider->mProviderInstance);
+    AIBinderCookie* binderCookie = reinterpret_cast<AIBinderCookie*>(cookie);
+    sp<AidlProviderInfo> provider = binderCookie->providerInfo.promote();
+    if (provider != nullptr) {
+        ALOGI("Camera provider '%s' has died; removing it", provider->mProviderInstance.c_str());
+        provider->mManager->removeProvider(provider->mProviderInstance);
+    }
 }
 
 status_t AidlProviderInfo::setUpVendorTags() {
@@ -319,11 +324,11 @@ const std::shared_ptr<ICameraProvider> AidlProviderInfo::startProviderInterface(
 
     interface->setCallback(mCallbacks);
     auto link = AIBinder_linkToDeath(interface->asBinder().get(), mDeathRecipient.get(),
-            this);
+            new AIBinderCookie{this});
     if (link != STATUS_OK) {
         ALOGW("%s: Unable to link to provider '%s' death notifications",
                 __FUNCTION__, mProviderName.c_str());
-        mManager->removeProvider(mProviderInstance);
+        mManager->removeProvider(std::string(mProviderInstance));
         return nullptr;
     }
 
@@ -520,6 +525,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     mCompositeJpegRDisabled = mCameraCharacteristics.exists(
             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS);
+    mCompositeHeicUltraHDRDisabled = mCameraCharacteristics.exists(
+            ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS);
 
     mSystemCameraKind = getSystemCameraKind();
 
@@ -529,13 +536,11 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
                 __FUNCTION__, strerror(-res), res);
         return;
     }
-    if (flags::camera_manual_flash_strength_control()) {
-        res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
-        if (OK != res) {
-            ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-            return;
-        }
+    res = fixupManualFlashStrengthControlTags(mCameraCharacteristics);
+    if (OK != res) {
+        ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+        return;
     }
 
     auto stat = addDynamicDepthTags();
@@ -551,6 +556,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
     res = deriveJpegRTags();
     if (OK != res) {
         ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
+    }
+    res = deriveHeicUltraHDRTags();
+    if (OK != res) {
+        ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
+                "media capabilities: %s (%d)",
                 __FUNCTION__, strerror(-res), res);
     }
     using camera3::SessionConfigurationUtils::supportsUltraHighResolutionCapture;
@@ -571,6 +582,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         if (OK != status) {
             ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities for"
                     "maximum resolution mode: %s (%d)", __FUNCTION__, strerror(-status), status);
+        }
+        status = deriveHeicUltraHDRTags(/*maxResolution*/true);
+        if (OK != status) {
+            ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
+                    "media capabilities: %s (%d)",
+                    __FUNCTION__, strerror(-status), status);
         }
     }
 
@@ -601,6 +618,22 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
                 __FUNCTION__, strerror(-res), res);
     }
 
+    if (flags::color_temperature()) {
+        res = addColorCorrectionAvailableModesTag(mCameraCharacteristics);
+        if (OK != res) {
+            ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
+                    __FUNCTION__, strerror(-res), res);
+        }
+    }
+
+    if (flags::ae_priority()) {
+        res = addAePriorityModeTags();
+        if (OK != res) {
+            ALOGE("%s: Unable to add CONTROL_AE_AVAILABLE_PRIORITY_MODES tag: %s (%d)",
+                    __FUNCTION__, strerror(-res), res);
+        }
+    }
+
     camera_metadata_entry flashAvailable =
             mCameraCharacteristics.find(ANDROID_FLASH_INFO_AVAILABLE);
     if (flashAvailable.count == 1 &&
@@ -622,12 +655,10 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         mHasFlashUnit = false;
     }
 
-    if (flags::feature_combination_query()) {
-        res = addSessionConfigQueryVersionTag();
-        if (OK != res) {
-            ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
-                    __FUNCTION__, strerror(-res), res);
-        }
+    res = addSessionConfigQueryVersionTag();
+    if (OK != res) {
+        ALOGE("%s: Unable to add sessionConfigurationQueryVersion tag: %s (%d)",
+                __FUNCTION__, strerror(-res), res);
     }
 
     camera_metadata_entry entry =
@@ -684,12 +715,18 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
                         __FUNCTION__, strerror(-res), res);
             }
 
-            if (flags::camera_manual_flash_strength_control()) {
-                res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            res = fixupManualFlashStrengthControlTags(mPhysicalCameraCharacteristics[id]);
+            if (OK != res) {
+                ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                        __FUNCTION__, strerror(-res), res);
+                return;
+            }
+
+            if (flags::color_temperature()) {
+                res = addColorCorrectionAvailableModesTag(mPhysicalCameraCharacteristics[id]);
                 if (OK != res) {
-                    ALOGE("%s: Unable to fix up manual flash strength control tags: %s (%d)",
+                    ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
                             __FUNCTION__, strerror(-res), res);
-                    return;
                 }
             }
         }
@@ -701,6 +738,10 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         // in ICameraDevice.isSessionConfigurationWithSettingsSupported.
         mAdditionalKeysForFeatureQuery.insert(mAdditionalKeysForFeatureQuery.end(),
                 {ANDROID_CONTROL_VIDEO_STABILIZATION_MODE, ANDROID_CONTROL_AE_TARGET_FPS_RANGE});
+    }
+
+    if (flags::camera_multi_client() && isAutomotiveDevice()) {
+        addSharedSessionConfigurationTags();
     }
 
     if (!kEnableLazyHal) {
@@ -844,11 +885,7 @@ status_t AidlProviderInfo::AidlDeviceInfo3::isSessionConfigurationSupported(
                     mVersion.get_minor());
             return INVALID_OPERATION;
         }
-        if (flags::feature_combination_query()) {
-            ret = interface->isStreamCombinationWithSettingsSupported(streamConfiguration, status);
-        } else {
-            return INVALID_OPERATION;
-        }
+        ret = interface->isStreamCombinationWithSettingsSupported(streamConfiguration, status);
     } else {
         ret = interface->isStreamCombinationSupported(streamConfiguration, status);
     }
@@ -885,10 +922,6 @@ status_t AidlProviderInfo::AidlDeviceInfo3::createDefaultRequest(
             templateId, &id);
     if (res != OK) {
         return res;
-    }
-
-    if (!flags::feature_combination_query()) {
-        return INVALID_OPERATION;
     }
 
     auto err = interface->constructDefaultRequestSettings(id, &request);
