@@ -1248,13 +1248,14 @@ status_t MediaCodec::getGloballyAvailableResources(std::vector<GlobalResourceInf
                                          return item.type == type; });
 
             if (used != currentResourceUsage.end() && used->value > 0) {
+                // Exclude the used resources.
                 if (res.mAvailable < used->value) {
                     ALOGW("%s: Resources used (%jd) is more than the Resource Capacity (%jd)!",
                           __func__, used->value, res.mAvailable);
-                    continue;
+                    res.mAvailable = 0;
+                } else {
+                    res.mAvailable -= used->value;
                 }
-                // Exclude the used resources.
-                res.mAvailable -= used->value;
             }
         }
 
