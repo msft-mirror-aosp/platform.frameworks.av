@@ -1066,7 +1066,7 @@ c2_status_t Codec2ConfigurableClient::ApexImpl::config(
                 mBase, &config, &result);
         base::ScopeGuard guard([result] {
             if (result) {
-                ApexCodec_SettingResults_release(result);
+                ApexCodec_SettingResults_destroy(result);
             }
         });
         size_t index = 0;
@@ -1115,7 +1115,7 @@ c2_status_t Codec2ConfigurableClient::ApexImpl::querySupportedParams(
         ApexCodec_Configurable_querySupportedParams(mBase, &paramDescs);
         base::ScopeGuard guard([paramDescs] {
             if (paramDescs) {
-                ApexCodec_ParamDescriptors_release(paramDescs);
+                ApexCodec_ParamDescriptors_destroy(paramDescs);
             }
         });
         uint32_t *indices = nullptr;
@@ -1173,7 +1173,7 @@ c2_status_t Codec2ConfigurableClient::ApexImpl::querySupportedValues(
             fields[i].status = (c2_status_t)queries[i].status;
             FromApex(queries[i].values, &fields[i].values);
             if (queries[i].values) {
-                ApexCodec_SupportedValues_release(queries[i].values);
+                ApexCodec_SupportedValues_destroy(queries[i].values);
                 queries[i].values = nullptr;
             }
         }

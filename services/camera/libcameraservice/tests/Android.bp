@@ -30,7 +30,7 @@ cc_defaults {
         "ExifUtilsTest.cpp",
         "NV12Compressor.cpp",
         "RotateAndCropMapperTest.cpp",
-	"SessionStatsBuilderTest.cpp",
+        "SessionStatsBuilderTest.cpp",
         "ZoomRatioTest.cpp",
     ],
 
@@ -88,7 +88,7 @@ cc_test {
 
     defaults: [
         "libcameraservice_deps",
-	"cameraservice_test_hostsupported"
+        "cameraservice_test_hostsupported",
     ],
 
     // Only include libs that can't be run host-side here
@@ -96,6 +96,7 @@ cc_test {
         "libcutils",
         "libhidlbase",
         "libcamera_client",
+        "libgui",
         "libui",
         "android.companion.virtualdevice.flags-aconfig-cc",
         "android.hardware.camera.common@1.0",
@@ -120,6 +121,7 @@ cc_test {
 
     // Only include sources that can't be run host-side here
     srcs: [
+        "Camera3StreamSplitterTest.cpp",
         "CameraPermissionsTest.cpp",
         "CameraProviderManagerTest.cpp",
     ],
@@ -130,13 +132,13 @@ cc_test_host {
     name: "cameraservice_test_host",
 
     defaults: [
-        "cameraservice_test_hostsupported"
+        "cameraservice_test_hostsupported",
     ],
 
     include_dirs: [
         "frameworks/av/camera/include",
         "frameworks/av/camera/include/camera",
-        "frameworks/native/libs/binder/include_activitymanager"
+        "frameworks/native/libs/binder/include_activitymanager",
     ],
 
     // Only include libs that can't be run device-side here
