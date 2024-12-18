@@ -128,9 +128,7 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
     return APEXCODEC_STATUS_OMITTED;
 }
 
-ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
-        ApexCodec_ParamDescriptors *descriptors) {
-    return APEXCODEC_STATUS_OMITTED;
+void ApexCodec_ParamDescriptors_destroy(ApexCodec_ParamDescriptors *descriptors) {
 }
 
 ApexCodec_Status ApexCodec_Configurable_querySupportedParams(

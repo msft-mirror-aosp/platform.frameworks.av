@@ -130,11 +130,11 @@ typedef enum ApexCodec_Domain : uint32_t {
  */
 typedef struct ApexCodec_ComponentTraits {
     /**
-     * The name of the component.
+     * The name of the component in ASCII encoding.
      */
     const char *_Nonnull name;
     /**
-     * The supported media type of the component.
+     * The supported media type of the component in ASCII encoding.
      */
     const char *_Nonnull mediaType;
     /**
@@ -187,10 +187,11 @@ typedef struct ApexCodec_Component ApexCodec_Component;
  * Create a component by the name.
  *
  * \param store the component store
- * \param name the name of the component
+ * \param name the name of the component in ASCII encoding
  * \param outComponent out-param to be filled with the component; must not be null
  * \return  APEXCODEC_STATUS_OK         if successful
- *          APEXCODEC_STATUS_NOT_FOUND  if the name is not found
+ * \return  APEXCODEC_STATUS_NOT_FOUND  if the name is not found
+ * \return  APEXCODEC_STATUS_CORRUPTED  if an unexpected error occurs
  */
 ApexCodec_Status ApexCodec_Component_create(
         ApexCodec_ComponentStore *_Nonnull store,
@@ -209,6 +210,9 @@ void ApexCodec_Component_destroy(ApexCodec_Component *_Nullable comp) __INTRODUC
  * Start the component. The component is ready to process buffers after this call.
  *
  * \param comp the handle for the component
+ * \return  APEXCODEC_STATUS_OK         if successful
+ * \return  APEXCODEC_STATUS_BAD_STATE  if the component is already started or released
+ * \return  APEXCODEC_STATUS_CORRUPTED  if an unexpected error occurs
  */
 ApexCodec_Status ApexCodec_Component_start(
         ApexCodec_Component *_Nonnull comp) __INTRODUCED_IN(36);
@@ -217,6 +221,9 @@ ApexCodec_Status ApexCodec_Component_start(
  * Flush the component's internal states. This operation preserves the existing configurations.
  *
  * \param comp the handle for the component
+ * \return  APEXCODEC_STATUS_OK         if successful
+ * \return  APEXCODEC_STATUS_BAD_STATE  if the component is not started
+ * \return  APEXCODEC_STATUS_CORRUPTED  if an unexpected error occurs
  */
 ApexCodec_Status ApexCodec_Component_flush(
         ApexCodec_Component *_Nonnull comp) __INTRODUCED_IN(36);
@@ -227,6 +234,8 @@ ApexCodec_Status ApexCodec_Component_flush(
  * set again to use the component.
  *
  * \param comp the handle for the component
+ * \return  APEXCODEC_STATUS_OK         if successful
+ * \return  APEXCODEC_STATUS_CORRUPTED  if an unexpected error occurs
  */
 ApexCodec_Status ApexCodec_Component_reset(
         ApexCodec_Component *_Nonnull comp) __INTRODUCED_IN(36);
@@ -359,6 +368,9 @@ typedef struct ApexCodec_SupportedValues ApexCodec_SupportedValues;
  *                          if type == APEXCODEC_SUPPORTED_VALUES_EMPTY: 0
  *                          if type == APEXCODEC_SUPPORTED_VALUES_RANGE: 5
  *                          if type == APEXCODEC_SUPPORTED_VALUES_VALUES/_FLAGS: varies
+ * \return  APEXCODEC_STATUS_OK         if successful
+ * \return  APEXCODEC_STATUS_BAD_VALUE  if the parameters are bad
+ * \return  APEXCODEC_STATUS_CORRUPTED  if an unexpected error occurs
  */
 ApexCodec_Status ApexCodec_SupportedValues_getTypeAndValues(
         ApexCodec_SupportedValues *_Nonnull supportedValues,
@@ -399,8 +411,9 @@ typedef struct ApexCodec_SettingResults ApexCodec_SettingResults;
  *                          should not free it.
  * \param outNumConflicts   pointer to be filled with the number of conflicts
  *                          may be 0 if there are no conflicts
- * \return APEXCODEC_STATUS_OK         if successful
- * \return APEXCODEC_STATUS_NOT_FOUND  if index is out of range
+ * \return  APEXCODEC_STATUS_OK         if successful
+ * \return  APEXCODEC_STATUS_NOT_FOUND  if index is out of range
+ * \return  APEXCODEC_STATUS_BAD_VALUE  if the parameters are bad
  */
 ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
         ApexCodec_SettingResults *_Nonnull results,
@@ -543,6 +556,7 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getIndices(
  * \param outAttr       the attribute of the param
  * \param outName       the pointer to be filled with the name of the param
  *                      the string is owned by |descriptors| and should not be freed by the client.
+ *                      the encoding is ASCII.
  * \param outDependencies the pointer to be filled with an array of the parameter indices
  *                        that the parameter with |index| depends on.
  *                        may be null if empty.
@@ -562,11 +576,11 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
         size_t *_Nonnull outNumDependencies) __INTRODUCED_IN(36);
 
 /**
- * Destroy the param descriptors object.
+ * Destroy the param descriptors object. No-op if |descriptors| is nullptr.
  *
  * \param descriptors the param descriptors object
  */
-ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
+void ApexCodec_ParamDescriptors_destroy(
         ApexCodec_ParamDescriptors *_Nullable descriptors) __INTRODUCED_IN(36);
 
 /**
@@ -615,7 +629,7 @@ typedef struct ApexCodec_SupportedValuesQuery {
  * \param inoutQueries the array of queries
  * \param numQueries the size of the queries array
  * \return  APEXCODEC_STATUS_OK         if successful
- *          APEXCODEC_STATUS_CORRUPTED  if unexpected error has occurred
+ * \return  APEXCODEC_STATUS_CORRUPTED  if unexpected error has occurred
  */
 ApexCodec_Status ApexCodec_Configurable_querySupportedValues(
         ApexCodec_Configurable *_Nonnull comp,

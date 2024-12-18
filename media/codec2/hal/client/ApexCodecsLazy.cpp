@@ -277,9 +277,9 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
                   descriptors, index, attr, name, dependencies, numDependencies);
 }
 
-ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
+void ApexCodec_ParamDescriptors_destroy(
         ApexCodec_ParamDescriptors *descriptors) {
-    INVOKE_METHOD(ApexCodec_ParamDescriptors_destroy, APEXCODEC_STATUS_OMITTED, descriptors);
+    INVOKE_METHOD(ApexCodec_ParamDescriptors_destroy, void(), descriptors);
 }
 
 ApexCodec_Status ApexCodec_Configurable_querySupportedParams(
