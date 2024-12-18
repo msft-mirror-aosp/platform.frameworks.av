@@ -17,6 +17,7 @@
 #ifndef ANDROID_SERVERS_CAMERA3_STREAM_H
 #define ANDROID_SERVERS_CAMERA3_STREAM_H
 
+#include <gui/Flags.h>
 #include <gui/Surface.h>
 #include <utils/RefBase.h>
 #include <utils/String16.h>
@@ -382,9 +383,13 @@ class Camera3Stream :
      */
     status_t         returnInputBuffer(const camera_stream_buffer &buffer);
 
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    status_t         getInputSurface(sp<Surface> *producer);
+#else
     // get the buffer producer of the input buffer queue.
     // only apply to input streams.
     status_t         getInputBufferProducer(sp<IGraphicBufferProducer> *producer);
+#endif
 
     /**
      * Whether any of the stream's buffers are currently in use by the HAL,
@@ -423,7 +428,7 @@ class Camera3Stream :
     /**
      * Debug dump of the stream's state.
      */
-    virtual void     dump(int fd, const Vector<String16> &args) const;
+    virtual void     dump(int fd, const Vector<String16> &args);
 
     /**
      * Add a camera3 buffer listener. Adding the same listener twice has
@@ -534,8 +539,12 @@ class Camera3Stream :
     virtual status_t returnInputBufferLocked(
             const camera_stream_buffer &buffer);
     virtual bool     hasOutstandingBuffersLocked() const = 0;
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    virtual status_t getInputSurfaceLocked(sp<Surface> *surface);
+#else
     // Get the buffer producer of the input buffer queue. Only apply to input streams.
     virtual status_t getInputBufferProducerLocked(sp<IGraphicBufferProducer> *producer);
+#endif
 
     // Can return -ENOTCONN when we are already disconnected (not an error)
     virtual status_t disconnectLocked() = 0;
@@ -562,7 +571,7 @@ class Camera3Stream :
 
     // Get the usage flags for the other endpoint, or return
     // INVALID_OPERATION if they cannot be obtained.
-    virtual status_t getEndpointUsage(uint64_t *usage) const = 0;
+    virtual status_t getEndpointUsage(uint64_t *usage) = 0;
 
     // Return whether the buffer is in the list of outstanding buffers.
     bool isOutstandingBuffer(const camera_stream_buffer& buffer) const;

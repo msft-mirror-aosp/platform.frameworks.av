@@ -43,6 +43,7 @@ public:
     ~JpegRCompositeStream() override;
 
     static bool isJpegRCompositeStream(const sp<Surface> &surface);
+    static bool isJpegRCompositeStreamInfo(const OutputStreamInfo& streamInfo);
 
     // CompositeStream overrides
     status_t createInternalStreams(const std::vector<sp<Surface>>& consumers,
@@ -127,7 +128,8 @@ private:
     int32_t              mOutputColorSpace;
     int64_t              mOutputStreamUseCase;
     nsecs_t              mFirstRequestLatency;
-    sp<ProducerListener> mProducerListener;
+
+    sp<StreamSurfaceListener> mStreamSurfaceListener;
 
     ssize_t              mMaxJpegBufferSize;
     ssize_t              mUHRMaxJpegBufferSize;

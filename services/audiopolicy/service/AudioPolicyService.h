@@ -21,6 +21,7 @@
 #include <android/media/GetSpatializerResponse.h>
 #include <android-base/thread_annotations.h>
 #include <audio_utils/mutex.h>
+#include <com/android/media/permission/INativePermissionController.h>
 #include <cutils/misc.h>
 #include <cutils/config_utils.h>
 #include <cutils/compiler.h>
@@ -35,6 +36,8 @@
 #include <media/ToneGenerator.h>
 #include <media/AudioEffect.h>
 #include <media/AudioPolicy.h>
+#include <media/IAudioPolicyServiceLocal.h>
+#include <media/NativePermissionController.h>
 #include <media/UsecaseValidator.h>
 #include <mediautils/ServiceUtilities.h>
 #include "AudioPolicyEffects.h"
@@ -44,6 +47,7 @@
 #include <android/hardware/BnSensorPrivacyListener.h>
 #include <android/content/AttributionSourceState.h>
 
+#include <numeric>
 #include <unordered_map>
 
 namespace android {
@@ -68,12 +72,16 @@ namespace media::audiopolicy {
 }
 
 using ::android::media::audiopolicy::AudioRecordClient;
+using ::com::android::media::permission::INativePermissionController;
+using ::com::android::media::permission::NativePermissionController;
+using ::com::android::media::permission::IPermissionProvider;
 
 class AudioPolicyService :
     public BinderService<AudioPolicyService>,
     public media::BnAudioPolicyService,
     public IBinder::DeathRecipient,
-    public SpatializerPolicyCallback
+    public SpatializerPolicyCallback,
+    public media::IAudioPolicyServiceLocal
 {
     friend class sp<AudioPolicyService>;
 
@@ -121,6 +129,9 @@ public:
     binder::Status startInput(int32_t portId) override;
     binder::Status stopInput(int32_t portId) override;
     binder::Status releaseInput(int32_t portId) override;
+    binder::Status setDeviceAbsoluteVolumeEnabled(const AudioDevice& device,
+                                                  bool enabled,
+                                                  AudioStreamType streamToDriveAbs) override;
     binder::Status initStreamVolume(AudioStreamType stream, int32_t indexMin,
                                     int32_t indexMax) override;
     binder::Status setStreamVolumeIndex(AudioStreamType stream,
@@ -314,7 +325,13 @@ public:
     binder::Status getRegisteredPolicyMixes(
             std::vector <::android::media::AudioMix>* mixes) override;
 
+    // Should only be called by AudioService to push permission data down to audioserver
+    binder::Status getPermissionController(sp<INativePermissionController>* out) override;
+
     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
+
+    // -- IAudioPolicyLocal methods
+    const IPermissionProvider& getPermissionProvider() const override;
 
     // IBinder::DeathRecipient
     virtual     void        binderDied(const wp<IBinder>& who);
@@ -338,6 +355,21 @@ public:
                                      float volume,
                                      audio_io_handle_t output,
                                      int delayMs = 0);
+
+    /**
+     * Set a volume on AudioTrack port id(s) for a particular output.
+     * For the same user setting, a volume group (and associated given port of the
+     * client's track) can have different volumes for each output destination device
+     * it is attached to.
+     *
+     * @param ports to consider
+     * @param volume to set
+     * @param output to consider
+     * @param delayMs to use
+     * @return NO_ERROR if successful
+     */
+    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+            audio_io_handle_t output, int delayMs = 0);
     virtual status_t setVoiceVolume(float volume, int delayMs = 0);
 
     void doOnNewAudioModulesAvailable();
@@ -436,8 +468,8 @@ private:
     app_state_t apmStatFromAmState(int amState);
 
     bool isSupportedSystemUsage(audio_usage_t usage);
-    status_t validateUsage(const audio_attributes_t& attr);
-    status_t validateUsage(const audio_attributes_t& attr,
+    binder::Status validateUsage(const audio_attributes_t& attr);
+    binder::Status validateUsage(const audio_attributes_t& attr,
                            const AttributionSourceState& attributionSource);
 
     void updateUidStates();
@@ -500,8 +532,6 @@ private:
                 int32_t capability) override;
         void onUidProcAdjChanged(uid_t uid, int32_t adj) override;
 
-        void addOverrideUid(uid_t uid, bool active) { updateOverrideUid(uid, active, true); }
-        void removeOverrideUid(uid_t uid) { updateOverrideUid(uid, false, false); }
 
         void updateUid(std::unordered_map<uid_t, std::pair<bool, int>> *uids,
                        uid_t uid, bool active, int state, bool insert);
@@ -510,7 +540,6 @@ private:
 
      private:
         void notifyService();
-        void updateOverrideUid(uid_t uid, bool active, bool insert);
         void updateUidLocked(std::unordered_map<uid_t, std::pair<bool, int>> *uids,
                              uid_t uid, bool active, int state, bool insert);
         void checkRegistered();
@@ -519,7 +548,6 @@ private:
         audio_utils::mutex mMutex{audio_utils::MutexOrder::kUidPolicy_Mutex};
         ActivityManager mAm;
         bool mObserverRegistered = false;
-        std::unordered_map<uid_t, std::pair<bool, int>> mOverrideUids GUARDED_BY(mMutex);
         std::unordered_map<uid_t, std::pair<bool, int>> mCachedUids GUARDED_BY(mMutex);
         std::vector<uid_t> mAssistantUids;
         std::vector<uid_t> mActiveAssistantUids;
@@ -565,6 +593,7 @@ private:
         // commands for tone AudioCommand
         enum {
             SET_VOLUME,
+            SET_PORTS_VOLUME,
             SET_PARAMETERS,
             SET_VOICE_VOLUME,
             STOP_OUTPUT,
@@ -598,6 +627,8 @@ private:
                     void        exit();
                     status_t    volumeCommand(audio_stream_type_t stream, float volume,
                                             audio_io_handle_t output, int delayMs = 0);
+                    status_t    volumePortsCommand(const std::vector<audio_port_handle_t> &ports,
+                            float volume, audio_io_handle_t output, int delayMs = 0);
                     status_t    parametersCommand(audio_io_handle_t ioHandle,
                                             const char *keyValuePairs, int delayMs = 0);
                     status_t    voiceVolumeCommand(float volume, int delayMs = 0);
@@ -670,6 +701,20 @@ private:
             audio_stream_type_t mStream;
             float mVolume;
             audio_io_handle_t mIO;
+        };
+
+        class VolumePortsData : public AudioCommandData {
+        public:
+            std::vector<audio_port_handle_t> mPorts;
+            float mVolume;
+            audio_io_handle_t mIO;
+            std::string dumpPorts() {
+                return std::string("volume ") + std::to_string(mVolume) + " on IO " +
+                        std::to_string(mIO) + " and ports " +
+                        std::accumulate(std::begin(mPorts), std::end(mPorts), std::string{},
+                                       [] (const std::string& ls, int rs) {
+                                return ls + std::to_string(rs) + " "; });
+            }
         };
 
         class ParametersData : public AudioCommandData {
@@ -778,7 +823,7 @@ private:
                                     audio_config_base_t *mixerConfig,
                                     const sp<DeviceDescriptorBase>& device,
                                     uint32_t *latencyMs,
-                                    audio_output_flags_t flags,
+                                    audio_output_flags_t *flags,
                                     audio_attributes_t attributes);
         // creates a special output that is duplicated to the two outputs passed as arguments. The duplication is performed by
         // a special mixer thread in the AudioFlinger.
@@ -812,6 +857,19 @@ private:
         // set a stream volume for a particular output. For the same user setting, a given stream type can have different volumes
         // for each output (destination device) it is attached to.
         virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, audio_io_handle_t output, int delayMs = 0);
+        /**
+         * Set a volume on port(s) for a particular output. For the same user setting, a volume
+         * group (and associated given port of the client's track) can have different volumes for
+         * each output (destination device) it is attached to.
+         *
+         * @param ports to consider
+         * @param volume to set
+         * @param output to consider
+         * @param delayMs to use
+         * @return NO_ERROR if successful
+         */
+        status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+                audio_io_handle_t output, int delayMs = 0) override;
 
         // function enabling to send proprietary informations directly from audio policy manager to audio hardware interface.
         virtual void setParameters(audio_io_handle_t ioHandle, const String8& keyValuePairs, int delayMs = 0);
@@ -876,6 +934,9 @@ private:
 
         status_t getAudioMixPort(const struct audio_port_v7 *devicePort,
                                  struct audio_port_v7 *port) override;
+
+        status_t setTracksInternalMute(
+                const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) override;
 
      private:
         AudioPolicyService *mAudioPolicyService;
@@ -962,13 +1023,15 @@ private:
                       const audio_io_handle_t io, AttributionSourceState attributionSource,
                             const audio_session_t session, audio_port_handle_t portId,
                             audio_port_handle_t deviceId, audio_stream_type_t stream,
-                            bool isSpatialized) :
+                            bool isSpatialized, audio_channel_mask_t channelMask) :
                     AudioClient(attributes, io, attributionSource, session, portId,
-                        deviceId), stream(stream), isSpatialized(isSpatialized)  {}
+                        deviceId), stream(stream), isSpatialized(isSpatialized),
+                        channelMask(channelMask) {}
                 ~AudioPlaybackClient() override = default;
 
         const audio_stream_type_t stream;
         const bool isSpatialized;
+        const audio_channel_mask_t channelMask;
     };
 
     void getPlaybackClientAndEffects(audio_port_handle_t portId,
@@ -999,14 +1062,14 @@ private:
     void unloadAudioPolicyManager();
 
     /**
-     * Returns the number of active audio tracks on the specified output mixer.
+     * Returns the channel masks for active audio tracks on the specified output mixer.
      * The query can be specified to only include spatialized audio tracks or consider
      * all tracks.
      * @param output the I/O handle of the output mixer to consider
      * @param spatializedOnly true if only spatialized tracks should be considered
-     * @return the number of active tracks.
+     * @return a list of channel masks for all active tracks matching the condition.
      */
-    size_t countActiveClientsOnOutput_l(
+    std::vector<audio_channel_mask_t> getActiveTracksMasks_l(
             audio_io_handle_t output, bool spatializedOnly = true) REQUIRES(mMutex);
 
     mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kAudioPolicyService_Mutex};
@@ -1050,6 +1113,7 @@ private:
     CreateAudioPolicyManagerInstance mCreateAudioPolicyManager;
     DestroyAudioPolicyManagerInstance mDestroyAudioPolicyManager;
     std::unique_ptr<media::UsecaseValidator> mUsecaseValidator;
+    const sp<NativePermissionController> mPermissionController;
 };
 
 } // namespace android

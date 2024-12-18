@@ -22,13 +22,15 @@
 #include "NdkImagePriv.h"
 #include "NdkImageReaderPriv.h"
 
-#include <cutils/atomic.h>
-#include <utils/Log.h>
 #include <android_media_Utils.h>
-#include <ui/PublicFormat.h>
-#include <private/android/AHardwareBufferHelpers.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <grallocusage/GrallocUsageConversion.h>
 #include <gui/bufferqueue/1.0/WGraphicBufferProducer.h>
+#include <private/android/AHardwareBufferHelpers.h>
+#include <ui/PublicFormat.h>
+#include <utils/Log.h>
+
+#include <cutils/atomic.h>
 
 using namespace android;
 
@@ -291,22 +293,30 @@ media_status_t
 AImageReader::init() {
     mHalUsage = AHardwareBuffer_convertToGrallocUsageBits(mUsage);
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     sp<IGraphicBufferProducer> gbProducer;
     sp<IGraphicBufferConsumer> gbConsumer;
     BufferQueue::createBufferQueue(&gbProducer, &gbConsumer);
+#endif  // !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     String8 consumerName = String8::format("ImageReader-%dx%df%xu%" PRIu64 "m%d-%d-%d",
             mWidth, mHeight, mFormat, mUsage, mMaxImages, getpid(),
             createProcessUniqueId());
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    mBufferItemConsumer = new BufferItemConsumer(mHalUsage, mMaxImages, /*controlledByApp*/ true);
+#else
     mBufferItemConsumer =
             new BufferItemConsumer(gbConsumer, mHalUsage, mMaxImages, /*controlledByApp*/ true);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     if (mBufferItemConsumer == nullptr) {
         ALOGE("Failed to allocate BufferItemConsumer");
         return AMEDIA_ERROR_UNKNOWN;
     }
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     mProducer = gbProducer;
+#endif  // !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     mBufferItemConsumer->setName(consumerName);
     mBufferItemConsumer->setFrameAvailableListener(mFrameListener);
     mBufferItemConsumer->setBufferFreedListener(mBufferRemovedListener);
@@ -328,10 +338,18 @@ AImageReader::init() {
         return AMEDIA_ERROR_UNKNOWN;
     }
     if (mUsage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        mBufferItemConsumer->setConsumerIsProtected(true);
+#else
         gbConsumer->setConsumerIsProtected(true);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    mSurface = mBufferItemConsumer->getSurface();
+#else
     mSurface = new Surface(mProducer, /*controlledByApp*/true);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     if (mSurface == nullptr) {
         ALOGE("Failed to create surface");
         return AMEDIA_ERROR_UNKNOWN;
@@ -578,8 +596,13 @@ media_status_t AImageReader::getWindowNativeHandle(native_handle **handle) {
         *handle = mWindowHandle;
         return AMEDIA_OK;
     }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    sp<HGraphicBufferProducer> hgbp = new TWGraphicBufferProducer<HGraphicBufferProducer>(
+            mSurface->getIGraphicBufferProducer());
+#else
     sp<HGraphicBufferProducer> hgbp =
         new TWGraphicBufferProducer<HGraphicBufferProducer>(mProducer);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     HalToken halToken;
     if (!createHalToken(hgbp, &halToken)) {
         return AMEDIA_ERROR_UNKNOWN;
@@ -653,6 +676,28 @@ AImageReader::acquireLatestImage(/*out*/AImage** image, /*out*/int* acquireFence
         prevImage = nextImage;
         nextImage = nullptr;
     }
+}
+
+media_status_t
+AImageReader::setUsage(uint64_t usage) {
+    Mutex::Autolock _l(mLock);
+    if (!mIsOpen || mBufferItemConsumer == nullptr) {
+        ALOGE("not ready to perform setUsage()");
+        return AMEDIA_ERROR_INVALID_PARAMETER;
+    }
+    if (mUsage == usage) {
+        return AMEDIA_OK;
+    }
+
+    uint64_t halUsage = AHardwareBuffer_convertToGrallocUsageBits(mUsage);
+    status_t ret = mBufferItemConsumer->setConsumerUsageBits(halUsage);
+    if (ret != OK) {
+        ALOGE("setConsumerUsageBits() failed %d", ret);
+        return AMEDIA_ERROR_UNKNOWN;
+    }
+    mUsage = usage;
+    mHalUsage = halUsage;
+    return AMEDIA_OK;
 }
 
 static
@@ -911,4 +956,15 @@ media_status_t AImageReader_setBufferRemovedListener(
 
     reader->setBufferRemovedListener(listener);
     return AMEDIA_OK;
+}
+
+EXPORT
+media_status_t AImageReader_setUsage(
+    AImageReader *reader, uint64_t usage) {
+    ALOGV("%s", __FUNCTION__);
+    if (reader == nullptr) {
+        ALOGE("%s: invalid argument! reader %p", __FUNCTION__, reader);
+        return AMEDIA_ERROR_INVALID_PARAMETER;
+    }
+    return reader->setUsage(usage);
 }

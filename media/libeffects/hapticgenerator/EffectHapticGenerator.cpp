@@ -35,11 +35,14 @@
 #include <audio_utils/format.h>
 #include <audio_utils/safe_math.h>
 #include <system/audio.h>
+#include <system/audio_effects/audio_effects_utils.h>
 
 static constexpr float DEFAULT_RESONANT_FREQUENCY = 150.0f;
 static constexpr float DEFAULT_BSF_ZERO_Q = 8.0f;
 static constexpr float DEFAULT_BSF_POLE_Q = 4.0f;
 static constexpr float DEFAULT_DISTORTION_OUTPUT_GAIN = 1.5f;
+
+using android::effect::utils::EffectParamReader;
 
 // This is the only symbol that needs to be exported
 __attribute__ ((visibility ("default")))
@@ -114,10 +117,11 @@ std::string hapticSettingToString(const struct HapticGeneratorParam& param) {
     std::stringstream ss;
     ss << "\t\tHaptic setting:\n";
     ss << "\t\t- tracks intensity map:\n";
-    for (const auto&[id, intensity] : param.id2Intensity) {
-        ss << "\t\t\t- id=" << id << ", intensity=" << (int) intensity;
+    for (const auto&[id, hapticScale] : param.id2HapticScale) {
+        ss << "\t\t\t- id=" << id << ", hapticLevel=" << (int) hapticScale.getLevel()
+           << ", adaptiveScaleFactor=" << hapticScale.getAdaptiveScaleFactor();
     }
-    ss << "\t\t- max intensity: " << (int) param.maxHapticIntensity << '\n';
+    ss << "\t\t- max scale level: " << (int) param.maxHapticScale.getLevel() << '\n';
     ss << "\t\t- max haptic amplitude: " << param.maxHapticAmplitude << '\n';
     return ss.str();
 }
@@ -145,7 +149,7 @@ int HapticGenerator_Init(struct HapticGeneratorContext *context) {
     memset(context->param.hapticChannelSource, 0, sizeof(context->param.hapticChannelSource));
     context->param.hapticChannelCount = 0;
     context->param.audioChannelCount = 0;
-    context->param.maxHapticIntensity = os::HapticLevel::MUTE;
+    context->param.maxHapticScale = os::HapticScale::mute();
 
     context->param.resonantFrequency = DEFAULT_RESONANT_FREQUENCY;
     context->param.bpfQ = 1.0f;
@@ -306,38 +310,58 @@ int HapticGenerator_Reset(struct HapticGeneratorContext *context) {
     return 0;
 }
 
-int HapticGenerator_SetParameter(struct HapticGeneratorContext *context,
-                                 int32_t param,
-                                 uint32_t size,
-                                 void *value) {
-    switch (param) {
+int HapticGenerator_SetParameter(struct HapticGeneratorContext *context, effect_param_t* param) {
+    if (param == nullptr) {
+        ALOGE("%s invalid effect_param_t is nullptr", __func__);
+        return -EINVAL;
+    }
+    int32_t paramType;
+    EffectParamReader reader(*param);
+    reader.readFromParameter(&paramType);
+
+    switch (paramType) {
     case HG_PARAM_HAPTIC_INTENSITY: {
-        if (value == nullptr || size != (uint32_t) (2 * sizeof(int))) {
+        if (param->vsize != (sizeof(int32_t) + sizeof(os::HapticScale))) {
+            ALOGE("%s invalid haptic intensity param size %s", __func__, reader.toString().c_str());
             return -EINVAL;
         }
-        int id = *(int *) value;
-        os::HapticLevel hapticIntensity =
-                static_cast<os::HapticLevel>(*((int *) value + 1));
-        ALOGD("Setting haptic intensity as %d", static_cast<int>(hapticIntensity));
-        if (hapticIntensity == os::HapticLevel::MUTE) {
-            context->param.id2Intensity.erase(id);
-        } else {
-            context->param.id2Intensity.emplace(id, hapticIntensity);
+        int32_t id, scaleLevel;
+        float scaleFactor, adaptiveScaleFactor;
+        if (reader.readFromValue(&id) != OK || reader.readFromValue(&scaleLevel) != OK ||
+            reader.readFromValue(&scaleFactor) != OK ||
+            reader.readFromValue(&adaptiveScaleFactor) != OK) {
+            ALOGE("%s error reading haptic intensity %s", __func__, reader.toString().c_str());
+            return -EINVAL;
         }
-        context->param.maxHapticIntensity = hapticIntensity;
-        for (const auto&[id, intensity] : context->param.id2Intensity) {
-            context->param.maxHapticIntensity = std::max(
-                    context->param.maxHapticIntensity, intensity);
+        os::HapticScale hapticScale(static_cast<os::HapticLevel>(scaleLevel), scaleFactor,
+                                    adaptiveScaleFactor);
+        ALOGD("Updating haptic scale, %s", hapticScale.toString().c_str());
+        if (hapticScale.isScaleMute()) {
+            context->param.id2HapticScale.erase(id);
+        } else {
+            context->param.id2HapticScale.emplace(id, hapticScale);
+        }
+        context->param.maxHapticScale = hapticScale;
+        for (const auto&[_, scale] : context->param.id2HapticScale) {
+            // TODO(b/360314386): update to use new scale factors
+            if (scale.getLevel() > context->param.maxHapticScale.getLevel()) {
+                context->param.maxHapticScale = scale;
+            }
         }
         break;
     }
     case HG_PARAM_VIBRATOR_INFO: {
-        if (value == nullptr || size != 3 * sizeof(float)) {
+        if (param->vsize != (3 * sizeof(float))) {
+            ALOGE("%s invalid vibrator info param size %s", __func__, reader.toString().c_str());
             return -EINVAL;
         }
-        const float resonantFrequency = *(float*) value;
-        const float qFactor = *((float *) value + 1);
-        const float maxAmplitude = *((float *) value + 2);
+        float resonantFrequency, qFactor, maxAmplitude;
+        if (reader.readFromValue(&resonantFrequency) != OK ||
+            reader.readFromValue(&qFactor) != OK ||
+            reader.readFromValue(&maxAmplitude) != OK) {
+            ALOGE("%s error reading vibrator info %s", __func__, reader.toString().c_str());
+            return -EINVAL;
+        }
         context->param.resonantFrequency =
                 audio_utils::safe_isnan(resonantFrequency) ? DEFAULT_RESONANT_FREQUENCY
                                                            : resonantFrequency;
@@ -365,7 +389,7 @@ int HapticGenerator_SetParameter(struct HapticGeneratorContext *context,
         HapticGenerator_Reset(context);
     } break;
     default:
-        ALOGW("Unknown param: %d", param);
+        ALOGW("Unknown param: %d", paramType);
         return -EINVAL;
     }
 
@@ -479,7 +503,7 @@ int32_t HapticGenerator_Process(effect_handle_t self,
         return -ENODATA;
     }
 
-    if (context->param.maxHapticIntensity == os::HapticLevel::MUTE) {
+    if (context->param.maxHapticScale.isScaleMute()) {
         // Haptic channels are muted, not need to generate haptic data.
         return 0;
     }
@@ -506,7 +530,7 @@ int32_t HapticGenerator_Process(effect_handle_t self,
             context->processingChain, context->inputBuffer.data(),
             context->outputBuffer.data(), inBuffer->frameCount);
         os::scaleHapticData(hapticOutBuffer, hapticSampleCount,
-                            { /*level=*/context->param.maxHapticIntensity},
+                            context->param.maxHapticScale,
                             context->param.maxHapticAmplitude);
 
     // For haptic data, the haptic playback thread will copy the data from effect input buffer,
@@ -569,8 +593,7 @@ int32_t HapticGenerator_Command(effect_handle_t self, uint32_t cmdCode, uint32_t
                 return -EINVAL;
             }
             effect_param_t *cmd = (effect_param_t *) cmdData;
-            *(int *) replyData = HapticGenerator_SetParameter(
-                    context, *(int32_t *) cmd->data, cmd->vsize, cmd->data + sizeof(int32_t));
+            *(int *) replyData = HapticGenerator_SetParameter(context, cmd);
         }
             break;
 

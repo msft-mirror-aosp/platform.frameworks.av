@@ -185,11 +185,7 @@ std::vector<uint32_t> kSamplingRates = {8000, 16000, 44100, 48000, 88200, 96000}
 
 template <typename T>
 T getValueFromVector(FuzzedDataProvider *fdp, std::vector<T> arr) {
-    if (fdp->ConsumeBool()) {
-        return arr[fdp->ConsumeIntegralInRange<int32_t>(0, arr.size() - 1)];
-    } else {
-        return (T)fdp->ConsumeIntegral<uint32_t>();
-    }
+    return arr[fdp->ConsumeIntegralInRange<int32_t>(0, arr.size() - 1)];
 }
 
 class AudioPolicyManagerFuzzer {
@@ -207,7 +203,8 @@ class AudioPolicyManagerFuzzer {
                          audio_port_handle_t *selectedDeviceId, audio_format_t format,
                          audio_channel_mask_t channelMask, int sampleRate,
                          audio_input_flags_t flags = AUDIO_INPUT_FLAG_NONE,
-                         audio_port_handle_t *portId = nullptr);
+                         audio_port_handle_t *portId = nullptr,
+                         uint32_t *virtualDeviceId = nullptr);
     bool findDevicePort(audio_port_role_t role, audio_devices_t deviceType,
                         const std::string &address, audio_port_v7 *foundPort);
     static audio_port_handle_t getDeviceIdFromPatch(const struct audio_patch *patch);
@@ -264,6 +261,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized;
     bool isBitPerfect;
+    float volume;
 
     // TODO b/182392769: use attribution source util
     AttributionSourceState attributionSource;
@@ -271,7 +269,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
     attributionSource.token = sp<BBinder>::make();
     if (mManager->getOutputForAttr(&attr, output, AUDIO_SESSION_NONE, &stream, attributionSource,
             &config, &flags, selectedDeviceId, portId, {}, &outputType, &isSpatialized,
-            &isBitPerfect) != OK) {
+            &isBitPerfect, &volume) != OK) {
         return false;
     }
     if (*output == AUDIO_IO_HANDLE_NONE || *portId == AUDIO_PORT_HANDLE_NONE) {
@@ -283,7 +281,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
 bool AudioPolicyManagerFuzzer::getInputForAttr(
     const audio_attributes_t &attr, audio_unique_id_t riid, audio_port_handle_t *selectedDeviceId,
     audio_format_t format, audio_channel_mask_t channelMask, int sampleRate,
-    audio_input_flags_t flags, audio_port_handle_t *portId) {
+    audio_input_flags_t flags, audio_port_handle_t *portId, uint32_t *virtualDeviceId) {
     audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
     audio_config_base_t config = AUDIO_CONFIG_BASE_INITIALIZER;
     config.sample_rate = sampleRate;
@@ -298,7 +296,7 @@ bool AudioPolicyManagerFuzzer::getInputForAttr(
     attributionSource.uid = 0;
     attributionSource.token = sp<BBinder>::make();
     if (mManager->getInputForAttr(&attr, &input, riid, AUDIO_SESSION_NONE, attributionSource,
-            &config, flags, selectedDeviceId, &inputType, portId) != OK) {
+            &config, flags, selectedDeviceId, &inputType, portId, virtualDeviceId) != OK) {
         return false;
     }
     if (*portId == AUDIO_PORT_HANDLE_NONE || input == AUDIO_IO_HANDLE_NONE) {

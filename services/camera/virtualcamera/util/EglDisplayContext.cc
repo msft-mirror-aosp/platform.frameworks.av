@@ -30,8 +30,9 @@ namespace android {
 namespace companion {
 namespace virtualcamera {
 
-EglDisplayContext::EglDisplayContext()
+EglDisplayContext::EglDisplayContext(std::shared_ptr<ANativeWindow> nativeWindow)
     : mEglDisplay(EGL_NO_DISPLAY),
+      mEglSurface(EGL_NO_SURFACE),
       mEglContext(EGL_NO_CONTEXT),
       mEglConfig(nullptr) {
   EGLBoolean result;
@@ -52,8 +53,12 @@ EglDisplayContext::EglDisplayContext()
 
   EGLint numConfigs = 0;
   EGLint configAttribs[] = {
-      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE,
-      EGL_OPENGL_ES2_BIT, EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+      EGL_SURFACE_TYPE,
+      nativeWindow == nullptr
+          ? EGL_PBUFFER_BIT  // Render into individual AHardwareBuffer
+          : EGL_WINDOW_BIT,  // Render into Surface (ANativeWindow)
+      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_RED_SIZE, 8, EGL_GREEN_SIZE,
+      8, EGL_BLUE_SIZE, 8,
       // no alpha
       EGL_NONE};
 
@@ -72,6 +77,17 @@ EglDisplayContext::EglDisplayContext()
     return;
   }
 
+  if (nativeWindow != nullptr) {
+    mEglSurface = eglCreateWindowSurface(mEglDisplay, mEglConfig,
+                                         nativeWindow.get(), NULL);
+    if (mEglSurface == EGL_NO_SURFACE) {
+      ALOGE("eglCreateWindowSurface error: %#x", eglGetError());
+    }
+  }
+
+  // EGL is a big state machine. Now that we have a configuration ready, we set
+  // this state machine to that configuration (we make it the "current"
+  // configuration).
   if (!makeCurrent()) {
     ALOGE(
         "Failed to set newly initialized EGLContext and EGLDisplay connection "
@@ -82,13 +98,16 @@ EglDisplayContext::EglDisplayContext()
 }
 
 EglDisplayContext::~EglDisplayContext() {
-  if (mEglDisplay != EGL_NO_DISPLAY) {
-    eglTerminate(mEglDisplay);
+  eglMakeCurrent(mEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  if (mEglSurface != EGL_NO_SURFACE) {
+    eglDestroySurface(mEglDisplay, mEglSurface);
   }
   if (mEglContext != EGL_NO_CONTEXT) {
     eglDestroyContext(mEglDisplay, mEglContext);
   }
-  eglReleaseThread();
+  if (mEglDisplay != EGL_NO_DISPLAY) {
+    eglTerminate(mEglDisplay);
+  }
 }
 
 EGLDisplay EglDisplayContext::getEglDisplay() const {
@@ -99,8 +118,14 @@ bool EglDisplayContext::isInitialized() const {
   return mEglContext != EGL_NO_CONTEXT && mEglDisplay != EGL_NO_DISPLAY;
 }
 
+void EglDisplayContext::swapBuffers() const {
+  if (mEglSurface != EGL_NO_SURFACE) {
+    eglSwapBuffers(mEglDisplay, mEglSurface);
+  }
+}
+
 bool EglDisplayContext::makeCurrent() {
-  if (!eglMakeCurrent(mEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, mEglContext)) {
+  if (!eglMakeCurrent(mEglDisplay, mEglSurface, mEglSurface, mEglContext)) {
     ALOGE("eglMakeCurrent failed: %#x", eglGetError());
     return false;
   }

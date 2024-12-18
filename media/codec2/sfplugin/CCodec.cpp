@@ -54,6 +54,7 @@
 #include <media/stagefright/omx/OmxGraphicBufferSource.h>
 #include <media/stagefright/CCodec.h>
 #include <media/stagefright/BufferProducerWrapper.h>
+#include <media/stagefright/CCodecResources.h>
 #include <media/stagefright/MediaCodecConstants.h>
 #include <media/stagefright/MediaCodecMetricsConstants.h>
 #include <media/stagefright/PersistentSurface.h>
@@ -512,9 +513,14 @@ public:
         uint64_t usage = mConfig.mUsage;
         (void)(*node)->setConsumerUsage((int64_t)usage);
 
+        // AIDL does not define legacy dataspace.
+        android_dataspace_t dataspace = mDataSpace;
+        if (android::media::codec::provider_->dataspace_v0_partial()) {
+            ColorUtils::convertDataSpaceToV0(dataspace);
+        }
         return fromAidlStatus(mSource->configure(
                 (*node), static_cast<::aidl::android::hardware::graphics::common::Dataspace>(
-                        mDataSpace)));
+                        dataspace)));
     }
 
     void disconnect() override {
@@ -1089,6 +1095,11 @@ void CCodec::allocate(const sp<MediaCodecInfo> &codecInfo) {
         // TODO: report error once we complete implementation.
     }
     config->queryConfiguration(comp);
+
+    if (android::media::codec::codec_availability_support()) {
+        std::string storeName = mClient->getServiceName();
+        mCodecResources = std::make_unique<CCodecResources>(storeName);
+    }
 
     mCallback->onComponentAllocated(componentName.c_str());
 }
@@ -1856,6 +1867,11 @@ void CCodec::configure(const sp<AMessage> &msg) {
     mMetrics = new AMessage;
     mChannel->resetBuffersPixelFormat((config->mDomain & Config::IS_ENCODER) ? true : false);
 
+    // Query required system resources for the current configuration
+    if (mCodecResources) {
+        // TODO: Should we fail the configuration if this query fails?
+        mCodecResources->queryRequiredResources(comp);
+    }
     mCallback->onComponentConfigured(config->mInputFormat, config->mOutputFormat);
 }
 
@@ -2768,6 +2784,13 @@ status_t CCodec::unsubscribeFromParameters(const std::vector<std::string> &names
     return config->unsubscribeFromVendorConfigUpdate(comp, names);
 }
 
+std::vector<InstanceResourceInfo> CCodec::getRequiredSystemResources() {
+    if (mCodecResources) {
+        return mCodecResources->getRequiredResources();
+    }
+    return std::vector<InstanceResourceInfo>{};
+}
+
 void CCodec::onWorkDone(std::list<std::unique_ptr<C2Work>> &workItems) {
     if (!workItems.empty()) {
         Mutexed<std::list<std::unique_ptr<C2Work>>>::Locked queue(mWorkDoneQueue);
@@ -2872,6 +2895,7 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
 
             // handle configuration changes in work done
             std::shared_ptr<const C2StreamInitDataInfo::output> initData;
+            sp<AMessage> inputFormat = nullptr;
             sp<AMessage> outputFormat = nullptr;
             {
                 Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
@@ -2959,10 +2983,12 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
                             initData->m.value, initData->flexCount(), config->mCodingMediaType,
                             config->mOutputFormat);
                 }
+                inputFormat = config->mInputFormat;
                 outputFormat = config->mOutputFormat;
             }
             mChannel->onWorkDone(
-                    std::move(work), outputFormat, initData ? initData.get() : nullptr);
+                    std::move(work), inputFormat, outputFormat,
+                    initData ? initData.get() : nullptr);
             // log metrics to MediaCodec
             if (mMetrics->countEntries() == 0) {
                 Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
@@ -3509,6 +3535,15 @@ std::shared_ptr<C2GraphicBlock> CCodec::FetchGraphicBlock(
         break;
     }
     return block;
+}
+
+//static
+std::vector<GlobalResourceInfo> CCodec::GetGloballyAvailableResources() {
+    if (android::media::codec::codec_availability_support()) {
+        return CCodecResources::GetGloballyAvailableResources();
+    }
+
+    return std::vector<GlobalResourceInfo>{};
 }
 
 }  // namespace android

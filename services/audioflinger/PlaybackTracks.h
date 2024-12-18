@@ -96,7 +96,8 @@ public:
                                 size_t frameCountToBeReady = SIZE_MAX,
                                 float speed = 1.0f,
                                 bool isSpatialized = false,
-                                bool isBitPerfect = false);
+                                bool isBitPerfect = false,
+                                float volume = 0.0f);
     ~Track() override;
     status_t initCheck() const final;
     void appendDumpHeader(String8& result) const final;
@@ -220,6 +221,13 @@ public:
      */
     void processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_state_t muteState) final;
 
+    bool getInternalMute() const final { return mInternalMute; }
+    void setInternalMute(bool muted) final { mInternalMute = muted; }
+
+    // VolumePortInterface implementation
+    void setPortVolume(float volume) override;
+    float getPortVolume() const override { return mVolume; }
+
 protected:
 
     DISALLOW_COPY_AND_ASSIGN(Track);
@@ -275,6 +283,8 @@ protected:
     void triggerEvents(AudioSystem::sync_event_t type) final;
     void invalidate() final;
     void disable() final;
+    bool isDisabled() const final;
+
     int& fastIndex() final { return mFastIndex; }
     bool isPlaybackRestricted() const final {
         // The monitor is only created for tracks that can be silenced.
@@ -358,6 +368,8 @@ private:
         for (auto& tp : mTeePatches) { f(tp.patchTrack); }
     };
 
+    void                populateUsageAndContentTypeFromStreamType();
+
     size_t              mPresentationCompleteFrames = 0; // (Used for Mixed tracks)
                                     // The number of frames written to the
                                     // audio HAL when this track is considered fully rendered.
@@ -399,6 +411,8 @@ private:
     // access these two variables only when holding player thread lock.
     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
     mute_state_t        mMuteState;
+    bool                mInternalMute = false;
+    std::atomic<float> mVolume = 0.0f;
 };  // end of Track
 
 
@@ -495,7 +509,8 @@ public:
                                                                     *  as soon as possible to have
                                                                     *  the lowest possible latency
                                                                     *  even if it might glitch. */
-                                   float speed = 1.0f);
+                                   float speed = 1.0f,
+                                   float volume = 1.0f);
     ~PatchTrack() override;
 
     size_t framesReady() const final;

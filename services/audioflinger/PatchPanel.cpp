@@ -268,7 +268,7 @@ status_t PatchPanel::createAudioPatch_l(const struct audio_patch* patch,
                                                             &mixerConfig,
                                                             outputDevice,
                                                             outputDeviceAddress,
-                                                            flags,
+                                                            &flags,
                                                             attributes);
                     ALOGV("mAfPatchPanelCallback->openOutput_l() returned %p", thread.get());
                     if (thread == 0) {
@@ -649,7 +649,8 @@ status_t PatchPanel::Patch::createConnections_l(const sp<IAfPatchPanel>& panel)
                                            outputFlags,
                                            {} /*timeout*/,
                                            frameCountToBeReady,
-                                           1.0f);
+                                           1.0f /*speed*/,
+                                           1.0f /*volume*/);
     status = mPlayback.checkTrack(tempPatchTrack.get());
     if (status != NO_ERROR) {
         return status;

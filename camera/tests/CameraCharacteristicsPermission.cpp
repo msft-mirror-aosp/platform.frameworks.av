@@ -19,11 +19,13 @@
 
 #include <gtest/gtest.h>
 
+#include <android/content/AttributionSourceState.h>
 #include <binder/ProcessState.h>
 #include <utils/Errors.h>
 #include <utils/Log.h>
 #include <camera/CameraMetadata.h>
 #include <camera/Camera.h>
+#include <camera/CameraUtils.h>
 #include <android/hardware/ICameraService.h>
 
 using namespace android;
@@ -31,7 +33,6 @@ using namespace android::hardware;
 
 class CameraCharacteristicsPermission : public ::testing::Test {
 protected:
-
     CameraCharacteristicsPermission() : numCameras(0){}
     //Gtest interface
     void SetUp() override;
@@ -47,8 +48,11 @@ void CameraCharacteristicsPermission::SetUp() {
     sp<IServiceManager> sm = defaultServiceManager();
     sp<IBinder> binder = sm->getService(String16("media.camera"));
     mCameraService = interface_cast<ICameraService>(binder);
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
     rc = mCameraService->getNumberOfCameras(
-            hardware::ICameraService::CAMERA_TYPE_ALL, &numCameras);
+            hardware::ICameraService::CAMERA_TYPE_ALL, clientAttribution, /*devicePolicy*/0,
+            &numCameras);
     EXPECT_TRUE(rc.isOk());
 }
 
@@ -61,7 +65,6 @@ void CameraCharacteristicsPermission::TearDown() {
 // a camera permission.
 TEST_F(CameraCharacteristicsPermission, TestCameraPermission) {
     for (int32_t cameraId = 0; cameraId < numCameras; cameraId++) {
-
         std::string cameraIdStr = std::to_string(cameraId);
         bool isSupported = false;
         auto rc = mCameraService->supportsCameraApi(cameraIdStr,
@@ -73,9 +76,11 @@ TEST_F(CameraCharacteristicsPermission, TestCameraPermission) {
 
         CameraMetadata metadata;
         std::vector<int32_t> tagsNeedingPermission;
+        AttributionSourceState clientAttribution;
+        clientAttribution.deviceId = kDefaultDeviceId;
         rc = mCameraService->getCameraCharacteristics(cameraIdStr,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__,
-                /*overrideToPortrait*/false, &metadata);
+                /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0, &metadata);
         ASSERT_TRUE(rc.isOk());
         EXPECT_FALSE(metadata.isEmpty());
         EXPECT_EQ(metadata.removePermissionEntries(CAMERA_METADATA_INVALID_VENDOR_ID,

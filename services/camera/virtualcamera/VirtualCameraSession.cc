@@ -66,14 +66,12 @@
 #include "util/EglProgram.h"
 #include "util/JpegUtil.h"
 #include "util/MetadataUtil.h"
-#include "util/TestPatternHelper.h"
 #include "util/Util.h"
 
 namespace android {
 namespace companion {
 namespace virtualcamera {
 
-using ::aidl::android::companion::virtualcamera::Format;
 using ::aidl::android::companion::virtualcamera::IVirtualCameraCallback;
 using ::aidl::android::companion::virtualcamera::SupportedStreamConfiguration;
 using ::aidl::android::hardware::camera::common::Status;
@@ -88,7 +86,6 @@ using ::aidl::android::hardware::camera::device::RequestTemplate;
 using ::aidl::android::hardware::camera::device::Stream;
 using ::aidl::android::hardware::camera::device::StreamBuffer;
 using ::aidl::android::hardware::camera::device::StreamConfiguration;
-using ::aidl::android::hardware::camera::device::StreamRotation;
 using ::aidl::android::hardware::common::fmq::MQDescriptor;
 using ::aidl::android::hardware::common::fmq::SynchronizedReadWrite;
 using ::aidl::android::hardware::graphics::common::BufferUsage;
@@ -148,7 +145,7 @@ CameraMetadata createDefaultRequestSettings(
           .setControlMode(ANDROID_CONTROL_MODE_AUTO)
           .setControlAeMode(ANDROID_CONTROL_AE_MODE_ON)
           .setControlAeExposureCompensation(0)
-          .setControlAeTargetFpsRange(maxFps, maxFps)
+          .setControlAeTargetFpsRange(FpsRange{maxFps, maxFps})
           .setControlAeAntibandingMode(ANDROID_CONTROL_AE_ANTIBANDING_MODE_AUTO)
           .setControlAePrecaptureTrigger(
               ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
@@ -192,7 +189,11 @@ HalStream getHalStream(const Stream& stream) {
   }
   halStream.overrideDataSpace = stream.dataSpace;
 
-  halStream.producerUsage = BufferUsage::GPU_RENDER_TARGET;
+  halStream.producerUsage = static_cast<BufferUsage>(
+      static_cast<int64_t>(stream.usage) |
+      static_cast<int64_t>(BufferUsage::CAMERA_OUTPUT) |
+      static_cast<int64_t>(BufferUsage::GPU_RENDER_TARGET));
+
   halStream.supportOffline = false;
   return halStream;
 }
@@ -211,6 +212,27 @@ Resolution resolutionFromStream(const Stream& stream) {
 Resolution resolutionFromInputConfig(
     const SupportedStreamConfiguration& inputConfig) {
   return Resolution(inputConfig.width, inputConfig.height);
+}
+
+std::optional<Resolution> resolutionFromSurface(const sp<Surface> surface) {
+  Resolution res{0, 0};
+  if (surface == nullptr) {
+    ALOGE("%s: Cannot get resolution from null surface", __func__);
+    return std::nullopt;
+  }
+
+  int status = surface->query(NATIVE_WINDOW_WIDTH, &res.width);
+  if (status != NO_ERROR) {
+    ALOGE("%s: Failed to get width from surface", __func__);
+    return std::nullopt;
+  }
+
+  status = surface->query(NATIVE_WINDOW_HEIGHT, &res.height);
+  if (status != NO_ERROR) {
+    ALOGE("%s: Failed to get height from surface", __func__);
+    return std::nullopt;
+  }
+  return res;
 }
 
 std::optional<SupportedStreamConfiguration> pickInputConfigurationForStreams(
@@ -257,10 +279,16 @@ RequestSettings createSettingsFromMetadata(const CameraMetadata& metadata) {
   return RequestSettings{
       .jpegQuality = getJpegQuality(metadata).value_or(
           VirtualCameraDevice::kDefaultJpegQuality),
+      .jpegOrientation = getJpegOrientation(metadata),
       .thumbnailResolution =
           getJpegThumbnailSize(metadata).value_or(Resolution(0, 0)),
       .thumbnailJpegQuality = getJpegThumbnailQuality(metadata).value_or(
-          VirtualCameraDevice::kDefaultJpegQuality)};
+          VirtualCameraDevice::kDefaultJpegQuality),
+      .fpsRange = getFpsRange(metadata),
+      .captureIntent = getCaptureIntent(metadata).value_or(
+          ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW),
+      .gpsCoordinates = getGpsCoordinates(metadata),
+      .aePrecaptureTrigger = getPrecaptureTrigger(metadata)};
 }
 
 }  // namespace
@@ -287,13 +315,13 @@ VirtualCameraSession::VirtualCameraSession(
 
 ndk::ScopedAStatus VirtualCameraSession::close() {
   ALOGV("%s", __func__);
-
-  if (mVirtualCameraClientCallback != nullptr) {
-    mVirtualCameraClientCallback->onStreamClosed(/*streamId=*/0);
-  }
-
   {
     std::lock_guard<std::mutex> lock(mLock);
+
+    if (mVirtualCameraClientCallback != nullptr) {
+      mVirtualCameraClientCallback->onStreamClosed(mCurrentInputStreamId);
+    }
+
     if (mRenderThread != nullptr) {
       mRenderThread->stop();
       mRenderThread = nullptr;
@@ -334,6 +362,7 @@ ndk::ScopedAStatus VirtualCameraSession::configureStreams(
   }
 
   sp<Surface> inputSurface = nullptr;
+  int inputStreamId = -1;
   std::optional<SupportedStreamConfiguration> inputConfig;
   {
     std::lock_guard<std::mutex> lock(mLock);
@@ -353,16 +382,49 @@ ndk::ScopedAStatus VirtualCameraSession::configureStreams(
           __func__, in_requestedConfiguration.toString().c_str());
       return cameraStatus(Status::ILLEGAL_ARGUMENT);
     }
-    if (mRenderThread == nullptr) {
-      // If there's no client callback, start camera in test mode.
-      const bool testMode = mVirtualCameraClientCallback == nullptr;
-      mRenderThread = std::make_unique<VirtualCameraRenderThread>(
-          mSessionContext, resolutionFromInputConfig(*inputConfig),
-          virtualCamera->getMaxInputResolution(), mCameraDeviceCallback,
-          testMode);
-      mRenderThread->start();
-      inputSurface = mRenderThread->getInputSurface();
+
+    if (mRenderThread != nullptr) {
+      // If there's already a render thread, it means this is not a first
+      // configuration call. If the surface has the same resolution and pixel
+      // format as the picked config, we don't need to do anything, the current
+      // render thread is capable of serving new set of configuration. However
+      // if it differens, we need to discard the current surface and
+      // reinitialize the render thread.
+
+      std::optional<Resolution> currentInputResolution =
+          resolutionFromSurface(mRenderThread->getInputSurface());
+      if (currentInputResolution.has_value() &&
+          *currentInputResolution == resolutionFromInputConfig(*inputConfig)) {
+        ALOGI(
+            "%s: Newly configured set of streams matches existing client "
+            "surface (%dx%d)",
+            __func__, currentInputResolution->width,
+            currentInputResolution->height);
+        return ndk::ScopedAStatus::ok();
+      }
+
+      if (mVirtualCameraClientCallback != nullptr) {
+        mVirtualCameraClientCallback->onStreamClosed(mCurrentInputStreamId);
+      }
+
+      ALOGV(
+          "%s: Newly requested output streams are not suitable for "
+          "pre-existing surface (%dx%d), creating new surface (%dx%d)",
+          __func__, currentInputResolution->width,
+          currentInputResolution->height, inputConfig->width,
+          inputConfig->height);
+
+      mRenderThread->flush();
+      mRenderThread->stop();
     }
+
+    mRenderThread = std::make_unique<VirtualCameraRenderThread>(
+        mSessionContext, resolutionFromInputConfig(*inputConfig),
+        virtualCamera->getMaxInputResolution(), mCameraDeviceCallback);
+    mRenderThread->start();
+    inputSurface = mRenderThread->getInputSurface();
+    inputStreamId = mCurrentInputStreamId =
+        virtualCamera->allocateInputStreamId();
   }
 
   if (mVirtualCameraClientCallback != nullptr && inputSurface != nullptr) {
@@ -370,7 +432,7 @@ ndk::ScopedAStatus VirtualCameraSession::configureStreams(
     // support for multiple input streams is implemented. For now we always
     // create single texture.
     mVirtualCameraClientCallback->onStreamConfigured(
-        /*streamId=*/0, aidl::android::view::Surface(inputSurface.get()),
+        inputStreamId, aidl::android::view::Surface(inputSurface.get()),
         inputConfig->width, inputConfig->height, inputConfig->pixelFormat);
   }
 
@@ -513,10 +575,11 @@ std::set<int> VirtualCameraSession::getStreamIds() const {
 
 ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
     const CaptureRequest& request) {
-  ALOGD("%s: request: %s", __func__, request.toString().c_str());
+  ALOGV("%s: request: %s", __func__, request.toString().c_str());
 
   std::shared_ptr<ICameraDeviceCallback> cameraCallback = nullptr;
   RequestSettings requestSettings;
+  int currentInputStreamId;
   {
     std::lock_guard<std::mutex> lock(mLock);
 
@@ -535,6 +598,7 @@ ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
     requestSettings = createSettingsFromMetadata(mCurrentRequestMetadata);
 
     cameraCallback = mCameraDeviceCallback;
+    currentInputStreamId = mCurrentInputStreamId;
   }
 
   if (cameraCallback == nullptr) {
@@ -572,7 +636,7 @@ ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
 
   if (mVirtualCameraClientCallback != nullptr) {
     auto status = mVirtualCameraClientCallback->onProcessCaptureRequest(
-        /*streamId=*/0, request.frameNumber);
+        currentInputStreamId, request.frameNumber);
     if (!status.isOk()) {
       ALOGE(
           "Failed to invoke onProcessCaptureRequest client callback for frame "

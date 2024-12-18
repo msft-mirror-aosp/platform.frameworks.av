@@ -55,8 +55,8 @@ cc_library {
     defaults: ["libaudiopreprocessing-defaults"],
     relative_install_path: "soundfx",
     srcs: ["PreProcessing.cpp"],
-    header_libs: [
-        "libwebrtc_absl_headers",
+    static_libs: [
+        "libabsl",
     ],
 }
 
@@ -77,12 +77,12 @@ cc_library_shared {
         "libutils",
     ],
     static_libs: [
+        "libabsl",
         "webrtc_audio_processing",
     ],
     header_libs: [
         "libaudioeffects",
         "libhardware_headers",
-        "libwebrtc_absl_headers",
     ],
     cflags: [
         "-Wno-unused-parameter",

@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "EglUtil.h"
 #include "android/hardware_buffer.h"
 #include "jpeglib.h"
 #include "ui/GraphicBuffer.h"
@@ -35,11 +36,6 @@ namespace virtualcamera {
 using ::aidl::android::companion::virtualcamera::Format;
 using ::aidl::android::hardware::common::NativeHandle;
 
-// Lower bound for maximal supported texture size is at least 2048x2048
-// but on most platforms will be more.
-// TODO(b/301023410) - Query actual max texture size.
-constexpr int kMaxTextureSize = 2048;
-constexpr int kLibJpegDctSize = DCTSIZE;
 constexpr int kMaxFpsUpperLimit = 60;
 
 constexpr std::array<Format, 2> kSupportedFormats{Format::YUV_420_888,
@@ -69,7 +65,6 @@ YCbCrLockGuard::~YCbCrLockGuard() {
   if (gBuffer == nullptr) {
     return;
   }
-  gBuffer->unlock();
   status_t status = gBuffer->unlock();
   if (status != NO_ERROR) {
     ALOGE("Failed to unlock graphic buffer: %s", statusToString(status).c_str());
@@ -94,12 +89,15 @@ PlanesLockGuard::PlanesLockGuard(std::shared_ptr<AHardwareBuffer> hwBuffer,
     return;
   }
 
-  const int32_t rawFence = fence != nullptr ? fence->get() : -1;
+  const int32_t rawFence = fence != nullptr ? dup(fence->get()) : -1;
   mLockStatus = static_cast<status_t>(AHardwareBuffer_lockPlanes(
       hwBuffer.get(), usageFlags, rawFence, nullptr, &mPlanes));
   if (mLockStatus != OK) {
     ALOGE("%s: Failed to lock graphic buffer: %s", __func__,
           statusToString(mLockStatus).c_str());
+  }
+  if (rawFence >= 0) {
+    close(rawFence);
   }
 }
 
@@ -141,15 +139,9 @@ bool isFormatSupportedForInput(const int width, const int height,
     return false;
   }
 
-  if (width <= 0 || height <= 0 || width > kMaxTextureSize ||
-      height > kMaxTextureSize) {
-    return false;
-  }
-
-  if (width % kLibJpegDctSize != 0 || height % kLibJpegDctSize != 0) {
-    // Input dimension needs to be multiple of libjpeg DCT size.
-    // TODO(b/301023410) This restriction can be removed once we add support for
-    // unaligned jpeg compression.
+  int maxTextureSize = getMaximumTextureSize();
+  if (width <= 0 || height <= 0 || width > maxTextureSize ||
+      height > maxTextureSize) {
     return false;
   }
 

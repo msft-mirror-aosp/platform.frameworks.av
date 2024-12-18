@@ -116,8 +116,23 @@ product_strategy_t EngineBase::getProductStrategyByName(const std::string &name)
     return PRODUCT_STRATEGY_NONE;
 }
 
+std::string EngineBase::getProductStrategyName(product_strategy_t id) const {
+    for (const auto &iter : mProductStrategies) {
+        if (iter.second->getId() == id) {
+            return iter.second->getName();
+        }
+    }
+    return "";
+}
+
+void EngineBase::setDefaultConfiguration() {
+    mProductStrategies.clear();
+    mVolumeGroups.clear();
+    (void) processParsingResult({std::make_unique<engineConfig::Config>(gDefaultEngineConfig), 1});
+}
+
 engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
-        const media::audio::common::AudioHalEngineConfig& aidlConfig)
+        const media::audio::common::AudioHalEngineConfig& aidlConfig, bool)
 {
     engineConfig::ParsingResult result = engineConfig::convert(aidlConfig);
     if (result.parsedConfig == nullptr) {
@@ -132,7 +147,8 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
     return processParsingResult(std::move(result));
 }
 
-engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(const std::string& xmlFilePath)
+engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
+        const std::string& xmlFilePath, bool isConfigurable)
 {
     auto fileExists = [](const char* path) {
         struct stat fileStat;
@@ -141,7 +157,7 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(const std::s
     const std::string filePath = xmlFilePath.empty() ? engineConfig::DEFAULT_PATH : xmlFilePath;
     engineConfig::ParsingResult result =
             fileExists(filePath.c_str()) ?
-            engineConfig::parse(filePath.c_str()) : engineConfig::ParsingResult{};
+            engineConfig::parse(filePath.c_str(), isConfigurable) : engineConfig::ParsingResult{};
     if (result.parsedConfig == nullptr) {
         ALOGD("%s: No configuration found, using default matching phone experience.", __FUNCTION__);
         engineConfig::Config config = gDefaultEngineConfig;
@@ -240,7 +256,7 @@ engineConfig::ParsingResult EngineBase::processParsingResult(
         loadVolumeConfig(mVolumeGroups, volumeConfig);
     }
     for (auto& strategyConfig : result.parsedConfig->productStrategies) {
-        sp<ProductStrategy> strategy = new ProductStrategy(strategyConfig.name);
+        sp<ProductStrategy> strategy = new ProductStrategy(strategyConfig.name, strategyConfig.id);
         for (const auto &group : strategyConfig.attributesGroups) {
             const auto &iter = std::find_if(begin(mVolumeGroups), end(mVolumeGroups),
                                          [&group](const auto &volumeGroup) {
@@ -302,6 +318,9 @@ StrategyVector EngineBase::getOrderedProductStrategies() const
     }
     StrategyVector orderedStrategies;
     for (const auto &iter : strategies) {
+        if (iter.second->isPatchStrategy()) {
+            continue;
+        }
         orderedStrategies.push_back(iter.second->getId());
     }
     return orderedStrategies;
@@ -733,6 +752,9 @@ void EngineBase::initializeDeviceSelectionCache() {
     auto defaultDevices = DeviceVector(getApmObserver()->getDefaultOutputDevice());
     for (const auto &iter : getProductStrategies()) {
         const auto &strategy = iter.second;
+        if (strategy->isPatchStrategy()) {
+            continue;
+        }
         mDevicesForStrategies[strategy->getId()] = defaultDevices;
         setStrategyDevices(strategy, defaultDevices);
     }
@@ -741,6 +763,9 @@ void EngineBase::initializeDeviceSelectionCache() {
 void EngineBase::updateDeviceSelectionCache() {
     for (const auto &iter : getProductStrategies()) {
         const auto& strategy = iter.second;
+        if (strategy->isPatchStrategy()) {
+            continue;
+        }
         auto devices = getDevicesForProductStrategy(strategy->getId());
         mDevicesForStrategies[strategy->getId()] = devices;
         setStrategyDevices(strategy, devices);

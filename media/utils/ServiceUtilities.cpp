@@ -41,13 +41,16 @@
 
 namespace android {
 
+namespace {
+constexpr auto PERMISSION_HARD_DENIED = permission::PermissionChecker::PERMISSION_HARD_DENIED;
+}
+
 using content::AttributionSourceState;
 
 static const String16 sAndroidPermissionRecordAudio("android.permission.RECORD_AUDIO");
 static const String16 sModifyPhoneState("android.permission.MODIFY_PHONE_STATE");
 static const String16 sModifyAudioRouting("android.permission.MODIFY_AUDIO_ROUTING");
 static const String16 sCallAudioInterception("android.permission.CALL_AUDIO_INTERCEPTION");
-static const String16 sAndroidPermissionBluetoothConnect("android.permission.BLUETOOTH_CONNECT");
 
 static String16 resolveCallingPackage(PermissionController& permissionController,
         const std::optional<String16> opPackageName, uid_t uid) {
@@ -86,7 +89,7 @@ int32_t getOpForSource(audio_source_t source) {
 }
 
 std::optional<AttributionSourceState> resolveAttributionSource(
-        const AttributionSourceState& callerAttributionSource) {
+        const AttributionSourceState& callerAttributionSource, const uint32_t virtualDeviceId) {
     AttributionSourceState nextAttributionSource = callerAttributionSource;
 
     if (!nextAttributionSource.packageName.has_value()) {
@@ -101,6 +104,7 @@ std::optional<AttributionSourceState> resolveAttributionSource(
             return std::nullopt;
         }
     }
+    nextAttributionSource.deviceId = virtualDeviceId;
 
     AttributionSourceState myAttributionSource;
     myAttributionSource.uid = VALUE_OR_FATAL(android::legacy2aidl_uid_t_int32_t(getuid()));
@@ -109,13 +113,15 @@ std::optional<AttributionSourceState> resolveAttributionSource(
     // audioserver to the app ops system
     static sp<BBinder> appOpsToken = sp<BBinder>::make();
     myAttributionSource.token = appOpsToken;
+    myAttributionSource.deviceId = virtualDeviceId;
     myAttributionSource.next.push_back(nextAttributionSource);
 
     return std::optional<AttributionSourceState>{myAttributionSource};
 }
 
-static bool checkRecordingInternal(const AttributionSourceState& attributionSource,
-        const String16& msg, bool start, audio_source_t source) {
+    static int checkRecordingInternal(const AttributionSourceState &attributionSource,
+                                       const uint32_t virtualDeviceId,
+                                       const String16 &msg, bool start, audio_source_t source) {
     // Okay to not track in app ops as audio server or media server is us and if
     // device is rooted security model is considered compromised.
     // system_server loses its RECORD_AUDIO permission when a secondary
@@ -127,8 +133,8 @@ static bool checkRecordingInternal(const AttributionSourceState& attributionSour
     // We specify a pid and uid here as mediaserver (aka MediaRecorder or StageFrightRecorder)
     // may open a record track on behalf of a client. Note that pid may be a tid.
     // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
-    const std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource);
+    std::optional<AttributionSourceState> resolvedAttributionSource =
+            resolveAttributionSource(attributionSource, virtualDeviceId);
     if (!resolvedAttributionSource.has_value()) {
         return false;
     }
@@ -136,30 +142,44 @@ static bool checkRecordingInternal(const AttributionSourceState& attributionSour
     const int32_t attributedOpCode = getOpForSource(source);
 
     permission::PermissionChecker permissionChecker;
-    bool permitted = false;
+    int permitted;
     if (start) {
-        permitted = (permissionChecker.checkPermissionForStartDataDeliveryFromDatasource(
+        permitted = permissionChecker.checkPermissionForStartDataDeliveryFromDatasource(
                 sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
-                attributedOpCode) != permission::PermissionChecker::PERMISSION_HARD_DENIED);
+                attributedOpCode);
     } else {
-        permitted = (permissionChecker.checkPermissionForPreflightFromDatasource(
+        permitted = permissionChecker.checkPermissionForPreflightFromDatasource(
                 sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
-                attributedOpCode) != permission::PermissionChecker::PERMISSION_HARD_DENIED);
+                attributedOpCode);
     }
 
     return permitted;
 }
 
-bool recordingAllowed(const AttributionSourceState& attributionSource, audio_source_t source) {
-    return checkRecordingInternal(attributionSource, String16(), /*start*/ false, source);
+static constexpr int DEVICE_ID_DEFAULT = 0;
+
+bool recordingAllowed(const AttributionSourceState &attributionSource, audio_source_t source) {
+    return checkRecordingInternal(attributionSource, DEVICE_ID_DEFAULT, String16(), /*start*/ false,
+                                  source) != PERMISSION_HARD_DENIED;
 }
 
-bool startRecording(const AttributionSourceState& attributionSource, const String16& msg,
-        audio_source_t source) {
-    return checkRecordingInternal(attributionSource, msg, /*start*/ true, source);
+bool recordingAllowed(const AttributionSourceState &attributionSource,
+                      const uint32_t virtualDeviceId,
+                      audio_source_t source) {
+    return checkRecordingInternal(attributionSource, virtualDeviceId,
+                                  String16(), /*start*/ false, source) != PERMISSION_HARD_DENIED;
 }
 
-void finishRecording(const AttributionSourceState& attributionSource, audio_source_t source) {
+int startRecording(const AttributionSourceState& attributionSource,
+                    const uint32_t virtualDeviceId,
+                    const String16& msg,
+                    audio_source_t source) {
+    return checkRecordingInternal(attributionSource, virtualDeviceId, msg, /*start*/ true,
+                                  source);
+}
+
+void finishRecording(const AttributionSourceState &attributionSource, uint32_t virtualDeviceId,
+                     audio_source_t source) {
     // Okay to not track in app ops as audio server is us and if
     // device is rooted security model is considered compromised.
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
@@ -169,7 +189,7 @@ void finishRecording(const AttributionSourceState& attributionSource, audio_sour
     // may open a record track on behalf of a client. Note that pid may be a tid.
     // IMPORTANT: DON'T USE PermissionCache - RUNTIME PERMISSIONS CHANGE.
     const std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource);
+            resolveAttributionSource(attributionSource, virtualDeviceId);
     if (!resolvedAttributionSource.has_value()) {
         return;
     }
@@ -270,7 +290,7 @@ bool modifyAudioRoutingAllowed() {
 bool modifyAudioRoutingAllowed(const AttributionSourceState& attributionSource) {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
-    if (isAudioServerUid(IPCThreadState::self()->getCallingUid())) return true;
+    if (isAudioServerUid(uid)) return true;
     // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
     bool ok = PermissionCache::checkPermission(sModifyAudioRouting, pid, uid);
     if (!ok) ALOGE("%s(): android.permission.MODIFY_AUDIO_ROUTING denied for uid %d",
@@ -285,7 +305,7 @@ bool modifyDefaultAudioEffectsAllowed() {
 bool modifyDefaultAudioEffectsAllowed(const AttributionSourceState& attributionSource) {
     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
     pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
-    if (isAudioServerUid(IPCThreadState::self()->getCallingUid())) return true;
+    if (isAudioServerUid(uid)) return true;
 
     static const String16 sModifyDefaultAudioEffectsAllowed(
             "android.permission.MODIFY_DEFAULT_AUDIO_EFFECTS");
@@ -376,48 +396,6 @@ status_t checkIMemory(const sp<IMemory>& iMemory)
     return NO_ERROR;
 }
 
-/**
- * Determines if the MAC address in Bluetooth device descriptors returned by APIs of
- * a native audio service (audio flinger, audio policy) must be anonymized.
- * MAC addresses returned to system server or apps with BLUETOOTH_CONNECT permission
- * are not anonymized.
- *
- * @param attributionSource The attribution source of the calling app.
- * @param caller string identifying the caller for logging.
- * @return true if the MAC addresses must be anonymized, false otherwise.
- */
-bool mustAnonymizeBluetoothAddress(
-        const AttributionSourceState& attributionSource, const String16& caller) {
-    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
-    if (isAudioServerOrSystemServerUid(uid)) {
-        return false;
-    }
-    const std::optional<AttributionSourceState> resolvedAttributionSource =
-            resolveAttributionSource(attributionSource);
-    if (!resolvedAttributionSource.has_value()) {
-        return true;
-    }
-    permission::PermissionChecker permissionChecker;
-    return permissionChecker.checkPermissionForPreflightFromDatasource(
-            sAndroidPermissionBluetoothConnect, resolvedAttributionSource.value(), caller,
-            AppOpsManager::OP_BLUETOOTH_CONNECT)
-                != permission::PermissionChecker::PERMISSION_GRANTED;
-}
-
-/**
- * Modifies the passed MAC address string in place for consumption by unprivileged clients.
- * the string is assumed to have a valid MAC address format.
- * the anonymzation must be kept in sync with toAnonymizedAddress() in BluetoothUtils.java
- *
- * @param address input/output the char string contining the MAC address to anonymize.
- */
-void anonymizeBluetoothAddress(char *address) {
-    if (address == nullptr || strlen(address) != strlen("AA:BB:CC:DD:EE:FF")) {
-        return;
-    }
-    memcpy(address, "XX:XX:XX:XX", strlen("XX:XX:XX:XX"));
-}
-
 sp<content::pm::IPackageManagerNative> MediaPackageManager::retrievePackageManager() {
     const sp<IServiceManager> sm = defaultServiceManager();
     if (sm == nullptr) {
@@ -499,35 +477,38 @@ void MediaPackageManager::dump(int fd, int spaces) const {
     }
 }
 
+namespace mediautils {
+
 // How long we hold info before we re-fetch it (24 hours) if we found it previously.
 static constexpr nsecs_t INFO_EXPIRATION_NS = 24 * 60 * 60 * NANOS_PER_SECOND;
 // Maximum info records we retain before clearing everything.
 static constexpr size_t INFO_CACHE_MAX = 1000;
 
 // The original code is from MediaMetricsService.cpp.
-mediautils::UidInfo::Info mediautils::UidInfo::getInfo(uid_t uid)
+std::shared_ptr<const UidInfo::Info> UidInfo::getCachedInfo(uid_t uid)
 {
+    std::shared_ptr<const UidInfo::Info> info;
+
     const nsecs_t now = systemTime(SYSTEM_TIME_REALTIME);
-    struct mediautils::UidInfo::Info info;
     {
         std::lock_guard _l(mLock);
         auto it = mInfoMap.find(uid);
         if (it != mInfoMap.end()) {
             info = it->second;
             ALOGV("%s: uid %d expiration %lld now %lld",
-                    __func__, uid, (long long)info.expirationNs, (long long)now);
-            if (info.expirationNs <= now) {
+                    __func__, uid, (long long)info->expirationNs, (long long)now);
+            if (info->expirationNs <= now) {
                 // purge the stale entry and fall into re-fetching
                 ALOGV("%s: entry for uid %d expired, now %lld",
                         __func__, uid, (long long)now);
                 mInfoMap.erase(it);
-                info.uid = (uid_t)-1;  // this is always fully overwritten
+                info.reset();  // force refetch
             }
         }
     }
 
     // if we did not find it in our map, look it up
-    if (info.uid == (uid_t)(-1)) {
+    if (!info) {
         sp<IServiceManager> sm = defaultServiceManager();
         sp<content::pm::IPackageManagerNative> package_mgr;
         if (sm.get() == nullptr) {
@@ -612,17 +593,30 @@ mediautils::UidInfo::Info mediautils::UidInfo::getInfo(uid_t uid)
         // first clear if we have too many cached elements.  This would be rare.
         if (mInfoMap.size() >= INFO_CACHE_MAX) mInfoMap.clear();
 
-        // always overwrite
-        info.uid = uid;
-        info.package = std::move(pkg);
-        info.installer = std::move(installer);
-        info.versionCode = versionCode;
-        info.expirationNs = now + (notFound ? 0 : INFO_EXPIRATION_NS);
+        info = std::make_shared<const UidInfo::Info>(
+                uid,
+                std::move(pkg),
+                std::move(installer),
+                versionCode,
+                now + (notFound ? 0 : INFO_EXPIRATION_NS));
         ALOGV("%s: adding uid %d package '%s' expirationNs: %lld",
-                __func__, uid, info.package.c_str(), (long long)info.expirationNs);
+                __func__, uid, info->package.c_str(), (long long)info->expirationNs);
         mInfoMap[uid] = info;
     }
     return info;
 }
+
+/* static */
+UidInfo& UidInfo::getUidInfo() {
+    [[clang::no_destroy]] static UidInfo uidInfo;
+    return uidInfo;
+}
+
+/* static */
+std::shared_ptr<const UidInfo::Info> UidInfo::getInfo(uid_t uid) {
+    return UidInfo::getUidInfo().getCachedInfo(uid);
+}
+
+} // namespace mediautils
 
 } // namespace android

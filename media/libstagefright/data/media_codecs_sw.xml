@@ -203,8 +203,7 @@
             <Feature name="dynamic-color-aspects" />
             <Attribute name="software-codec" />
         </MediaCodec>
-        <MediaCodec name="c2.android.av1.decoder" type="video/av01" variant="slow-cpu,!slow-cpu">
-            <!-- TODO: implement a mechanism to prevent AV1 Decoder usage on pre-U devices -->
+        <MediaCodec name="c2.android.av1-dav1d.decoder" type="video/av01" variant="slow-cpu,!slow-cpu">
             <Limit name="alignment" value="1x1" />
             <Limit name="block-size" value="16x16" />
             <Variant name="!slow-cpu">
@@ -224,7 +223,8 @@
             <Feature name="low-latency" />
             <Attribute name="software-codec" />
         </MediaCodec>
-        <MediaCodec name="c2.android.av1-dav1d.decoder" type="video/av01" variant="slow-cpu,!slow-cpu" rank="1024">
+        <MediaCodec name="c2.android.av1.decoder" type="video/av01" variant="slow-cpu,!slow-cpu" rank="1024">
+            <!-- TODO: implement a mechanism to prevent AV1 Decoder usage on pre-U devices -->
             <Limit name="alignment" value="1x1" />
             <Limit name="block-size" value="16x16" />
             <Variant name="!slow-cpu">
@@ -254,6 +254,16 @@
             <Limit name="bitrate" range="1-20000000" />
             <Feature name="adaptive-playback" />
             <Attribute name="software-codec" />
+        </MediaCodec>
+        <MediaCodec name="c2.android.apv.decoder" type="video/apv" enabled="false" minsdk="36" variant="!slow-cpu">
+            <Limit name="size" min="16x16" max="1920x1920"/>
+            <Limit name="alignment" value="2x2"/>
+            <Limit name="bitrate" range="1-240000000"/>
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
+            <Feature name="adaptive-playback" />
+            <Feature name="dynamic-color-aspects" />
+            <Attribute name="software-codec"/>
         </MediaCodec>
     </Decoders>
     <Encoders>
@@ -407,6 +417,15 @@
             <Limit name="complexity" range="0-5"  default="0" />
             <Feature name="bitrate-modes" value="VBR,CBR,CQ" />
             <Feature name="qp-bounds" />
+            <Attribute name="software-codec" />
+        </MediaCodec>
+        <MediaCodec name="c2.android.apv.encoder" type="video/apv" enabled="false" minsdk="36" variant="!slow-cpu">
+            <Limit name="size" min="2x2" max="1920x1920" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
+            <Limit name="bitrate" range="1-240000000" />
+            <Feature name="bitrate-modes" value="VBR,CBR" />
             <Attribute name="software-codec" />
         </MediaCodec>
     </Encoders>

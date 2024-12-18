@@ -26,7 +26,9 @@
 #include <android/binder_ibinder.h>
 #include <android/binder_manager.h>
 #include <binder/Status.h>
+#include <camera/CameraUtils.h>
 #include <hidl/HidlTransportSupport.h>
+#include <utils/AttributionAndPermissionUtils.h>
 #include <utils/Utils.h>
 
 namespace android::frameworks::cameraservice::service::implementation {
@@ -37,6 +39,7 @@ using ::android::hardware::cameraservice::utils::conversion::aidl::areBindersEqu
 using ::android::hardware::cameraservice::utils::conversion::aidl::cloneToAidl;
 using ::android::hardware::cameraservice::utils::conversion::aidl::convertToAidl;
 using ::android::hardware::cameraservice::utils::conversion::aidl::filterVndkKeys;
+using hardware::BnCameraService::ROTATION_OVERRIDE_NONE;
 using ::ndk::ScopedAStatus;
 
 // VNDK classes
@@ -87,9 +90,16 @@ ScopedAStatus AidlCameraService::getCameraCharacteristics(const std::string& in_
     if (_aidl_return == nullptr) { return fromSStatus(SStatus::ILLEGAL_ARGUMENT); }
 
     ::android::CameraMetadata cameraMetadata;
+    AttributionSourceState clientAttribution =
+            AttributionAndPermissionUtils::buildAttributionSource(
+                    hardware::ICameraService::USE_CALLING_PID,
+                    hardware::ICameraService::USE_CALLING_UID,
+                    kDefaultDeviceId);
     UStatus ret = mCameraService->getCameraCharacteristics(in_cameraId,
                                                            mVndkVersion,
-                                                           /* overrideToPortrait= */ false,
+                                                           ROTATION_OVERRIDE_NONE,
+                                                           clientAttribution,
+                                                           /* devicePolicy= */ 0,
                                                            &cameraMetadata);
     if (!ret.isOk()) {
         if (ret.exceptionCode() != EX_SERVICE_SPECIFIC) {
@@ -139,15 +149,21 @@ ndk::ScopedAStatus AidlCameraService::connectDevice(
         return fromSStatus(SStatus::UNKNOWN_ERROR);
     }
     sp<hardware::camera2::ICameraDeviceCallbacks> callbacks = hybridCallbacks;
+    AttributionSourceState clientAttribution =
+            AttributionAndPermissionUtils::buildAttributionSource(
+                    hardware::ICameraService::USE_CALLING_PID,
+                    hardware::ICameraService::USE_CALLING_UID,
+                    kDefaultDeviceId);
+    clientAttribution.packageName = "";
+    clientAttribution.attributionTag = std::nullopt;
     binder::Status serviceRet = mCameraService->connectDevice(
             callbacks,
             in_cameraId,
-            std::string(),
-            /* clientFeatureId= */{},
-            hardware::ICameraService::USE_CALLING_UID,
             /* scoreOffset= */ 0,
             /* targetSdkVersion= */ __ANDROID_API_FUTURE__,
-            /* overrideToPortrait= */ false,
+            ROTATION_OVERRIDE_NONE,
+            clientAttribution,
+            /* devicePolicy= */ 0,
             &unstableDevice);
     if (!serviceRet.isOk()) {
         ALOGE("%s: Unable to connect to camera device: %s", __FUNCTION__,

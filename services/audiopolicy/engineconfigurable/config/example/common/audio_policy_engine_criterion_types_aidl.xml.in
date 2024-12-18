@@ -1,0 +1,97 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!-- Copyright (C) 2018 The Android Open Source Project
+
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+-->
+<criterion_types>
+    <criterion_type name="OutputDevicesMaskType" type="inclusive"/>
+    <criterion_type name="InputDevicesMaskType" type="inclusive"/>
+    <criterion_type name="OutputDevicesAddressesType" type="inclusive">
+        <values>
+            <!-- legacy remote submix -->
+            <value literal="0"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="InputDevicesAddressesType" type="inclusive">
+        <values>
+            <!-- legacy remote submix -->
+            <value literal="0"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="AndroidModeType" type="exclusive"/>
+    <criterion_type name="ForceUseForCommunicationType" type="exclusive">
+        <values>
+            <value literal="NONE"/>
+            <value literal="SPEAKER"/>
+            <value literal="BT_SCO"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="ForceUseForMediaType" type="exclusive">
+        <values>
+            <value literal="NONE"/>
+            <value literal="SPEAKER"/>
+            <value literal="HEADPHONES"/>
+            <value literal="BT_A2DP"/>
+            <value literal="ANALOG_DOCK"/>
+            <value literal="DIGITAL_DOCK"/>
+            <value literal="WIRED_ACCESSORY"/>
+            <value literal="NO_BT_A2DP"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="ForceUseForRecordType" type="exclusive">
+        <values>
+            <value literal="NONE"/>
+            <value literal="BT_SCO"/>
+            <value literal="WIRED_ACCESSORY"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="ForceUseForDockType" type="exclusive">
+        <values>
+            <value literal="NONE"/>
+            <value literal="BT_CAR_DOCK"/>
+            <value literal="BT_DESK_DOCK"/>
+            <value literal="ANALOG_DOCK"/>
+            <value literal="DIGITAL_DOCK"/>
+            <value literal="WIRED_ACCESSORY"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="ForceUseForSystemType" type="exclusive" >
+        <values>
+            <value literal="NONE"/>
+            <value literal="SYSTEM_ENFORCED"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="ForceUseForHdmiSystemAudioType" type="exclusive">
+        <values>
+            <value literal="NONE"/>
+            <value literal="HDMI_SYSTEM_AUDIO_ENFORCED"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="ForceUseForEncodedSurroundType" type="exclusive">
+        <values>
+            <value literal="UNSPECIFIED"/>
+            <value literal="NEVER"/>
+            <value literal="ALWAYS"/>
+            <value literal="MANUAL"/>
+        </values>
+    </criterion_type>
+    <criterion_type name="ForceUseForVibrateRingingType" type="exclusive">
+        <values>
+            <value literal="NONE"/>
+            <value literal="BT_SCO"/>
+            <value literal="BT_BLE"/>
+        </values>
+    </criterion_type>
+</criterion_types>
+
+

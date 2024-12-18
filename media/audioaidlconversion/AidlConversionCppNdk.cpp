@@ -739,6 +739,8 @@ const detail::AudioFormatPairs& getAudioFormatPairs() {
             {// Note: not in the IANA registry.
              AUDIO_FORMAT_APTX_HD, make_AudioFormatDescription("audio/vnd.qcom.aptx.hd")},
             {AUDIO_FORMAT_AC4, make_AudioFormatDescription(::android::MEDIA_MIMETYPE_AUDIO_AC4)},
+            {AUDIO_FORMAT_AC4_L4, make_AudioFormatDescription(
+                    std::string(::android::MEDIA_MIMETYPE_AUDIO_AC4) + ";version=02.01.04")},
             {// Note: not in the IANA registry.
              AUDIO_FORMAT_LDAC, make_AudioFormatDescription("audio/vnd.sony.ldac")},
             {AUDIO_FORMAT_MAT,
@@ -1069,13 +1071,6 @@ AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& de
             if (mac.size() != 6) return BAD_VALUE;
             snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-            // special case for anonymized mac address:
-            // change anonymized bytes back from FD:FF:FF:FF to XX:XX:XX:XX
-            std::string address(addressBuffer);
-            if (address.compare(0, strlen("FD:FF:FF:FF"), "FD:FF:FF:FF") == 0) {
-                address.replace(0, strlen("FD:FF:FF:FF"), "XX:XX:XX:XX");
-            }
-            strcpy(addressBuffer, address.c_str());
         } break;
         case Tag::ipv4: {
             const std::vector<uint8_t>& ipv4 = aidl.address.get<AudioDeviceAddress::ipv4>();
@@ -1136,20 +1131,11 @@ legacy2aidl_audio_device_AudioDevice(
     if (!legacyAddress.empty()) {
         switch (suggestDeviceAddressTag(aidl.type)) {
             case Tag::mac: {
-                // special case for anonymized mac address:
-                // change anonymized bytes so that they can be scanned as HEX bytes
-                // Use '01' for LSB bits 0 and 1 as Bluetooth MAC addresses are never multicast
-                // and universaly administered
-                std::string address = legacyAddress;
-                if (address.compare(0, strlen("XX:XX:XX:XX"), "XX:XX:XX:XX") == 0) {
-                    address.replace(0, strlen("XX:XX:XX:XX"), "FD:FF:FF:FF");
-                }
-
                 std::vector<uint8_t> mac(6);
-                int status = sscanf(address.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
+                int status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
                         &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
                 if (status != mac.size()) {
-                    ALOGE("%s: malformed MAC address: \"%s\"", __func__, address.c_str());
+                    ALOGE("%s: malformed MAC address: \"%s\"", __func__, legacyAddress.c_str());
                     return unexpected(BAD_VALUE);
                 }
                 aidl.address = AudioDeviceAddress::make<AudioDeviceAddress::mac>(std::move(mac));
@@ -2327,6 +2313,15 @@ aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(const AudioPortDevic
     audio_port_config_device_ext legacy{};
     RETURN_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
                     aidl.device, &legacy.type, legacy.address));
+    const bool isInput = false;  // speaker_layout_channel_mask only represents output.
+    if (aidl.speakerLayout.has_value()) {
+        legacy.speaker_layout_channel_mask =
+                VALUE_OR_RETURN(aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
+                        aidl.speakerLayout.value(), isInput));
+    } else {
+        // Default to none when the field is null in the AIDL.
+        legacy.speaker_layout_channel_mask = AUDIO_CHANNEL_NONE;
+    }
     return legacy;
 }
 
@@ -2335,6 +2330,14 @@ ConversionResult<AudioPortDeviceExt> legacy2aidl_audio_port_config_device_ext_Au
     AudioPortDeviceExt aidl;
     aidl.device = VALUE_OR_RETURN(
             legacy2aidl_audio_device_AudioDevice(legacy.type, legacy.address));
+    const bool isInput = false;  // speaker_layout_channel_mask only represents output.
+    // The AIDL speakerLayout is nullable and if set, can only be a layoutMask.
+    if (audio_channel_mask_is_valid(legacy.speaker_layout_channel_mask) &&
+        audio_channel_mask_get_representation(legacy.speaker_layout_channel_mask) ==
+                AUDIO_CHANNEL_REPRESENTATION_POSITION) {
+        aidl.speakerLayout = VALUE_OR_RETURN(legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
+                legacy.speaker_layout_channel_mask, isInput));
+    }
     return aidl;
 }
 
