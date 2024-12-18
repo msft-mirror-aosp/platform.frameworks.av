@@ -117,9 +117,10 @@ public:
             AudioDeviceTypeAddrVector &devices) const override;
 
     engineConfig::ParsingResult loadAudioPolicyEngineConfig(
-            const media::audio::common::AudioHalEngineConfig& aidlConfig);
+            const media::audio::common::AudioHalEngineConfig& aidlConfig, bool);
 
-    engineConfig::ParsingResult loadAudioPolicyEngineConfig(const std::string& xmlFilePath = "");
+    engineConfig::ParsingResult loadAudioPolicyEngineConfig(
+            const std::string& xmlFilePath = "", bool isConfigurable = false);
 
     const ProductStrategyMap &getProductStrategies() const { return mProductStrategies; }
 
@@ -128,6 +129,8 @@ public:
     product_strategy_t getProductStrategyForStream(audio_stream_type_t stream) const;
 
     product_strategy_t getProductStrategyByName(const std::string &name) const;
+
+    std::string getProductStrategyName(product_strategy_t id) const;
 
     AudioPolicyManagerObserver *getApmObserver() const { return mApmObserver; }
 
@@ -174,6 +177,8 @@ public:
     void initializeDeviceSelectionCache() override;
 
     void updateDeviceSelectionCache() override;
+
+    void setDefaultConfiguration();
 
 protected:
     DeviceVector getPreferredAvailableDevicesForProductStrategy(

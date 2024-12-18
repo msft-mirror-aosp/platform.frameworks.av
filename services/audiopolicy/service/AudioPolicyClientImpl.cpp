@@ -56,7 +56,7 @@ status_t AudioPolicyService::AudioPolicyClient::openOutput(audio_module_handle_t
                                                            audio_config_base_t *mixerConfig,
                                                            const sp<DeviceDescriptorBase>& device,
                                                            uint32_t *latencyMs,
-                                                           audio_output_flags_t flags,
+                                                           audio_output_flags_t *flags,
                                                            audio_attributes_t attributes)
 {
     sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
@@ -74,7 +74,7 @@ status_t AudioPolicyService::AudioPolicyClient::openOutput(audio_module_handle_t
     request.mixerConfig = VALUE_OR_RETURN_STATUS(
             legacy2aidl_audio_config_base_t_AudioConfigBase(*mixerConfig, false /*isInput*/));
     request.device = VALUE_OR_RETURN_STATUS(legacy2aidl_DeviceDescriptorBase(device));
-    request.flags = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
+    request.flags = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_output_flags_t_int32_t_mask(*flags));
     request.attributes = VALUE_OR_RETURN_STATUS(
             legacy2aidl_audio_attributes_t_AudioAttributes(attributes));
 
@@ -89,7 +89,9 @@ status_t AudioPolicyService::AudioPolicyClient::openOutput(audio_module_handle_t
             .channel_mask = halConfig->channel_mask,
             .format = halConfig->format,
         };
-        mAudioPolicyService->registerOutput(*output, config, flags);
+        *flags = VALUE_OR_RETURN_STATUS(
+                aidl2legacy_int32_t_audio_output_flags_t_mask(response.flags));
+        mAudioPolicyService->registerOutput(*output, config, *flags);
     }
     return status;
 }
@@ -189,6 +191,16 @@ status_t AudioPolicyService::AudioPolicyClient::setStreamVolume(audio_stream_typ
 {
     return mAudioPolicyService->setStreamVolume(stream, volume, output,
                                                delay_ms);
+}
+
+status_t AudioPolicyService::AudioPolicyClient::setPortsVolume(
+        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output,
+        int delayMs)
+{
+    if (ports.empty()) {
+        return NO_ERROR;
+    }
+    return mAudioPolicyService->setPortsVolume(ports, volume, output, delayMs);
 }
 
 void AudioPolicyService::AudioPolicyClient::setParameters(audio_io_handle_t io_handle,
@@ -353,6 +365,15 @@ status_t AudioPolicyService::AudioPolicyClient::getAudioMixPort(
         return PERMISSION_DENIED;
     }
     return af->getAudioMixPort(devicePort, port);
+}
+
+status_t AudioPolicyService::AudioPolicyClient::setTracksInternalMute(
+        const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) {
+    sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
+    if (af == nullptr) {
+        return PERMISSION_DENIED;
+    }
+    return af->setTracksInternalMute(tracksInternalMute);
 }
 
 } // namespace android

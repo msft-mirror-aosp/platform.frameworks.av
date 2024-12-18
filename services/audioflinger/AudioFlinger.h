@@ -33,10 +33,12 @@
 #include <audio_utils/FdToString.h>
 #include <audio_utils/SimpleLog.h>
 #include <media/IAudioFlinger.h>
+#include <media/IAudioPolicyServiceLocal.h>
 #include <media/MediaMetricsItem.h>
 #include <media/audiohal/DevicesFactoryHalInterface.h>
 #include <mediautils/ServiceUtilities.h>
 #include <mediautils/Synchronization.h>
+#include <psh_utils/AudioPowerManager.h>
 
 // not needed with the includes above, added to prevent transitive include dependency.
 #include <utils/KeyedVector.h>
@@ -95,9 +97,8 @@ private:
     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
             EXCLUDES_AudioFlinger_Mutex;
 
-    float streamVolume(audio_stream_type_t stream,
-            audio_io_handle_t output) const final EXCLUDES_AudioFlinger_Mutex;
-    bool streamMute(audio_stream_type_t stream) const final EXCLUDES_AudioFlinger_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
 
     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
 
@@ -261,6 +262,10 @@ private:
     status_t getAudioMixPort(const struct audio_port_v7* devicePort,
                              struct audio_port_v7* mixPort) const final EXCLUDES_AudioFlinger_Mutex;
 
+    status_t setTracksInternalMute(
+            const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) final
+            EXCLUDES_AudioFlinger_Mutex;
+
     status_t onTransactWrapper(TransactionCode code, const Parcel& data, uint32_t flags,
             const std::function<status_t()>& delegate) final EXCLUDES_AudioFlinger_Mutex;
 
@@ -332,7 +337,7 @@ private:
             audio_config_base_t* mixerConfig,
             audio_devices_t deviceType,
             const String8& address,
-            audio_output_flags_t flags,
+            audio_output_flags_t* flags,
             audio_attributes_t attributes) final REQUIRES(mutex());
     const DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>&
             getAudioHwDevs_l() const final REQUIRES(mutex(), hardwareMutex()) {
@@ -405,6 +410,8 @@ private:
     void onHardError(std::set<audio_port_handle_t>& trackPortIds) final
             EXCLUDES_AudioFlinger_ClientMutex;
 
+    const ::com::android::media::permission::IPermissionProvider& getPermissionProvider() final;
+
     // ---- end of IAfThreadCallback interface
 
     /* List available audio ports and their attributes */
@@ -427,6 +434,13 @@ public:
                             const sp<MmapStreamCallback>& callback,
                             sp<MmapStreamInterface>& interface,
             audio_port_handle_t *handle) EXCLUDES_AudioFlinger_Mutex;
+
+    void initAudioPolicyLocal(sp<media::IAudioPolicyServiceLocal> audioPolicyLocal) {
+        if (mAudioPolicyServiceLocal.load() == nullptr) {
+            mAudioPolicyServiceLocal = std::move(audioPolicyLocal);
+        }
+    }
+
 private:
     // FIXME The 400 is temporarily too high until a leak of writers in media.log is fixed.
     static const size_t kLogMemorySize = 400 * 1024;
@@ -486,6 +500,7 @@ private:
         const pid_t             mPid;
         const uid_t             mUid;
         const sp<media::IAudioFlingerClient> mAudioFlingerClient;
+        const std::unique_ptr<media::psh_utils::Token> mClientToken;
     };
 
     // --- MediaLogNotifier ---
@@ -542,6 +557,7 @@ private:
     IAfPlaybackThread* checkMixerThread_l(audio_io_handle_t output) const REQUIRES(mutex());
 
     sp<VolumeInterface> getVolumeInterface_l(audio_io_handle_t output) const REQUIRES(mutex());
+
     std::vector<sp<VolumeInterface>> getAllVolumeInterfaces_l() const REQUIRES(mutex());
 
 
@@ -684,8 +700,7 @@ private:
 
     DefaultKeyedVector<audio_io_handle_t, sp<IAfRecordThread>> mRecordThreads GUARDED_BY(mutex());
 
-    DefaultKeyedVector<pid_t, sp<NotificationClient>> mNotificationClients
-            GUARDED_BY(clientMutex());
+    std::map<pid_t, sp<NotificationClient>> mNotificationClients GUARDED_BY(clientMutex());
 
                 // updated by atomic_fetch_add_explicit
     volatile atomic_uint_fast32_t mNextUniqueIds[AUDIO_UNIQUE_ID_USE_MAX];  // ctor init
@@ -748,9 +763,6 @@ private:
     std::atomic<size_t> mClientSharedHeapSize = kMinimumClientSharedHeapSizeBytes;
     static constexpr size_t kMinimumClientSharedHeapSizeBytes = 1024 * 1024; // 1MB
 
-    // when a global effect was last enabled
-    nsecs_t mGlobalEffectEnableTime GUARDED_BY(mutex()) = 0;
-
     /* const */ sp<IAfPatchPanel> mPatchPanel;
 
     const sp<EffectsFactoryHalInterface> mEffectsFactoryHal =
@@ -762,8 +774,6 @@ private:
 
     bool mSystemReady GUARDED_BY(mutex()) = false;
     std::atomic<bool> mAudioPolicyReady = false;
-
-    mediautils::UidInfo mUidInfo GUARDED_BY(mutex());
 
     // no mutex needed.
     SimpleLog  mRejectedSetParameterLog;
@@ -785,6 +795,9 @@ private:
 
     // Bluetooth Variable latency control logic is enabled or disabled
     std::atomic<bool> mBluetoothLatencyModesEnabled = true;
+
+    // Local interface to AudioPolicyService, late inited, but logically const
+    mediautils::atomic_sp<media::IAudioPolicyServiceLocal> mAudioPolicyServiceLocal;
 };
 
 // ----------------------------------------------------------------------------

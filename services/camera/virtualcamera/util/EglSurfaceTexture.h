@@ -17,16 +17,21 @@
 #ifndef ANDROID_COMPANION_VIRTUALCAMERA_EGLSURFACETEXTURE_H
 #define ANDROID_COMPANION_VIRTUALCAMERA_EGLSURFACETEXTURE_H
 
-#include <cstdint>
+#include <GLES/gl.h>
+#include <gui/ConsumerBase.h>
+#include <gui/Surface.h>
+#include <utils/RefBase.h>
 
-#include "GLES/gl.h"
-#include "gui/Surface.h"
-#include "utils/RefBase.h"
+#include <chrono>
+#include <cstdint>
 
 namespace android {
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 class IGraphicBufferProducer;
 class IGraphicBufferConsumer;
+#endif  // !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
 class GLConsumer;
 
 namespace companion {
@@ -51,6 +56,15 @@ class EglSurfaceTexture {
   // Get height of surface / texture.
   uint32_t getHeight() const;
 
+  // Wait for next frame to be available in the surface
+  // until timeout.
+  //
+  // Returns false on timeout, true if new frame was received before timeout.
+  bool waitForNextFrame(std::chrono::nanoseconds timeout);
+
+  void setFrameAvailableListener(
+      const wp<ConsumerBase::FrameAvailableListener>& listener);
+
   // Update the texture with the most recent submitted buffer.
   // Most be called on thread with EGL context.
   //
@@ -68,9 +82,15 @@ class EglSurfaceTexture {
   // See SurfaceTexture.getTransformMatrix for more details.
   std::array<float, 16> getTransformMatrix();
 
+  // Retrieves the timestamp associated with the texture image
+  // set by the most recent call to updateTexture.
+  std::chrono::nanoseconds getTimestamp();
+
  private:
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<IGraphicBufferProducer> mBufferProducer;
   sp<IGraphicBufferConsumer> mBufferConsumer;
+#endif  // !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
   sp<GLConsumer> mGlConsumer;
   sp<Surface> mSurface;
   GLuint mTextureId;

@@ -41,6 +41,7 @@ import android.media.ISoundDose;
 import android.media.ISoundDoseCallback;
 import android.media.MicrophoneInfoFw;
 import android.media.RenderPosition;
+import android.media.TrackInternalMuteInfo;
 import android.media.TrackSecondaryOutputInfo;
 import android.media.audio.common.AudioChannelLayout;
 import android.media.audio.common.AudioFormatDescription;
@@ -93,13 +94,18 @@ interface IAudioFlingerService {
     float getMasterBalance();
 
     /*
-     * Set/gets stream type state. This will probably be used by
+     * Set stream type state. This will probably be used by
      * the preference panel, mostly.
      */
     void setStreamVolume(AudioStreamType stream, float value, int /* audio_io_handle_t */ output);
     void setStreamMute(AudioStreamType stream, boolean muted);
-    float streamVolume(AudioStreamType stream, int /* audio_io_handle_t */ output);
-    boolean streamMute(AudioStreamType stream);
+
+    /*
+     * Set AudioTrack port ids volume attribute. This is the new way of controlling volume from
+     * AudioPolicyManager to AudioFlinger.
+     */
+    void setPortsVolume(in int[] /* audio_port_handle_t[] */ portIds, float volume,
+            int /* audio_io_handle_t */ output);
 
     // set audio mode.
     void setMode(AudioMode mode);
@@ -292,6 +298,11 @@ interface IAudioFlingerService {
      * Get the attributes of the mix port when connecting to the given device port.
      */
     AudioPortFw getAudioMixPort(in AudioPortFw devicePort, in AudioPortFw mixPort);
+
+    /**
+     * Set internal mute for a list of tracks.
+     */
+    void setTracksInternalMute(in TrackInternalMuteInfo[] tracksInternalMute);
 
     /*
      * Reset Circular references in AudioFlinger service.

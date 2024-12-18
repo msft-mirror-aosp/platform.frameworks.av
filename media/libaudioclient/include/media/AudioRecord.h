@@ -138,6 +138,12 @@ public:
                                       audio_format_t format,
                                       audio_channel_mask_t channelMask);
 
+    /* Checks for erroneous status, marks error in MediaMetrics, logs the error message.
+     * Updates and returns mStatus.
+     */
+    status_t logIfErrorAndReturnStatus(status_t status, const std::string& errorMessage,
+                                       const std::string& func);
+
     /* How data is transferred from AudioRecord
      */
     enum transfer_type {
@@ -582,6 +588,12 @@ public:
 
     /* Get the flags */
             audio_input_flags_t getFlags() const { AutoMutex _l(mLock); return mFlags; }
+
+    /* Set parameters */
+            status_t    setParameters(const String8& keyValuePairs);
+
+    /* Get parameters */
+            String8     getParameters(const String8& keys);
 
     /* Get active microphones. A empty vector of MicrophoneInfoFw will be passed as a parameter,
      * the data will be filled when querying the hal.

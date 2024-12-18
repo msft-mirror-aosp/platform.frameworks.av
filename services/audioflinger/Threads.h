@@ -33,6 +33,7 @@
 #include <fastpath/FastMixer.h>
 #include <mediautils/Synchronization.h>
 #include <mediautils/ThreadSnapshot.h>
+#include <psh_utils/Token.h>
 #include <timing/MonotonicFrameCounter.h>
 #include <utils/Log.h>
 
@@ -725,6 +726,7 @@ protected:
                 char                    mThreadName[kThreadNameLength]; // guaranteed NUL-terminated
     sp<os::IPowerManager> mPowerManager GUARDED_BY(mutex());
     sp<IBinder> mWakeLockToken GUARDED_BY(mutex());
+    std::unique_ptr<media::psh_utils::Token> mThreadToken GUARDED_BY(mutex());
                 const sp<PMDeathRecipient> mDeathRecipient;
                 // list of suspended effects per session and per type. The first (outer) vector is
                 // keyed by session ID, the second (inner) by type UUID timeLow field
@@ -834,6 +836,12 @@ protected:
                         return mActiveTracks.begin();
                     }
                     typename SortedVector<sp<T>>::iterator end() {
+                        return mActiveTracks.end();
+                    }
+                    typename SortedVector<const sp<T>>::iterator begin() const {
+                        return mActiveTracks.begin();
+                    }
+                    typename SortedVector<const sp<T>>::iterator end() const {
                         return mActiveTracks.end();
                     }
 
@@ -1011,6 +1019,9 @@ public:
     void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            final EXCLUDES_ThreadBase_Mutex;
+
     void setVolumeForOutput_l(float left, float right) const final;
 
     sp<IAfTrack> createTrack_l(
@@ -1035,7 +1046,8 @@ public:
                                 const sp<media::IAudioTrackCallback>& callback,
                                 bool isSpatialized,
                                 bool isBitPerfect,
-                                audio_output_flags_t* afTrackFlags) final
+                                audio_output_flags_t* afTrackFlags,
+                                float volume) final
             REQUIRES(audio_utils::AudioFlinger_Mutex);
 
     bool isTrackActive(const sp<IAfTrack>& track) const final {
@@ -1212,6 +1224,11 @@ public:
                     }
                     return mHalStarted;
                 }
+
+    void setTracksInternalMute(std::map<audio_port_handle_t, bool>* /* tracksInternalMute */)
+            override EXCLUDES_ThreadBase_Mutex {
+        // Do nothing. It is only used for bit perfect thread
+    }
 protected:
     // updated by readOutputParameters_l()
     size_t                          mNormalFrameCount;  // normal mixer and effects
@@ -2380,6 +2397,8 @@ public:
     void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
+    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+            final EXCLUDES_ThreadBase_Mutex;
 
     void setMasterMute_l(bool muted) REQUIRES(mutex()) { mMasterMute = muted; }
 
@@ -2464,12 +2483,17 @@ public:
     BitPerfectThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStreamOut *output,
                      audio_io_handle_t id, bool systemReady);
 
+    void setTracksInternalMute(std::map<audio_port_handle_t, bool>* tracksInternalMuted)
+            final EXCLUDES_ThreadBase_Mutex;
+
 protected:
     mixer_state prepareTracks_l(Vector<sp<IAfTrack>>* tracksToRemove) final
             REQUIRES(mutex(), ThreadBase_ThreadLoop);
     void threadLoop_mix() final REQUIRES(ThreadBase_ThreadLoop);
 
 private:
+    sp<IAfTrack> getTrackToStreamBitPerfectly_l() REQUIRES(mutex());
+
     // These variables are only accessed on the threadLoop; hence need no mutex.
     bool mIsBitPerfect GUARDED_BY(ThreadBase_ThreadLoop) = false;
     float mVolumeLeft GUARDED_BY(ThreadBase_ThreadLoop) = 0.f;

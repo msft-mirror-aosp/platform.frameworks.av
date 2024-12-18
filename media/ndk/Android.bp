@@ -52,9 +52,6 @@ ndk_library {
     symbol_file: "libmediandk.map.txt",
     first_version: "21",
     unversioned_until: "current",
-    export_header_libs: [
-        "libmediandk_headers",
-    ],
 }
 
 ndk_headers {
@@ -96,6 +93,8 @@ cc_library_shared {
     srcs: [
         "NdkJavaVMHelper.cpp",
         "NdkMediaCodec.cpp",
+        "NdkMediaCodecInfo.cpp",
+        "NdkMediaCodecStore.cpp",
         "NdkMediaCrypto.cpp",
         "NdkMediaDataSource.cpp",
         "NdkMediaExtractor.cpp",
@@ -134,6 +133,8 @@ cc_library_shared {
         "libbase",
         "libdatasource",
         "libmedia",
+        "libmedia_codeclist",
+        "libmedia_codeclist_capabilities",
         "libmediadrm",
         "libmedia_omx",
         "libmedia_jni_utils",

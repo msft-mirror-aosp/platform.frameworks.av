@@ -16,6 +16,8 @@
 
 #include <Camera.h>
 #include <CameraParameters.h>
+#include <CameraUtils.h>
+#include <android/content/AttributionSourceState.h>
 #include <binder/MemoryDealer.h>
 #include <fuzzer/FuzzedDataProvider.h>
 #include <gui/Surface.h>
@@ -122,21 +124,25 @@ bool CameraFuzzer::initCamera() {
     sp<ICameraService> cameraService = nullptr;
     cameraService = interface_cast<ICameraService>(binder);
     sp<ICamera> cameraDevice = nullptr;
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
     if (mFDP->ConsumeBool()) {
-        cameraService->connect(this, mFDP->ConsumeIntegral<int32_t>() /* cameraId */, "CAMERAFUZZ",
-                               hardware::ICameraService::USE_CALLING_UID,
-                               hardware::ICameraService::USE_CALLING_PID,
+        clientAttribution.uid = hardware::ICameraService::USE_CALLING_UID;
+        clientAttribution.pid = hardware::ICameraService::USE_CALLING_PID;
+        clientAttribution.packageName = "CAMERAFUZZ";
+        cameraService->connect(this, mFDP->ConsumeIntegral<int32_t>() /* cameraId */,
                                /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
                                /*overrideToPortrait*/ false, /*forceSlowJpegMode*/ false,
-                               &cameraDevice);
+                               clientAttribution, /*devicePolicy*/0, &cameraDevice);
     } else {
+        clientAttribution.uid = mFDP->ConsumeIntegral<int8_t>();
+        clientAttribution.pid = mFDP->ConsumeIntegral<int8_t>();
+        clientAttribution.packageName = mFDP->ConsumeRandomLengthString(kMaxBytes).c_str();
         cameraService->connect(this, mFDP->ConsumeIntegral<int32_t>() /* cameraId */,
-                               mFDP->ConsumeRandomLengthString(kMaxBytes).c_str(),
-                               mFDP->ConsumeIntegral<int8_t>() /* clientUid */,
-                               mFDP->ConsumeIntegral<int8_t>() /* clientPid */,
                                /*targetSdkVersion*/ mFDP->ConsumeIntegral<int32_t>(),
                                /*overrideToPortrait*/ mFDP->ConsumeBool(),
-                               /*forceSlowJpegMode*/ mFDP->ConsumeBool(), &cameraDevice);
+                               /*forceSlowJpegMode*/ mFDP->ConsumeBool(), clientAttribution,
+                               /*devicePolicy*/0, &cameraDevice);
     }
 
     mCamera = Camera::create(cameraDevice);
@@ -163,13 +169,16 @@ void CameraFuzzer::invokeCamera() {
     }
 
     int32_t cameraId = mFDP->ConsumeIntegral<int32_t>();
-    Camera::getNumberOfCameras();
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    Camera::getNumberOfCameras(clientAttribution, /*devicePolicy*/0);
     CameraInfo cameraInfo;
     cameraInfo.facing = mFDP->ConsumeBool() ? mFDP->PickValueInArray(kValidFacing)
                                             : mFDP->ConsumeIntegral<int32_t>();
     cameraInfo.orientation = mFDP->ConsumeBool() ? mFDP->PickValueInArray(kValidOrientation)
                                                  : mFDP->ConsumeIntegral<int32_t>();
-    Camera::getCameraInfo(cameraId, /*overrideToPortrait*/false, &cameraInfo);
+    Camera::getCameraInfo(cameraId, /*overrideToPortrait*/false, clientAttribution,
+                          /*devicePolicy*/0, &cameraInfo);
     mCamera->reconnect();
 
     sp<SurfaceComposerClient> composerClient = new SurfaceComposerClient;

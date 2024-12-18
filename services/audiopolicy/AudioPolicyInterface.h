@@ -18,6 +18,7 @@
 #define ANDROID_AUDIOPOLICY_INTERFACE_H
 
 #include <android/media/DeviceConnectedState.h>
+#include <android/media/TrackInternalMuteInfo.h>
 #include <media/AudioCommonTypes.h>
 #include <media/AudioContainers.h>
 #include <media/AudioDeviceTypeAddr.h>
@@ -146,7 +147,8 @@ public:
                                       std::vector<audio_io_handle_t> *secondaryOutputs,
                                       output_type_t *outputType,
                                       bool *isSpatialized,
-                                      bool *isBitPerfect) = 0;
+                                      bool *isBitPerfect,
+                                      float *volume) = 0;
     // indicates to the audio policy manager that the output starts being used by corresponding
     // stream.
     virtual status_t startOutput(audio_port_handle_t portId) = 0;
@@ -166,7 +168,8 @@ public:
                                      audio_input_flags_t flags,
                                      audio_port_handle_t *selectedDeviceId,
                                      input_type_t *inputType,
-                                     audio_port_handle_t *portId) = 0;
+                                     audio_port_handle_t *portId,
+                                     uint32_t *virtualDeviceId) = 0;
     // indicates to the audio policy manager that the input starts being used.
     virtual status_t startInput(audio_port_handle_t portId) = 0;
     // indicates to the audio policy manager that the input stops being used.
@@ -178,10 +181,16 @@ public:
     // volume control functions
     //
 
+    // notifies the audio policy manager that the absolute volume mode is enabled/disabled on
+    // the passed device. Also specifies the stream that is controlling the absolute volume.
+    virtual status_t setDeviceAbsoluteVolumeEnabled(audio_devices_t device,
+                                                    const char *address,
+                                                    bool enabled,
+                                                    audio_stream_type_t streamToDriveAbs) = 0;
     // initialises stream volume conversion parameters by specifying volume index range.
     virtual void initStreamVolume(audio_stream_type_t stream,
-                                      int indexMin,
-                                      int indexMax) = 0;
+                                  int indexMin,
+                                  int indexMax) = 0;
 
     // sets the new stream volume at a level corresponding to the supplied index for the
     // supplied device. By convention, specifying AUDIO_DEVICE_OUT_DEFAULT_FOR_VOLUME means
@@ -286,8 +295,7 @@ public:
     virtual status_t startAudioSource(const struct audio_port_config *source,
                                       const audio_attributes_t *attributes,
                                       audio_port_handle_t *portId,
-                                      uid_t uid,
-                                      bool internal = false) = 0;
+                                      uid_t uid) = 0;
     virtual status_t stopAudioSource(audio_port_handle_t portId) = 0;
 
     virtual status_t setMasterMono(bool mono) = 0;
@@ -470,7 +478,7 @@ public:
                                 audio_config_base_t *mixerConfig,
                                 const sp<DeviceDescriptorBase>& device,
                                 uint32_t *latencyMs,
-                                audio_output_flags_t flags,
+                                audio_output_flags_t *flags,
                                 audio_attributes_t audioAttributes) = 0;
     // creates a special output that is duplicated to the two outputs passed as arguments.
     // The duplication is performed by a special mixer thread in the AudioFlinger.
@@ -508,6 +516,18 @@ public:
     // for each output (destination device) it is attached to.
     virtual status_t setStreamVolume(audio_stream_type_t stream, float volume,
                                      audio_io_handle_t output, int delayMs = 0) = 0;
+    /**
+     * Set volume for given AudioTrack port ids for a particular output.
+     * For the same user setting, a given volume group and associated output port id
+     * can have different volumes for each output (destination device) it is attached to.
+     * @param ports to consider
+     * @param volume to apply
+     * @param output to consider
+     * @param delayMs to use
+     * @return NO_ERROR if successful
+     */
+    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& ports, float volume,
+            audio_io_handle_t output, int delayMs = 0) = 0;
 
     // function enabling to send proprietary informations directly from audio policy manager to
     // audio hardware interface.
@@ -585,6 +605,9 @@ public:
     // Get the attributes of the mix port when connecting to the given device port.
     virtual status_t getAudioMixPort(const struct audio_port_v7 *devicePort,
                                      struct audio_port_v7 *mixPort) = 0;
+
+    virtual status_t setTracksInternalMute(
+            const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) = 0;
 };
 
     // These are the signatures of createAudioPolicyManager/destroyAudioPolicyManager

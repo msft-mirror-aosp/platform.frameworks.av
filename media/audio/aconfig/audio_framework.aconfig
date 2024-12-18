@@ -22,8 +22,24 @@ flag {
     bug: "302323921"
 }
 
+flag{
+    name: "enable_ringtone_haptics_customization"
+    namespace: "media_audio"
+    description: "Enables haptic customization for playing ringtone."
+    bug: "351974934"
+}
+
+flag {
+    name: "deprecate_stream_bt_sco"
+    namespace: "media_audio"
+    description: "Deprecate STREAM_BLUETOOTH_SCO"
+    is_exported: true
+    bug: "376756660"
+}
+
 flag {
     name: "feature_spatial_audio_headtracking_low_latency"
+    is_exported: true
     namespace: "media_audio"
     description: "Define feature for low latency headtracking for SA"
     bug: "324291076"
@@ -31,6 +47,7 @@ flag {
 
 flag {
     name: "focus_exclusive_with_recording"
+    is_exported: true
     namespace: "media_audio"
     description:
         "Audio focus GAIN_TRANSIENT_EXCLUSIVE only mutes"
@@ -39,17 +56,29 @@ flag {
 }
 
 flag {
+    name: "dolby_ac4_level4_encoding_api"
+    namespace: "media_audio"
+    description: "Feature flag for Dolby AC-4 level 4 AudioFormat encoding."
+    is_fixed_read_only: true
+    bug: "266537650"
+}
+
+# TODO remove
+flag {
     name: "foreground_audio_control"
+    is_exported: true
     namespace: "media_audio"
     description:
         "Audio focus gain requires FGS or delegation to "
-	"take effect"
+        "take effect"
     bug: "296232417"
+    is_fixed_read_only: true
 }
 
 # TODO remove
 flag {
     name: "focus_freeze_test_api"
+    is_exported: true
     namespace: "media_audio"
     description: "\
  AudioManager audio focus test APIs:\
@@ -63,6 +92,7 @@ flag {
 
 flag {
     name: "loudness_configurator_api"
+    is_exported: true
     namespace: "media_audio"
     description: "\
 Enable the API for providing loudness metadata and CTA-2075 \
@@ -79,7 +109,15 @@ flag {
 }
 
 flag {
+    name: "muted_by_port_volume_api"
+    namespace: "media_audio"
+    description: "Playback monitoring flag used when player muted by port volume"
+    bug: "319515324"
+}
+
+flag {
     name: "sco_managed_by_audio"
+    is_exported: true
     namespace: "media_audio"
     description: "\
 Enable new implementation of headset profile device connection and\
@@ -89,14 +127,37 @@ SCO audio activation."
 
 flag {
     name: "supported_device_types_api"
+    is_exported: true
     namespace: "media_audio"
     description: "Surface new API method AudioManager.getSupportedDeviceTypes()"
     bug: "307537538"
 }
 
 flag {
+    name: "ro_foreground_audio_control"
+    is_exported: true
+    namespace: "media_audio"
+    description:
+        "Audio focus gain requires FGS or delegation to "
+        "take effect"
+    bug: "296232417"
+    is_fixed_read_only: true
+}
+
+flag {
+    name: "ro_volume_ringer_api_hardening"
+    namespace: "media_audio"
+    description: "Limit access to volume and ringer SDK APIs in AudioManager"
+    bug: "296232417"
+    is_fixed_read_only: true
+}
+
+
+# TODO remove
+flag {
     name: "volume_ringer_api_hardening"
     namespace: "media_audio"
     description: "Limit access to volume and ringer SDK APIs in AudioManager"
     bug: "296232417"
+    is_fixed_read_only: true
 }

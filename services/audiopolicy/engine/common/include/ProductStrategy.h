@@ -46,7 +46,7 @@ private:
     using VolumeGroupAttributesVector = std::vector<VolumeGroupAttributes>;
 
 public:
-    ProductStrategy(const std::string &name);
+    ProductStrategy(const std::string &name, int id = PRODUCT_STRATEGY_NONE);
 
     void addAttributes(const VolumeGroupAttributes &volumeGroupAttributes);
 
@@ -91,6 +91,10 @@ public:
     volume_group_t getDefaultVolumeGroup() const;
 
     bool isDefault() const;
+
+    bool isPatchStrategy() const {
+        return getVolumeGroupForStreamType(AUDIO_STREAM_PATCH) != VOLUME_GROUP_NONE;
+    }
 
     void dump(String8 *dst, int spaces = 0) const;
 

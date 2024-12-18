@@ -21,6 +21,7 @@
 #include <audio_utils/mutex.h>
 #include <audiomanager/IAudioManager.h>
 #include <binder/IMemory.h>
+#include <datapath/VolumePortInterface.h>
 #include <fastpath/FastMixerDumpState.h>
 #include <media/AudioSystem.h>
 #include <media/VolumeShaper.h>
@@ -254,7 +255,7 @@ public:
 };
 
 // Common interface for Playback tracks.
-class IAfTrack : public virtual IAfTrackBase {
+class IAfTrack : public virtual IAfTrackBase, public virtual VolumePortInterface {
 public:
     // FillingStatus is used for suppressing volume ramp at begin of playing
     enum FillingStatus { FS_INVALID, FS_FILLING, FS_FILLED, FS_ACTIVE };
@@ -289,7 +290,8 @@ public:
             size_t frameCountToBeReady = SIZE_MAX,
             float speed = 1.0f,
             bool isSpatialized = false,
-            bool isBitPerfect = false);
+            bool isBitPerfect = false,
+            float volume = 0.0f);
 
     virtual void pause() = 0;
     virtual void flush() = 0;
@@ -375,6 +377,8 @@ public:
     virtual void triggerEvents(AudioSystem::sync_event_t type) = 0;
 
     virtual void disable() = 0;
+    virtual bool isDisabled() const = 0;
+
     virtual int& fastIndex() = 0;
     virtual bool isPlaybackRestricted() const = 0;
 
@@ -425,6 +429,10 @@ public:
     virtual FillingStatus& fillingStatus() = 0;
     virtual int8_t& retryCount() = 0;
     virtual FastTrackUnderruns& fastTrackUnderruns() = 0;
+
+    // Internal mute, this is currently only used for bit-perfect playback
+    virtual bool getInternalMute() const = 0;
+    virtual void setInternalMute(bool muted) = 0;
 };
 
 // playback track, used by DuplicatingThread
@@ -446,7 +454,7 @@ public:
     virtual ExtendedTimestamp getClientProxyTimestamp() const = 0;
 };
 
-class IAfMmapTrack : public virtual IAfTrackBase {
+class IAfMmapTrack : public virtual IAfTrackBase, public virtual VolumePortInterface {
 public:
     static sp<IAfMmapTrack> create(IAfThreadBase* thread,
             const audio_attributes_t& attr,
@@ -457,7 +465,8 @@ public:
             bool isOut,
             const android::content::AttributionSourceState& attributionSource,
             pid_t creatorPid,
-            audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE);
+            audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
+            float volume = 0.0f);
 
     // protected by MMapThread::mLock
     virtual void setSilenced_l(bool silenced) = 0;
@@ -522,6 +531,7 @@ public:
     virtual status_t setPreferredMicrophoneFieldDimension(float zoom) = 0;
     virtual status_t shareAudioHistory(
             const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) = 0;
+    virtual status_t setParameters(const String8& keyValuePairs) = 0;
     virtual int32_t startFrames() const = 0;
 
     static bool checkServerLatencySupported(audio_format_t format, audio_input_flags_t flags) {
@@ -577,7 +587,8 @@ public:
                                              *  as soon as possible to have
                                              *  the lowest possible latency
                                              *  even if it might glitch. */
-            float speed = 1.0f);
+            float speed = 1.0f,
+            float volume = 1.0f);
 };
 
 class IAfPatchRecord : public virtual IAfRecordTrack, public virtual IAfPatchTrackBase {

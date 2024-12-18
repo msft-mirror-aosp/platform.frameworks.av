@@ -18,6 +18,7 @@
 #define ANDROID_SERVERS_CAMERA3_OUTPUT_STREAM_H
 
 #include <mutex>
+#include <optional>
 #include <utils/RefBase.h>
 #include <gui/IProducerListener.h>
 #include <gui/Surface.h>
@@ -143,7 +144,7 @@ class Camera3OutputStream :
      * Camera3Stream interface
      */
 
-    virtual void     dump(int fd, const Vector<String16> &args) const;
+    virtual void     dump(int fd, const Vector<String16> &args);
 
     /**
      * Set the transform on the output stream; one of the
@@ -154,21 +155,21 @@ class Camera3OutputStream :
     /**
      * Return if this output stream is for video encoding.
      */
-    bool isVideoStream() const;
+    bool isVideoStream();
     /**
      * Return if this output stream is consumed by hardware composer.
      */
-    bool isConsumedByHWComposer() const;
+    bool isConsumedByHWComposer();
 
     /**
      * Return if this output stream is consumed by hardware texture.
      */
-    bool isConsumedByHWTexture() const;
+    bool isConsumedByHWTexture();
 
     /**
      * Return if this output stream is consumed by CPU.
      */
-    bool isConsumedByCPU() const;
+    bool isConsumedByCPU();
 
     /**
      * Return if the consumer configuration of this stream is deferred.
@@ -192,6 +193,7 @@ class Camera3OutputStream :
             virtual void onBufferReleased();
             virtual bool needsReleaseNotify() { return mNeedsReleaseNotify; }
             virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& buffers);
+            virtual void onBufferDetached(int /*slot*/) override {};
 
         private:
             wp<Camera3OutputStream> mParent;
@@ -304,8 +306,7 @@ class Camera3OutputStream :
     virtual status_t disconnectLocked();
     status_t fixUpHidlJpegBlobHeader(ANativeWindowBuffer* anwBuffer, int fence);
 
-    status_t getEndpointUsageForSurface(uint64_t *usage,
-            const sp<Surface>& surface) const;
+    status_t getEndpointUsageForSurface(uint64_t *usage, const sp<Surface>& surface);
     status_t configureConsumerQueueLocked(bool allowPreviewRespace);
 
     // Consumer as the output of camera HAL
@@ -325,9 +326,6 @@ class Camera3OutputStream :
     virtual status_t  setTransformLocked(int transform);
 
     bool mTraceFirstBuffer;
-
-    // Name of Surface consumer
-    std::string           mConsumerName;
 
     /**
      * GraphicBuffer manager this stream is registered to. Used to replace the buffer
@@ -366,6 +364,11 @@ class Camera3OutputStream :
      */
     uint64_t    mConsumerUsage;
 
+    /**
+     * Consumer end point usage flag retrieved from the buffer queue.
+     */
+    std::optional<uint64_t>    mConsumerUsageCachedValue;
+
     // Whether to drop valid buffers.
     bool mDropBuffers;
 
@@ -399,7 +402,7 @@ class Camera3OutputStream :
 
     virtual status_t configureQueueLocked();
 
-    virtual status_t getEndpointUsage(uint64_t *usage) const;
+    virtual status_t getEndpointUsage(uint64_t *usage);
 
     /**
      * Private methods
