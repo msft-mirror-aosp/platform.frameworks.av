@@ -202,6 +202,20 @@ ndk::ScopedAStatus AidlCameraDeviceUser::isPrimaryClient(bool* _aidl_return) {
     return fromUStatus(ret);
 }
 
+ndk::ScopedAStatus AidlCameraDeviceUser::startStreaming(
+        const std::vector<int32_t>& in_streamIdxArray,
+        const std::vector<int32_t>& in_surfaceIdxArray, SSubmitInfo* _aidl_return){
+    USubmitInfo submitInfo;
+    UStatus ret = mDeviceRemote->startStreaming(in_streamIdxArray, in_surfaceIdxArray, &submitInfo);
+    if (!ret.isOk()) {
+        ALOGE("%s: Failed to start streaming: %s", __FUNCTION__, ret.toString8().c_str());
+        return fromUStatus(ret);
+    }
+    mRequestId = submitInfo.mRequestId;
+    convertToAidl(submitInfo, _aidl_return);
+    return ScopedAStatus::ok();
+}
+
 ndk::ScopedAStatus AidlCameraDeviceUser::flush(int64_t* _aidl_return) {
     UStatus ret = mDeviceRemote->flush(_aidl_return);
     return fromUStatus(ret);

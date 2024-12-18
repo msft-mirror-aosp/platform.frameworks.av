@@ -2096,7 +2096,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfi
         const int32_t sharedColorSpaceTag = ANDROID_SHARED_SESSION_COLOR_SPACE;
         const int32_t sharedOutputConfigurationsTag = ANDROID_SHARED_SESSION_OUTPUT_CONFIGURATIONS;
         auto& c = mCameraCharacteristics;
-        uint8_t colorSpace = 0;
+        int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED;
 
         res = c.update(sharedColorSpaceTag, &colorSpace, 1);
 
@@ -2104,8 +2104,8 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfi
         // take these values from XML instead.
         std::vector<int64_t> sharedOutputConfigEntries;
         int64_t surfaceType1 =  OutputConfiguration::SURFACE_TYPE_IMAGE_READER;
-        int64_t width = 1280;
-        int64_t height = 800;
+        int64_t width = 1920;
+        int64_t height = 1080;
         int64_t format1 = HAL_PIXEL_FORMAT_RGBA_8888;
         int64_t mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO;
         int64_t timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT;
@@ -2131,7 +2131,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfi
         // Stream 2 configuration hardcoded
         int64_t surfaceType2 =  OutputConfiguration::SURFACE_TYPE_SURFACE_VIEW;
         int64_t format2 = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
-        int64_t usage2 = 0;
+        int64_t usage2 = GraphicBuffer::USAGE_HW_TEXTURE | GraphicBuffer::USAGE_HW_COMPOSER;
 
         sharedOutputConfigEntries.push_back(surfaceType2);
         sharedOutputConfigEntries.push_back(width);
