@@ -20,10 +20,11 @@
 #include <binder/IAppOpsCallback.h>
 #include <cutils/android_filesystem_config.h>
 #include <log/log.h>
-#include <media/ValidatedAttributionSourceState.h>
 #include <utils/RefBase.h>
 
 #include <functional>
+
+#include "media/ValidatedAttributionSourceState.h"
 
 namespace android::media::permission {
 
@@ -99,10 +100,10 @@ class AppOpsSession {
           mOps(ops),
           mCb(std::move(opChangedCb)),
           mAppOps(std::move(appOpsFacade)),
-          mCookie(mAppOps.addChangeCallback(attr, ops,
+          mCookie(mAppOps.addChangeCallback(mAttr, ops,
                                             [this](bool x) { this->onPermittedChanged(x); })),
           mDeliveryRequested(false),
-          mDeliveryPermitted(mAppOps.checkAccess(attr, ops)) {}
+          mDeliveryPermitted(mAppOps.checkAccess(mAttr, ops)) { }
 
     ~AppOpsSession() {
         endDeliveryRequest();
@@ -188,7 +189,7 @@ class DefaultAppOpsFacade {
     class OpMonitor : public BnAppOpsCallback {
       public:
         OpMonitor(ValidatedAttributionSourceState attr, Ops ops, std::function<void(bool)> cb)
-            : mAttr(attr), mOps(ops), mCb(cb) {}
+            : mAttr(std::move(attr)), mOps(ops), mCb(std::move(cb)) { }
 
         void opChanged(int32_t op, const String16& packageName) override;
 

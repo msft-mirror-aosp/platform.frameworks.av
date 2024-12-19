@@ -33,8 +33,6 @@
 
 namespace android {
 
-namespace media { class IMediaMetricsService; }
-
 class Parcel;
 
 /*
@@ -271,8 +269,6 @@ class BaseItem {
 public:
     // are we collecting metrics data
     static bool isEnabled();
-    // returns the MediaMetrics service if active.
-    static sp<media::IMediaMetricsService> getService();
     // submits a raw buffer directly to the MediaMetrics service - this is highly optimized.
     static status_t submitBuffer(const char *buffer, size_t len);
 
@@ -280,9 +276,6 @@ protected:
     static constexpr const char * const EnabledProperty = "media.metrics.enabled";
     static constexpr const char * const EnabledPropertyPersist = "persist.media.metrics.enabled";
     static const int EnabledProperty_default = 1;
-
-    // let's reuse a binder connection
-    static sp<media::IMediaMetricsService> sMediaMetricsService;
 
     static void dropInstance();
 

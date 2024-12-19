@@ -63,14 +63,10 @@ using utilities::convertTo;
 
 namespace audio_policy {
 
-#ifdef ENABLE_CAP_AIDL_HYBRID_MODE
-// Legacy or AIDL with Hybrid enabled read XML from vendor partition
-const char *const ParameterManagerWrapper::mPolicyPfwConfFileName =
+const char *const ParameterManagerWrapper::mPolicyPfwDefaultConfFileName =
+    "/etc/parameter-framework/ParameterFrameworkConfigurationCap.xml";
+const char *const ParameterManagerWrapper::mPolicyPfwVendorConfFileName =
     "/vendor/etc/parameter-framework/ParameterFrameworkConfigurationPolicy.xml";
-#else
-const char *const ParameterManagerWrapper::mPolicyPfwConfFileName =
-    "/etc/parameter-framework/ParameterFrameworkConfigurationPolicy.xml";
-#endif
 
 template <>
 struct ParameterManagerWrapper::parameterManagerElementSupported<ISelectionCriterionInterface> {};
@@ -82,12 +78,12 @@ ParameterManagerWrapper::ParameterManagerWrapper(bool enableSchemaVerification,
     : mPfwConnectorLogger(new ParameterMgrPlatformConnectorLogger)
 {
     // Connector
-    if (access(mPolicyPfwConfFileName, R_OK) != 0) {
-        // bailing out
-        ALOGE("%s: failed to find Cap config file, cannot init Cap.", __func__);
-        return;
+    if (access(mPolicyPfwVendorConfFileName, R_OK) == 0) {
+        mPfwConnector = new CParameterMgrFullConnector(mPolicyPfwVendorConfFileName);
+    } else {
+        mPfwConnector = new CParameterMgrFullConnector(mPolicyPfwDefaultConfFileName);
     }
-    mPfwConnector = new CParameterMgrFullConnector(mPolicyPfwConfFileName);
+
     // Logger
     mPfwConnector->setLogger(mPfwConnectorLogger);
 
@@ -104,10 +100,6 @@ ParameterManagerWrapper::ParameterManagerWrapper(bool enableSchemaVerification,
 status_t ParameterManagerWrapper::addCriterion(const std::string &name, bool isInclusive,
                                                ValuePairs pairs, const std::string &defaultValue)
 {
-    if (mPfwConnector == nullptr) {
-        ALOGE("%s: Cannot add a criterion, Cap not initialized", __func__);
-        return NO_INIT;
-    }
     ALOG_ASSERT(not isStarted(), "Cannot add a criterion if PFW is already started");
     auto criterionType = mPfwConnector->createSelectionCriterionType(isInclusive);
 
@@ -150,9 +142,7 @@ status_t ParameterManagerWrapper::addCriterion(const std::string &name, bool isI
 ParameterManagerWrapper::~ParameterManagerWrapper()
 {
     // Unset logger
-    if (mPfwConnector != nullptr) {
-        mPfwConnector->setLogger(NULL);
-    }
+    mPfwConnector->setLogger(NULL);
     // Remove logger
     delete mPfwConnectorLogger;
     // Remove connector
@@ -163,9 +153,8 @@ status_t ParameterManagerWrapper::start(std::string &error)
 {
     ALOGD("%s: in", __FUNCTION__);
     /// Start PFW
-    if (mPfwConnector == nullptr || !mPfwConnector->start(error)) {
-        ALOGE("%s: Policy PFW start error: %s", __FUNCTION__,
-              mPfwConnector == nullptr ? "invalid connector" : error.c_str());
+    if (!mPfwConnector->start(error)) {
+        ALOGE("%s: Policy PFW start error: %s", __FUNCTION__, error.c_str());
         return NO_INIT;
     }
     ALOGD("%s: Policy PFW successfully started!", __FUNCTION__);
@@ -333,10 +322,6 @@ status_t ParameterManagerWrapper::setAvailableOutputDevices(const DeviceTypeSet 
 
 void ParameterManagerWrapper::applyPlatformConfiguration()
 {
-    if (!isStarted()) {
-        ALOGE("%s: failed to apply configuration, Cap not initialized", __func__);
-        return;
-    }
     mPfwConnector->applyConfigurations();
 }
 
@@ -376,10 +361,6 @@ DeviceTypeSet ParameterManagerWrapper::convertDeviceCriterionValueToDeviceTypes(
 
 void ParameterManagerWrapper::createDomain(const std::string &domain)
 {
-    if (!isStarted()) {
-        ALOGE("%s: failed to createDomain, Cap not initialized", __func__);
-        return;
-    }
     std::string error;
     bool ret = mPfwConnector->createDomain(domain, error);
     if (!ret) {
@@ -391,10 +372,6 @@ void ParameterManagerWrapper::createDomain(const std::string &domain)
 void ParameterManagerWrapper::addConfigurableElementToDomain(const std::string &domain,
         const std::string &elementPath)
 {
-    if (!isStarted()) {
-        ALOGE("%s: failed to addConfigurableElementToDomain, Cap not initialized", __func__);
-        return;
-    }
     std::string error;
     bool ret = mPfwConnector->addConfigurableElementToDomain(domain, elementPath, error);
     ALOGE_IF(!ret, "%s: failed to add parameter %s for domain %s (error=%s)",
@@ -404,10 +381,6 @@ void ParameterManagerWrapper::addConfigurableElementToDomain(const std::string &
 void ParameterManagerWrapper::createConfiguration(const std::string &domain,
         const std::string &configurationName)
 {
-    if (!isStarted()) {
-        ALOGE("%s: failed to createConfiguration, Cap not initialized", __func__);
-        return;
-    }
     std::string error;
     bool ret = mPfwConnector->createConfiguration(domain, configurationName, error);
     ALOGE_IF(!ret, "%s: failed to create configuration %s for domain %s (error=%s)",
@@ -417,10 +390,6 @@ void ParameterManagerWrapper::createConfiguration(const std::string &domain,
 void ParameterManagerWrapper::setApplicationRule(
         const std::string &domain, const std::string &configurationName, const std::string &rule)
 {
-    if (!isStarted()) {
-        ALOGE("%s: failed to setApplicationRule, Cap not initialized", __func__);
-        return;
-    }
     std::string error;
     bool ret = mPfwConnector->setApplicationRule(domain, configurationName, rule, error);
     ALOGE_IF(!ret, "%s: failed to set rule %s for domain %s and configuration %s (error=%s)",
@@ -431,10 +400,6 @@ void ParameterManagerWrapper::accessConfigurationValue(const std::string &domain
         const std::string &configurationName, const std::string &elementPath,
         std::string &value)
 {
-    if (!isStarted()) {
-        ALOGE("%s: failed to accessConfigurationValue, Cap not initialized", __func__);
-        return;
-    }
     std::string error;
     bool ret = mPfwConnector->accessConfigurationValue(domain, configurationName, elementPath,
             value, /*set=*/ true, error);
