@@ -49,7 +49,9 @@
 
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItemConsumer.h>
+#if not COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 #include <gui/IGraphicBufferProducer.h>
+#endif
 #include <gui/Surface.h>
 
 #include <gtest/gtest.h>
@@ -704,10 +706,20 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
 
 TEST_F(CameraClientBinderTest, CheckBinderCaptureRequest) {
     sp<CaptureRequest> requestOriginal, requestParceled;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    sp<BufferItemConsumer> opaqueConsumer = new BufferItemConsumer(
+            GRALLOC_USAGE_SW_READ_NEVER, /*maxImages*/ 2, /*controlledByApp*/ true);
+    EXPECT_TRUE(opaqueConsumer.get() != nullptr);
+    opaqueConsumer->setName(String8("nom nom nom"));
+    sp<Surface> surface = opaqueConsumer->getSurface();
+#else
     sp<IGraphicBufferProducer> gbProducer;
     sp<IGraphicBufferConsumer> gbConsumer;
     BufferQueue::createBufferQueue(&gbProducer, &gbConsumer);
     sp<Surface> surface(new Surface(gbProducer, /*controlledByApp*/false));
+#endif
+
     Vector<sp<Surface>> surfaceList;
     surfaceList.push_back(surface);
     std::string physicalDeviceId1 = "0";

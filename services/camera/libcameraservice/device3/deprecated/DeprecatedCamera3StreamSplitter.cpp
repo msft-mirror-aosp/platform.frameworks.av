@@ -474,6 +474,12 @@ status_t DeprecatedCamera3StreamSplitter::attachBufferToOutputs(
         mMutex.unlock();
         res = gbp->attachBuffer(&slot, gb);
         mMutex.lock();
+        // During buffer attach 'mMutex' is not held which makes the removal of
+        //"gbp" possible. Check whether this is the case and continue.
+        if (gbp.get() == nullptr) {
+            res = OK;
+            continue;
+        }
         if (res != OK) {
             SP_LOGE("%s: Cannot attachBuffer from GraphicBufferProducer %p: %s (%d)", __FUNCTION__,
                     gbp.get(), strerror(-res), res);
@@ -484,11 +490,6 @@ status_t DeprecatedCamera3StreamSplitter::attachBufferToOutputs(
             SP_LOGE("%s: Slot received %d either bigger than expected maximum %d or negative!",
                     __FUNCTION__, slot, BufferQueue::NUM_BUFFER_SLOTS);
             return BAD_VALUE;
-        }
-        // During buffer attach 'mMutex' is not held which makes the removal of
-        //"gbp" possible. Check whether this is the case and continue.
-        if (mOutputSlots[gbp] == nullptr) {
-            continue;
         }
         auto& outputSlots = *mOutputSlots[gbp];
         if (static_cast<size_t>(slot + 1) > outputSlots.size()) {

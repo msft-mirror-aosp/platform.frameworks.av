@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ constexpr char COMPONENT_NAME[] = "c2.android.apv.decoder";
 constexpr uint32_t kDefaultOutputDelay = 8;
 constexpr uint32_t kMaxOutputDelay = 16;
 constexpr size_t kMinInputBufferSize = 2 * 1024 * 1024;
+constexpr int32_t kDefaultSoftApvDecNumThreads = 1;
 }  // namespace
 
 class C2SoftApvDec::IntfImpl : public SimpleInterface<void>::BaseParams {
@@ -496,19 +497,16 @@ C2SoftApvDec::C2SoftApvDec(const char* name, c2_node_id_t id,
     : SimpleC2Component(std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
       mIntf(intfImpl),
       mDecHandle(nullptr),
+      mMetadataHandle(nullptr),
       mOutBufferFlush(nullptr),
-      mIvColorformat(IV_YUV_420P),
       mOutputDelay(kDefaultOutputDelay),
-      mHeaderDecoded(false),
       mOutIndex(0u),
       mHalPixelFormat(HAL_PIXEL_FORMAT_YV12),
       mWidth(320),
       mHeight(240),
       mSignalledOutputEos(false),
       mSignalledError(false) {
-    oapvdHandle = NULL;
-    oapvmHandle = NULL;
-    outputCsp = OUTPUT_CSP_NATIVE;
+    mOutCsp = OUTPUT_CSP_P210;
 }
 
 C2SoftApvDec::~C2SoftApvDec() {
@@ -535,18 +533,18 @@ void C2SoftApvDec::onReset() {
 
 status_t C2SoftApvDec::deleteDecoder() {
     ALOGV("%s", __FUNCTION__);
-    if (oapvdHandle) {
-        oapvd_delete(oapvdHandle);
-        oapvdHandle = NULL;
+    if (mDecHandle) {
+        oapvd_delete(mDecHandle);
+        mDecHandle = nullptr;
     }
-    if (oapvmHandle) {
-        oapvm_delete(oapvmHandle);
-        oapvmHandle = NULL;
+    if (mMetadataHandle) {
+        oapvm_delete(mMetadataHandle);
+        mMetadataHandle = nullptr;
     }
-    for (int i = 0; i < ofrms.num_frms; i++) {
-        if (ofrms.frm[i].imgb != NULL) {
-            ofrms.frm[i].imgb->release(ofrms.frm[i].imgb);
-            ofrms.frm[i].imgb = NULL;
+    for (int i = 0; i < mOutFrames.num_frms; i++) {
+        if (mOutFrames.frm[i].imgb != NULL) {
+            mOutFrames.frm[i].imgb->release(mOutFrames.frm[i].imgb);
+            mOutFrames.frm[i].imgb = NULL;
         }
     }
     return OK;
@@ -587,22 +585,23 @@ status_t C2SoftApvDec::initDecoder() {
         mPixelFormatInfo = mIntf->getPixelFormat_l();
         ALOGW("Hal pixel format = %d", mPixelFormatInfo->value);
     }
-    memset(&cdesc, 0, sizeof(oapvd_cdesc_t));
 
-    cdesc.threads = 1;  // default
-    oapvdHandle = oapvd_create(&cdesc, &ret);
-    if (oapvdHandle == NULL) {
+    oapvd_cdesc_t cdesc;
+    memset(&cdesc, 0, sizeof(oapvd_cdesc_t));
+    cdesc.threads = kDefaultSoftApvDecNumThreads;
+    mDecHandle = oapvd_create(&cdesc, &ret);
+    if (mDecHandle == nullptr) {
         ALOGE("ERROR: cannot create APV decoder (err=%d)\n", ret);
         return C2_NO_INIT;
     }
 
-    memset(&ofrms, 0, sizeof(oapv_frms_t));
+    memset(&mOutFrames, 0, sizeof(oapv_frms_t));
 
-    oapvmHandle = oapvm_create(&ret);
+    mMetadataHandle = oapvm_create(&ret);
     if (OAPV_FAILED(ret)) {
         ALOGE("oapvm create failed");
-        oapvd_delete(oapvdHandle);
-        oapvdHandle = NULL;
+        oapvd_delete(mDecHandle);
+        mDecHandle = nullptr;
         return C2_NO_INIT;
     }
 
@@ -944,17 +943,18 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
         }
 
         /* create decoding frame buffers */
-        ofrms.num_frms = aui.num_frms;
-        if (ofrms.num_frms <= 0) {
-            ALOGE("Parse error - no output frame(%d)", ofrms.num_frms);
+        mOutFrames.num_frms = aui.num_frms;
+        if (mOutFrames.num_frms <= 0) {
+            ALOGE("Parse error - no output frame(%d)", mOutFrames.num_frms);
             fillEmptyWork(work);
             return;
         }
-        for (int i = 0; i < ofrms.num_frms; i++) {
-            oapv_frm_info_t* finfo = &aui.frm_info[FRM_IDX];
-            oapv_frm_t* frm = &ofrms.frm[i];
 
-            if (mWidth != finfo->w || mHeight != finfo->w) {
+        for (int i = 0; i < mOutFrames.num_frms; i++) {
+            oapv_frm_info_t* finfo = &aui.frm_info[i];
+            oapv_frm_t* frm = &mOutFrames.frm[i];
+
+            if (mWidth != finfo->w || mHeight != finfo->h) {
                 mWidth = finfo->w;
                 mHeight = finfo->h;
             }
@@ -965,7 +965,7 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
             }
 
             if (frm->imgb == NULL) {
-                if (outputCsp == OUTPUT_CSP_P210) {
+                if (mOutCsp == OUTPUT_CSP_P210) {
                     frm->imgb = imgb_create(finfo->w, finfo->h, OAPV_CS_P210);
                 } else {
                     frm->imgb = imgb_create(finfo->w, finfo->h, finfo->cs);
@@ -980,7 +980,7 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
         }
 
         oapvd_stat_t stat;
-        ret = oapvd_decode(oapvdHandle, &bitb, &ofrms, oapvmHandle, &stat);
+        ret = oapvd_decode(mDecHandle, &bitb, &mOutFrames, mMetadataHandle, &stat);
         if (bitb.ssize != stat.read) {
             ALOGW("decode done, input size: %d, processed size: %d", bitb.ssize, stat.read);
         }
@@ -989,6 +989,18 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
             ALOGE("failed to decode bitstream\n");
             fillEmptyWork(work);
             return;
+        }
+
+        for(int i = 0; i < stat.aui.num_frms; i++) {
+            oapv_frm_info_t* finfo = &stat.aui.frm_info[i];
+            if(finfo->pbu_type == OAPV_PBU_TYPE_PRIMARY_FRAME) {
+                if(finfo->color_description_present_flag > 0) {
+                    vuiColorAspects.primaries = finfo->color_primaries;
+                    vuiColorAspects.transfer = finfo->transfer_characteristics;
+                    vuiColorAspects.coeffs = finfo->matrix_coefficients;
+                    vuiColorAspects.fullRange = finfo->full_range_flag;
+                }
+            }
         }
 
         status_t err = outputBuffer(pool, work);
@@ -1014,13 +1026,7 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
     }
 }
 
-void C2SoftApvDec::getVuiParams(VuiColorAspects* buffer) {
-    VuiColorAspects vuiColorAspects;
-    vuiColorAspects.primaries = buffer->primaries;
-    vuiColorAspects.transfer = buffer->transfer;
-    vuiColorAspects.coeffs = buffer->coeffs;
-    vuiColorAspects.fullRange = buffer->fullRange;
-
+void C2SoftApvDec::getVuiParams() {
     // convert vui aspects to C2 values if changed
     if (!(vuiColorAspects == mBitstreamColorAspects)) {
         mBitstreamColorAspects = vuiColorAspects;
@@ -1049,18 +1055,168 @@ void C2SoftApvDec::getVuiParams(VuiColorAspects* buffer) {
     }
 }
 
+void C2SoftApvDec::getHDRStaticParams(const struct ApvHdrInfo *buffer,
+                                       const std::unique_ptr<C2Work> &work) {
+    C2StreamHdrStaticMetadataInfo::output hdrStaticMetadataInfo{};
+    bool infoPresent = false;
+
+    if(buffer->has_hdr_mdcv) {
+        ALOGV("has hdr mdcv");
+        // hdr_mdcv.primary_chromaticity_* values are in 0.16 fixed-point format.
+        hdrStaticMetadataInfo.mastering.red.x =
+            buffer->hdr_mdcv.primary_chromaticity_x[0] / 50000.0;
+        hdrStaticMetadataInfo.mastering.red.y =
+            buffer->hdr_mdcv.primary_chromaticity_y[0] / 50000.0;
+        hdrStaticMetadataInfo.mastering.green.x =
+            buffer->hdr_mdcv.primary_chromaticity_x[1] / 50000.0;
+        hdrStaticMetadataInfo.mastering.green.y =
+            buffer->hdr_mdcv.primary_chromaticity_y[1] / 50000.0;
+        hdrStaticMetadataInfo.mastering.blue.x =
+            buffer->hdr_mdcv.primary_chromaticity_x[2] / 50000.0;
+        hdrStaticMetadataInfo.mastering.blue.y =
+            buffer->hdr_mdcv.primary_chromaticity_y[2] / 50000.0;
+
+        // hdr_mdcv.white_point_chromaticity_* values are in 0.16 fixed-point format.
+        hdrStaticMetadataInfo.mastering.white.x =
+            buffer->hdr_mdcv.white_point_chromaticity_x / 50000.0;
+        hdrStaticMetadataInfo.mastering.white.y =
+            buffer->hdr_mdcv.white_point_chromaticity_y / 50000.0;
+
+        // hdr_mdcv.luminance_max is in 24.8 fixed-point format.
+        hdrStaticMetadataInfo.mastering.maxLuminance =
+            buffer->hdr_mdcv.max_mastering_luminance / 10000.0;
+        // hdr_mdcv.luminance_min is in 18.14 format.
+        hdrStaticMetadataInfo.mastering.minLuminance =
+            buffer->hdr_mdcv.min_mastering_luminance / 10000.0;
+        infoPresent = true;
+    }
+
+    if(buffer->has_hdr_cll) {
+        ALOGV("has hdr cll");
+        hdrStaticMetadataInfo.maxCll = buffer->hdr_cll.max_cll;
+        hdrStaticMetadataInfo.maxFall = buffer->hdr_cll.max_fall;
+        infoPresent = true;
+    }
+
+    // config if static info has changed
+    if (infoPresent && !(hdrStaticMetadataInfo == mHdrStaticMetadataInfo)) {
+        mHdrStaticMetadataInfo = hdrStaticMetadataInfo;
+        work->worklets.front()->output.configUpdate.push_back(
+                    C2Param::Copy(mHdrStaticMetadataInfo));
+    }
+}
+
+void C2SoftApvDec::getHDR10PlusInfoData(const struct ApvHdrInfo *buffer,
+                                         const std::unique_ptr<C2Work> &work) {
+    if(!buffer->has_itut_t35) {
+        ALOGD("no itu_t_t35 data");
+        return;
+    }
+
+    std::vector<uint8_t> payload;
+    size_t payloadSize = buffer->itut_t35.payload_size;
+    if (payloadSize > 0) {
+        payload.push_back(buffer->itut_t35.country_code);
+        if (buffer->itut_t35.country_code == 0xFF) {
+            payload.push_back(buffer->itut_t35.country_code_extension_byte);
+        }
+        payload.insert(payload.end(), buffer->itut_t35.payload_bytes,
+                    buffer->itut_t35.payload_bytes + buffer->itut_t35.payload_size);
+    }
+
+    std::unique_ptr<C2StreamHdr10PlusInfo::output> hdr10PlusInfo =
+            C2StreamHdr10PlusInfo::output::AllocUnique(payload.size());
+    if (!hdr10PlusInfo) {
+        ALOGE("Hdr10PlusInfo allocation failed");
+        mSignalledError = true;
+        work->result = C2_NO_MEMORY;
+        return;
+    }
+    memcpy(hdr10PlusInfo->m.value, payload.data(), payload.size());
+
+    // config if hdr10Plus info has changed
+    if (nullptr == mHdr10PlusInfo || !(*hdr10PlusInfo == *mHdr10PlusInfo)) {
+        mHdr10PlusInfo = std::move(hdr10PlusInfo);
+        work->worklets.front()->output.configUpdate.push_back(std::move(mHdr10PlusInfo));
+    }
+}
+
+void C2SoftApvDec::getHdrInfo(struct ApvHdrInfo *hdrInfo, int groupId) {
+    void *pld;
+    int size;
+
+    int ret = oapvm_get(mMetadataHandle, groupId, OAPV_METADATA_MDCV, &pld, &size, nullptr);
+    if(ret == OAPV_OK) {
+        if(size < sizeof(struct ApvHdrInfo::HdrMdcv)) {
+            ALOGW("metadata_mdcv size is smaller than expected");
+            return;
+        }
+        unsigned char *data = (unsigned char *)pld;
+        hdrInfo->has_hdr_mdcv = true;
+        for(int i = 0; i < 3; i++) {
+            hdrInfo->hdr_mdcv.primary_chromaticity_x[i] = (*data++) << 8;
+            hdrInfo->hdr_mdcv.primary_chromaticity_x[i] |= (*data++);
+            hdrInfo->hdr_mdcv.primary_chromaticity_y[i] = (*data++) << 8;
+            hdrInfo->hdr_mdcv.primary_chromaticity_y[i] |= (*data++);
+        }
+        hdrInfo->hdr_mdcv.white_point_chromaticity_x = (*data++) << 8;
+        hdrInfo->hdr_mdcv.white_point_chromaticity_x |= (*data++);
+        hdrInfo->hdr_mdcv.white_point_chromaticity_y = (*data++) << 8;
+        hdrInfo->hdr_mdcv.white_point_chromaticity_y |= (*data++);
+        hdrInfo->hdr_mdcv.max_mastering_luminance =  (*data++) << 24;
+        hdrInfo->hdr_mdcv.max_mastering_luminance |= (*data++) << 16;
+        hdrInfo->hdr_mdcv.max_mastering_luminance |= (*data++) << 8;
+        hdrInfo->hdr_mdcv.max_mastering_luminance |= (*data++);
+        hdrInfo->hdr_mdcv.min_mastering_luminance =  (*data++) << 24;
+        hdrInfo->hdr_mdcv.min_mastering_luminance |= (*data++) << 16;
+        hdrInfo->hdr_mdcv.min_mastering_luminance |= (*data++) << 8;
+        hdrInfo->hdr_mdcv.min_mastering_luminance |= (*data);
+    }
+
+    ret = oapvm_get(mMetadataHandle, groupId, OAPV_METADATA_CLL, &pld, &size, nullptr);
+    if(ret == OAPV_OK) {
+        if(size < sizeof(struct ApvHdrInfo::HdrCll)) {
+            ALOGW("metadata_cll size is smaller than expected");
+            return;
+        }
+        unsigned char *data = (unsigned char *)pld;
+        hdrInfo->has_hdr_cll = true;
+        hdrInfo->hdr_cll.max_cll =  (*data++) << 8;
+        hdrInfo->hdr_cll.max_cll |= (*data++);
+        hdrInfo->hdr_cll.max_fall =  (*data++) << 8;
+        hdrInfo->hdr_cll.max_fall |= (*data);
+    }
+
+    ret = oapvm_get(mMetadataHandle, groupId, OAPV_METADATA_ITU_T_T35, &pld, &size, nullptr);
+    if(ret == OAPV_OK) {
+        char *data = (char *)pld;
+        hdrInfo->has_itut_t35 = true;
+        int readSize = size;
+        hdrInfo->itut_t35.country_code = *data++;
+        readSize--;
+        if(hdrInfo->itut_t35.country_code == 0xFF) {
+            hdrInfo->itut_t35.country_code_extension_byte = *data++;
+            readSize--;
+        }
+        hdrInfo->itut_t35.payload_bytes = data;
+        hdrInfo->itut_t35.payload_size = readSize;
+    }
+}
+
 status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
                                     const std::unique_ptr<C2Work>& work) {
     if (!(work && pool)) return BAD_VALUE;
 
     oapv_imgb_t* imgbOutput = nullptr;
+    int groupId = -1;
     std::shared_ptr<C2GraphicBlock> block;
 
-    if (ofrms.num_frms > 0) {
-        for(int i = 0; i < ofrms.num_frms; i++) {
-            oapv_frm_t* frm = &ofrms.frm[0];
+    if (mOutFrames.num_frms > 0) {
+        for(int i = 0; i < mOutFrames.num_frms; i++) {
+            oapv_frm_t* frm = &mOutFrames.frm[i];
             if(frm->pbu_type == OAPV_PBU_TYPE_PRIMARY_FRAME) {
                 imgbOutput = frm->imgb;
+                groupId = frm->group_id;
                 break;
             }
         }
@@ -1074,13 +1230,11 @@ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
     }
     bool isMonochrome = OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CS_YCBCR400;
 
-    // TODO: use bitstream color aspect after vui parsing
-    VuiColorAspects colorAspect;
-    colorAspect.primaries = 2;
-    colorAspect.transfer = 2;
-    colorAspect.coeffs = 2;
-    colorAspect.fullRange = 1;
-    getVuiParams(&colorAspect);
+    getVuiParams();
+    struct ApvHdrInfo hdrInfo = {};
+    getHdrInfo(&hdrInfo, groupId);
+    getHDRStaticParams(&hdrInfo, work);
+    getHDR10PlusInfoData(&hdrInfo, work);
 
     uint32_t format = HAL_PIXEL_FORMAT_YV12;
     std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;

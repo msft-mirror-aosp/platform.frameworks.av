@@ -60,6 +60,7 @@ namespace android {
 using namespace camera2;
 using namespace camera3;
 using camera3::camera_stream_rotation_t::CAMERA_STREAM_ROTATION_0;
+using hardware::camera2::ICameraDeviceUser::NO_IN_FLIGHT_REPEATING_FRAMES;
 
 namespace flags = com::android::internal::camera::flags;
 
@@ -94,6 +95,7 @@ CameraDeviceClient::CameraDeviceClient(
                         sharedMode),
       mInputStream(),
       mStreamingRequestId(REQUEST_ID_NONE),
+      mStreamingRequestLastFrameNumber(NO_IN_FLIGHT_REPEATING_FRAMES),
       mRequestIdCounter(0),
       mOverrideForPerfClass(overrideForPerfClass),
       mOriginalCameraId(originalCameraId),
@@ -118,13 +120,23 @@ status_t CameraDeviceClient::initializeImpl(TProviderPtr providerPtr,
         return res;
     }
 
-    mFrameProcessor = new FrameProcessorBase(mDevice);
-    std::string threadName = std::string("CDU-") + mCameraIdStr + "-FrameProc";
-    res = mFrameProcessor->run(threadName.c_str());
-    if (res != OK) {
-        ALOGE("%s: Unable to start frame processor thread: %s (%d)",
-                __FUNCTION__, strerror(-res), res);
-        return res;
+    if (flags::camera_multi_client() && mSharedMode) {
+        // In shared camera device mode, there can be more than one clients and
+        // frame processor thread is started by shared camera device.
+        mFrameProcessor = mDevice->getSharedFrameProcessor();
+        if (mFrameProcessor == nullptr) {
+            ALOGE("%s: Unable to start frame processor thread", __FUNCTION__);
+            return UNKNOWN_ERROR;
+        }
+    } else {
+        mFrameProcessor = new FrameProcessorBase(mDevice);
+        std::string threadName = std::string("CDU-") + mCameraIdStr + "-FrameProc";
+        res = mFrameProcessor->run(threadName.c_str());
+        if (res != OK) {
+            ALOGE("%s: Unable to start frame processor thread: %s (%d)",
+                    __FUNCTION__, strerror(-res), res);
+            return res;
+        }
     }
 
     mFrameProcessor->registerListener(camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MIN_ID,
@@ -292,6 +304,97 @@ static std::list<int> getIntersection(const std::unordered_set<int> &streamIdsFo
     return intersection;
 }
 
+binder::Status CameraDeviceClient::startStreaming(const std::vector<int>& streamIds,
+            const std::vector<int>& surfaceIds,
+            /*out*/
+            hardware::camera2::utils::SubmitInfo *submitInfo) {
+    ATRACE_CALL();
+    ALOGV("%s-start of function. Stream list size %zu. Surface list size %zu", __FUNCTION__,
+            streamIds.size(), surfaceIds.size());
+
+    binder::Status res = binder::Status::ok();
+    status_t err;
+    if ( !(res = checkPidStatus(__FUNCTION__) ).isOk()) {
+        return res;
+    }
+
+    Mutex::Autolock icl(mBinderSerializationLock);
+
+    if (!mDevice.get()) {
+        return STATUS_ERROR(CameraService::ERROR_DISCONNECTED, "Camera device no longer alive");
+    }
+
+    if (!flags::camera_multi_client() || !mSharedMode) {
+        ALOGE("%s: Camera %s: Invalid operation.", __FUNCTION__, mCameraIdStr.c_str());
+        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, "Invalid operation");
+    }
+
+    if (streamIds.empty() || surfaceIds.empty()) {
+        ALOGE("%s: Camera %s: Sent empty streamIds or surface Ids. Rejecting request.",
+              __FUNCTION__, mCameraIdStr.c_str());
+        return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, "Empty Stream or surface Ids");
+    }
+
+    if (streamIds.size() != surfaceIds.size()) {
+        ALOGE("%s: Camera %s: Sent different size array for stream and surface Ids.",
+              __FUNCTION__, mCameraIdStr.c_str());
+        return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+                "Stream and surface Ids are not of same size");
+    }
+
+    submitInfo->mRequestId = mRequestIdCounter;
+    SurfaceMap surfaceMap;
+    Vector<int32_t> outputStreamIds;
+    for (size_t i = 0; i < streamIds.size(); i++) {
+        int streamId = streamIds[i];
+        int surfaceIdx = surfaceIds[i];
+
+        ssize_t index = mConfiguredOutputs.indexOfKey(streamId);
+        if (index < 0) {
+            ALOGE("%s: Camera %s: Tried to start streaming with a surface that"
+                    " we have not called createStream on: stream %d",
+                    __FUNCTION__, mCameraIdStr.c_str(), streamId);
+            return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+                    "Start streaming targets Surface that is not part of current capture session");
+        }
+
+        const auto& surfaces = mConfiguredOutputs.valueAt(index).getSurfaces();
+        if ((size_t)surfaceIdx >= surfaces.size()) {
+            ALOGE("%s: Camera %s: Tried to start streaming with a surface that"
+                    " we have not called createStream on: stream %d, surfaceIdx %d",
+                     __FUNCTION__, mCameraIdStr.c_str(), streamId, surfaceIdx);
+            return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+                    "Start streaming targets Surface has invalid surface index");
+        }
+
+        res = insertSurfaceLocked(surfaces[surfaceIdx], &surfaceMap, &outputStreamIds, nullptr);
+
+        if (!res.isOk()) {
+            return res;
+        }
+    }
+
+    mRequestIdCounter++;
+    int sharedReqID;
+
+    err = mDevice->startStreaming(submitInfo->mRequestId, surfaceMap, &sharedReqID,
+            &(submitInfo->mLastFrameNumber));
+    if (err != OK) {
+        std::string msg = fmt::sprintf(
+            "Camera %s:  Got error %s (%d) after trying to start streaming request",
+            mCameraIdStr.c_str(), strerror(-err), err);
+        ALOGE("%s: %s", __FUNCTION__, msg.c_str());
+        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, msg.c_str());
+    } else {
+        Mutex::Autolock idLock(mStreamingRequestIdLock);
+        mStreamingRequestId = submitInfo->mRequestId;
+        mSharedStreamingRequest = {sharedReqID, submitInfo->mRequestId};
+    }
+
+    ALOGV("%s: Camera %s: End of function", __FUNCTION__, mCameraIdStr.c_str());
+    return binder::Status::ok();
+}
+
 binder::Status CameraDeviceClient::submitRequestList(
         const std::vector<hardware::camera2::CaptureRequest>& requests,
         bool streaming,
@@ -316,6 +419,12 @@ binder::Status CameraDeviceClient::submitRequestList(
         ALOGE("%s: Camera %s: Sent null request. Rejecting request.",
               __FUNCTION__, mCameraIdStr.c_str());
         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, "Empty request list");
+    }
+
+    if (flags::camera_multi_client() && mSharedMode && !mIsPrimaryClient) {
+        ALOGE("%s: Camera %s: This client is not a primary client of the shared camera device.",
+              __FUNCTION__, mCameraIdStr.c_str());
+        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, "Invalid Operation.");
     }
 
     List<const CameraDeviceBase::PhysicalCameraSettingsList> metadataRequestList;
@@ -594,9 +703,16 @@ binder::Status CameraDeviceClient::submitRequestList(
     }
     mRequestIdCounter++;
 
+    int32_t sharedReqID;
     if (streaming) {
-        err = mDevice->setStreamingRequestList(metadataRequestList, surfaceMapList,
-                &(submitInfo->mLastFrameNumber));
+        if (flags::camera_multi_client() && mSharedMode) {
+            err = mDevice->setSharedStreamingRequest(*metadataRequestList.begin(),
+                    *surfaceMapList.begin(), &sharedReqID, &(submitInfo->mLastFrameNumber));
+        } else {
+            err = mDevice->setStreamingRequestList(metadataRequestList, surfaceMapList,
+                    &(submitInfo->mLastFrameNumber));
+        }
+
         if (err != OK) {
             std::string msg = fmt::sprintf(
                 "Camera %s:  Got error %s (%d) after trying to set streaming request",
@@ -607,10 +723,18 @@ binder::Status CameraDeviceClient::submitRequestList(
         } else {
             Mutex::Autolock idLock(mStreamingRequestIdLock);
             mStreamingRequestId = submitInfo->mRequestId;
+            if (flags::camera_multi_client() && mSharedMode) {
+                mSharedStreamingRequest = {sharedReqID, submitInfo->mRequestId};
+            }
         }
     } else {
-        err = mDevice->captureList(metadataRequestList, surfaceMapList,
-                &(submitInfo->mLastFrameNumber));
+        if (flags::camera_multi_client() && mSharedMode) {
+            err = mDevice->setSharedCaptureRequest(*metadataRequestList.begin(),
+                    *surfaceMapList.begin(), &sharedReqID, &(submitInfo->mLastFrameNumber));
+         } else {
+            err = mDevice->captureList(metadataRequestList, surfaceMapList,
+                    &(submitInfo->mLastFrameNumber));
+        }
         if (err != OK) {
             std::string msg = fmt::sprintf(
                 "Camera %s: Got error %s (%d) after trying to submit capture request",
@@ -618,6 +742,9 @@ binder::Status CameraDeviceClient::submitRequestList(
             ALOGE("%s: %s", __FUNCTION__, msg.c_str());
             res = STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
                     msg.c_str());
+        }
+        if (flags::camera_multi_client() && mSharedMode) {
+            mSharedRequestMap[sharedReqID] = submitInfo->mRequestId;
         }
         ALOGV("%s: requestId = %d ", __FUNCTION__, submitInfo->mRequestId);
     }
@@ -652,12 +779,19 @@ binder::Status CameraDeviceClient::cancelRequest(
         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
     }
 
-    err = mDevice->clearStreamingRequest(lastFrameNumber);
+    if (flags::camera_multi_client() && mSharedMode) {
+        err = mDevice->clearSharedStreamingRequest(lastFrameNumber);
+    } else {
+        err = mDevice->clearStreamingRequest(lastFrameNumber);
+    }
 
     if (err == OK) {
         ALOGV("%s: Camera %s: Successfully cleared streaming request",
                 __FUNCTION__, mCameraIdStr.c_str());
         mStreamingRequestId = REQUEST_ID_NONE;
+        if (flags::camera_multi_client() && mSharedMode) {
+            mStreamingRequestLastFrameNumber = *lastFrameNumber;
+        }
     } else {
         res = STATUS_ERROR_FMT(CameraService::ERROR_INVALID_OPERATION,
                 "Camera %s: Error clearing streaming request: %s (%d)",
@@ -1042,7 +1176,7 @@ binder::Status CameraDeviceClient::createStream(
     int streamId = camera3::CAMERA3_STREAM_ID_INVALID;
     std::vector<int> surfaceIds;
     if (flags::camera_multi_client() && mSharedMode) {
-        err = mDevice->getSharedStreamId(outputConfiguration, &streamId);
+        err = mDevice->getSharedStreamId(streamInfo, &streamId);
         if (err == OK) {
             err = mDevice->addSharedSurfaces(streamId, streamInfos, surfaceHolders, &surfaceIds);
         }
@@ -1589,6 +1723,10 @@ binder::Status CameraDeviceClient::flush(
         res = STATUS_ERROR_FMT(CameraService::ERROR_INVALID_OPERATION,
                 "Camera %s: Error flushing device: %s (%d)", mCameraIdStr.c_str(), strerror(-err),
                 err);
+    }
+    if (flags::camera_multi_client() && mSharedMode) {
+        mSharedRequestMap.clear();
+        mStreamingRequestLastFrameNumber = *lastFrameNumber;
     }
     return res;
 }
@@ -2192,6 +2330,19 @@ void CameraDeviceClient::notifyError(int32_t errorCode,
     sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = getRemoteCallback();
 
     bool skipClientNotification = false;
+    if (flags::camera_multi_client() && mSharedMode) {
+        int clientReqId;
+        if (!matchClientRequest(resultExtras, &clientReqId)) {
+            return;
+        }
+        CaptureResultExtras mutableResultExtras = resultExtras;
+        mutableResultExtras.requestId = clientReqId;
+        mSharedRequestMap.erase(resultExtras.requestId);
+        if (remoteCb != 0) {
+            remoteCb->onDeviceError(errorCode, mutableResultExtras);
+        }
+        return;
+    }
     {
         // Access to the composite stream map must be synchronized
         Mutex::Autolock l(mCompositeLock);
@@ -2254,10 +2405,24 @@ void CameraDeviceClient::notifyShutter(const CaptureResultExtras& resultExtras,
         nsecs_t timestamp) {
     // Thread safe. Don't bother locking.
     sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = getRemoteCallback();
-    if (remoteCb != 0) {
-        remoteCb->onCaptureStarted(resultExtras, timestamp);
+    CaptureResultExtras mutableResultExtras = resultExtras;
+    if (flags::camera_multi_client() && mSharedMode) {
+        int clientReqId;
+        if (!matchClientRequest(resultExtras, &clientReqId)) {
+            return;
+        }
+        mutableResultExtras.requestId = clientReqId;
     }
-    Camera2ClientBase::notifyShutter(resultExtras, timestamp);
+
+    if (remoteCb != 0) {
+        remoteCb->onCaptureStarted(mutableResultExtras, timestamp);
+    }
+    Camera2ClientBase::notifyShutter(mutableResultExtras, timestamp);
+    if (flags::camera_multi_client() && mSharedMode) {
+        // When camera is opened in shared mode, composite streams are not
+        // supported.
+        return;
+    }
 
     // Access to the composite stream map must be synchronized
     Mutex::Autolock l(mCompositeLock);
@@ -2298,13 +2463,16 @@ void CameraDeviceClient::detachDevice() {
     if (mDevice == 0) return;
 
     nsecs_t startTime = systemTime();
-    if (!flags::camera_multi_client() || sCameraService->isOnlyClient(this)){
-        ALOGV("Camera %s: Stopping processors", mCameraIdStr.c_str());
-
-        if (mFrameProcessor.get() != nullptr) {
+    if (mFrameProcessor.get() != nullptr) {
             mFrameProcessor->removeListener(
                     camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MIN_ID,
                     camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MAX_ID, /*listener*/this);
+    }
+    if (!flags::camera_multi_client() || !mSharedMode ||
+            (mSharedMode && sCameraService->isOnlyClient(this))){
+        ALOGV("Camera %s: Stopping processors", mCameraIdStr.c_str());
+
+        if (mFrameProcessor.get() != nullptr) {
             mFrameProcessor->requestExit();
             ALOGV("Camera %s: Waiting for threads", mCameraIdStr.c_str());
             mFrameProcessor->join();
@@ -2386,9 +2554,49 @@ std::vector<PhysicalCaptureResultInfo> CameraDeviceClient::convertToFMQ(
     return retVal;
 }
 
+bool CameraDeviceClient::matchClientRequest(const CaptureResultExtras& resultExtras,
+        int* clientReqId) {
+    if (flags::camera_multi_client() && mSharedMode) {
+       if (resultExtras.requestId == mSharedStreamingRequest.first) {
+          *clientReqId = mSharedStreamingRequest.second;
+          return true;
+       }
+       if (mIsPrimaryClient) {
+          auto iter = mSharedRequestMap.find(resultExtras.requestId);
+          if (iter != mSharedRequestMap.end()) {
+              *clientReqId = iter->second;
+              return true;
+          }
+       }
+    }
+    return true;
+}
+
 void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
     ATRACE_CALL();
     ALOGVV("%s E", __FUNCTION__);
+    CaptureResult mutableResult = result;
+    if (flags::camera_multi_client() && mSharedMode) {
+        int clientReqId;
+        if (!matchClientRequest(result.mResultExtras, &clientReqId)) {
+            return;
+        }
+        // When a client stops streaming using cancelRequest, we still need to deliver couple
+        // more capture results to the client, till the lastframe number returned by the
+        // cancelRequest. Therefore, only clean the shared streaming request once all the frames for
+        // the repeating request have been delivered to the client.
+        if ((mStreamingRequestId == REQUEST_ID_NONE) &&
+                (result.mResultExtras.frameNumber > mStreamingRequestLastFrameNumber)) {
+            mSharedStreamingRequest.first = REQUEST_ID_NONE;
+            mSharedStreamingRequest.second = REQUEST_ID_NONE;
+        }
+        mSharedRequestMap.erase(result.mResultExtras.requestId);
+        mutableResult.mResultExtras.requestId = clientReqId;
+        if (mutableResult.mMetadata.update(ANDROID_REQUEST_ID, &clientReqId, 1) != OK) {
+            ALOGE("%s Failed to set request ID in metadata.", __FUNCTION__);
+            return;
+        }
+    }
 
     // Thread-safe. No lock necessary.
     sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = mRemoteCallback;
@@ -2398,29 +2606,29 @@ void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
         // Vendor clients need to modify metadata and also this call is in process
         // before going through FMQ to vendor clients. So don't use FMQ here.
         if (!mIsVendorClient && flags::fmq_metadata()) {
-            fmqMetadataSize = writeResultMetadataIntoResultQueue(result.mMetadata);
+            fmqMetadataSize = writeResultMetadataIntoResultQueue(mutableResult.mMetadata);
         }
         hardware::camera2::impl::CameraMetadataNative resultMetadata;
         CameraMetadataInfo resultInfo;
         if (fmqMetadataSize == 0) {
             // The flag was off / we're serving VNDK shim call or FMQ write failed.
-            resultMetadata = result.mMetadata;
+            resultMetadata = mutableResult.mMetadata;
             resultInfo.set<CameraMetadataInfo::metadata>(resultMetadata);
         } else {
             resultInfo.set<CameraMetadataInfo::fmqSize>(fmqMetadataSize);
         }
 
         std::vector<PhysicalCaptureResultInfo> physicalMetadatas =
-                convertToFMQ(result.mPhysicalMetadatas);
+                convertToFMQ(mutableResult.mPhysicalMetadatas);
 
-        remoteCb->onResultReceived(resultInfo, result.mResultExtras,
+        remoteCb->onResultReceived(resultInfo, mutableResult.mResultExtras,
                 physicalMetadatas);
     }
 
     // Access to the composite stream map must be synchronized
     Mutex::Autolock l(mCompositeLock);
     for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
-        mCompositeStreamMap.valueAt(i)->onResultAvailable(result);
+        mCompositeStreamMap.valueAt(i)->onResultAvailable(mutableResult);
     }
     ALOGVV("%s X", __FUNCTION__);
 }
