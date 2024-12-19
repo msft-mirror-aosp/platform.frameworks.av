@@ -17,7 +17,6 @@
 #include <camera2/OutputConfiguration.h>
 #include <camera2/SessionConfiguration.h>
 #include <fuzzer/FuzzedDataProvider.h>
-#include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
 #include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
 #include <gui/SurfaceComposerClient.h>

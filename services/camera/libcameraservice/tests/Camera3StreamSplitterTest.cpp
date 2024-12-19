@@ -22,7 +22,10 @@
 #include <com_android_internal_camera_flags.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferConsumer.h>
+#include <gui/Flags.h> // remove with WB_PLATFORM_API_IMPROVEMENTS
+#if not COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 #include <gui/IGraphicBufferProducer.h>
+#endif
 #include <gui/Surface.h>
 #include <ui/Fence.h>
 #include <ui/GraphicBuffer.h>
@@ -162,7 +165,11 @@ TEST_F(Camera3StreamSplitterTest, TestProcessSingleBuffer) {
     sp<TestSurfaceListener> surfaceListener = sp<TestSurfaceListener>::make();
     EXPECT_EQ(OK, inputSurface->connect(NATIVE_WINDOW_API_CAMERA, surfaceListener, false));
     // TODO: Do this with the surface itself once the API is available.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+    EXPECT_EQ(OK, inputSurface->allowAllocation(false));
+#else
     EXPECT_EQ(OK, inputSurface->getIGraphicBufferProducer()->allowAllocation(false));
+#endif
 
     //
     // Create a buffer to use:
