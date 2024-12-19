@@ -435,6 +435,7 @@ public:
         printf("          n for _NONE\n");
         printf("          l for _LATENCY\n");
         printf("          p for _POWER_SAVING;\n");
+        printf("          o for _POWER_SAVING_OFFLOADED;\n");
         printf("      -r{sampleRate} for example 44100\n");
         printf("      -s{duration} in seconds, default is %d\n", DEFAULT_DURATION_SECONDS);
         printf("      -u{usage} eg. 14 for AAUDIO_USAGE_GAME\n");
@@ -476,6 +477,9 @@ public:
                 break;
             case 'p':
                 mode = AAUDIO_PERFORMANCE_MODE_POWER_SAVING;
+                break;
+            case 'o':
+                mode = AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED;
                 break;
             default:
                 printf("ERROR: invalid performance mode %c\n", c);
