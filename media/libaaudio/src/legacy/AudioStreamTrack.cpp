@@ -470,10 +470,9 @@ aaudio_result_t AudioStreamTrack::processCommands() {
     case AAUDIO_STREAM_STATE_STOPPING:
         if (mAudioTrack->stopped()) {
             if (getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
-                std::lock_guard<std::mutex> lock(mStreamLock);
-                if (!mOffloadEosPending) {
-                    break;
-                }
+                // For offload mode, the state will be updated as `STOPPED` from
+                // stream end callback.
+                break;
             }
             setState(AAUDIO_STREAM_STATE_STOPPED);
         }
@@ -703,6 +702,8 @@ void AudioStreamTrack::onStreamEnd() {
         std::lock_guard<std::mutex> lock(mStreamLock);
         if (mOffloadEosPending) {
             requestStart_l();
+        } else {
+            setState(AAUDIO_STREAM_STATE_STOPPED);
         }
         mOffloadEosPending = false;
     }
