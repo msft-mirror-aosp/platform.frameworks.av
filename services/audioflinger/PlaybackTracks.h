@@ -132,7 +132,6 @@ public:
     float* mainBuffer() const final { return mMainBuffer; }
     int auxEffectId() const final { return mAuxEffectId; }
     status_t getTimestamp(AudioTimestamp& timestamp) final;
-    void signal() final;
     status_t getDualMonoMode(audio_dual_mono_mode_t* mode) const final;
     status_t setDualMonoMode(audio_dual_mono_mode_t mode) final;
     status_t getAudioDescriptionMixLevel(float* leveldB) const final;

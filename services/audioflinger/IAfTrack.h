@@ -131,6 +131,7 @@ public:
     virtual status_t getNextBuffer(AudioBufferProvider::Buffer* buffer) = 0;
     virtual void releaseBuffer(AudioBufferProvider::Buffer* buffer) = 0;
 
+    virtual void signal() = 0;
     // Added for RecordTrack and OutputTrack
     virtual wp<IAfThreadBase> thread() const = 0;
     virtual const sp<ServerProxy>& serverProxy() const = 0;
@@ -323,7 +324,6 @@ public:
     virtual float* mainBuffer() const = 0;
     virtual int auxEffectId() const = 0;
     virtual status_t getTimestamp(AudioTimestamp& timestamp) = 0;
-    virtual void signal() = 0;
     virtual status_t getDualMonoMode(audio_dual_mono_mode_t* mode) const = 0;
     virtual status_t setDualMonoMode(audio_dual_mono_mode_t mode) = 0;
     virtual status_t getAudioDescriptionMixLevel(float* leveldB) const = 0;
