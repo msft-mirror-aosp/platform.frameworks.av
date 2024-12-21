@@ -445,6 +445,10 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
             AUGMENT_LOG(E, "failed to read %zu bytes to data MQ", toRead);
             return NOT_ENOUGH_DATA;
         }
+    } else if (*transferred > bytes) {
+        ALOGW("%s: HAL module wrote %zu bytes, which exceeds requested count %zu",
+                __func__, *transferred, bytes);
+        *transferred = bytes;
     }
     mStreamPowerLog.log(buffer, *transferred);
     return OK;
