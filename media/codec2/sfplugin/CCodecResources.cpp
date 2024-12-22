@@ -74,8 +74,9 @@ c2_status_t queryGlobalResources(const std::shared_ptr<Codec2Client>& client,
                     if (found->mAvailable >= excluded) {
                         found->mAvailable -= excluded;
                     } else {
-                       ALOGW("Excluded resources(%jd) can't be more than Available resources(%jd)",
-                             excluded, found->mAvailable);
+                        ALOGW("Excluded resources(%jd) can't be more than Available resources(%jd)",
+                              excluded, found->mAvailable);
+                        found->mAvailable = 0;
                     }
                 } else {
                     ALOGW("Failed to find the resource [%s]", name.c_str());

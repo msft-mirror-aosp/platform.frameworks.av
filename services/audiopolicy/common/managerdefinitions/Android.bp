@@ -39,6 +39,8 @@ cc_library {
         "android.media.audiopolicy-aconfig-cc",
         "audioclient-types-aidl-cpp",
         "audiopolicy-types-aidl-cpp",
+        "com.android.media.audioserver-aconfig-cc",
+        "libaconfig_storage_read_api_cc",
         "libaudioclient_aidl_conversion",
         "libaudiofoundation",
         "libaudiopolicy",
@@ -51,6 +53,7 @@ cc_library {
         "libmedia_helper",
         "libutils",
         "libxml2",
+        "server_configurable_flags",
     ],
     export_shared_lib_headers: [
         "libaudiofoundation",

@@ -128,7 +128,8 @@ public:
                                   std::vector<audio_io_handle_t> *secondaryOutputs,
                                   output_type_t *outputType,
                                   bool *isSpatialized,
-                                  bool *isBitPerfect) override;
+                                  bool *isBitPerfect,
+                                  float *volume) override;
         virtual status_t startOutput(audio_port_handle_t portId);
         virtual status_t stopOutput(audio_port_handle_t portId);
         virtual bool releaseOutput(audio_port_handle_t portId);
@@ -590,6 +591,8 @@ protected:
          * @param index index to match in the volume curves for the calculation
          * @param deviceTypes devices that should be considered in the volume curves for the
          *        calculation
+         * @param adjustAttenuation boolean indicating whether we should adjust the value to
+         *        avoid double attenuation when controlling an avrcp device
          * @param computeInternalInteraction boolean indicating whether recursive volume computation
          *        should continue within the volume computation. Defaults to {@code true} so the
          *        volume interactions can be computed. Calls within the method should always set the
@@ -598,6 +601,7 @@ protected:
          */
         virtual float computeVolume(IVolumeCurves &curves, VolumeSource volumeSource,
                                int index, const DeviceTypeSet& deviceTypes,
+                               bool adjustAttenuation = true,
                                bool computeInternalInteraction = true);
 
         // rescale volume index from srcStream within range of dstStream
@@ -1361,6 +1365,11 @@ private:
         status_t getDevicesForAttributes(const audio_attributes_t &attr,
                                          DeviceVector &devices,
                                          bool forVolume);
+
+        // A helper method used by getDevicesForAttributes to retrieve input devices when
+        // capture preset is available in the given audio attributes parameter.
+        status_t getInputDevicesForAttributes(const audio_attributes_t &attr,
+                                              DeviceVector &devices);
 
         status_t getProfilesForDevices(const DeviceVector& devices,
                                        AudioProfileVector& audioProfiles,
