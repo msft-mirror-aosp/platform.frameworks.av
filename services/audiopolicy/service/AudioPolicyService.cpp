@@ -61,6 +61,10 @@ static const nsecs_t kAudioCommandTimeoutNs = seconds(3); // 3 seconds
 
 static const String16 sManageAudioPolicyPermission("android.permission.MANAGE_AUDIO_POLICY");
 
+namespace {
+constexpr auto PERMISSION_GRANTED = permission::PermissionChecker::PERMISSION_GRANTED;
+}
+
 // Creates an association between Binder code to name for IAudioPolicyService.
 #define IAUDIOPOLICYSERVICE_BINDER_METHOD_MACRO_LIST \
 BINDER_METHOD_ENTRY(onNewAudioModulesAvailable) \
@@ -588,12 +592,13 @@ void AudioPolicyService::doOnCheckSpatializer()
             if (status == NO_ERROR && currentOutput == newOutput) {
                 return;
             }
-            size_t numActiveTracks = countActiveClientsOnOutput_l(newOutput);
+            std::vector<audio_channel_mask_t> activeTracksMasks =
+                    getActiveTracksMasks_l(newOutput);
             mMutex.unlock();
             // It is OK to call detachOutput() is none is already attached.
             mSpatializer->detachOutput();
             if (status == NO_ERROR && newOutput != AUDIO_IO_HANDLE_NONE) {
-                status = mSpatializer->attachOutput(newOutput, numActiveTracks);
+                status = mSpatializer->attachOutput(newOutput, activeTracksMasks);
             }
             mMutex.lock();
             if (status != NO_ERROR) {
@@ -611,17 +616,17 @@ void AudioPolicyService::doOnCheckSpatializer()
     }
 }
 
-size_t AudioPolicyService::countActiveClientsOnOutput_l(
+std::vector<audio_channel_mask_t> AudioPolicyService::getActiveTracksMasks_l(
         audio_io_handle_t output, bool spatializedOnly) {
-    size_t count = 0;
+    std::vector<audio_channel_mask_t> activeTrackMasks;
     for (size_t i = 0; i < mAudioPlaybackClients.size(); i++) {
         auto client = mAudioPlaybackClients.valueAt(i);
         if (client->io == output && client->active
                 && (!spatializedOnly || client->isSpatialized)) {
-            count++;
+            activeTrackMasks.push_back(client->channelMask);
         }
     }
-    return count;
+    return activeTrackMasks;
 }
 
 void AudioPolicyService::onUpdateActiveSpatializerTracks_l() {
@@ -637,12 +642,12 @@ void AudioPolicyService::doOnUpdateActiveSpatializerTracks()
         return;
     }
     audio_io_handle_t output = mSpatializer->getOutput();
-    size_t activeClients;
+    std::vector<audio_channel_mask_t> activeTracksMasks;
     {
         audio_utils::lock_guard _l(mMutex);
-        activeClients = countActiveClientsOnOutput_l(output);
+        activeTracksMasks = getActiveTracksMasks_l(output);
     }
-    mSpatializer->updateActiveTracks(activeClients);
+    mSpatializer->updateActiveTracks(activeTracksMasks);
 }
 
 status_t AudioPolicyService::clientCreateAudioPatch(const struct audio_patch *patch,
@@ -1215,9 +1220,10 @@ void AudioPolicyService::setAppState_l(sp<AudioRecordClient> client, app_state_t
                 } else {
                     std::stringstream msg;
                     msg << "Audio recording un-silenced on session " << client->session;
-                    if (!startRecording(client->attributionSource, client->virtualDeviceId,
-                                        String16(msg.str().c_str()), client->attributes.source)) {
-                        silenced = true;
+                    if (startRecording(client->attributionSource, client->virtualDeviceId,
+                                String16(msg.str().c_str()), client->attributes.source)
+                                != PERMISSION_GRANTED) {
+                        return;
                     }
                 }
             }
@@ -1415,7 +1421,7 @@ status_t AudioPolicyService::onTransact(
         }
     }, mediautils::TimeCheck::getDefaultTimeoutDuration(),
     mediautils::TimeCheck::getDefaultSecondChanceDuration(),
-    true /* crashOnTimeout */);
+    !property_get_bool("audio.timecheck.disabled", false) /* crashOnTimeout */);
 
     switch (code) {
         case SHELL_COMMAND_TRANSACTION: {
@@ -1814,6 +1820,16 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                                                                     data->mIO);
                     ul.lock();
                     }break;
+                case SET_PORTS_VOLUME: {
+                    VolumePortsData *data = (VolumePortsData *)command->mParam.get();
+                    ALOGV("AudioCommandThread() processing set volume Ports %s volume %f, \
+                            output %d", data->dumpPorts().c_str(), data->mVolume, data->mIO);
+                    ul.unlock();
+                    command->mStatus = AudioSystem::setPortsVolume(data->mPorts,
+                                                                   data->mVolume,
+                                                                   data->mIO);
+                    ul.lock();
+                    } break;
                 case SET_PARAMETERS: {
                     ParametersData *data = (ParametersData *)command->mParam.get();
                     ALOGV("AudioCommandThread() processing set parameters string %s, io %d",
@@ -2147,6 +2163,23 @@ status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type
     return sendCommand(command, delayMs);
 }
 
+status_t AudioPolicyService::AudioCommandThread::volumePortsCommand(
+        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output,
+        int delayMs)
+{
+    sp<AudioCommand> command = new AudioCommand();
+    command->mCommand = SET_PORTS_VOLUME;
+    sp<VolumePortsData> data = new VolumePortsData();
+    data->mPorts = ports;
+    data->mVolume = volume;
+    data->mIO = output;
+    command->mParam = data;
+    command->mWaitStatus = true;
+    ALOGV("AudioCommandThread() adding set volume ports %s, volume %f, output %d",
+            data->dumpPorts().c_str(), volume, output);
+    return sendCommand(command, delayMs);
+}
+
 status_t AudioPolicyService::AudioCommandThread::parametersCommand(audio_io_handle_t ioHandle,
                                                                    const char *keyValuePairs,
                                                                    int delayMs)
@@ -2477,6 +2510,31 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(sp<AudioCommand>& c
             delayMs = 1;
         } break;
 
+        case SET_PORTS_VOLUME: {
+            VolumePortsData *data = (VolumePortsData *)command->mParam.get();
+            VolumePortsData *data2 = (VolumePortsData *)command2->mParam.get();
+            if (data->mIO != data2->mIO) break;
+            // Can remove command only if port ids list is the same, otherwise, remove from
+            // command 2 all port whose volume will be replaced with command 1 volume.
+            std::vector<audio_port_handle_t> portsOnlyInCommand2{};
+            std::copy_if(data2->mPorts.begin(), data2->mPorts.end(),
+                    std::back_inserter(portsOnlyInCommand2), [&](const auto &portId) {
+                return std::find(data->mPorts.begin(), data->mPorts.end(), portId) ==
+                        data->mPorts.end();
+            });
+            if (!portsOnlyInCommand2.empty()) {
+                data2->mPorts = portsOnlyInCommand2;
+                break;
+            }
+            ALOGV("Filtering out volume command on output %d for ports %s",
+                    data->mIO, data->dumpPorts().c_str());
+            removedCommands.add(command2);
+            command->mTime = command2->mTime;
+            // force delayMs to non 0 so that code below does not request to wait for
+            // command status as the command is now delayed
+            delayMs = 1;
+        } break;
+
         case SET_VOICE_VOLUME: {
             VoiceVolumeData *data = (VoiceVolumeData *)command->mParam.get();
             VoiceVolumeData *data2 = (VoiceVolumeData *)command2->mParam.get();
@@ -2622,6 +2680,12 @@ int AudioPolicyService::setStreamVolume(audio_stream_type_t stream,
 {
     return (int)mAudioCommandThread->volumeCommand(stream, volume,
                                                    output, delayMs);
+}
+
+int AudioPolicyService::setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+                                       audio_io_handle_t output, int delayMs)
+{
+    return (int)mAudioCommandThread->volumePortsCommand(ports, volume, output, delayMs);
 }
 
 int AudioPolicyService::setVoiceVolume(float volume, int delayMs)

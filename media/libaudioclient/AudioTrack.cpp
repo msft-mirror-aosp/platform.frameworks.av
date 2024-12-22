@@ -1707,6 +1707,18 @@ status_t AudioTrack::setOutputDevice(audio_port_handle_t deviceId) {
     AutoMutex lock(mLock);
     ALOGV("%s(%d): deviceId=%d mSelectedDeviceId=%d",
             __func__, mPortId, deviceId, mSelectedDeviceId);
+    const int64_t beginNs = systemTime();
+    mediametrics::Defer defer([&] {
+        mediametrics::LogItem(mMetricsId)
+                .set(AMEDIAMETRICS_PROP_CALLERNAME,
+                     mCallerName.empty()
+                     ? AMEDIAMETRICS_PROP_CALLERNAME_VALUE_UNKNOWN
+                     : mCallerName.c_str())
+                .set(AMEDIAMETRICS_PROP_EVENT, AMEDIAMETRICS_PROP_EVENT_VALUE_SETPREFERREDDEVICE)
+                .set(AMEDIAMETRICS_PROP_EXECUTIONTIMENS, (int64_t)(systemTime() - beginNs))
+                .set(AMEDIAMETRICS_PROP_SELECTEDDEVICEID, (int32_t)deviceId)
+                .record(); });
+
     if (mSelectedDeviceId != deviceId) {
         mSelectedDeviceId = deviceId;
         if (mStatus == NO_ERROR) {
@@ -2423,12 +2435,14 @@ nsecs_t AudioTrack::processAudioBuffer()
     int32_t flags = android_atomic_and(
         ~(CBLK_UNDERRUN | CBLK_LOOP_CYCLE | CBLK_LOOP_FINAL | CBLK_BUFFER_END), &mCblk->mFlags);
 
+    const bool isOffloaded = isOffloaded_l();
+    const bool isOffloadedOrDirect = isOffloadedOrDirect_l();
     // Check for track invalidation
     if (flags & CBLK_INVALID) {
         // for offloaded tracks restoreTrack_l() will just update the sequence and clear
         // AudioSystem cache. We should not exit here but after calling the callback so
         // that the upper layers can recreate the track
-        if (!isOffloadedOrDirect_l() || (mSequence == mObservedSequence)) {
+        if (!isOffloadedOrDirect || (mSequence == mObservedSequence)) {
             status_t status __unused = restoreTrack_l("processAudioBuffer");
             // FIXME unused status
             // after restoration, continue below to make sure that the loop and buffer events
@@ -2598,7 +2612,7 @@ nsecs_t AudioTrack::processAudioBuffer()
         mObservedSequence = sequence;
         callback->onNewIAudioTrack();
         // for offloaded tracks, just wait for the upper layers to recreate the track
-        if (isOffloadedOrDirect()) {
+        if (isOffloadedOrDirect) {
             return NS_INACTIVE;
         }
     }
@@ -2686,7 +2700,7 @@ nsecs_t AudioTrack::processAudioBuffer()
                 __func__, mPortId, mRemainingFrames, avail, audioBuffer.frameCount, nonContig, err);
         if (err != NO_ERROR) {
             if (err == TIMED_OUT || err == WOULD_BLOCK || err == -EINTR ||
-                    (isOffloaded() && (err == DEAD_OBJECT))) {
+                    (isOffloaded && (err == DEAD_OBJECT))) {
                 // FIXME bug 25195759
                 return 1000000;
             }
@@ -2772,7 +2786,7 @@ nsecs_t AudioTrack::processAudioBuffer()
             // buffer size and skip the loop entirely.
 
             nsecs_t myns;
-            if (audio_has_proportional_frames(mFormat)) {
+            if (!isOffloaded && audio_has_proportional_frames(mFormat)) {
                 // time to wait based on buffer occupancy
                 const nsecs_t datans = mRemainingFrames <= avail ? 0 :
                         framesToNanoseconds(mRemainingFrames - avail, sampleRate, speed);
