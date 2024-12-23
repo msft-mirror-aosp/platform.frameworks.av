@@ -432,6 +432,14 @@ void TrackBase::logRefreshInterval(const std::string& devices) {
     }
 }
 
+void TrackBase::signal() {
+    const sp<IAfThreadBase> thread = mThread.promote();
+    if (thread != nullptr) {
+        audio_utils::lock_guard _l(thread->mutex());
+        thread->broadcast_l();
+    }
+}
+
 PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,
         IAfThreadBase* thread, const Timeout& timeout)
     : mProxy(proxy)
@@ -2126,16 +2134,6 @@ void Track::signalClientFlag(int32_t flag)
     android_atomic_release_store(0x40000000, &cblk->mFutex);
     // client is not in server, so FUTEX_WAKE is needed instead of FUTEX_WAKE_PRIVATE
     (void) syscall(__NR_futex, &cblk->mFutex, FUTEX_WAKE, INT_MAX);
-}
-
-void Track::signal()
-{
-    const sp<IAfThreadBase> thread = mThread.promote();
-    if (thread != 0) {
-        auto* const t = thread->asIAfPlaybackThread().get();
-        audio_utils::lock_guard _l(t->mutex());
-        t->broadcast_l();
-    }
 }
 
 status_t Track::getDualMonoMode(audio_dual_mono_mode_t* mode) const
