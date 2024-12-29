@@ -30,7 +30,9 @@
 #include "hardware/camera2.h"
 #include "camera/CameraMetadata.h"
 #include "camera/CaptureResult.h"
+#if not WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
 #include "gui/IGraphicBufferProducer.h"
+#endif
 #include "device3/Camera3StreamInterface.h"
 #include "device3/StatusTracker.h"
 #include "binder/Status.h"
