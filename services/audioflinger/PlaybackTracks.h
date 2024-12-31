@@ -23,6 +23,7 @@
 #include <audio_utils/mutex.h>
 #include <audio_utils/LinearMap.h>
 #include <binder/AppOpsManager.h>
+#include <media/AppOpsSession.h>
 #include <utils/RWLock.h>
 
 namespace android {
@@ -297,8 +298,7 @@ protected:
     }
 
     bool isPlaybackRestrictedControl() const final {
-        return false;
-        // return mOpAudioControlSoftMonitor ? !mOpAudioControlSoftMonitor->hasOp() : false;
+        return mOpControlSession ? !mHasOpControl.load(std::memory_order_acquire) : false;
     }
 
     bool isPlaybackRestricted() const final {
@@ -352,6 +352,12 @@ protected:
     sp<media::VolumeHandler>  mVolumeHandler; // handles multiple VolumeShaper configs and operations
 
     sp<OpPlayAudioMonitor>  mOpPlayAudioMonitor;
+
+    // logically const
+    std::optional<media::permission::AppOpsSession<media::permission::DefaultAppOpsFacade>>
+            mOpControlSession;
+
+    std::atomic<bool> mHasOpControl {true};
 
     bool                mHapticPlaybackEnabled = false; // indicates haptic playback enabled or not
     // scale to play haptic data
