@@ -173,6 +173,24 @@ struct AidlProviderInfo : public CameraProviderManager::ProviderInfo {
     };
     ndk::ScopedAIBinder_DeathRecipient mDeathRecipient;
 
+    // Estimate based on the camera framework modification on camera
+    // characteristics:
+    // - Flash strength: 4 entries
+    // - Dynamic depth: 6 entries
+    // - Heic: 6 entries
+    // - Rotation and crop: 1 entry
+    // - Autoframing: 1 entry
+    // - Pre-correction active array size: 1 entry
+    // - Zoom ratio: 1 entry
+    // - Readout timestamp: 1 entry
+    // - color correction modes: 1 entry
+    // - AE priority modes: 1 entry
+    // - Torch strength level: 2 entries
+    // - Session config query version: 1 entry
+    //
+    // Total: 26 entries. Round up to 64 entries.
+    static constexpr size_t CHARACTERISTICS_EXTRA_ENTRIES = 64;
+    static constexpr size_t CHARACTERISTICS_EXTRA_DATA_SIZE = 1024; // in bytes
 };
 
 } // namespace android
