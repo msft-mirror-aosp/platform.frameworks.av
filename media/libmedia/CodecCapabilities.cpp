@@ -149,7 +149,7 @@ bool CodecCapabilities::isFormatSupported(const sp<AMessage> &format) const {
         int32_t yesNo;
         std::string key = KEY_FEATURE_;
         key = key + feat.mName;
-        if (format->findInt32(key.c_str(), &yesNo)) {
+        if (!format->findInt32(key.c_str(), &yesNo)) {
             continue;
         }
         if ((yesNo == 1 && !isFeatureSupported(feat.mName)) ||
