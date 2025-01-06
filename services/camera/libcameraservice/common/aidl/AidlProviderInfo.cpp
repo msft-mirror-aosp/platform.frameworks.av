@@ -769,7 +769,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     std::filesystem::path sharedSessionConfigFilePath =
             std::string(SHARED_SESSION_FILE_PATH) + std::string(SHARED_SESSION_FILE_NAME);
-    if (flags::camera_multi_client() && std::filesystem::exists(sharedSessionConfigFilePath)) {
+    if (flags::camera_multi_client() && std::filesystem::exists(sharedSessionConfigFilePath)
+            && mSystemCameraKind == SystemCameraKind::SYSTEM_ONLY_CAMERA) {
         addSharedSessionConfigurationTags(id);
     }
 
