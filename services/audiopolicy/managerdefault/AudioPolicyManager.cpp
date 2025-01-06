@@ -7547,7 +7547,8 @@ void AudioPolicyManager::checkOutputForAttributes(const audio_attributes_t &attr
         }
 
         for (const sp<TrackClientDescriptor>& client : desc->getClientIterable()) {
-            if (mEngine->getProductStrategyForAttributes(client->attributes()) != psId) {
+            if (mEngine->getProductStrategyForAttributes(client->attributes()) != psId
+                    || client->isInvalid()) {
                 continue;
             }
             if (!desc->supportsAllDevices(newDevices)) {
@@ -7584,6 +7585,9 @@ void AudioPolicyManager::checkOutputForAttributes(const audio_attributes_t &attr
 
             bool invalidate = false;
             for (auto client : desc->clientsList(false /*activeOnly*/)) {
+                if (client->isInvalid()) {
+                    continue;
+                }
                 if (desc->isDuplicated() || !desc->mProfile->isDirectOutput()) {
                     // a client on a non direct outputs has necessarily a linear PCM format
                     // so we can call selectOutput() safely
