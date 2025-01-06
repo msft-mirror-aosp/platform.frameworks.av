@@ -225,7 +225,7 @@ flag {
     name: "zoom_method"
     is_exported: true
     description: "Gives apps explicit control on reflects zoom via ZOOM_RATIO capture result"
-    bug: "298899993"
+    bug: "350076823"
 }
 
 flag {
