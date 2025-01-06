@@ -95,7 +95,7 @@ class CameraDevice final : public std::enable_shared_from_this<CameraDevice> {
   public:
     CameraDevice(const char* id, ACameraDevice_StateCallbacks* cb,
                   sp<ACameraMetadata> chars,
-                  ACameraDevice* wrapper);
+                  ACameraDevice* wrapper, bool sharedMode);
     ~CameraDevice();
 
     // Called to initialize fields that require shared_ptr to `this`
@@ -136,6 +136,7 @@ class CameraDevice final : public std::enable_shared_from_this<CameraDevice> {
                                             const CaptureResultExtras& in_resultExtras,
                                             const std::vector<PhysicalCaptureResultInfo>&
                                                     in_physicalCaptureResultInfos) override;
+         ndk::ScopedAStatus onClientSharedAccessPriorityChanged(bool isPrimaryClient) override;
 
       private:
         camera_status_t readOneResultMetadata(const CaptureMetadataInfo& captureMetadataInfo,
@@ -154,6 +155,9 @@ class CameraDevice final : public std::enable_shared_from_this<CameraDevice> {
 
     // Stop the looper thread and unregister the handler
     void stopLooperAndDisconnect();
+    void setPrimaryClient(bool isPrimary) {mIsPrimaryClient = isPrimary;};
+    bool isPrimaryClient() {return mIsPrimaryClient;};
+    bool isSharedMode() {return mSharedMode;};
 
   private:
     friend ACameraCaptureSession;
@@ -191,6 +195,13 @@ class CameraDevice final : public std::enable_shared_from_this<CameraDevice> {
             int numRequests, ACaptureRequest** requests,
             /*out*/int* captureSequenceId,
             bool isRepeating);
+
+    camera_status_t stopStreamingLocked();
+
+    template<class T>
+    camera_status_t startStreamingLocked(ACameraCaptureSession* session,
+            /*optional*/T* callbacks,
+            int numOutputWindows, ANativeWindow** windows, /*optional*/int* captureSequenceId);
 
     void addRequestSettingsMetadata(ACaptureRequest *aCaptureRequest, sp<CaptureRequest> &req);
 
@@ -232,6 +243,10 @@ class CameraDevice final : public std::enable_shared_from_this<CameraDevice> {
     const sp<ACameraMetadata> mChars;    // Camera characteristics
     std::shared_ptr<ServiceCallback> mServiceCallback;
     ACameraDevice* mWrapper;
+    bool mSharedMode;
+    bool mIsPrimaryClient;
+    ACaptureRequest* mPreviewRequest = nullptr;
+    std::vector<ACameraOutputTarget*> mPreviewRequestOutputs;
 
     // stream id -> pair of (ACameraWindowType* from application, OutputConfiguration used for
     // camera service)
@@ -274,7 +289,8 @@ class CameraDevice final : public std::enable_shared_from_this<CameraDevice> {
         kWhatCaptureBufferLost, // onCaptureBufferLost
         kWhatPreparedCb, // onPrepared
         // Internal cleanup
-        kWhatCleanUpSessions   // Cleanup cached sp<ACameraCaptureSession>
+        kWhatCleanUpSessions,   // Cleanup cached sp<ACameraCaptureSession>
+        kWhatClientSharedAccessPriorityChanged
     };
     static const char* kContextKey;
     static const char* kDeviceKey;
@@ -434,9 +450,9 @@ class CameraDevice final : public std::enable_shared_from_this<CameraDevice> {
  */
 struct ACameraDevice {
     ACameraDevice(const char* id, ACameraDevice_StateCallbacks* cb,
-                  sp<ACameraMetadata> chars) :
+                  sp<ACameraMetadata> chars, bool sharedMode) :
             mDevice(std::make_shared<android::acam::CameraDevice>(id, cb,
-                                                                std::move(chars), this)) {
+            std::move(chars), this, sharedMode)) {
         mDevice->init();
     }
 
@@ -481,6 +497,16 @@ struct ACameraDevice {
     inline bool setDeviceMetadataQueues() {
         return mDevice->setDeviceMetadataQueues();
     }
+    inline void setPrimaryClient(bool isPrimary) {
+        mDevice->setPrimaryClient(isPrimary);
+    }
+    inline bool isPrimaryClient() const {
+        return mDevice->isPrimaryClient();
+    }
+    inline bool isSharedMode() const {
+        return mDevice->isSharedMode();
+    }
+
   private:
     std::shared_ptr<android::acam::CameraDevice> mDevice;
 };

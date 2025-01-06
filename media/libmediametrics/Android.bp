@@ -16,6 +16,7 @@ cc_library {
     name: "libmediametrics",
 
     srcs: [
+        "ItemSerialization.cpp",
         "MediaMetrics.cpp",
         "MediaMetricsItem.cpp",
     ],

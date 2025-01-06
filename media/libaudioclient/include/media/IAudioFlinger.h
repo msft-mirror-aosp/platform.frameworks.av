@@ -109,7 +109,7 @@ public:
         audio_output_flags_t flags;
         size_t frameCount;
         size_t notificationFrameCount;
-        audio_port_handle_t selectedDeviceId;
+        DeviceIdVector selectedDeviceIds;
         audio_session_t sessionId;
 
         /* output */
@@ -180,6 +180,8 @@ public:
         static ConversionResult<CreateRecordOutput>
         fromAidl(const media::CreateRecordResponse& aidl);
     };
+
+    virtual sp<media::IAudioFlingerService> getDelegate() const { return {}; }
 
     /* create an audio track and registers it with AudioFlinger.
      * The audioTrack field will be null if the track cannot be created and the status will reflect
@@ -413,6 +415,8 @@ public:
 class AudioFlingerClientAdapter : public IAudioFlinger {
 public:
     explicit AudioFlingerClientAdapter(const sp<media::IAudioFlingerService> delegate);
+
+    sp<media::IAudioFlingerService> getDelegate() const final { return mDelegate; }
 
     status_t createTrack(const media::CreateTrackRequest& input,
                          media::CreateTrackResponse& output) override;

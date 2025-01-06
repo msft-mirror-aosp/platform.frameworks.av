@@ -131,7 +131,6 @@ public:
     float* mainBuffer() const final { return mMainBuffer; }
     int auxEffectId() const final { return mAuxEffectId; }
     status_t getTimestamp(AudioTimestamp& timestamp) final;
-    void signal() final;
     status_t getDualMonoMode(audio_dual_mono_mode_t* mode) const final;
     status_t setDualMonoMode(audio_dual_mono_mode_t mode) final;
     status_t getAudioDescriptionMixLevel(float* leveldB) const final;
@@ -231,6 +230,8 @@ public:
     float getPortVolume() const override { return mVolume; }
     bool getPortMute() const override { return mMutedFromPort; }
 
+    std::string trackFlagsAsString() const final { return toString(mFlags); }
+
 protected:
 
     DISALLOW_COPY_AND_ASSIGN(Track);
@@ -289,9 +290,20 @@ protected:
     bool isDisabled() const final;
 
     int& fastIndex() final { return mFastIndex; }
-    bool isPlaybackRestricted() const final {
+
+    bool isPlaybackRestrictedOp() const final {
         // The monitor is only created for tracks that can be silenced.
-        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false; }
+        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false;
+    }
+
+    bool isPlaybackRestrictedControl() const final {
+        return false;
+        // return mOpAudioControlSoftMonitor ? !mOpAudioControlSoftMonitor->hasOp() : false;
+    }
+
+    bool isPlaybackRestricted() const final {
+        return isPlaybackRestrictedOp() || isPlaybackRestrictedControl();
+    }
 
     const sp<AudioTrackServerProxy>& audioTrackServerProxy() const final {
         return mAudioTrackServerProxy;

@@ -38,22 +38,8 @@
 
 namespace android::audio_policy {
 
-struct legacy_strategy_map { const char *name; legacy_strategy id; };
 static const std::vector<legacy_strategy_map>& getLegacyStrategy() {
-    static const std::vector<legacy_strategy_map> legacyStrategy = {
-        { "STRATEGY_NONE", STRATEGY_NONE },
-        { "STRATEGY_MEDIA", STRATEGY_MEDIA },
-        { "STRATEGY_PHONE", STRATEGY_PHONE },
-        { "STRATEGY_SONIFICATION", STRATEGY_SONIFICATION },
-        { "STRATEGY_SONIFICATION_RESPECTFUL", STRATEGY_SONIFICATION_RESPECTFUL },
-        { "STRATEGY_DTMF", STRATEGY_DTMF },
-        { "STRATEGY_ENFORCED_AUDIBLE", STRATEGY_ENFORCED_AUDIBLE },
-        { "STRATEGY_TRANSMITTED_THROUGH_SPEAKER", STRATEGY_TRANSMITTED_THROUGH_SPEAKER },
-        { "STRATEGY_ACCESSIBILITY", STRATEGY_ACCESSIBILITY },
-        { "STRATEGY_REROUTING", STRATEGY_REROUTING },
-        { "STRATEGY_PATCH", STRATEGY_PATCH }, // boiler to manage stream patch volume
-        { "STRATEGY_CALL_ASSISTANT", STRATEGY_CALL_ASSISTANT },
-    };
+    static const std::vector<legacy_strategy_map> legacyStrategy = getLegacyStrategyMap();
     return legacyStrategy;
 }
 
@@ -68,7 +54,7 @@ status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath) {
 
 template<typename T>
 status_t Engine::loadWithFallback(const T& configSource) {
-    auto result = EngineBase::loadAudioPolicyEngineConfig(configSource);
+    auto result = EngineBase::loadAudioPolicyEngineConfig(configSource, false /*isConfigurable*/);
     ALOGE_IF(result.nbSkippedElement != 0,
              "Policy Engine configuration is partially invalid, skipped %zu elements",
              result.nbSkippedElement);
@@ -464,20 +450,18 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                 excludedDevices.push_back(AUDIO_DEVICE_OUT_AUX_DIGITAL);
             }
             if ((getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) != AUDIO_POLICY_FORCE_NO_BT_A2DP)) {
-                // Get the last connected device of wired and bluetooth a2dp
-                devices2 = availableOutputDevices.getFirstDevicesFromTypes(
-                        getLastRemovableMediaDevices(GROUP_NONE, excludedDevices));
                 if (com::android::media::audioserver::use_bt_sco_for_media()) {
-                    if (isBtScoActive(availableOutputDevices)
-                         && !(devices2.getDevicesFromTypes(
-                                 getAudioDeviceOutAllA2dpSet()).isEmpty()
-                             && devices2.getDevicesFromTypes(
-                                     getAudioDeviceOutAllBleSet()).isEmpty())) {
+                    if (isBtScoActive(availableOutputDevices)) {
                         devices2 = availableOutputDevices.getFirstDevicesFromTypes(
                                 { AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT,
-                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
-                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
+                                AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
+                                AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
                     }
+                }
+                if (devices2.isEmpty()) {
+                    // Get the last connected device of wired and bluetooth a2dp
+                    devices2 = availableOutputDevices.getFirstDevicesFromTypes(
+                            getLastRemovableMediaDevices(GROUP_NONE, excludedDevices));
                 }
             } else {
                 // Get the last connected device of wired except bluetooth a2dp

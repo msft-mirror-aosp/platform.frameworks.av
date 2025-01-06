@@ -258,7 +258,9 @@ TEST(service_singleton_tests, one_and_only) {
 
         // we can also request our own death notifications (outside of the service traits).
         handle3 = mediautils::requestDeathNotification(service, [&] { ++listenerServiceDied; });
+        EXPECT_TRUE(handle3);
         handle4 = mediautils::requestDeathNotification(service2, [&] { ++listenerServiceDied; });
+        EXPECT_TRUE(handle4);
     }
 
     EXPECT_EQ(4, sNewService);
@@ -296,6 +298,42 @@ TEST(service_singleton_tests, one_and_only) {
     EXPECT_EQ(4, sNewService);
     EXPECT_EQ(4, sServiceDied);
     EXPECT_EQ(4, listenerServiceCreated);  // our listener picks it up.
+
+    {
+        // in default mode (kNull) a null is returned when the service is skipped and
+        // wait time is ignored.
+
+        const auto ref1 = std::chrono::steady_clock::now();
+        auto service = mediautils::getService<IServiceSingletonTest>(std::chrono::seconds(2));
+        EXPECT_FALSE(service);
+        const auto ref2 = std::chrono::steady_clock::now();
+        EXPECT_LT(ref2 - ref1, std::chrono::seconds(1));
+
+        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>(
+                std::chrono::seconds(2));
+        EXPECT_FALSE(service2);
+        const auto ref3 = std::chrono::steady_clock::now();
+        EXPECT_LT(ref3 - ref2, std::chrono::seconds(1));
+    }
+
+    // Cancel the singleton cache but use wait mode.
+    mediautils::skipService<IServiceSingletonTest>(mediautils::SkipMode::kWait);
+    mediautils::skipService<aidl::IServiceSingletonTest>(mediautils::SkipMode::kWait);
+
+    {
+        // in wait mode, the timeouts are respected
+        const auto ref1 = std::chrono::steady_clock::now();
+        auto service = mediautils::getService<IServiceSingletonTest>(std::chrono::seconds(1));
+        EXPECT_FALSE(service);
+        const auto ref2 = std::chrono::steady_clock::now();
+        EXPECT_GT(ref2 - ref1, std::chrono::seconds(1));
+
+        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>(
+                std::chrono::seconds(1));
+        EXPECT_FALSE(service2);
+        const auto ref3 = std::chrono::steady_clock::now();
+        EXPECT_GT(ref3 - ref2, std::chrono::seconds(1));
+    }
 
     // remove service
     remoteWorker->putc('b');
@@ -352,6 +390,13 @@ TEST(service_singleton_tests, one_and_only) {
 
     EXPECT_EQ(6, listenerServiceCreated);  // listener associated with service name picks up info.
 
+    // get service pointers that will be made stale later.
+    auto stale_service = mediautils::getService<IServiceSingletonTest>();
+    EXPECT_TRUE(stale_service);  // not stale yet.
+
+    auto stale_service2 = mediautils::getService<aidl::IServiceSingletonTest>();
+    EXPECT_TRUE(stale_service2);  // not stale yet.
+
     // Release the service.
     remoteWorker->putc('b');
     EXPECT_EQ('b', remoteWorker->getc());
@@ -362,4 +407,15 @@ TEST(service_singleton_tests, one_and_only) {
     EXPECT_EQ(4, sServiceDied);
     EXPECT_EQ(2, sNewService2);   // new counters change
     EXPECT_EQ(2, sServiceDied2);
+
+    // The service handles are now stale, verify that we can't register a death notification.
+    {
+        std::atomic_int32_t postDied = 0;
+        // we cannot register death notification so handles are null.
+        auto handle1 = mediautils::requestDeathNotification(stale_service, [&] { ++postDied; });
+        EXPECT_FALSE(handle1);
+        auto handle2= mediautils::requestDeathNotification(stale_service2, [&] { ++postDied; });
+        EXPECT_FALSE(handle2);
+        EXPECT_EQ(0, postDied);  // no callbacks issued.
+    }
 }

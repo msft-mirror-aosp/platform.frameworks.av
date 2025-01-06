@@ -81,6 +81,12 @@ aconfig_declarations {
     srcs: ["extractor.aconfig"],
 }
 
+java_aconfig_library {
+    name: "android.media.extractor.flags-aconfig-java",
+    aconfig_declarations: "android.media.extractor.flags-aconfig",
+    defaults: ["framework-minus-apex-aconfig-java-defaults"],
+}
+
 cc_aconfig_library {
     name: "android.media.extractor.flags-aconfig-cc",
     aconfig_declarations: "android.media.extractor.flags-aconfig",

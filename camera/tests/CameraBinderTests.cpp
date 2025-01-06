@@ -49,7 +49,9 @@
 
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItemConsumer.h>
+#if not COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 #include <gui/IGraphicBufferProducer.h>
+#endif
 #include <gui/Surface.h>
 
 #include <gtest/gtest.h>
@@ -63,6 +65,7 @@
 using namespace android;
 using ::android::hardware::ICameraService;
 using ::android::hardware::camera2::ICameraDeviceUser;
+using ::android::hardware::camera2::CameraMetadataInfo;
 
 #define ASSERT_NOT_NULL(x) \
     ASSERT_TRUE((x) != nullptr)
@@ -126,6 +129,15 @@ public:
 
     virtual binder::Status onCameraClosed([[maybe_unused]] const std::string& /*cameraId*/,
             [[maybe_unused]] int32_t /*deviceId*/) override {
+        // No op
+        return binder::Status::ok();
+    }
+
+    virtual binder::Status onCameraOpenedInSharedMode(
+            [[maybe_unused]] const std::string& /*cameraId*/,
+            [[maybe_unused]] const std::string& /*clientPackageName*/,
+            [[maybe_unused]] int32_t /*deviceId*/,
+            [[maybe_unused]] bool /*isPrimaryClient*/) override {
         // No op
         return binder::Status::ok();
     }
@@ -240,10 +252,10 @@ public:
         return binder::Status::ok();
     }
 
-    virtual binder::Status onResultReceived(const CameraMetadata& metadata,
+    virtual binder::Status onResultReceived(const CameraMetadataInfo& resultInfo,
             const CaptureResultExtras& resultExtras,
             const std::vector<PhysicalCaptureResultInfo>& physicalResultInfos) {
-        (void) metadata;
+        (void) resultInfo;
         (void) resultExtras;
         (void) physicalResultInfos;
         Mutex::Autolock l(mLock);
@@ -278,6 +290,12 @@ public:
         mLastStatus = REQUEST_QUEUE_EMPTY;
         mStatusesHit.push_back(mLastStatus);
         mStatusCondition.broadcast();
+        return binder::Status::ok();
+    }
+
+    virtual binder::Status onClientSharedAccessPriorityChanged(
+            [[maybe_unused]] bool /*isPrimaryClient*/) {
+        // No-op
         return binder::Status::ok();
     }
 
@@ -402,7 +420,8 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
         res = service->connectDevice(callbacks, cameraId,
                 /*oomScoreOffset*/ 0,
                 /*targetSdkVersion*/__ANDROID_API_FUTURE__,
-                /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0, /*out*/&device);
+                /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0,
+                /*sharedMode*/false, /*out*/&device);
         EXPECT_TRUE(res.isOk()) << res;
         ASSERT_NE(nullptr, device.get());
         device->disconnect();
@@ -451,7 +470,7 @@ protected:
                     /*oomScoreOffset*/ 0,
                     /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                     /*overrideToPortrait*/false, clientAttribution, /*devicePolicy*/0,
-                    /*out*/&device);
+                    /*sharedMode*/false, /*out*/&device);
             EXPECT_TRUE(res.isOk()) << res;
         }
         auto p = std::make_pair(callbacks, device);
@@ -531,10 +550,9 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
                   opaqueConsumer->setDefaultBufferFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED));
 
         sp<Surface> surface = opaqueConsumer->getSurface();
-
-        sp<IGraphicBufferProducer> producer = surface->getIGraphicBufferProducer();
+        ParcelableSurfaceType pSurface = flagtools::surfaceToParcelableSurfaceType(surface);
         std::string noPhysicalId;
-        OutputConfiguration output(producer, /*rotation*/ 0, noPhysicalId);
+        OutputConfiguration output(pSurface, /*rotation*/ 0, noPhysicalId);
 #else
         sp<IGraphicBufferProducer> gbProducer;
         sp<IGraphicBufferConsumer> gbConsumer;
@@ -688,10 +706,20 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
 
 TEST_F(CameraClientBinderTest, CheckBinderCaptureRequest) {
     sp<CaptureRequest> requestOriginal, requestParceled;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    sp<BufferItemConsumer> opaqueConsumer = new BufferItemConsumer(
+            GRALLOC_USAGE_SW_READ_NEVER, /*maxImages*/ 2, /*controlledByApp*/ true);
+    EXPECT_TRUE(opaqueConsumer.get() != nullptr);
+    opaqueConsumer->setName(String8("nom nom nom"));
+    sp<Surface> surface = opaqueConsumer->getSurface();
+#else
     sp<IGraphicBufferProducer> gbProducer;
     sp<IGraphicBufferConsumer> gbConsumer;
     BufferQueue::createBufferQueue(&gbProducer, &gbConsumer);
     sp<Surface> surface(new Surface(gbProducer, /*controlledByApp*/false));
+#endif
+
     Vector<sp<Surface>> surfaceList;
     surfaceList.push_back(surface);
     std::string physicalDeviceId1 = "0";

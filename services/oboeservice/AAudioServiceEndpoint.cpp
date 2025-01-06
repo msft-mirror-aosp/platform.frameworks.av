@@ -57,7 +57,7 @@ std::string AAudioServiceEndpoint::dump() const NO_THREAD_SAFETY_ANALYSIS {
     result << "    Direction:            " << ((getDirection() == AAUDIO_DIRECTION_OUTPUT)
                                    ? "OUTPUT" : "INPUT") << "\n";
     result << "    Requested Device Id:  " << mRequestedDeviceId << "\n";
-    result << "    Device Id:            " << getDeviceId() << "\n";
+    result << "    Device Ids:           " << android::toString(getDeviceIds()).c_str() << "\n";
     result << "    Sample Rate:          " << getSampleRate() << "\n";
     result << "    Channel Count:        " << getSamplesPerFrame() << "\n";
     result << "    Channel Mask:         0x" << std::hex << getChannelMask() << std::dec << "\n";
@@ -155,8 +155,8 @@ bool AAudioServiceEndpoint::matches(const AAudioStreamConfiguration& configurati
     if (configuration.getDirection() != getDirection()) {
         return false;
     }
-    if (configuration.getDeviceId() != AAUDIO_UNSPECIFIED &&
-        configuration.getDeviceId() != getDeviceId()) {
+    if (!configuration.getDeviceIds().empty() &&
+        !android::areDeviceIdsEqual(configuration.getDeviceIds(), getDeviceIds())) {
         return false;
     }
     if (configuration.getSessionId() != AAUDIO_SESSION_ID_ALLOCATE &&
@@ -196,14 +196,14 @@ audio_attributes_t AAudioServiceEndpoint::getAudioAttributesFrom(
             ? AAudioConvert_inputPresetToAudioSource(params->getInputPreset())
             : AUDIO_SOURCE_DEFAULT;
     audio_flags_mask_t flags;
-    std::optional<std::string> optTags = {};
+    std::string tags;
     if (direction == AAUDIO_DIRECTION_OUTPUT) {
         flags = AAudio_computeAudioFlagsMask(
                         params->getAllowedCapturePolicy(),
                         params->getSpatializationBehavior(),
                         params->isContentSpatialized(),
                         AUDIO_OUTPUT_FLAG_FAST);
-        optTags = params->getTags();
+        tags = params->getTagsAsString();
     } else {
         flags = static_cast<audio_flags_mask_t>(AUDIO_FLAG_LOW_LATENCY
                 | AAudioConvert_privacySensitiveToAudioFlagsMask(params->isPrivacySensitive()));
@@ -215,9 +215,9 @@ audio_attributes_t AAudioServiceEndpoint::getAudioAttributesFrom(
             .flags = flags,
             .tags = ""
     };
-    if (optTags.has_value() && !optTags->empty()) {
-        strncpy(nativeAttributes.tags, optTags.value().c_str(), AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
-        nativeAttributes.tags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1] = '\0';
+    if (!tags.empty()) {
+        strncpy(nativeAttributes.tags, tags.c_str(), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
+        nativeAttributes.tags[AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1] = '\0';
     }
     return nativeAttributes;
 }

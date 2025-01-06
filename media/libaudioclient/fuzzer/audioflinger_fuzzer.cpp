@@ -396,7 +396,7 @@ void AudioFlingerFuzzer::invokeAudioRecord() {
         static_cast<audio_port_handle_t>(mFdp.ConsumeIntegral<int32_t>());
     record->setInputDevice(deviceId);
     record->getInputDevice();
-    record->getRoutedDeviceId();
+    record->getRoutedDeviceIds();
     record->getPortId();
 }
 

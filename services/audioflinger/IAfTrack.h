@@ -131,6 +131,7 @@ public:
     virtual status_t getNextBuffer(AudioBufferProvider::Buffer* buffer) = 0;
     virtual void releaseBuffer(AudioBufferProvider::Buffer* buffer) = 0;
 
+    virtual void signal() = 0;
     // Added for RecordTrack and OutputTrack
     virtual wp<IAfThreadBase> thread() const = 0;
     virtual const sp<ServerProxy>& serverProxy() const = 0;
@@ -205,12 +206,16 @@ public:
 
     virtual const char* getTrackStateAsString() const = 0;
 
+    virtual const std::string& getTraceSuffix() const = 0;
     // Called by the PlaybackThread to indicate that the track is becoming active
     // and a new interval should start with a given device list.
     virtual void logBeginInterval(const std::string& devices) = 0;
 
     // Called by the PlaybackThread to indicate the track is no longer active.
     virtual void logEndInterval() = 0;
+
+    // Called by the PlaybackThread when ATRACE is enabled.
+    virtual void logRefreshInterval(const std::string& devices) = 0;
 
     // Called to tally underrun frames in playback.
     virtual void tallyUnderrunFrames(size_t frames) = 0;
@@ -319,7 +324,6 @@ public:
     virtual float* mainBuffer() const = 0;
     virtual int auxEffectId() const = 0;
     virtual status_t getTimestamp(AudioTimestamp& timestamp) = 0;
-    virtual void signal() = 0;
     virtual status_t getDualMonoMode(audio_dual_mono_mode_t* mode) const = 0;
     virtual status_t setDualMonoMode(audio_dual_mono_mode_t mode) = 0;
     virtual status_t getAudioDescriptionMixLevel(float* leveldB) const = 0;
@@ -391,6 +395,11 @@ public:
     virtual bool isDisabled() const = 0;
 
     virtual int& fastIndex() = 0;
+
+    // Restricted due to OP_PLAY_AUDIO
+    virtual bool isPlaybackRestrictedOp() const = 0;
+    // Restricted due to OP_AUDIO_CONTROL_SOFT
+    virtual bool isPlaybackRestrictedControl() const = 0;
     virtual bool isPlaybackRestricted() const = 0;
 
     // Used by thread only
@@ -556,6 +565,7 @@ public:
     virtual status_t setPreferredMicrophoneFieldDimension(float zoom) = 0;
     virtual status_t shareAudioHistory(
             const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) = 0;
+    virtual status_t setParameters(const String8& keyValuePairs) = 0;
     virtual int32_t startFrames() const = 0;
 
     static bool checkServerLatencySupported(audio_format_t format, audio_input_flags_t flags) {

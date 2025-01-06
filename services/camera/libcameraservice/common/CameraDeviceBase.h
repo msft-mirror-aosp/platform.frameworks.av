@@ -30,10 +30,13 @@
 #include "hardware/camera2.h"
 #include "camera/CameraMetadata.h"
 #include "camera/CaptureResult.h"
+#if not WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
 #include "gui/IGraphicBufferProducer.h"
+#endif
 #include "device3/Camera3StreamInterface.h"
 #include "device3/StatusTracker.h"
 #include "binder/Status.h"
+#include "FrameProcessorBase.h"
 #include "FrameProducer.h"
 #include "utils/IPCTransport.h"
 #include "utils/SessionConfigurationUtils.h"
@@ -93,6 +96,7 @@ class CameraDeviceBase : public virtual FrameProducer {
     virtual status_t initialize(sp<CameraProviderManager> manager,
             const std::string& monitorTags) = 0;
     virtual status_t disconnect() = 0;
+    virtual status_t disconnectClient(int) {return OK;};
 
     virtual status_t dump(int fd, const Vector<String16> &args) = 0;
     virtual status_t startWatchingTags(const std::string &tags) = 0;
@@ -285,6 +289,75 @@ class CameraDeviceBase : public virtual FrameProducer {
      * reference that stream.
      */
     virtual status_t deleteStream(int id) = 0;
+
+
+    /**
+     * This function is responsible for configuring camera streams at the start of a session.
+     * In shared session mode, where multiple clients may access the camera, camera service
+     * applies a predetermined shared session configuration. If the camera is opened in non-shared
+     * mode, this function is a no-op.
+     */
+    virtual status_t beginConfigure() = 0;
+
+    /**
+     * In shared session mode, this function retrieves the stream ID associated with a specific
+     * output configuration.
+     */
+    virtual status_t getSharedStreamId(const android::camera3::OutputStreamInfo &config,
+            int *streamId) = 0;
+
+    /**
+     * In shared session mode, this function add surfaces to an existing shared stream ID.
+     */
+    virtual status_t addSharedSurfaces(int streamId,
+            const std::vector<android::camera3::OutputStreamInfo> &outputInfo,
+            const std::vector<SurfaceHolder>& surfaces, std::vector<int> *surfaceIds = nullptr) = 0;
+
+    /**
+     * In shared session mode, this function remove surfaces from an existing shared stream ID.
+     */
+    virtual status_t removeSharedSurfaces(int streamId, const std::vector<size_t> &surfaceIds) = 0;
+
+    /**
+     * In shared session mode, this function retrieves the frame processor.
+     */
+    virtual sp<camera2::FrameProcessorBase> getSharedFrameProcessor() = 0;
+
+    /**
+     * Submit a shared streaming request for streaming.
+     * Output lastFrameNumber is the last frame number of the previous streaming request.
+     */
+    virtual status_t setSharedStreamingRequest(
+            const PhysicalCameraSettingsList &request,
+            const SurfaceMap &surfaceMap, int32_t *sharedReqID,
+            int64_t *lastFrameNumber = NULL) = 0;
+
+    /**
+     * Clear the shared streaming request slot.
+     * Output lastFrameNumber is the last frame number of the previous streaming request.
+     */
+    virtual status_t clearSharedStreamingRequest(int64_t *lastFrameNumber = NULL) = 0;
+
+    /**
+     * In shared session mode, only primary clients can change the capture
+     * parameters through capture request or repeating request. When the primary
+     * client sends the capture request to the camera device, the request ID is
+     * overridden by the camera device to maintain unique ID. This API is
+     * similar to captureList API, with only difference that the request ID is
+     * changed by the device before submitting the request to HAL.
+     * Output sharedReqID is the request ID actually used.
+     * Output lastFrameNumber is the expected last frame number of the list of requests.
+     */
+    virtual status_t setSharedCaptureRequest(const PhysicalCameraSettingsList &request,
+                                 const SurfaceMap &surfaceMap, int32_t *sharedReqID,
+                                 int64_t *lastFrameNumber = NULL) = 0;
+
+    /**
+     * Submit a start streaming request.
+     * Output lastFrameNumber is the last frame number of the previous streaming request.
+     */
+    virtual status_t startStreaming(const int32_t reqId, const SurfaceMap &surfaceMap,
+            int32_t *sharedReqID, int64_t *lastFrameNumber = NULL) = 0;
 
     /**
      * Take the currently-defined set of streams and configure the HAL to use

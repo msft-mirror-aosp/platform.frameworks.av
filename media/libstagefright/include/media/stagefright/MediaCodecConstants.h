@@ -854,12 +854,17 @@ inline static const char *asString_ColorFormat(int32_t i, const char *def = "??"
 }
 
 inline constexpr char FEATURE_AdaptivePlayback[]       = "adaptive-playback";
+inline constexpr char FEATURE_DynamicTimestamp[]       = "dynamic-timestamp";
 inline constexpr char FEATURE_EncodingStatistics[]     = "encoding-statistics";
+inline constexpr char FEATURE_FrameParsing[]           = "frame-parsing";
+inline constexpr char FEATURE_HdrEditing[]             = "hdr-editing";
 inline constexpr char FEATURE_IntraRefresh[] = "intra-refresh";
+inline constexpr char FEATURE_LowLatency[]             = "low-latency";
 inline constexpr char FEATURE_MultipleFrames[] = "multiple-frames";
 inline constexpr char FEATURE_PartialFrame[] = "partial-frame";
 inline constexpr char FEATURE_QpBounds[] = "qp-bounds";
 inline constexpr char FEATURE_SecurePlayback[]         = "secure-playback";
+inline constexpr char FEATURE_SpecialCodec[]           = "special-codec";
 inline constexpr char FEATURE_TunneledPlayback[]       = "tunneled-playback";
 
 // from MediaFormat.java
@@ -983,6 +988,7 @@ inline constexpr char KEY_MAX_OUTPUT_CHANNEL_COUNT[] = "max-output-channel-count
 inline constexpr char KEY_MAX_PTS_GAP_TO_ENCODER[] = "max-pts-gap-to-encoder";
 inline constexpr char KEY_MAX_WIDTH[] = "max-width";
 inline constexpr char KEY_MIME[] = "mime";
+inline constexpr char KEY_NUM_SLOTS[] = "num-slots";
 inline constexpr char KEY_OPERATING_RATE[] = "operating-rate";
 inline constexpr char KEY_OUTPUT_REORDER_DEPTH[] = "output-reorder-depth";
 inline constexpr char KEY_PCM_ENCODING[] = "pcm-encoding";

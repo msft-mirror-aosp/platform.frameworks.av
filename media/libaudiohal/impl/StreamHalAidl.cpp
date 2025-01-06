@@ -232,7 +232,9 @@ status_t StreamHalAidl::standby() {
             RETURN_STATUS_IF_ERROR(pause(&reply));
             if (reply.state != StreamDescriptor::State::PAUSED &&
                     reply.state != StreamDescriptor::State::DRAIN_PAUSED &&
-                    reply.state != StreamDescriptor::State::TRANSFER_PAUSED) {
+                    reply.state != StreamDescriptor::State::TRANSFER_PAUSED &&
+                    (state != StreamDescriptor::State::DRAINING ||
+                        reply.state != StreamDescriptor::State::IDLE)) {
                 AUGMENT_LOG(E, "unexpected stream state: %s (expected PAUSED)",
                             toString(reply.state).c_str());
                 return INVALID_OPERATION;
@@ -443,6 +445,10 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
             AUGMENT_LOG(E, "failed to read %zu bytes to data MQ", toRead);
             return NOT_ENOUGH_DATA;
         }
+    } else if (*transferred > bytes) {
+        ALOGW("%s: HAL module wrote %zu bytes, which exceeds requested count %zu",
+                __func__, *transferred, bytes);
+        *transferred = bytes;
     }
     mStreamPowerLog.log(buffer, *transferred);
     return OK;

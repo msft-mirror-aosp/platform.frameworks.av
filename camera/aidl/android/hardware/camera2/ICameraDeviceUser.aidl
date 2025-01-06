@@ -23,6 +23,8 @@ import android.hardware.camera2.impl.CameraMetadataNative;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.utils.SubmitInfo;
+import android.hardware.common.fmq.MQDescriptor;
+import android.hardware.common.fmq.SynchronizedReadWrite;
 import android.view.Surface;
 
 /** @hide */
@@ -34,6 +36,20 @@ interface ICameraDeviceUser
 
     SubmitInfo submitRequest(in CaptureRequest request, boolean streaming);
     SubmitInfo submitRequestList(in CaptureRequest[] requestList, boolean streaming);
+    /**
+     * When a camera device is opened in shared mode, only the primary client can change capture
+     * parameters and submit capture requests. Secondary clients can use the startStreaming API to
+     * provide the stream and surface IDs they want to stream on. If the primary client has an
+     * ongoing repeating request, camera service will attach these surfaces to it. Otherwise,
+     * camera service will create a default capture request with a preview template.
+     *
+     * @param streamIdxArray stream ids of the target surfaces
+     * @param surfaceIdxArray surface ids of the target surfaces
+     * @return SubmitInfo data structure containing the request id of the capture request and the
+     *         frame number of the last request, of the previous batch of repeating requests, if
+     *         any. If there is no previous  batch, the frame number returned will be -1.
+     */
+    SubmitInfo startStreaming(in int[] streamIdxArray, in int[] surfaceIdxArray);
 
     /**
      * Cancel the repeating request specified by requestId
@@ -66,6 +82,17 @@ interface ICameraDeviceUser
      * used, and requests must be batched.
      */
     const int CONSTRAINED_HIGH_SPEED_MODE = 1;
+
+    /**
+     * The shared operating mode for a camera device.
+     *
+     * <p>
+     * When in shared mode, the camera device can be opened and accessed by multiple applications
+     * simultaneously.
+     * </p>
+     *
+     */
+    const int SHARED_MODE = 2;
 
     /**
      * Start of custom vendor modes
@@ -162,6 +189,7 @@ interface ICameraDeviceUser
 
     void finalizeOutputConfigurations(int streamId, in OutputConfiguration outputConfiguration);
 
+    MQDescriptor<byte, SynchronizedReadWrite> getCaptureResultMetadataQueue();
 
     // Keep in sync with public API in
     // frameworks/base/core/java/android/hardware/camera2/CameraDevice.java
@@ -194,4 +222,12 @@ interface ICameraDeviceUser
      */
     ICameraOfflineSession switchToOffline(in ICameraDeviceCallbacks callbacks,
             in int[] offlineOutputIds);
+
+    /**
+     * Get the client status as primary or secondary when camera is opened in shared mode.
+     *
+     * @return true if this is primary client when camera is opened in shared mode.
+     *         false if another higher priority client with primary access is also using the camera.
+     */
+    boolean isPrimaryClient();
 }

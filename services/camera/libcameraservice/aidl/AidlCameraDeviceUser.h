@@ -97,6 +97,11 @@ class AidlCameraDeviceUser final : public SBnCameraDeviceUser {
         return mCaptureResultMetadataQueue;
     }
 
+    ndk::ScopedAStatus isPrimaryClient(bool* _aidl_return) override;
+
+    ndk::ScopedAStatus startStreaming(const std::vector<int32_t>& in_streamIdxArray,
+            const std::vector<int32_t>& in_surfaceIdxArray, SSubmitInfo* _aidl_return) override;
+
   private:
     bool initDevice();
 
