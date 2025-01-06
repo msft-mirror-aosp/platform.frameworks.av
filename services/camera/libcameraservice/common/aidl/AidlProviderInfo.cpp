@@ -499,7 +499,20 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
     int resV = validate_camera_metadata_structure(buffer, &expectedSize);
     if (resV == OK || resV == CAMERA_METADATA_VALIDATION_SHIFTED) {
         set_camera_metadata_vendor_id(buffer, mProviderTagid);
-        mCameraCharacteristics = buffer;
+        if (flags::metadata_resize_fix()) {
+            //b/379388099: Create a CameraCharacteristics object slightly larger
+            //to accommodate framework addition/modification. This is to
+            //optimize memory because the CameraMetadata::update() doubles the
+            //memory footprint, which could be significant if original
+            //CameraCharacteristics is already large.
+            mCameraCharacteristics = {
+                    get_camera_metadata_entry_count(buffer) + CHARACTERISTICS_EXTRA_ENTRIES,
+                    get_camera_metadata_data_count(buffer) + CHARACTERISTICS_EXTRA_DATA_SIZE
+            };
+            mCameraCharacteristics.append(buffer);
+        } else {
+            mCameraCharacteristics = buffer;
+        }
     } else {
         ALOGE("%s: Malformed camera metadata received from HAL", __FUNCTION__);
         return;
@@ -703,7 +716,20 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
             int res = validate_camera_metadata_structure(pBuffer, &expectedSize);
             if (res == OK || res == CAMERA_METADATA_VALIDATION_SHIFTED) {
                 set_camera_metadata_vendor_id(pBuffer, mProviderTagid);
-                mPhysicalCameraCharacteristics[id] = pBuffer;
+                if (flags::metadata_resize_fix()) {
+                    //b/379388099: Create a CameraCharacteristics object slightly larger
+                    //to accommodate framework addition/modification. This is to
+                    //optimize memory because the CameraMetadata::update() doubles the
+                    //memory footprint, which could be significant if original
+                    //CameraCharacteristics is already large.
+                    mPhysicalCameraCharacteristics[id] = {
+                          get_camera_metadata_entry_count(pBuffer) + CHARACTERISTICS_EXTRA_ENTRIES,
+                          get_camera_metadata_data_count(pBuffer) + CHARACTERISTICS_EXTRA_DATA_SIZE
+                    };
+                    mPhysicalCameraCharacteristics[id].append(pBuffer);
+                } else {
+                    mPhysicalCameraCharacteristics[id] = pBuffer;
+                }
             } else {
                 ALOGE("%s: Malformed camera metadata received from HAL", __FUNCTION__);
                 return;

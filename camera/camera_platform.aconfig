@@ -280,3 +280,13 @@ flag {
     description: "Applies system controlled effects targetting video conferencing"
     bug: "376797335"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "metadata_resize_fix"
+    description: "metadata resize during update needs to consider existing entry"
+    bug: "379388099"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
