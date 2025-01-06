@@ -4627,21 +4627,21 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
                             AppOpsManager::OP_CAMERA, attr.uid,
                             toString16(attr.packageName.value_or(""))));
                 });
-        ALOGV("checkOp returns: %d, %s ", res,
+        res = appOpModeToPermissionResult(appOpMode);
+        ALOGV("checkOp returns: %d, %s ", appOpMode,
               appOpMode == AppOpsManager::MODE_ALLOWED   ? "ALLOWED"
               : appOpMode == AppOpsManager::MODE_IGNORED ? "IGNORED"
               : appOpMode == AppOpsManager::MODE_ERRORED ? "ERRORED"
                                                          : "UNKNOWN");
-        res = appOpModeToPermissionResult(appOpMode);
     } else {
         int32_t appOpMode = mAppOpsManager->checkOp(AppOpsManager::OP_CAMERA, getClientUid(),
                                                     toString16(getPackageName()));
-        ALOGV("checkOp returns: %d, %s ", res,
+        res = appOpModeToPermissionResult(appOpMode);
+        ALOGV("checkOp returns: %d, %s ", appOpMode,
               appOpMode == AppOpsManager::MODE_ALLOWED   ? "ALLOWED"
               : appOpMode == AppOpsManager::MODE_IGNORED ? "IGNORED"
               : appOpMode == AppOpsManager::MODE_ERRORED ? "ERRORED"
                                                          : "UNKNOWN");
-        res = appOpModeToPermissionResult(appOpMode);
     }
 
     if (res == PermissionChecker::PERMISSION_HARD_DENIED) {
