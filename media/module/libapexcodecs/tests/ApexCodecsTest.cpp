@@ -98,4 +98,4 @@ static_assert((uint32_t)APEXCODEC_PARAM_IS_STRICT     == (uint32_t)C2ParamDescri
 static_assert((uint32_t)APEXCODEC_PARAM_IS_READ_ONLY  == (uint32_t)C2ParamDescriptor::IS_READ_ONLY);
 static_assert((uint32_t)APEXCODEC_PARAM_IS_HIDDEN     == (uint32_t)C2ParamDescriptor::IS_HIDDEN);
 static_assert((uint32_t)APEXCODEC_PARAM_IS_INTERNAL   == (uint32_t)C2ParamDescriptor::IS_INTERNAL);
-static_assert((uint32_t)APEXCODEC_PARAM_IS_CONST      == (uint32_t)C2ParamDescriptor::IS_CONST);
+static_assert((uint32_t)APEXCODEC_PARAM_IS_CONSTANT   == (uint32_t)C2ParamDescriptor::IS_CONST);

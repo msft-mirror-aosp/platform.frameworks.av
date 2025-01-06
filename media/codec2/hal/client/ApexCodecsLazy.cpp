@@ -30,10 +30,11 @@ using android::RWLock;
 
 namespace {
 
-// This file provides a lazy interface to libapexcodecs.so to address early boot dependencies.
+// This file provides a lazy interface to libcom.android.media.swcodec.apexcodecs.so
+// to address early boot dependencies.
 
-// Method pointers to libapexcodecs methods are held in an array which simplifies checking
-// all pointers are initialized.
+// Method pointers to libcom.android.media.swcodec.apexcodecs methods are held in an array
+// which simplifies checking all pointers are initialized.
 enum MethodIndex {
     k_ApexCodec_Component_create,
     k_ApexCodec_Component_destroy,
@@ -84,14 +85,15 @@ public:
     }
 
 private:
-    static void* LoadLibapexcodecs(int dlopen_flags) {
-        return dlopen("libapexcodecs.so", dlopen_flags);
+    static void* LoadApexCodecs(int dlopen_flags) {
+        return dlopen("libcom.android.media.swcodec.apexcodecs.so", dlopen_flags);
     }
 
     // Initialization and symbol binding.
     void bindSymbol_l(void* handle, const char* name, enum MethodIndex index) {
         void* symbol = dlsym(handle, name);
-        ALOGI_IF(symbol == nullptr, "Failed to find symbol '%s' in libapexcodecs.so: %s",
+        ALOGI_IF(symbol == nullptr,
+                "Failed to find symbol '%s' in libcom.android.media.swcodec.apexcodecs.so: %s",
                  name, dlerror());
         mMethods[index] = symbol;
     }
@@ -103,9 +105,9 @@ private:
                 return true;
             }
         }
-        void* handle = LoadLibapexcodecs(RTLD_NOW);
+        void* handle = LoadApexCodecs(RTLD_NOW);
         if (handle == nullptr) {
-            ALOGI("Failed to load libapexcodecs.so: %s", dlerror());
+            ALOGI("Failed to load libcom.android.media.swcodec.apexcodecs.so: %s", dlerror());
             return false;
         }
 
@@ -137,7 +139,8 @@ private:
         // Check every symbol is bound.
         for (int i = 0; i < k_MethodCount; ++i) {
             if (mMethods[i] == nullptr) {
-                ALOGI("Uninitialized method in libapexcodecs_lazy at index: %d", i);
+                ALOGI("Uninitialized method in "
+                      "libcom.android.media.swcodec.apexcodecs_lazy at index: %d", i);
                 return false;
             }
         }
@@ -146,7 +149,7 @@ private:
     }
 
     RWLock mLock;
-    // Table of methods pointers in libapexcodecs APIs.
+    // Table of methods pointers in libcom.android.media.swcodec.apexcodecs APIs.
     void* mMethods[k_MethodCount];
     bool mInit{false};
 };
@@ -274,9 +277,9 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
                   descriptors, index, attr, name, dependencies, numDependencies);
 }
 
-ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
+void ApexCodec_ParamDescriptors_destroy(
         ApexCodec_ParamDescriptors *descriptors) {
-    INVOKE_METHOD(ApexCodec_ParamDescriptors_destroy, APEXCODEC_STATUS_OMITTED, descriptors);
+    INVOKE_METHOD(ApexCodec_ParamDescriptors_destroy, void(), descriptors);
 }
 
 ApexCodec_Status ApexCodec_Configurable_querySupportedParams(
