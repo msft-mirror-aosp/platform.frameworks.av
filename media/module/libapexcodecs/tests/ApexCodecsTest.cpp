@@ -38,7 +38,7 @@ static_assert((uint32_t)APEXCODEC_FLAG_CORRECTED     == (uint32_t)C2FrameData::F
 static_assert((uint32_t)APEXCODEC_FLAG_CORRUPT       == (uint32_t)C2FrameData::FLAG_CORRUPT);
 static_assert((uint32_t)APEXCODEC_FLAG_CODEC_CONFIG  == (uint32_t)C2FrameData::FLAG_CODEC_CONFIG);
 
-static_assert((uint32_t)APEXCODEC_BUFFER_TYPE_INVALID        ==
+static_assert((uint32_t)APEXCODEC_BUFFER_TYPE_EMPTY          ==
               (uint32_t)C2BufferData::INVALID);
 static_assert((uint32_t)APEXCODEC_BUFFER_TYPE_LINEAR         ==
               (uint32_t)C2BufferData::LINEAR);
