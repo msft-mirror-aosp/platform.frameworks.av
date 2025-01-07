@@ -1744,13 +1744,8 @@ status_t Track::selectPresentation(int presentationId,
 
 void Track::setPortVolume(float volume) {
     mVolume = volume;
-    if (mType != TYPE_PATCH) {
-        // Do not recursively propagate a PatchTrack setPortVolume to
-        // downstream PatchTracks.
-        forEachTeePatchTrack_l([volume](const auto &patchTrack) {
-            patchTrack->setPortVolume(volume);
-        });
-    }
+    // for now the secondary patch tracks contain the unattenuated volume
+    // TODO(b/388241142): use volume capture rules to forward the volume to its patch tracks
 }
 
 void Track::setPortMute(bool muted) {
@@ -1758,13 +1753,8 @@ void Track::setPortMute(bool muted) {
         return;
     }
     mMutedFromPort = muted;
-    if (mType != TYPE_PATCH) {
-        // Do not recursively propagate a PatchTrack setPortVolume to
-        // downstream PatchTracks.
-        forEachTeePatchTrack_l([muted](const auto &patchTrack) {
-            patchTrack->setPortMute(muted);
-        });
-    }
+    // for now the secondary patch tracks will always be not muted
+    // TODO(b/388241142): use volume capture rules to forward the mute state to its patch tracks
 }
 
 VolumeShaper::Status Track::applyVolumeShaper(
