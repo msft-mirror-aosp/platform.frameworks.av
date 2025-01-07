@@ -994,9 +994,6 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
     uint8_t* yPlane = const_cast<uint8_t*>(input->data()[C2PlanarLayout::PLANE_Y]);
     uint8_t* uPlane = const_cast<uint8_t*>(input->data()[C2PlanarLayout::PLANE_U]);
     uint8_t* vPlane = const_cast<uint8_t*>(input->data()[C2PlanarLayout::PLANE_V]);
-    int32_t yStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
-    int32_t uStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
-    int32_t vStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
 
     uint32_t width = mSize->width;
     uint32_t height = mSize->height;
@@ -1033,6 +1030,7 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
         }
         case C2PlanarLayout::TYPE_YUV: {
             if (IsP010(*input)) {
+                ALOGV("Convert from P010 to P210");
                 if (mColorFormat == OAPV_CF_YCBCR422) {
                     ColorConvertP010ToYUV422P10le(input, inputFrames->frm[0].imgb);
                 } else if (mColorFormat == OAPV_CF_PLANAR2) {
@@ -1040,33 +1038,43 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                     uint16_t *srcUV = (uint16_t*)(input->data()[1]);
                     uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
                     uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+                    size_t dstYStride = inputFrames->frm[0].imgb->s[0] / 2;
+                    size_t dstUVStride = inputFrames->frm[0].imgb->s[1] / 2;
                     convertP010ToP210(dstY, dstUV, srcY, srcUV,
-                                      input->width(), input->width(), input->width(),
-                                      input->height());
+                                      layout.planes[layout.PLANE_Y].rowInc / 2,
+                                      layout.planes[layout.PLANE_U].rowInc / 2,
+                                      dstYStride, dstUVStride, input->width(), input->height());
                 } else {
                     ALOGE("Not supported color format. %d", mColorFormat);
                     return C2_BAD_VALUE;
                 }
             } else if (IsNV12(*input)) {
+                ALOGV("Convert from NV12 to P210");
                 uint8_t  *srcY  = (uint8_t*)input->data()[0];
                 uint8_t  *srcUV = (uint8_t*)input->data()[1];
                 uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
                 uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+                size_t dstYStride = inputFrames->frm[0].imgb->s[0] / 2;
+                size_t dstUVStride = inputFrames->frm[0].imgb->s[1] / 2;
                 convertSemiPlanar8ToP210(dstY, dstUV, srcY, srcUV,
-                                         input->width(), input->width(), input->width(),
-                                         input->width(), input->width(), input->height(),
-                                         CONV_FORMAT_I420);
+                                         layout.planes[layout.PLANE_Y].rowInc,
+                                         layout.planes[layout.PLANE_U].rowInc,
+                                         dstYStride, dstUVStride,
+                                         input->width(), input->height(), CONV_FORMAT_I420);
             } else if (IsI420(*input)) {
+                ALOGV("Convert from I420 to P210");
                 uint8_t  *srcY  = (uint8_t*)input->data()[0];
                 uint8_t  *srcU  = (uint8_t*)input->data()[1];
                 uint8_t  *srcV  = (uint8_t*)input->data()[2];
                 uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
                 uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
+                size_t dstYStride = inputFrames->frm[0].imgb->s[0] / 2;
+                size_t dstUVStride = inputFrames->frm[0].imgb->s[1] / 2;
                 convertPlanar8ToP210(dstY, dstUV, srcY, srcU, srcV,
                                         layout.planes[C2PlanarLayout::PLANE_Y].rowInc,
                                         layout.planes[C2PlanarLayout::PLANE_U].rowInc,
                                         layout.planes[C2PlanarLayout::PLANE_V].rowInc,
-                                        input->width(), input->width(),
+                                        dstYStride, dstUVStride,
                                         input->width(), input->height(),
                                         CONV_FORMAT_I420);
 
