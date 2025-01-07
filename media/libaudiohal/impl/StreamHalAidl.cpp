@@ -659,6 +659,13 @@ status_t StreamHalAidl::sendCommand(
         const ::aidl::android::hardware::audio::core::StreamDescriptor::Command& command,
         ::aidl::android::hardware::audio::core::StreamDescriptor::Reply* reply,
         bool safeFromNonWorkerThread, StatePositions* statePositions) {
+
+    // Add timeCheck only for start command (pause, flush checked at caller).
+    std::unique_ptr<mediautils::TimeCheck> timeCheck;
+    if (command.getTag() == StreamDescriptor::Command::start) {
+        timeCheck = mediautils::makeTimeCheckStatsForClassMethodUniquePtr(
+                getClassName(), "sendCommand_start");
+    }
     // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!safeFromNonWorkerThread) {
         const pid_t workerTid = mWorkerTid.load(std::memory_order_acquire);
