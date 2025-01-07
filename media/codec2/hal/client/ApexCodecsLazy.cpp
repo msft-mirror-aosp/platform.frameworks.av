@@ -36,13 +36,25 @@ namespace {
 // Method pointers to libcom.android.media.swcodec.apexcodecs methods are held in an array
 // which simplifies checking all pointers are initialized.
 enum MethodIndex {
+    k_ApexCodec_Buffer_clear,
+    k_ApexCodec_Buffer_create,
+    k_ApexCodec_Buffer_destroy,
+    k_ApexCodec_Buffer_getBufferInfo,
+    k_ApexCodec_Buffer_getConfigUpdates,
+    k_ApexCodec_Buffer_getGraphicBuffer,
+    k_ApexCodec_Buffer_getLinearBuffer,
+    k_ApexCodec_Buffer_getType,
+    k_ApexCodec_Buffer_setBufferInfo,
+    k_ApexCodec_Buffer_setConfigUpdates,
+    k_ApexCodec_Buffer_setGraphicBuffer,
+    k_ApexCodec_Buffer_setLinearBuffer,
     k_ApexCodec_Component_create,
     k_ApexCodec_Component_destroy,
     k_ApexCodec_Component_flush,
     k_ApexCodec_Component_getConfigurable,
     k_ApexCodec_Component_process,
-    k_ApexCodec_Component_start,
     k_ApexCodec_Component_reset,
+    k_ApexCodec_Component_start,
     k_ApexCodec_Configurable_config,
     k_ApexCodec_Configurable_query,
     k_ApexCodec_Configurable_querySupportedParams,
@@ -114,13 +126,24 @@ private:
         RWLock::AutoWLock l(mLock);
 #undef BIND_SYMBOL
 #define BIND_SYMBOL(name) bindSymbol_l(handle, #name, k_##name);
+        BIND_SYMBOL(ApexCodec_Buffer_clear);
+        BIND_SYMBOL(ApexCodec_Buffer_create);
+        BIND_SYMBOL(ApexCodec_Buffer_destroy);
+        BIND_SYMBOL(ApexCodec_Buffer_getBufferInfo);
+        BIND_SYMBOL(ApexCodec_Buffer_getConfigUpdates);
+        BIND_SYMBOL(ApexCodec_Buffer_getGraphicBuffer);
+        BIND_SYMBOL(ApexCodec_Buffer_getLinearBuffer);
+        BIND_SYMBOL(ApexCodec_Buffer_getType);
+        BIND_SYMBOL(ApexCodec_Buffer_setConfigUpdates);
+        BIND_SYMBOL(ApexCodec_Buffer_setGraphicBuffer);
+        BIND_SYMBOL(ApexCodec_Buffer_setLinearBuffer);
         BIND_SYMBOL(ApexCodec_Component_create);
         BIND_SYMBOL(ApexCodec_Component_destroy);
         BIND_SYMBOL(ApexCodec_Component_flush);
         BIND_SYMBOL(ApexCodec_Component_getConfigurable);
         BIND_SYMBOL(ApexCodec_Component_process);
-        BIND_SYMBOL(ApexCodec_Component_start);
         BIND_SYMBOL(ApexCodec_Component_reset);
+        BIND_SYMBOL(ApexCodec_Component_start);
         BIND_SYMBOL(ApexCodec_Configurable_config);
         BIND_SYMBOL(ApexCodec_Configurable_query);
         BIND_SYMBOL(ApexCodec_Configurable_querySupportedParams);
@@ -176,6 +199,82 @@ ApexCodec_ComponentTraits *ApexCodec_Traits_get(
     INVOKE_METHOD(ApexCodec_Traits_get, nullptr, store, index);
 }
 
+ApexCodec_Buffer *ApexCodec_Buffer_create() {
+    INVOKE_METHOD(ApexCodec_Buffer_create, nullptr);
+}
+
+void ApexCodec_Buffer_destroy(ApexCodec_Buffer *buffer) {
+    INVOKE_METHOD(ApexCodec_Buffer_destroy, void(), buffer);
+}
+
+void ApexCodec_Buffer_clear(ApexCodec_Buffer *buffer) {
+    INVOKE_METHOD(ApexCodec_Buffer_clear, void(), buffer);
+}
+
+ApexCodec_BufferType ApexCodec_Buffer_getType(ApexCodec_Buffer *buffer) {
+    INVOKE_METHOD(ApexCodec_Buffer_getType, APEXCODEC_BUFFER_TYPE_EMPTY, buffer);
+}
+
+void ApexCodec_Buffer_setBufferInfo(
+        ApexCodec_Buffer *_Nonnull buffer,
+        ApexCodec_BufferFlags flags,
+        uint64_t frameIndex,
+        uint64_t timestampUs) {
+    INVOKE_METHOD(ApexCodec_Buffer_setBufferInfo, void(),
+                  buffer, flags, frameIndex, timestampUs);
+}
+
+ApexCodec_Status ApexCodec_Buffer_setLinearBuffer(
+        ApexCodec_Buffer *buffer,
+        const ApexCodec_LinearBuffer *linearBuffer) {
+    INVOKE_METHOD(ApexCodec_Buffer_setLinearBuffer, APEXCODEC_STATUS_OMITTED,
+                  buffer, linearBuffer);
+}
+
+ApexCodec_Status ApexCodec_Buffer_setGraphicBuffer(
+        ApexCodec_Buffer *buffer,
+        AHardwareBuffer *graphicBuffer) {
+    INVOKE_METHOD(ApexCodec_Buffer_setGraphicBuffer, APEXCODEC_STATUS_OMITTED,
+                  buffer, graphicBuffer);
+}
+
+ApexCodec_Status ApexCodec_Buffer_setConfigUpdates(
+        ApexCodec_Buffer *buffer,
+        const ApexCodec_LinearBuffer *configUpdates) {
+    INVOKE_METHOD(ApexCodec_Buffer_setConfigUpdates, APEXCODEC_STATUS_OMITTED,
+                  buffer, configUpdates);
+}
+
+ApexCodec_Status ApexCodec_Buffer_getBufferInfo(
+        ApexCodec_Buffer *buffer,
+        ApexCodec_BufferFlags *outFlags,
+        uint64_t *outFrameIndex,
+        uint64_t *outTimestampUs) {
+    INVOKE_METHOD(ApexCodec_Buffer_getBufferInfo, APEXCODEC_STATUS_OMITTED,
+                  buffer, outFlags, outFrameIndex, outTimestampUs);
+}
+
+ApexCodec_Status ApexCodec_Buffer_getLinearBuffer(
+        ApexCodec_Buffer *buffer,
+        ApexCodec_LinearBuffer *outLinearBuffer) {
+    INVOKE_METHOD(ApexCodec_Buffer_getLinearBuffer, APEXCODEC_STATUS_OMITTED,
+                  buffer, outLinearBuffer);
+}
+
+ApexCodec_Status ApexCodec_Buffer_getGraphicBuffer(
+        ApexCodec_Buffer *buffer,
+        AHardwareBuffer **outGraphicBuffer) {
+    INVOKE_METHOD(ApexCodec_Buffer_getGraphicBuffer, APEXCODEC_STATUS_OMITTED,
+                  buffer, outGraphicBuffer);
+}
+
+ApexCodec_Status ApexCodec_Buffer_getConfigUpdates(
+        ApexCodec_Buffer *buffer,
+        ApexCodec_LinearBuffer *outConfigUpdates,
+        bool *outOwnedByClient) {
+    INVOKE_METHOD(ApexCodec_Buffer_getConfigUpdates, APEXCODEC_STATUS_OMITTED,
+                  buffer, outConfigUpdates, outOwnedByClient);
+}
 ApexCodec_Status ApexCodec_Component_create(
         ApexCodec_ComponentStore *store, const char *name, ApexCodec_Component **comp) {
     INVOKE_METHOD(ApexCodec_Component_create, APEXCODEC_STATUS_OMITTED, store, name, comp);
