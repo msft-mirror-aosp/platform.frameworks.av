@@ -24,8 +24,10 @@ using ::android::content::AttributionSourceState;
 
 namespace android::media::permission {
 
-// params are unreliable at the moment
-void DefaultAppOpsFacade::OpMonitor::opChanged(int32_t, const String16&) {
+// Package name param is unreliable (can be empty), but we should only get valid events based on
+// how we register the listener.
+void DefaultAppOpsFacade::OpMonitor::opChanged(int32_t op, const String16&) {
+    if (mOps.attributedOp != op && mOps.additionalOp != op) return;
     DefaultAppOpsFacade x{};
     const auto allowed = x.checkAccess(mAttr, mOps);
     std::lock_guard l_{mLock};
@@ -107,6 +109,9 @@ void DefaultAppOpsFacade::removeChangeCallback(uintptr_t ptr) {
     }
     LOG_ALWAYS_FATAL_IF(monitor == nullptr, "Unexpected nullptr in cb map");
     monitor->stopListening();
+    // Callbacks are stored via binder identity in AppOpsService, so unregistering the callback
+    // removes it regardless of how many calls to startWatchingMode occurred
+    AppOpsManager{}.stopWatchingMode(monitor);
 }
 
 }  // namespace android::media::permission
