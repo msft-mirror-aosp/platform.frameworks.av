@@ -42,8 +42,8 @@ cc_library {
     cpp_std: "gnu++20",
 
     header_libs: [
-        "libapexcodecs-header",
         "libcodec2_internal", // private
+        "libcom.android.media.swcodec.apexcodecs-header",
     ],
 
     shared_libs: [
@@ -82,7 +82,7 @@ cc_library {
     ],
 
     export_header_lib_headers: [
-        "libapexcodecs-header",
+        "libcom.android.media.swcodec.apexcodecs-header",
     ],
 
     export_shared_lib_headers: [

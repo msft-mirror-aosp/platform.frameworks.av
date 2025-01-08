@@ -500,6 +500,14 @@ sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_
 
     audio_devices_t deviceType = getPropertyForKey<audio_devices_t, audio_source_t>(attr.source);
 
+    if (deviceType == AUDIO_DEVICE_IN_ECHO_REFERENCE) {
+        device = getInputDeviceForEchoRef(attr, availableInputDevices);
+        if (device != nullptr) {
+            return device;
+        }
+    }
+
+
     if (audio_is_remote_submix_device(deviceType)) {
         address = "0";
         std::size_t pos;
