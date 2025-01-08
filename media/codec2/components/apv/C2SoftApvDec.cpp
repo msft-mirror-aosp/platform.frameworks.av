@@ -496,8 +496,6 @@ C2SoftApvDec::C2SoftApvDec(const char* name, c2_node_id_t id,
                            const std::shared_ptr<IntfImpl>& intfImpl)
     : SimpleC2Component(std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
       mIntf(intfImpl),
-      mDecHandle(nullptr),
-      mMetadataHandle(nullptr),
       mOutBufferFlush(nullptr),
       mOutputDelay(kDefaultOutputDelay),
       mOutIndex(0u),
@@ -505,8 +503,11 @@ C2SoftApvDec::C2SoftApvDec(const char* name, c2_node_id_t id,
       mWidth(320),
       mHeight(240),
       mSignalledOutputEos(false),
-      mSignalledError(false) {
-    mOutCsp = OUTPUT_CSP_P210;
+      mSignalledError(false),
+      mDecHandle(nullptr),
+      mMetadataHandle(nullptr),
+      mOutCsp(OUTPUT_CSP_P210) {
+    memset(&mOutFrames, 0, sizeof(oapv_frms_t));
 }
 
 C2SoftApvDec::~C2SoftApvDec() {
@@ -1109,7 +1110,7 @@ void C2SoftApvDec::getHDRStaticParams(const struct ApvHdrInfo *buffer,
 void C2SoftApvDec::getHDR10PlusInfoData(const struct ApvHdrInfo *buffer,
                                          const std::unique_ptr<C2Work> &work) {
     if(!buffer->has_itut_t35) {
-        ALOGD("no itu_t_t35 data");
+        ALOGV("no itu_t_t35 data");
         return;
     }
 
