@@ -63,6 +63,70 @@ ApexCodec_Configurable *ApexCodec_Component_getConfigurable(
     return nullptr;
 }
 
+ApexCodec_Buffer *ApexCodec_Buffer_create() {
+    return nullptr;
+}
+
+void ApexCodec_Buffer_destroy(ApexCodec_Buffer *buffer) {}
+
+void ApexCodec_Buffer_clear(ApexCodec_Buffer *buffer) {}
+
+ApexCodec_BufferType ApexCodec_Buffer_getType(ApexCodec_Buffer *buffer) {
+    return APEXCODEC_BUFFER_TYPE_EMPTY;
+}
+
+void ApexCodec_Buffer_setBufferInfo(
+        ApexCodec_Buffer *buffer,
+        ApexCodec_BufferFlags flags,
+        uint64_t frameIndex,
+        uint64_t timestampUs) {
+}
+
+ApexCodec_Status ApexCodec_Buffer_setLinearBuffer(
+        ApexCodec_Buffer *buffer,
+        const ApexCodec_LinearBuffer *linearBuffer) {
+    return APEXCODEC_STATUS_OMITTED;
+}
+
+ApexCodec_Status ApexCodec_Buffer_setGraphicBuffer(
+        ApexCodec_Buffer *buffer,
+        AHardwareBuffer *graphicBuffer) {
+    return APEXCODEC_STATUS_OMITTED;
+}
+
+ApexCodec_Status ApexCodec_Buffer_setConfigUpdates(
+        ApexCodec_Buffer *buffer,
+        const ApexCodec_LinearBuffer *configUpdates) {
+    return APEXCODEC_STATUS_OMITTED;
+}
+
+ApexCodec_Status ApexCodec_Buffer_getBufferInfo(
+        ApexCodec_Buffer *buffer,
+        ApexCodec_BufferFlags *outFlags,
+        uint64_t *outFrameIndex,
+        uint64_t *outTimestampUs) {
+    return APEXCODEC_STATUS_OMITTED;
+}
+
+ApexCodec_Status ApexCodec_Buffer_getLinearBuffer(
+        ApexCodec_Buffer *buffer,
+        ApexCodec_LinearBuffer *outLinearBuffer) {
+    return APEXCODEC_STATUS_OMITTED;
+}
+
+ApexCodec_Status ApexCodec_Buffer_getGraphicBuffer(
+        ApexCodec_Buffer *buffer,
+        AHardwareBuffer **outGraphicBuffer) {
+    return APEXCODEC_STATUS_OMITTED;
+}
+
+ApexCodec_Status ApexCodec_Buffer_getConfigUpdates(
+        ApexCodec_Buffer *buffer,
+        ApexCodec_LinearBuffer *outConfigUpdates,
+        bool *outOwnedByClient) {
+    return APEXCODEC_STATUS_OMITTED;
+}
+
 ApexCodec_Status ApexCodec_SupportedValues_getTypeAndValues(
         ApexCodec_SupportedValues *supportedValues,
         ApexCodec_SupportedValuesType *type,
@@ -128,9 +192,7 @@ ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
     return APEXCODEC_STATUS_OMITTED;
 }
 
-ApexCodec_Status ApexCodec_ParamDescriptors_destroy(
-        ApexCodec_ParamDescriptors *descriptors) {
-    return APEXCODEC_STATUS_OMITTED;
+void ApexCodec_ParamDescriptors_destroy(ApexCodec_ParamDescriptors *descriptors) {
 }
 
 ApexCodec_Status ApexCodec_Configurable_querySupportedParams(

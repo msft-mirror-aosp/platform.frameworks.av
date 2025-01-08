@@ -19,7 +19,7 @@ package {
 }
 
 cc_defaults {
-    name: "libapexcodecs-defaults",
+    name: "libcom.android.media.swcodec.apexcodecs-defaults",
     header_libs: [
         "libbase_headers",
     ],
@@ -41,7 +41,7 @@ cc_defaults {
 }
 
 cc_library_headers {
-    name: "libapexcodecs-header",
+    name: "libcom.android.media.swcodec.apexcodecs-header",
     visibility: [
         "//frameworks/av/apex:__subpackages__",
         "//frameworks/av/media/codec2/hal/client",
@@ -50,8 +50,8 @@ cc_library_headers {
 }
 
 cc_library {
-    name: "libapexcodecs-testing",
-    defaults: ["libapexcodecs-defaults"],
+    name: "libcom.android.media.swcodec.apexcodecs-testing",
+    defaults: ["libcom.android.media.swcodec.apexcodecs-defaults"],
 
     visibility: [
         ":__subpackages__",
@@ -59,8 +59,8 @@ cc_library {
 }
 
 cc_library {
-    name: "libapexcodecs",
-    defaults: ["libapexcodecs-defaults"],
+    name: "libcom.android.media.swcodec.apexcodecs",
+    defaults: ["libcom.android.media.swcodec.apexcodecs-defaults"],
 
     visibility: [
         "//frameworks/av/apex:__subpackages__",
@@ -68,9 +68,9 @@ cc_library {
     ],
 
     min_sdk_version: "apex_inherit",
-    version_script: "libapexcodecs.map.txt",
+    version_script: "libcom.android.media.swcodec.apexcodecs.map.txt",
     stubs: {
-        symbol_file: "libapexcodecs.map.txt",
+        symbol_file: "libcom.android.media.swcodec.apexcodecs.map.txt",
         versions: ["36"],
     },
 

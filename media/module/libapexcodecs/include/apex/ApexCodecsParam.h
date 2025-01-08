@@ -172,14 +172,19 @@ typedef enum ApexCodec_ParamAttribute : uint32_t {
     APEXCODEC_PARAM_IS_PERSISTENT = 1u << 1,
     /** parameter is strict */
     APEXCODEC_PARAM_IS_STRICT     = 1u << 2,
-    /** parameter is read-only */
+    /**
+     * parameter is read-only; the value may change if other parameters are changed,
+     * but the client cannot modify the value directly.
+     */
     APEXCODEC_PARAM_IS_READ_ONLY  = 1u << 3,
     /** parameter shall not be visible to clients */
     APEXCODEC_PARAM_IS_HIDDEN     = 1u << 4,
     /** parameter shall not be used by framework (other than testing) */
     APEXCODEC_PARAM_IS_INTERNAL   = 1u << 5,
-    /** parameter is publicly const (hence read-only) */
-    APEXCODEC_PARAM_IS_CONST      = 1u << 6 | APEXCODEC_PARAM_IS_READ_ONLY,
+    /**
+     * parameter is publicly const (hence read-only); the parameter never changes.
+     */
+    APEXCODEC_PARAM_IS_CONSTANT   = 1u << 6 | APEXCODEC_PARAM_IS_READ_ONLY,
 } ApexCodec_ParamAttribute;
 
 __END_DECLS
