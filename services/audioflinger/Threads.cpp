@@ -3392,49 +3392,37 @@ ThreadBase::MetadataUpdate PlaybackThread::updateMetadata_l()
         return {}; // nothing to do
     }
     StreamOutHalInterface::SourceMetadata metadata;
-    static const bool stereo_spatialization_property =
-            property_get_bool("ro.audio.stereo_spatialization_enabled", false);
-    const bool stereo_spatialization_enabled =
-            stereo_spatialization_property && com_android_media_audio_stereo_spatialization();
-    if (stereo_spatialization_enabled) {
-        std::map<audio_session_t, std::vector<playback_track_metadata_v7_t> >allSessionsMetadata;
-        for (const sp<IAfTrack>& track : mActiveTracks) {
-            std::vector<playback_track_metadata_v7_t>& sessionMetadata =
-                    allSessionsMetadata[track->sessionId()];
-            auto backInserter = std::back_inserter(sessionMetadata);
-            // No track is invalid as this is called after prepareTrack_l in the same
-            // critical section
-            track->copyMetadataTo(backInserter);
+    std::map<audio_session_t, std::vector<playback_track_metadata_v7_t> >allSessionsMetadata;
+    for (const sp<IAfTrack>& track : mActiveTracks) {
+        std::vector<playback_track_metadata_v7_t>& sessionMetadata =
+                allSessionsMetadata[track->sessionId()];
+        auto backInserter = std::back_inserter(sessionMetadata);
+        // No track is invalid as this is called after prepareTrack_l in the same
+        // critical section
+        track->copyMetadataTo(backInserter);
+    }
+    std::vector<playback_track_metadata_v7_t> spatializedTracksMetaData;
+    for (const auto& [session, sessionTrackMetadata] : allSessionsMetadata) {
+        metadata.tracks.insert(metadata.tracks.end(),
+                sessionTrackMetadata.begin(), sessionTrackMetadata.end());
+        if (auto chain = getEffectChain_l(session) ; chain != nullptr) {
+            chain->sendMetadata_l(sessionTrackMetadata, {});
         }
-        std::vector<playback_track_metadata_v7_t> spatializedTracksMetaData;
-        for (const auto& [session, sessionTrackMetadata] : allSessionsMetadata) {
-            metadata.tracks.insert(metadata.tracks.end(),
+        if ((hasAudioSession_l(session) & IAfThreadBase::SPATIALIZED_SESSION) != 0) {
+            spatializedTracksMetaData.insert(spatializedTracksMetaData.end(),
                     sessionTrackMetadata.begin(), sessionTrackMetadata.end());
-            if (auto chain = getEffectChain_l(session) ; chain != nullptr) {
-                chain->sendMetadata_l(sessionTrackMetadata, {});
-            }
-            if ((hasAudioSession_l(session) & IAfThreadBase::SPATIALIZED_SESSION) != 0) {
-                spatializedTracksMetaData.insert(spatializedTracksMetaData.end(),
-                        sessionTrackMetadata.begin(), sessionTrackMetadata.end());
-            }
-        }
-        if (auto chain = getEffectChain_l(AUDIO_SESSION_OUTPUT_MIX); chain != nullptr) {
-            chain->sendMetadata_l(metadata.tracks, {});
-        }
-        if (auto chain = getEffectChain_l(AUDIO_SESSION_OUTPUT_STAGE); chain != nullptr) {
-            chain->sendMetadata_l(metadata.tracks, spatializedTracksMetaData);
-        }
-        if (auto chain = getEffectChain_l(AUDIO_SESSION_DEVICE); chain != nullptr) {
-            chain->sendMetadata_l(metadata.tracks, {});
-        }
-    } else {
-        auto backInserter = std::back_inserter(metadata.tracks);
-        for (const sp<IAfTrack>& track : mActiveTracks) {
-            // No track is invalid as this is called after prepareTrack_l in the same
-            // critical section
-            track->copyMetadataTo(backInserter);
         }
     }
+    if (auto chain = getEffectChain_l(AUDIO_SESSION_OUTPUT_MIX); chain != nullptr) {
+        chain->sendMetadata_l(metadata.tracks, {});
+    }
+    if (auto chain = getEffectChain_l(AUDIO_SESSION_OUTPUT_STAGE); chain != nullptr) {
+        chain->sendMetadata_l(metadata.tracks, spatializedTracksMetaData);
+    }
+    if (auto chain = getEffectChain_l(AUDIO_SESSION_DEVICE); chain != nullptr) {
+        chain->sendMetadata_l(metadata.tracks, {});
+    }
+
     sendMetadataToBackend_l(metadata);
     MetadataUpdate change;
     change.playbackMetadataUpdate = metadata.tracks;
