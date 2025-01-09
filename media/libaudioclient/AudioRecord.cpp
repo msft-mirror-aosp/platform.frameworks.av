@@ -286,7 +286,7 @@ status_t AudioRecord::set(
     if (binder != nullptr) {
         // Barrier to ensure runtime permission update propagates to audioflinger
         // Must be client-side
-        interface_cast<IAudioManager>(binder)->permissionUpdateBarrier();
+        interface_cast<IAudioManager>(binder)->getNativeInterface()->permissionUpdateBarrier();
     }
 
     mSelectedDeviceId = selectedDeviceId;
