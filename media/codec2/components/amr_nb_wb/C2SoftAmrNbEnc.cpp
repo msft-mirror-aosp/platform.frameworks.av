@@ -229,7 +229,7 @@ void C2SoftAmrNbEnc::process(
         mProcessedSamples * 1000000ll / mIntf->getSampleRate();
     size_t inPos = 0;
     size_t outPos = 0;
-    while (inPos < inSize) {
+    while (inPos < inSize || eos) {
         const uint8_t *inPtr = rView.data() + inOffset;
         int validSamples = mFilledLen / sizeof(int16_t);
         if ((inPos + (kNumBytesPerInputFrame - mFilledLen)) <= inSize) {
@@ -240,11 +240,10 @@ void C2SoftAmrNbEnc::process(
             memcpy(mInputFrame + validSamples, inPtr + inPos, (inSize - inPos));
             mFilledLen += (inSize - inPos);
             inPos += (inSize - inPos);
-            if (eos) {
+            if (eos && (mFilledLen > 0)) {
                 validSamples = mFilledLen / sizeof(int16_t);
                 memset(mInputFrame + validSamples, 0, (kNumBytesPerInputFrame - mFilledLen));
             } else break;
-
         }
         Frame_Type_3GPP frameType;
         int numEncBytes = AMREncode(mEncState, mSidState, mMode, mInputFrame,
@@ -278,7 +277,6 @@ void C2SoftAmrNbEnc::process(
     if (eos) {
         mSignalledOutputEos = true;
         ALOGV("signalled EOS");
-        if (mFilledLen) ALOGV("Discarding trailing %d bytes", mFilledLen);
     }
 }
 
