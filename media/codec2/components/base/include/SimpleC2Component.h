@@ -68,8 +68,8 @@ void convertP010ToYUV420Planar16(uint16_t *dstY, uint16_t *dstU, uint16_t *dstV,
                                  size_t dstUStride, size_t dstVStride, size_t width,
                                  size_t height, bool isMonochrome = false);
 
-void convertP010ToP210(uint16_t *dstY, uint16_t *dstUV, const uint16_t *srcY,
-                       const uint16_t *srcUV, size_t srcUVStride, size_t dstUVStride,
+void convertP010ToP210(uint16_t *dstY, uint16_t *dstUV, const uint16_t *srcY, const uint16_t *srcUV,
+                       size_t srcYStride, size_t srcUVStride, size_t dstYStride, size_t dstUVStride,
                        size_t width, size_t height);
 
 void convertRGBA1010102ToYUV420Planar16(uint16_t* dstY, uint16_t* dstU, uint16_t* dstV,
