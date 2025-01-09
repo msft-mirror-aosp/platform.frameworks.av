@@ -32,6 +32,7 @@
 #include <audio_utils/minifloat.h>
 #include <com_android_media_audio.h>
 #include <media/AppOpsSession.h>
+#include <media/AudioPermissionPolicy.h>
 #include <media/AudioValidator.h>
 #include <media/IPermissionProvider.h>
 #include <media/RecordBufferConverter.h>
@@ -79,6 +80,15 @@ using com::android::media::audio::audioserver_permissions;
 using com::android::media::permission::PermissionEnum::CAPTURE_AUDIO_HOTWORD;
 using content::AttributionSourceState;
 using media::VolumeShaper;
+
+static bool shouldExemptFromOpControl(audio_usage_t usage) {
+    switch (usage) {
+        case AUDIO_USAGE_VIRTUAL_SOURCE:
+            return true;
+        default:
+            return media::permission::isSystemUsage(usage);
+    }
+}
 
 // ----------------------------------------------------------------------------
 //      TrackBase
@@ -952,12 +962,13 @@ Track::Track(
                 Ops { .attributedOp = AppOpsManager::OP_CONTROL_AUDIO_PARTIAL },
                 [this]
                 (bool isPermitted) {
-                    mHasOpControl.store(isPermitted, std::memory_order_release);
+                    mHasOpControlPartial.store(isPermitted, std::memory_order_release);
                     if (isOffloaded()) {
                         signal();
                     }
                 }
             );
+            mIsExemptedFromOpControl = shouldExemptFromOpControl(attr.usage);
         }
     }
 
@@ -1532,7 +1543,7 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
         // TODO(b/385417236) once mute logic is centralized, the delivery request session should be
         // tied to sonifying playback instead of track start->pause
         if (mOpControlSession) {
-            mHasOpControl.store(mOpControlSession->beginDeliveryRequest(),
+            mHasOpControlPartial.store(mOpControlSession->beginDeliveryRequest(),
                                 std::memory_order_release);
         }
         // send format to AudioManager for playback activity monitoring
