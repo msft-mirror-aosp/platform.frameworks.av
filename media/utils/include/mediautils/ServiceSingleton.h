@@ -318,7 +318,9 @@ private:
                 [traits, this](const InterfaceType<Service>& service) {
                     audio_utils::unique_lock ul(mMutex);
                     auto originalService = std::get<BaseInterfaceType<Service>>(mService);
-                    if (originalService != service) {
+                    // we suppress equivalent services from being set
+                    // where either the pointers match or the binder objects match.
+                    if (!mediautils::isSameInterface(originalService, service)) {
                         if (originalService != nullptr) {
                             invalidateService_l<Service>();
                         }
@@ -346,6 +348,8 @@ private:
     // sets the death notifier for mService (mService must be non-null).
     template <typename Service>
     void setDeathNotifier_l(const BaseInterfaceType<Service>& base) REQUIRES(mMutex) {
+        // here the pointer match should be identical to binder object match
+        // since we use a cached service.
         if (base != std::get<BaseInterfaceType<Service>>(mService)) {
             ALOGW("%s: service has changed for %s, skipping death notification registration",
                     __func__, toString(Service::descriptor).c_str());
