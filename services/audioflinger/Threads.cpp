@@ -5865,6 +5865,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                         volume = masterVolume * track->getPortVolume();
                     }
                 }
+                track->maybeLogPlaybackHardening(
+                        *mAfThreadCallback->getOrCreateAudioManager()->getNativeInterface());
                 handleVoipVolume_l(&volume);
 
                 // cache the combined master volume and stream type volume for fast mixer; this
@@ -6062,6 +6064,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 }
             }
             handleVoipVolume_l(&v);
+            track->maybeLogPlaybackHardening(
+                    *mAfThreadCallback->getOrCreateAudioManager()->getNativeInterface());
 
             if (track->isPausing()) {
                 vl = vr = 0;
@@ -6891,6 +6895,9 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
                                track->getPortMute(),
                                track->isPlaybackRestrictedControl()});
     }
+    track->maybeLogPlaybackHardening(
+            *mAfThreadCallback->getOrCreateAudioManager()->getNativeInterface());
+
 
     if (lastTrack) {
         track->setFinalVolume(left, right);

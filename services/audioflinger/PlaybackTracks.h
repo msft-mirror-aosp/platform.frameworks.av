@@ -216,6 +216,7 @@ public:
     bool isSpatialized() const final { return mIsSpatialized; }
     bool isBitPerfect() const final { return mIsBitPerfect; }
 
+    void maybeLogPlaybackHardening(media::IAudioManagerNative& am) const final;
     /**
      * Updates the mute state and notifies the audio service. Call this only when holding player
      * thread lock.
@@ -366,6 +367,8 @@ protected:
     // logically const
     bool mIsExemptedFromOpControl = false;
     std::atomic<bool> mHasOpControlPartial {true};
+
+    mutable std::atomic<bool> mPlaybackHardeningLogged {false};
 
     bool                mHapticPlaybackEnabled = false; // indicates haptic playback enabled or not
     // scale to play haptic data

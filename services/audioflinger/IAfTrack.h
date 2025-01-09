@@ -383,6 +383,14 @@ public:
     virtual float getSpeed() const = 0;
 
     /**
+     * Inform AudioService of any potential playback restriction due to fg state.
+     * Should be called when evaluating playback restrictions due to fg state
+     * (see {@link isPlaybackRestrictedControl()}). This function
+     * internally checks the OP state and dispatches to AudioService for metrics
+     */
+    virtual void maybeLogPlaybackHardening(media::IAudioManagerNative& am) const = 0;
+
+    /**
      * Updates the mute state and notifies the audio service. Call this only when holding player
      * thread lock.
      */
