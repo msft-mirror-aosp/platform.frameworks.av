@@ -75,6 +75,7 @@ namespace android {
 
 using ::android::aidl_utils::binderStatusFromStatusT;
 using ::com::android::media::audio::hardening_impl;
+using ::com::android::media::audio::hardening_strict;
 using binder::Status;
 using com::android::media::audio::audioserver_permissions;
 using com::android::media::permission::PermissionEnum::CAPTURE_AUDIO_HOTWORD;
@@ -82,11 +83,17 @@ using content::AttributionSourceState;
 using media::VolumeShaper;
 
 static bool shouldExemptFromOpControl(audio_usage_t usage) {
-    switch (usage) {
-        case AUDIO_USAGE_VIRTUAL_SOURCE:
-            return true;
-        default:
-            return media::permission::isSystemUsage(usage);
+    // TODO(b/389136997) this should be swapped to another flag when it is added, but use this flag
+    // for now since it is already in teamfood
+    if (hardening_strict()) {
+        switch (usage) {
+            case AUDIO_USAGE_VIRTUAL_SOURCE:
+                return true;
+            default:
+                return media::permission::isSystemUsage(usage);
+        }
+    } else {
+        return true;
     }
 }
 
