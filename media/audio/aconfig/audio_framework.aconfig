@@ -63,6 +63,14 @@ flag {
     bug: "266537650"
 }
 
+flag {
+    name: "sony_360ra_mpegh_3d_format"
+    namespace: "media_audio"
+    description: "360 Reality Audio MPEG-H 3D Format"
+    is_fixed_read_only: true
+    bug: "238402306"
+}
+
 # TODO remove
 flag {
     name: "foreground_audio_control"

@@ -75,13 +75,8 @@ status_t Engine::loadFromHalConfigWithFallback(
 
     auto capResult = capEngineConfig::convert(aidlConfig);
     if (capResult.parsedConfig == nullptr) {
-#ifdef ENABLE_CAP_AIDL_HYBRID_MODE
-        ALOGE("%s CapEngine Config invalid, falling back on vendor XML for engine", __func__);
-        return loadFromXmlConfigWithFallback(engineConfig::DEFAULT_PATH);
-#else
         ALOGE("%s CapEngine Config invalid", __func__);
         return BAD_VALUE;
-#endif
     }
     status_t ret = loadWithFallback(aidlConfig);
     if (ret != NO_ERROR) {
@@ -97,10 +92,9 @@ status_t Engine::loadFromHalConfigWithFallback(
     };
     loadCriteria(capResult.parsedConfig->capCriteria);
     std::string error;
-    if (mPolicyParameterMgr->start(error) != NO_ERROR) {
-        ALOGE("%s: could not start Policy PFW: %s, fallback on default", __func__ , error.c_str());
-        setDefaultConfiguration();
-        return NO_ERROR;
+    if (mPolicyParameterMgr == nullptr || mPolicyParameterMgr->start(error) != NO_ERROR) {
+        ALOGE("%s: could not start Policy PFW: %s", __FUNCTION__, error.c_str());
+        return NO_INIT;
     }
     return mPolicyParameterMgr->setConfiguration(capResult);
 }
@@ -109,10 +103,9 @@ status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath)
 {
     status_t status = loadWithFallback(xmlFilePath);
     std::string error;
-    if (mPolicyParameterMgr->start(error) != NO_ERROR) {
-        ALOGE("%s: could not start Policy PFW: %s, fallback on default", __func__ , error.c_str());
-        setDefaultConfiguration();
-        return NO_ERROR;
+    if (mPolicyParameterMgr == nullptr || mPolicyParameterMgr->start(error) != NO_ERROR) {
+        ALOGE("%s: could not start Policy PFW: %s", __FUNCTION__, error.c_str());
+        return NO_INIT;
     }
     return status;
 }
@@ -412,8 +405,9 @@ DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t ps) const
         auto defaultDevice = getApmObserver()->getDefaultOutputDevice();
         ALOG_ASSERT(defaultDevice != nullptr, "no valid default device defined");
         selectedDevices = DeviceVector(defaultDevice);
-    } else if (/*device_distinguishes_on_address(*deviceTypes.begin())*/ isSingleDeviceType(
-            deviceTypes, AUDIO_DEVICE_OUT_BUS)) {
+    } else if (/*device_distinguishes_on_address(*deviceTypes.begin())*/
+            isSingleDeviceType(deviceTypes, AUDIO_DEVICE_OUT_BUS) ||
+            isSingleDeviceType(deviceTypes, AUDIO_DEVICE_OUT_SPEAKER)) {
         // We do expect only one device for these types of devices
         // Criterion device address garantee this one is available
         // If this criterion is not wished, need to ensure this device is available
@@ -506,6 +500,14 @@ sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_
     }
 
     audio_devices_t deviceType = getPropertyForKey<audio_devices_t, audio_source_t>(attr.source);
+
+    if (deviceType == AUDIO_DEVICE_IN_ECHO_REFERENCE) {
+        device = getInputDeviceForEchoRef(attr, availableInputDevices);
+        if (device != nullptr) {
+            return device;
+        }
+    }
+
 
     if (audio_is_remote_submix_device(deviceType)) {
         address = "0";

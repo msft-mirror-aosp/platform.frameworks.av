@@ -473,6 +473,12 @@ status_t Camera3StreamSplitter::attachBufferToOutputs(ANativeWindowBuffer* anb,
         mMutex.unlock();
         res = gbp->attachBuffer(&slot, gb);
         mMutex.lock();
+        //During buffer attach 'mMutex' is not held which makes the removal of
+        //"gbp" possible. Check whether this is the case and continue.
+        if (gbp.get() == nullptr) {
+            res = OK;
+            continue;
+        }
         if (res != OK) {
             SP_LOGE("%s: Cannot attachBuffer from GraphicBufferProducer %p: %s (%d)",
                     __FUNCTION__, gbp.get(), strerror(-res), res);
