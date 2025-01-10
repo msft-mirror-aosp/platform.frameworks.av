@@ -238,9 +238,12 @@ public:
             ALOGW_IF(old != mService,
                     "%s: service changed during callback, continuing.", __func__);
         }
-        mService = af;
-        ul.unlock();
-        if (af) onNewServiceWithAdapter(af);
+        if (af) {
+            ul.unlock();
+            onNewServiceWithAdapter(af);
+        } else {
+            mService = nullptr;
+        }
         return OK;
     }
 
@@ -270,6 +273,11 @@ private:
         bool reportNoError = false;
         {
             std::lock_guard l(mMutex);
+            if (mService == service ||
+                    (mService && service && mService->getDelegate() == service->getDelegate())) {
+                ALOGW("%s: %s  same service, ignoring", __func__, getServiceName());
+                return;
+            }
             ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
                     __func__, getServiceName());
             if (mClient == nullptr) {
