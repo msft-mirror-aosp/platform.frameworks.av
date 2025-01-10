@@ -155,8 +155,8 @@ public:
                 return;
             }
             if (!mService || mService->getDelegate() != service) {
-                ALOGW("%s: %s unmatched service death pointers, ignoring",
-                        __func__, getServiceName());
+                ALOGW("%s: %s unmatched service death pointers, previous %p, ignoring",
+                        __func__, getServiceName(), mService.get());
                 return;
             }
             mValid = false;
@@ -1002,6 +1002,10 @@ public:
         sp<AudioSystem::AudioPolicyServiceClient> client;
         {
             std::lock_guard l(mMutex);
+            if (aps == mService) {
+                ALOGW_IF("%s: %s same service, ignoring", __func__, getServiceName());
+                return;
+            }
             ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
                     __func__, getServiceName());
             if (mClient == nullptr) {
@@ -1025,12 +1029,13 @@ public:
         {
             std::lock_guard l(mMutex);
             if (!mValid) {
-                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
+                ALOGW("%s: %s service already invalidated, previous %p, ignoring",
+                        __func__, getServiceName(), mService.get());
                 return;
             }
             if (mService != service) {
-                ALOGW("%s: %s unmatched service death pointers, ignoring",
-                        __func__, getServiceName());
+                ALOGW("%s: %s unmatched service death pointers, previous %p, ignoring",
+                        __func__, getServiceName(), mService.get());
                 return;
             }
             mValid = false;
@@ -1108,9 +1113,12 @@ public:
                 return OK;
             }
         }
-        mService = aps;
-        ul.unlock();
-        if (aps) onNewService(aps);
+        if (aps) {
+            ul.unlock();
+            onNewService(aps);
+        } else {
+            mService = nullptr;
+        }
         return OK;
     }
 
