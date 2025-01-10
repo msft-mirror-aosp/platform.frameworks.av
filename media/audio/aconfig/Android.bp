@@ -77,7 +77,7 @@ cc_aconfig_library {
     // TODO(b/316909431) native_bridge_supported: true,
     apex_available: [
         "//apex_available:platform",
-        "com.android.btservices",
+        "com.android.bt",
         "com.android.media",
         "com.android.media.swcodec",
     ],
@@ -158,9 +158,7 @@ java_aconfig_library {
     defaults: ["framework-minus-apex-aconfig-java-defaults"],
     min_sdk_version: "Tiramisu",
     mode: "exported",
-    apex_available: [
-        "com.android.btservices",
-    ],
+    apex_available: ["com.android.bt"],
     visibility: [
         "//packages/modules/Bluetooth:__subpackages__",
     ],
