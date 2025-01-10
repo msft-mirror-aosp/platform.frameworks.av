@@ -1912,12 +1912,12 @@ void Track::maybeLogPlaybackHardening(media::IAudioManagerNative& am) const {
     if (!hasOpControlPartial()) {
         if (!mPlaybackHardeningLogged.exchange(true, std::memory_order_acq_rel)) {
             am.playbackHardeningEvent(uid(), PARTIAL,
-                                             /* bypassed= */
-                                             !isPlaybackRestrictedControl());
+                                      /* bypassed= */
+                                      !isPlaybackRestrictedControl());
         }
     }
-
 }
+
 // must be called with player thread lock held
 void Track::processMuteEvent_l(const sp<
     IAudioManager>& audioManager, mute_state_t muteState)
@@ -3821,6 +3821,24 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
         mUid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid))),
             mSilenced(false), mSilencedNotified(false), mVolume(volume)
 {
+    using media::permission::ValidatedAttributionSourceState;
+    using media::permission::Ops;
+    if (hardening_impl()) {
+        // Don't bother for trusted uids
+        if (!media::permission::skipOpsForUid(attributionSource.uid)) {
+            mOpControlSession.emplace(
+                ValidatedAttributionSourceState::createFromTrustedSource(attributionSource),
+                Ops { .attributedOp = AppOpsManager::OP_CONTROL_AUDIO_PARTIAL },
+                [this]
+                (bool isPermitted) {
+                    mHasOpControlPartial.store(isPermitted, std::memory_order_release);
+                    signal();
+                }
+            );
+            mIsExemptedFromOpControl = shouldExemptFromOpControl(attr.usage);
+        }
+    }
+
     mMutedFromPort = muted;
     // Once this item is logged by the server, the client can add properties.
     mTrackMetrics.logConstructor(creatorPid, uid(), id());
@@ -3844,6 +3862,10 @@ status_t MmapTrack::initCheck() const
 status_t MmapTrack::start(AudioSystem::sync_event_t event __unused,
                                                     audio_session_t triggerSession __unused)
 {
+    if (mOpControlSession) {
+        mHasOpControlPartial.store(mOpControlSession->beginDeliveryRequest(),
+                            std::memory_order_release);
+    }
     if (ATRACE_ENABLED()) [[unlikely]] {
         ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
                 .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_START)
@@ -3854,6 +3876,9 @@ status_t MmapTrack::start(AudioSystem::sync_event_t event __unused,
 
 void MmapTrack::stop()
 {
+    if (mOpControlSession) {
+        mOpControlSession->endDeliveryRequest();
+    }
     if (ATRACE_ENABLED()) [[unlikely]] {
         ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
                 .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_STOP)
@@ -3881,6 +3906,20 @@ int64_t MmapTrack::framesReleased() const
 
 void MmapTrack::onTimestamp(const ExtendedTimestamp& timestamp __unused)
 {
+}
+
+void MmapTrack::maybeLogPlaybackHardening(media::IAudioManagerNative& am) const {
+    using media::IAudioManagerNative::HardeningType::PARTIAL;
+    // The op state deviates from if the track is actually muted if the playback was exempted for
+    // some compat reason.
+    // The state could have technically TOCTOU, but this is for metrics and that is very unlikely
+    if (!hasOpControlPartial()) {
+        if (!mPlaybackHardeningLogged.exchange(true, std::memory_order_acq_rel)) {
+            am.playbackHardeningEvent(uid(), PARTIAL,
+                                      /* bypassed= */
+                                      !isPlaybackRestrictedControl());
+        }
+    }
 }
 
 void MmapTrack::processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_state_t muteState)

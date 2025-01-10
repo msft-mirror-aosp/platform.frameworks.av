@@ -20,6 +20,7 @@
 #include "TrackBase.h"
 
 #include <android/content/AttributionSourceState.h>
+#include <media/AppOpsSession.h>
 
 namespace android {
 
@@ -59,6 +60,18 @@ public:
     bool getAndSetSilencedNotified_l() final { bool silencedNotified = mSilencedNotified;
                                                         mSilencedNotified = true;
                                                         return silencedNotified; }
+
+    // The following functions are duplicated from PlaybackTrack
+    // TODO(b/241533526) refactor common code
+    bool hasOpControlPartial() const {
+        return mOpControlSession ? mHasOpControlPartial.load(std::memory_order_acquire) : true;
+    }
+
+    bool isPlaybackRestrictedControl() const final {
+        return !(mIsExemptedFromOpControl || hasOpControlPartial());
+    }
+
+    void maybeLogPlaybackHardening(media::IAudioManagerNative& am) const final;
 
     /**
      * Updates the mute state and notifies the audio service. Call this only when holding player
@@ -105,6 +118,16 @@ private:
     bool mMutedFromPort;
 
     float mVolume = 0.0f;
+
+    // logically const
+    std::optional<media::permission::AppOpsSession<media::permission::DefaultAppOpsFacade>>
+            mOpControlSession;
+
+    // logically const
+    bool mIsExemptedFromOpControl = false;
+    std::atomic<bool> mHasOpControlPartial {true};
+    mutable std::atomic<bool> mPlaybackHardeningLogged {false};
+
 };  // end of Track
 
 } // namespace android
