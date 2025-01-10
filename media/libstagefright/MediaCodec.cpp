@@ -753,7 +753,7 @@ public:
     explicit ReleaseSurface(uint64_t usage) {
         BufferQueue::createBufferQueue(&mProducer, &mConsumer);
         mSurface = new Surface(mProducer, false /* controlledByApp */);
-        struct ConsumerListener : public BnConsumerListener {
+        struct ConsumerListener : public IConsumerListener {
             ConsumerListener(const sp<IGraphicBufferConsumer> &consumer) {
                 mConsumer = consumer;
             }

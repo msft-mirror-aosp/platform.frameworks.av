@@ -140,9 +140,8 @@ private:
 
     // This is a thin wrapper class that lets us listen to
     // IConsumerListener::onFrameAvailable from mInput.
-    class InputListener : public BnConsumerListener,
-                          public IBinder::DeathRecipient {
-    public:
+    class InputListener : public IConsumerListener, public IBinder::DeathRecipient {
+      public:
         InputListener(const sp<MediaSync> &sync);
         virtual ~InputListener();
 
