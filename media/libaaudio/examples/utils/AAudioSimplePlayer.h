@@ -119,7 +119,8 @@ public:
     aaudio_result_t open(const AAudioParameters &parameters,
                          AAudioStream_dataCallback dataCallback = nullptr,
                          AAudioStream_errorCallback errorCallback = nullptr,
-                         void *userContext = nullptr) {
+                         void *userContext = nullptr,
+                         AAudioStream_presentationEndCallback presentationEndCallback = nullptr) {
         aaudio_result_t result = AAUDIO_OK;
 
         // Use an AAudioStreamBuilder to contain requested parameters.
@@ -136,6 +137,10 @@ public:
         }
         if (errorCallback != nullptr) {
             AAudioStreamBuilder_setErrorCallback(builder, errorCallback, userContext);
+        }
+        if (presentationEndCallback != nullptr) {
+            AAudioStreamBuilder_setPresentationEndCallback(
+                    builder, presentationEndCallback, userContext);
         }
         //AAudioStreamBuilder_setFramesPerDataCallback(builder, CALLBACK_SIZE_FRAMES);
         //AAudioStreamBuilder_setBufferCapacityInFrames(builder, 48 * 8);
