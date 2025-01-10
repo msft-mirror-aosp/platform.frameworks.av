@@ -78,7 +78,7 @@ class AidlCamera3SharedDevice :
     virtual void notifyRepeatingRequestError(long /*lastFrameNumber*/) {};
   private:
     static std::map<std::string, sp<AidlCamera3SharedDevice>> sSharedDevices;
-    static std::map<std::string, std::unordered_set<int>> sClientsUid;
+    static std::map<std::string, std::unordered_set<int>> sClientsPid;
     static Mutex sSharedClientsLock;
     AidlCamera3SharedDevice(
             std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,

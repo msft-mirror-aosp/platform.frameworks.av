@@ -84,7 +84,7 @@ public:
 // See android.info.availableSharedOutputConfigurations for details.
 static const int SHARED_OUTPUT_CONFIG_NUM_OF_ENTRIES = 11;
 std::map<std::string, sp<AidlCamera3SharedDevice>> AidlCamera3SharedDevice::sSharedDevices;
-std::map<std::string, std::unordered_set<int>> AidlCamera3SharedDevice::sClientsUid;
+std::map<std::string, std::unordered_set<int>> AidlCamera3SharedDevice::sClientsPid;
 Mutex AidlCamera3SharedDevice::sSharedClientsLock;
 sp<AidlCamera3SharedDevice> AidlCamera3SharedDevice::getInstance(
         std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
@@ -92,14 +92,14 @@ sp<AidlCamera3SharedDevice> AidlCamera3SharedDevice::getInstance(
         const std::string& id, bool overrideForPerfClass, int rotationOverride,
         bool legacyClient) {
     Mutex::Autolock l(sSharedClientsLock);
-    if (sClientsUid[id].empty()) {
+    if (sClientsPid[id].empty()) {
         AidlCamera3SharedDevice* sharedDevice = new AidlCamera3SharedDevice(
                 cameraServiceProxyWrapper, attributionAndPermissionUtils, id, overrideForPerfClass,
                 rotationOverride, legacyClient);
         sSharedDevices[id] = sharedDevice;
     }
     if (attributionAndPermissionUtils != nullptr) {
-        sClientsUid[id].insert(attributionAndPermissionUtils->getCallingUid());
+        sClientsPid[id].insert(attributionAndPermissionUtils->getCallingPid());
     }
     return sSharedDevices[id];
 }
@@ -133,14 +133,14 @@ status_t AidlCamera3SharedDevice::initialize(sp<CameraProviderManager> manager,
     return res;
 }
 
-status_t AidlCamera3SharedDevice::disconnectClient(int clientUid) {
+status_t AidlCamera3SharedDevice::disconnectClient(int clientPid) {
     Mutex::Autolock l(mSharedDeviceLock);
-    if (sClientsUid[mId].erase(clientUid) == 0) {
+    if (sClientsPid[mId].erase(clientPid) == 0) {
         ALOGW("%s: Camera %s: Client %d is not connected to shared device", __FUNCTION__,
-                mId.c_str(), clientUid);
+                mId.c_str(), clientPid);
     }
 
-    if (sClientsUid[mId].empty()) {
+    if (sClientsPid[mId].empty()) {
         return Camera3Device::disconnect();
     }
     return OK;
