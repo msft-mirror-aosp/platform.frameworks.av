@@ -90,6 +90,14 @@
         "name": "HEVCUtilsUnitTest"
     },
     {
+      "name": "MctsMediaCodecTestCases",
+      "options": [
+        {
+          "include-annotation": "android.platform.test.annotations.Presubmit"
+        }
+      ]
+    },
+    {
       "name": "MctsMediaDecoderTestCases",
       "options": [
         {
@@ -105,17 +113,9 @@
         }
       ]
     }
-  ],
-  "postsubmit": [
-    // writerTest fails about 5 out of 66
-    // { "name": "writerTest" },
-    {
-      "name": "MctsMediaCodecTestCases",
-      "options": [
-        {
-          "include-annotation": "android.platform.test.annotations.Presubmit"
-        }
-      ]
-    }
   ]
+  // "postsubmit": [
+  //   writerTest fails about 5 out of 66
+  //   { "name": "writerTest" },
+  // ]
 }

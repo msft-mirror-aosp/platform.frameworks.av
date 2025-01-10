@@ -16,10 +16,7 @@ cc_library {
         "-Wall",
         "-Werror",
         "-Wextra",
-    ] + select(release_flag("RELEASE_HARDWARE_AUDIO_USE_CAP_AIDL"), {
-        true: [],
-        default: ["-DENABLE_CAP_AIDL_HYBRID_MODE"],
-    }),
+    ],
     header_libs: [
         "libaudiofoundation_headers",
         "libaudiopolicycapengine_config_headers",

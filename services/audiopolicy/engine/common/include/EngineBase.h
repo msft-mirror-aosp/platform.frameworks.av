@@ -178,8 +178,6 @@ public:
 
     void updateDeviceSelectionCache() override;
 
-    void setDefaultConfiguration();
-
 protected:
     DeviceVector getPreferredAvailableDevicesForProductStrategy(
         const DeviceVector& availableOutputDevices, product_strategy_t strategy) const;
@@ -236,6 +234,9 @@ protected:
      * @param strategy the strategy to query
      */
     virtual DeviceVector getDevicesForProductStrategy(product_strategy_t strategy) const = 0;
+
+    sp<DeviceDescriptor> getInputDeviceForEchoRef(const audio_attributes_t &attr,
+            const DeviceVector &availableInputDevices) const;
 
     DeviceStrategyMap mDevicesForStrategies;
 };

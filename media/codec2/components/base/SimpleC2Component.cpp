@@ -464,15 +464,18 @@ void convertP010ToYUV420Planar16(uint16_t *dstY, uint16_t *dstU, uint16_t *dstV,
 }
 
 void convertP010ToP210(uint16_t *dstY, uint16_t *dstUV, const uint16_t *srcY, const uint16_t *srcUV,
-                       size_t srcUVStride, size_t dstUVStride, size_t width, size_t height) {
-    std::memcpy(dstY, srcY, width * height * sizeof(uint16_t));
+                       size_t srcYStride, size_t srcUVStride, size_t dstYStride, size_t dstUVStride,
+                       size_t width, size_t height) {
+    for (size_t y = 0; y < height; ++y) {
+        std::memcpy(dstY + (y * dstYStride), srcY + (y * srcYStride), width * sizeof(uint16_t));
+    }
 
     int32_t offsetTop, offsetBot;
     for (size_t y = 0; y < (height + 1) / 2; ++y) {
-        offsetTop = (y * 2) * dstUVStride;
-        offsetBot = (y * 2 + 1) * dstUVStride;
-        std::memcpy(dstUV + offsetTop, srcUV + (y * srcUVStride), srcUVStride * sizeof(uint16_t));
-        std::memcpy(dstUV + offsetBot, srcUV + (y * srcUVStride), srcUVStride * sizeof(uint16_t));
+        std::memcpy(dstUV, srcUV, width * sizeof(uint16_t));
+        std::memcpy(dstUV + dstUVStride, srcUV, width * sizeof(uint16_t));
+        srcUV += srcUVStride;
+        dstUV += dstUVStride << 1;
     }
 }
 
@@ -703,7 +706,7 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
     srcY += srcYStride;
   }
 
-  for (int32_t y = 0; y < height / 2; ++y) {
+  for (int32_t y = 0; y < (height + 1) / 2; ++y) {
     for (int32_t x = 0; x < width; ++x) {
       dstUV[x] = dstUV[dstUVStride + x] =
           ((uint16_t)((double)srcUV[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;

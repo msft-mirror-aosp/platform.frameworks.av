@@ -181,6 +181,7 @@ public:
     virtual bool isHapticGenerator() const = 0;
     static bool isSpatializer(const effect_uuid_t* type);
     virtual bool isSpatializer() const = 0;
+    virtual bool isEffect(const effect_uuid_t &uuid) const = 0;
 
     virtual status_t setHapticScale_l(int id, os::HapticScale hapticScale)
             REQUIRES(audio_utils::EffectChain_Mutex) EXCLUDES_EffectBase_Mutex = 0;
