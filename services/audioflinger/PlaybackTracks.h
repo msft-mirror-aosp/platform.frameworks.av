@@ -23,6 +23,7 @@
 #include <audio_utils/mutex.h>
 #include <audio_utils/LinearMap.h>
 #include <binder/AppOpsManager.h>
+#include <media/AppOpsSession.h>
 #include <utils/RWLock.h>
 
 namespace android {
@@ -293,12 +294,17 @@ protected:
 
     bool isPlaybackRestrictedOp() const final {
         // The monitor is only created for tracks that can be silenced.
-        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false;
+        return mOpPlayAudioMonitor
+                       ? !mOpPlayAudioMonitor->hasOpPlayAudio()
+                       : false;
+    }
+
+    bool hasOpControlPartial() const {
+        return mOpControlSession ? mHasOpControlPartial.load(std::memory_order_acquire) : true;
     }
 
     bool isPlaybackRestrictedControl() const final {
-        return false;
-        // return mOpAudioControlSoftMonitor ? !mOpAudioControlSoftMonitor->hasOp() : false;
+        return !(mIsExemptedFromOpControl || hasOpControlPartial());
     }
 
     bool isPlaybackRestricted() const final {
@@ -352,6 +358,14 @@ protected:
     sp<media::VolumeHandler>  mVolumeHandler; // handles multiple VolumeShaper configs and operations
 
     sp<OpPlayAudioMonitor>  mOpPlayAudioMonitor;
+
+    // logically const
+    std::optional<media::permission::AppOpsSession<media::permission::DefaultAppOpsFacade>>
+            mOpControlSession;
+
+    // logically const
+    bool mIsExemptedFromOpControl = false;
+    std::atomic<bool> mHasOpControlPartial {true};
 
     bool                mHapticPlaybackEnabled = false; // indicates haptic playback enabled or not
     // scale to play haptic data

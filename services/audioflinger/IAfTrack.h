@@ -398,7 +398,8 @@ public:
 
     // Restricted due to OP_PLAY_AUDIO
     virtual bool isPlaybackRestrictedOp() const = 0;
-    // Restricted due to OP_AUDIO_CONTROL_SOFT
+
+    // Restricted due to OP_AUDIO_CONTROL_PARTIAL
     virtual bool isPlaybackRestrictedControl() const = 0;
     virtual bool isPlaybackRestricted() const = 0;
 

@@ -31,26 +31,6 @@ namespace android::media::permission {
 using ValidatedAttributionSourceState =
         com::android::media::permission::ValidatedAttributionSourceState;
 
-/**
- * Tracking ops for the following uids are pointless -- system always has ops and isn't tracked,
- * and native only services don't have packages which is what appops tracks over.
- * So, we skip tracking, and always permit access.
- * Notable omissions are AID_SHELL, AID_RADIO, and AID_BLUETOOTH, which are non-app uids which
- * interface with us, but are associated with packages so can still be attributed to.
- */
-inline bool skipOpsForUid(uid_t uid) {
-    switch (uid % AID_USER_OFFSET) {
-        case AID_ROOT:
-        case AID_SYSTEM:
-        case AID_MEDIA:
-        case AID_AUDIOSERVER:
-        case AID_CAMERASERVER:
-            return true;
-        default:
-            return false;
-    }
-}
-
 struct Ops {
     int attributedOp = -1;  // same as OP_NONE
     int additionalOp = -1;
