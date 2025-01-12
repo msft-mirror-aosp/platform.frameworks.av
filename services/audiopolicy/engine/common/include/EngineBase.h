@@ -235,6 +235,9 @@ protected:
      */
     virtual DeviceVector getDevicesForProductStrategy(product_strategy_t strategy) const = 0;
 
+    sp<DeviceDescriptor> getInputDeviceForEchoRef(const audio_attributes_t &attr,
+            const DeviceVector &availableInputDevices) const;
+
     DeviceStrategyMap mDevicesForStrategies;
 };
 
