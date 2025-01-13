@@ -316,11 +316,12 @@ ConversionResult<std::string> aidl2legacy_AudioHalCapRule_CapRule(
     }
     rule += "{";
     if (!aidlRule.nestedRules.empty()) {
-        for (const auto& nestedRule: aidlRule.nestedRules) {
-            rule += VALUE_OR_FATAL(aidl2legacy_AudioHalCapRule_CapRule(nestedRule));
-        }
-        if (!aidlRule.criterionRules.empty()) {
-            rule += ",";
+        for (auto ruleIter = aidlRule.nestedRules.begin(); ruleIter != aidlRule.nestedRules.end();
+                ++ruleIter) {
+            rule += VALUE_OR_FATAL(aidl2legacy_AudioHalCapRule_CapRule(*ruleIter));
+            if (ruleIter != (aidlRule.nestedRules.end()  - 1) || !aidlRule.criterionRules.empty()) {
+                rule += ",";
+            }
         }
     }
     bool isFirstCriterionRule = true;
