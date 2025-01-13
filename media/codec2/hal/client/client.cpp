@@ -77,12 +77,14 @@
 #include <private/android/AHardwareBufferHelpers.h>
 #include <system/window.h> // for NATIVE_WINDOW_QUERY_*
 
+#include <algorithm>
 #include <deque>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <thread>
 #include <type_traits>
