@@ -210,7 +210,7 @@ extern "C" {
 EXPORT
 media_status_t AMediaCodecStore_getSupportedMediaTypes(
         const AMediaCodecSupportedMediaType **outMediaTypes, size_t *outCount) {
-    if (outMediaTypes == nullptr) {
+    if (outMediaTypes == nullptr || outCount == nullptr) {
         return AMEDIA_ERROR_INVALID_PARAMETER;
     }
 
