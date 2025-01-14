@@ -854,6 +854,8 @@ inline static const char *asString_ColorFormat(int32_t i, const char *def = "??"
 }
 
 inline constexpr char FEATURE_AdaptivePlayback[]       = "adaptive-playback";
+inline constexpr char FEATURE_DetachedSurface[]        = "detached-surface";
+inline constexpr char FEATURE_DynamicColorAspects[]    = "dynamic-color-aspects";
 inline constexpr char FEATURE_DynamicTimestamp[]       = "dynamic-timestamp";
 inline constexpr char FEATURE_EncodingStatistics[]     = "encoding-statistics";
 inline constexpr char FEATURE_FrameParsing[]           = "frame-parsing";
