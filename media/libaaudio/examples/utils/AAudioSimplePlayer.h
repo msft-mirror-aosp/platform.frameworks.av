@@ -271,6 +271,24 @@ public:
         return result;
     }
 
+    aaudio_result_t setOffloadDelayPadding(int delay, int padding) {
+        aaudio_result_t result = AAudioStream_setOffloadDelayPadding(mStream, delay, padding);
+        if (result != AAUDIO_OK) {
+            printf("WARNING - AAudioStream_setOffloadDelayPadding(%d, %d) returned %d %s\n",
+                   delay, padding, result, AAudio_convertResultToText(result));
+        }
+        return result;
+    }
+
+    aaudio_result_t setOffloadEndOfStream() {
+        aaudio_result_t result = AAudioStream_setOffloadEndOfStream(mStream);
+        if (result != AAUDIO_OK) {
+            printf("ERROR - AAudioStream_setOffloadEndOfStream() returned %d %s\n",
+                   result, AAudio_convertResultToText(result));
+        }
+        return result;
+    }
+
     AAudioStream *getStream() const {
         return mStream;
     }
