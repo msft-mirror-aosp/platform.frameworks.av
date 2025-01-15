@@ -363,4 +363,6 @@ aaudio_policy_t AAudio_getAAudioPolicy(
         android::media::audio::common::AudioMMapPolicy defaultPolicy =
                 android::media::audio::common::AudioMMapPolicy::NEVER);
 
+bool AAudio_isCompressedFormat(audio_format_t format);
+
 #endif //UTILITY_AAUDIO_UTILITIES_H
