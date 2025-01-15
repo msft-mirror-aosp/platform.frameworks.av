@@ -147,6 +147,27 @@ audio_format_t AAudioConvert_aaudioToAndroidDataFormat(aaudio_format_t aaudioFor
     case AAUDIO_FORMAT_IEC61937:
         androidFormat = AUDIO_FORMAT_IEC61937;
         break;
+    case AAUDIO_FORMAT_MP3:
+        androidFormat = AUDIO_FORMAT_MP3;
+        break;
+    case AAUDIO_FORMAT_AAC_LC:
+        androidFormat = AUDIO_FORMAT_AAC_LC;
+        break;
+    case AAUDIO_FORMAT_AAC_HE_V1:
+        androidFormat = AUDIO_FORMAT_AAC_HE_V1;
+        break;
+    case AAUDIO_FORMAT_AAC_HE_V2:
+        androidFormat = AUDIO_FORMAT_AAC_HE_V2;
+        break;
+    case AAUDIO_FORMAT_AAC_ELD:
+        androidFormat = AUDIO_FORMAT_AAC_ELD;
+        break;
+    case AAUDIO_FORMAT_AAC_XHE:
+        androidFormat = AUDIO_FORMAT_AAC_XHE;
+        break;
+    case AAUDIO_FORMAT_OPUS:
+        androidFormat = AUDIO_FORMAT_OPUS;
+        break;
     default:
         androidFormat = AUDIO_FORMAT_INVALID;
         ALOGE("%s() 0x%08X unrecognized", __func__, aaudioFormat);
@@ -175,6 +196,27 @@ aaudio_format_t AAudioConvert_androidToAAudioDataFormat(audio_format_t androidFo
         break;
     case AUDIO_FORMAT_IEC61937:
         aaudioFormat = AAUDIO_FORMAT_IEC61937;
+        break;
+    case AUDIO_FORMAT_MP3:
+        aaudioFormat = AAUDIO_FORMAT_MP3;
+        break;
+    case AUDIO_FORMAT_AAC_LC:
+        aaudioFormat = AAUDIO_FORMAT_AAC_LC;
+        break;
+    case AUDIO_FORMAT_AAC_HE_V1:
+        aaudioFormat = AAUDIO_FORMAT_AAC_HE_V1;
+        break;
+    case AUDIO_FORMAT_AAC_HE_V2:
+        aaudioFormat = AAUDIO_FORMAT_AAC_HE_V2;
+        break;
+    case AUDIO_FORMAT_AAC_ELD:
+        aaudioFormat = AAUDIO_FORMAT_AAC_ELD;
+        break;
+    case AUDIO_FORMAT_AAC_XHE:
+        aaudioFormat = AAUDIO_FORMAT_AAC_XHE;
+        break;
+    case AUDIO_FORMAT_OPUS:
+        aaudioFormat = AAUDIO_FORMAT_OPUS;
         break;
     default:
         aaudioFormat = AAUDIO_FORMAT_INVALID;

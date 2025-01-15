@@ -89,6 +89,24 @@ public:
         return mErrorCallbackUserData;
     }
 
+    AudioStreamBuilder* setPresentationEndCallbackProc(AAudioStream_presentationEndCallback proc) {
+        mPresentationEndCallbackProc = proc;
+        return this;
+    }
+
+    AAudioStream_presentationEndCallback getPresentationEndCallbackProc() const {
+        return mPresentationEndCallbackProc;
+    }
+
+    AudioStreamBuilder* setPresentationEndCallbackUserData(void *userData) {
+        mPresentationEndCallbackUserData = userData;
+        return this;
+    }
+
+    void *getPresentationEndCallbackUserData() const {
+        return mPresentationEndCallbackUserData;
+    }
+
     int32_t getFramesPerDataCallback() const {
         return mFramesPerDataCallback;
     }
@@ -127,6 +145,9 @@ private:
 
     AAudioStream_errorCallback mErrorCallbackProc = nullptr;
     void                      *mErrorCallbackUserData = nullptr;
+
+    AAudioStream_presentationEndCallback mPresentationEndCallbackProc = nullptr;
+    void                                *mPresentationEndCallbackUserData = nullptr;
 
     enum {
         PRIVACY_SENSITIVE_DEFAULT = -1,
