@@ -52,7 +52,7 @@ int32_t AMediaCodecInfo_isVendor(const AMediaCodecInfo *info) {
     }
 
     int32_t attributes = info->mInfo->getAttributes();
-    return (attributes & android::MediaCodecInfo::kFlagIsVendor);
+    return (attributes & android::MediaCodecInfo::kFlagIsVendor) ? 1 : 0;
 }
 
 EXPORT
