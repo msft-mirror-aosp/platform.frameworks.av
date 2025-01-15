@@ -24,6 +24,14 @@ flag {
 }
 
 flag {
+    name: "cache_get_stream_min_max_volume"
+    namespace: "media_audio"
+    description:
+       "Cache getStream[Min|Max]Volume calls between AM and AS"
+    bug: "383667500"
+}
+
+flag {
     name: "concurrent_audio_record_bypass_permission"
     namespace: "media_audio"
     description:
