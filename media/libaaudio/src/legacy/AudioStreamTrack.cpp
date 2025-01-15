@@ -130,6 +130,9 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
             // that is some multiple of the burst size.
             notificationFrames = 0 - DEFAULT_BURSTS_PER_BUFFER_CAPACITY;
         }
+    } else if (getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
+        streamTransferType = AudioTrack::transfer_type::TRANSFER_SYNC_NOTIF_CALLBACK;
+        callback = wp<AudioTrack::IAudioTrackCallback>::fromExisting(this);
     }
     mCallbackBufferSize = builder.getFramesPerDataCallback();
 
