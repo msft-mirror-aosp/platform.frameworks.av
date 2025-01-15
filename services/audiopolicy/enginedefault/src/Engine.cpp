@@ -901,7 +901,7 @@ sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_
 
     device = getDeviceForInputSource(attr.source);
 
-    if (device->type() == AUDIO_DEVICE_IN_ECHO_REFERENCE) {
+    if (device != nullptr && device->type() == AUDIO_DEVICE_IN_ECHO_REFERENCE) {
         sp<DeviceDescriptor> device2 = getInputDeviceForEchoRef(attr, availableInputDevices);
         if (device2 != nullptr) {
             return device2;
