@@ -511,6 +511,10 @@ public:
     // protected by MMapThread::mLock
     virtual bool getAndSetSilencedNotified_l() = 0;
 
+    // TODO(b/241533526): Refactor shared logic between MMAP and legacy
+    virtual bool isPlaybackRestrictedControl() const = 0;
+    virtual void maybeLogPlaybackHardening(media::IAudioManagerNative& am) const = 0;
+
     /**
      * Updates the mute state and notifies the audio service. Call this only when holding player
      * thread lock.
