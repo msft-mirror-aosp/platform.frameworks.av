@@ -1904,6 +1904,20 @@ void Track::setTeePatchesToUpdate_l(TeePatches teePatchesToUpdate) {
     mTeePatchesToUpdate = std::move(teePatchesToUpdate);
 }
 
+void Track::maybeLogPlaybackHardening(media::IAudioManagerNative& am) const {
+    using media::IAudioManagerNative::HardeningType::PARTIAL;
+    // The op state deviates from if the track is actually muted if the playback was exempted for
+    // some compat reason.
+    // The state could have technically TOCTOU, but this is for metrics and that is very unlikely
+    if (!hasOpControlPartial()) {
+        if (!mPlaybackHardeningLogged.exchange(true, std::memory_order_acq_rel)) {
+            am.playbackHardeningEvent(uid(), PARTIAL,
+                                             /* bypassed= */
+                                             !isPlaybackRestrictedControl());
+        }
+    }
+
+}
 // must be called with player thread lock held
 void Track::processMuteEvent_l(const sp<
     IAudioManager>& audioManager, mute_state_t muteState)
