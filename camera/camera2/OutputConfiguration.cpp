@@ -347,7 +347,7 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
         IF_ALOGV() {
             uint64_t bufferID;
             surface.getUniqueId(&bufferID);
-            ALOGV("%s: OutputConfiguration: %lu, name %s", __FUNCTION__,
+            ALOGV("%s: OutputConfiguration: %" PRIu64 ", name %s", __FUNCTION__,
                     bufferID, toString8(surface.name).c_str());
         }
 #else
