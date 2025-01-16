@@ -119,8 +119,42 @@ enum {
      *
      * Available since API level 34.
      */
-    AAUDIO_FORMAT_IEC61937
+    AAUDIO_FORMAT_IEC61937,
 
+    /**
+     * This format is used for audio compressed in MP3 format.
+     */
+    AAUDIO_FORMAT_MP3,
+
+    /**
+     * This format is used for audio compressed in AAC LC format.
+     */
+    AAUDIO_FORMAT_AAC_LC,
+
+    /**
+     * This format is used for audio compressed in AAC HE V1 format.
+     */
+    AAUDIO_FORMAT_AAC_HE_V1,
+
+    /**
+     * This format is used for audio compressed in AAC HE V2 format.
+     */
+    AAUDIO_FORMAT_AAC_HE_V2,
+
+    /**
+     * This format is used for audio compressed in AAC ELD format.
+     */
+    AAUDIO_FORMAT_AAC_ELD,
+
+    /**
+     * This format is used for audio compressed in AAC XHE format.
+     */
+    AAUDIO_FORMAT_AAC_XHE,
+
+    /**
+     * This format is used for audio compressed in OPUS.
+     */
+    AAUDIO_FORMAT_OPUS
 };
 typedef int32_t aaudio_format_t;
 
@@ -335,7 +369,23 @@ enum {
     /**
      * Reducing latency is more important than battery life.
      */
-    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
+    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+
+    /**
+     * Extending battery life is more important than low latency.
+     *
+     * This mode is not supported in input streams.
+     * This mode will play through the offloaded audio path to save battery life.
+     *
+     * Comparing to mode {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING}, the stream at
+     * this mode will be able to write a large amount(several seconds) of data within a
+     * short time. The written data will be queued in a hardware buffer. After that, the
+     * app can suspend its thread/process that playing audio, the audio framework's data
+     * pipe will be suspended automatically and the CPU will be allowed to sleep for
+     * power saving. When all queued data are played, the apps will be able to get callback
+     * to feed more data.
+     */
+    AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED
 };
 typedef int32_t aaudio_performance_mode_t;
 
@@ -1090,7 +1140,8 @@ AAUDIO_API void AAudioStreamBuilder_setBufferCapacityInFrames(
  * Set the requested performance mode.
  *
  * Supported modes are {@link #AAUDIO_PERFORMANCE_MODE_NONE},
- * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING} * and {@link #AAUDIO_PERFORMANCE_MODE_LOW_LATENCY}.
+ * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING}, {@link #AAUDIO_PERFORMANCE_MODE_LOW_LATENCY} and
+ * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED}.
  *
  * The default, if you do not call this function, is {@link #AAUDIO_PERFORMANCE_MODE_NONE}.
  *
@@ -1473,6 +1524,44 @@ typedef void (*AAudioStream_errorCallback)(
 AAUDIO_API void AAudioStreamBuilder_setErrorCallback(AAudioStreamBuilder* _Nonnull builder,
         AAudioStream_errorCallback _Nullable callback, void* _Nullable userData)
         __INTRODUCED_IN(26);
+
+/**
+ * Prototype for the callback function that is passed to
+ * AAudioStreamBuilder_setPresentationEndCallback().
+ *
+ * This will be called when all the buffers of an offloaded stream that were queued in the audio
+ * system (e.g. the combination of the Android audio framework and the device's audio hardware)
+ * have been played after AudioStream_requestStop() has been called.
+ *
+ * @param stream reference provided by AAudioStreamBuilder_openStream(), which must be an
+ *               output stream as the offloaded mode is only supported for output stream
+ * @param userData the same address that was passed to
+ *                 AAudioStreamBuilder_setPresentationEndCallback().
+ */
+typedef void (*AAudioStream_presentationEndCallback)(AAudioStream* _Nonnull stream,
+                                                     void* _Null_unspecified userData);
+
+/**
+ * Request that AAudio call this function when all the buffers of an offloaded stream that were
+ * queued in the audio system (e.g. the combination of the Android audio framework and the device's
+ * audio hardware) have been played.
+ *
+ * The presentation end callback must be used together with the data callback.
+ * The presentation edn callback won't be called if the stream is closed before all the data
+ * is played.
+ *
+ * Available since API level 36.
+ *
+ * @param builder reference provided by AAudio_createStreamBuilder()
+ * @param callback pointer to a function that will be called when all the buffers of an offloaded
+ *                 stream that were queued have been played.
+ * @param userData pointer to an application data structure that will be passed
+ *                 to the callback functions.
+ */
+AAUDIO_API void AAudioStreamBuilder_setPresentationEndCallback(
+        AAudioStreamBuilder* _Nonnull builder,
+        AAudioStream_presentationEndCallback _Nonnull callback,
+        void* _Nullable userData) __INTRODUCED_IN(36);
 
 /**
  * Open a stream based on the options in the StreamBuilder.
@@ -2165,6 +2254,72 @@ AAUDIO_API bool AAudioStream_isPrivacySensitive(AAudioStream* _Nonnull stream)
  */
 AAUDIO_API aaudio_channel_mask_t AAudioStream_getChannelMask(AAudioStream* _Nonnull stream)
         __INTRODUCED_IN(32);
+
+/**
+ * Configures the delay and padding values for the current stream playing in offload mode.
+ * This should only be used on a stream whose performance mode is
+ * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED} and the format is compressed format.
+ * The unit is frames, where a frame includes samples for all audio channels, e.g. 100 frames
+ * for a stereo stream corresponds to 200 interleaved PCM samples.
+ *
+ * @param stream reference provided by AAudioStreamBuilder_openStream()
+ * @param delayInFrames number of frames to be ignored at the beginning of the stream. A value
+ *                      of 0 indicates no delay is to be applied.
+ * @param paddingInFrames number of frames to be ignored at the end of the stream. A value of 0
+ *                        of 0 indicates no padding is to be applied.
+ * @return {@link #AAUDIO_OK} if the delay and padding values are set successfully,
+ *         or {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT} if delayInFrames or paddingInFrames
+ *         is less than 0,
+ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
+ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
+ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
+ */
+AAUDIO_API aaudio_result_t AAudioStream_setOffloadDelayPadding(
+        AAudioStream* _Nonnull stream, int32_t delayInFrames, int32_t paddingInFrames)
+        __INTRODUCED_IN(36);
+
+/**
+ * Return the decoder delay of an offloaded stream in frames.
+ *
+ * @param stream reference provided by AAudioStreamBuilder_openStream()
+ * @return the offload delay in frames that previously set with
+ *         {@link #AAudioStream_setOffloadDelayPadding},
+ *         or 0 if it was never modified,
+ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
+ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
+ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
+ */
+AAUDIO_API int32_t AAudioStream_getOffloadDelay(AAudioStream* _Nonnull stream) __INTRODUCED_IN(36);
+
+/**
+ * Return the decoder padding of an offloaded stream in frames.
+ *
+ * @param stream reference provided by AAudioStreamBuilder_openStream()
+ * @return the offload padding in frames that previously set with
+ *         {@link #AAudioStream_setOffloadDelayPadding},
+ *         or 0 if it was never modified,
+ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
+ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
+ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
+ */
+AAUDIO_API int32_t AAudioStream_getOffloadPadding(AAudioStream* _Nonnull stream)
+        __INTRODUCED_IN(36);
+
+/**
+ * Declares that the last data writing operation on this stream provided the last buffer of this
+ * stream.
+ * After the end of stream, previously set padding and delay values are ignored. That indicates
+ * all written data will be played.
+ * Use this method in the same thread as any data writing operation.
+ *
+ * @param stream reference provided by AAudioStreamBuilder_openStream()
+ * @return {@link #AAUDIO_OK} on success,
+ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
+ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
+ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
+ */
+AAUDIO_API aaudio_result_t AAudioStream_setOffloadEndOfStream(AAudioStream* _Nonnull stream)
+        __INTRODUCED_IN(36);
 
 #ifdef __cplusplus
 }
