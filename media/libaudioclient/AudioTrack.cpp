@@ -2909,7 +2909,8 @@ status_t AudioTrack::restoreTrack_l(const char *from, bool forceRestore)
     // See b/74409267. Connecting to a BT A2DP device supporting multiple codecs
     // causes a lot of churn on the service side, and it can reject starting
     // playback of a previously created track. May also apply to other cases.
-    const int INITIAL_RETRIES = 3;
+    const int INITIAL_RETRIES = 10;
+    const uint32_t RETRY_DELAY_US = 150000;
     int retries = INITIAL_RETRIES;
 retry:
     mFlags = mOrigFlags;
@@ -2986,7 +2987,7 @@ retry:
         ALOGW("%s(%d): failed status %d, retries %d", __func__, mPortId, result, retries);
         if (--retries > 0) {
             // leave time for an eventual race condition to clear before retrying
-            usleep(500000);
+            usleep(RETRY_DELAY_US);
             goto retry;
         }
         // if no retries left, set invalid bit to force restoring at next occasion
