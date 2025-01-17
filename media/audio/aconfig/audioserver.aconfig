@@ -36,6 +36,14 @@ flag {
 }
 
 flag {
+    name: "fix_aaudio_stream_reopen_in_libaudiohal_aidl"
+    namespace: "media_audio"
+    description:
+        "Support reopening of AAudio streams in the libaudiohal@aidl layer"
+    bug: "274456992"
+}
+
+flag {
     name: "fix_call_audio_patch"
     namespace: "media_audio"
     description:
