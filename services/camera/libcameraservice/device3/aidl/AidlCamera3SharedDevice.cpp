@@ -343,7 +343,6 @@ status_t AidlCamera3SharedDevice::addSharedSurfaces(int streamId,
               streamId, res, strerror(-res));
         return res;
     }
-
     for (size_t i = 0 ; i < outputMap.size(); i++){
         if (surfaceIds != nullptr) {
             surfaceIds->push_back(outputMap.valueAt(i));
@@ -456,9 +455,9 @@ status_t AidlCamera3SharedDevice::setSharedStreamingRequest(
         return err;
     }
     mStreamingRequestId = requestID;
-    uid_t clientUid = mAttributionAndPermissionUtils->getCallingUid();
-    mClientRequestIds[clientUid] = clientRequestId;
-    mClientSurfaces[clientUid] = surfaceMap;
+    int clientPid = mAttributionAndPermissionUtils->getCallingPid();
+    mClientRequestIds[clientPid] = clientRequestId;
+    mClientSurfaces[clientPid] = surfaceMap;
     *sharedReqID = mStreamingRequestId;
 
     return err;
@@ -466,7 +465,7 @@ status_t AidlCamera3SharedDevice::setSharedStreamingRequest(
 
 status_t AidlCamera3SharedDevice::clearSharedStreamingRequest(int64_t *lastFrameNumber) {
     Mutex::Autolock l(mSharedDeviceLock);
-    uid_t clientUid = mAttributionAndPermissionUtils->getCallingUid();
+    int clientPid = mAttributionAndPermissionUtils->getCallingPid();
     const sp<CaptureRequest> curRequest = getOngoingRepeatingRequestLocked();
     if (curRequest == nullptr) {
         CLOGE("No streaming ongoing");
@@ -474,9 +473,9 @@ status_t AidlCamera3SharedDevice::clearSharedStreamingRequest(int64_t *lastFrame
     }
 
     SurfaceMap newSurfaceMap;
-    newSurfaceMap = removeClientSurfaceMap(curRequest->mOutputSurfaces, mClientSurfaces[clientUid]);
-    mClientRequestIds.erase(clientUid);
-    mClientSurfaces.erase(clientUid);
+    newSurfaceMap = removeClientSurfaceMap(curRequest->mOutputSurfaces, mClientSurfaces[clientPid]);
+    mClientRequestIds.erase(clientPid);
+    mClientSurfaces.erase(clientPid);
     if (newSurfaceMap.empty()) {
         status_t err = clearStreamingRequest(lastFrameNumber);
         if (err != OK) {
@@ -563,9 +562,9 @@ status_t AidlCamera3SharedDevice::startStreaming(const int32_t reqId, const Surf
         mStreamingRequestId = requestID;
     }
 
-    uid_t clientUid = mAttributionAndPermissionUtils->getCallingUid();
-    mClientRequestIds[clientUid] = reqId;
-    mClientSurfaces[clientUid] = surfaceMap;
+    int clientPid = mAttributionAndPermissionUtils->getCallingPid();
+    mClientRequestIds[clientPid] = reqId;
+    mClientSurfaces[clientPid] = surfaceMap;
     *sharedReqID = mStreamingRequestId;
     return OK;
 }
@@ -577,7 +576,7 @@ status_t AidlCamera3SharedDevice::setNotifyCallback(wp<NotificationListener> lis
     if (listener == NULL) {
         return BAD_VALUE;
     }
-    mClientListeners[mAttributionAndPermissionUtils->getCallingUid()] = listener;
+    mClientListeners[mAttributionAndPermissionUtils->getCallingPid()] = listener;
     return OK;
 }
 
