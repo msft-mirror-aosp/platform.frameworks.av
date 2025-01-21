@@ -85,17 +85,6 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
                              .withSetter(SizeSetter)
                              .build());
 
-        // matches limits in codec library
-        addParameter(DefineParam(mBitrateMode, C2_PARAMKEY_BITRATE_MODE)
-                             .withDefault(new C2StreamBitrateModeTuning::output(
-                                     0u, C2Config::BITRATE_VARIABLE))
-                             .withFields({C2F(mBitrateMode, value)
-                                                  .oneOf({C2Config::BITRATE_CONST,
-                                                          C2Config::BITRATE_VARIABLE,
-                                                          C2Config::BITRATE_IGNORE})})
-                             .withSetter(Setter<decltype(*mBitrateMode)>::StrictValueWithNoDeps)
-                             .build());
-
         addParameter(DefineParam(mBitrate, C2_PARAMKEY_BITRATE)
                              .withDefault(new C2StreamBitrateInfo::output(0u, 512000))
                              .withFields({C2F(mBitrate, value).inRange(512000, 240000000)})
@@ -718,25 +707,6 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
         return bandIdc;
     }
 
-    int32_t getBitrateMode_l() const {
-        int32_t bitrateMode = C2Config::BITRATE_CONST;
-
-        switch (mBitrateMode->value) {
-            case C2Config::BITRATE_CONST:
-                bitrateMode = OAPV_RC_CQP;
-                break;
-            case C2Config::BITRATE_VARIABLE:
-                bitrateMode = OAPV_RC_ABR;
-                break;
-            case C2Config::BITRATE_IGNORE:
-                bitrateMode = 0;
-                break;
-            default:
-                ALOGE("Unrecognized bitrate mode: %x", mBitrateMode->value);
-        }
-        return bitrateMode;
-    }
-
     std::shared_ptr<C2StreamPictureSizeInfo::input> getSize_l() const { return mSize; }
     std::shared_ptr<C2StreamFrameRateInfo::output> getFrameRate_l() const { return mFrameRate; }
     std::shared_ptr<C2StreamBitrateInfo::output> getBitrate_l() const { return mBitrate; }
@@ -763,7 +733,6 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
     std::shared_ptr<C2StreamPictureSizeInfo::input> mSize;
     std::shared_ptr<C2StreamFrameRateInfo::output> mFrameRate;
     std::shared_ptr<C2StreamBitrateInfo::output> mBitrate;
-    std::shared_ptr<C2StreamBitrateModeTuning::output> mBitrateMode;
     std::shared_ptr<C2StreamQualityTuning::output> mQuality;
     std::shared_ptr<C2StreamColorAspectsInfo::input> mColorAspects;
     std::shared_ptr<C2StreamColorAspectsInfo::output> mCodedColorAspects;
@@ -968,15 +937,9 @@ void C2SoftApvEnc::setParams(oapve_param_t& param) {
     param.fps_num = (int)(mFrameRate->value * 100);
     param.fps_den = 100;
     param.bitrate = (int)(mBitrate->value / 1000);
-    param.rc_type = mIntf->getBitrateMode_l();
+    param.rc_type = OAPV_RC_ABR;
 
-    int ApvQP = kApvDefaultQP;
-    if (param.rc_type == OAPV_RC_CQP) {
-        ApvQP = getQpFromQuality(mQuality->value);
-        ALOGI("Bitrate mode is CQ, so QP value is derived from Quality. Quality is %d, QP is %d",
-              mQuality->value, ApvQP);
-    }
-    param.qp = ApvQP;
+    param.qp = kApvDefaultQP;
     param.band_idc = mIntf->getBandIdc_l();
     param.profile_idc = mIntf->getProfile_l();
     param.level_idc = mIntf->getLevel_l();
