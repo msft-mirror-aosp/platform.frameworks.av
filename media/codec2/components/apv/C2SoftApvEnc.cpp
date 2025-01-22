@@ -994,9 +994,7 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
         case C2PlanarLayout::TYPE_YUV: {
             if (IsP010(*input)) {
                 ALOGV("Convert from P010 to P210");
-                if (mColorFormat == OAPV_CF_YCBCR422) {
-                    ColorConvertP010ToYUV422P10le(input, inputFrames->frm[0].imgb);
-                } else if (mColorFormat == OAPV_CF_PLANAR2) {
+                if (mColorFormat == OAPV_CF_PLANAR2) {
                     uint16_t *srcY  = (uint16_t*)(input->data()[0]);
                     uint16_t *srcUV = (uint16_t*)(input->data()[1]);
                     uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
@@ -1006,7 +1004,7 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                     convertP010ToP210(dstY, dstUV, srcY, srcUV,
                                       layout.planes[layout.PLANE_Y].rowInc / 2,
                                       layout.planes[layout.PLANE_U].rowInc / 2,
-                                      dstYStride, dstUVStride, input->width(), input->height());
+                                      dstYStride, dstUVStride, width, height);
                 } else {
                     ALOGE("Not supported color format. %d", mColorFormat);
                     return C2_BAD_VALUE;
@@ -1023,7 +1021,7 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                                          layout.planes[layout.PLANE_Y].rowInc,
                                          layout.planes[layout.PLANE_U].rowInc,
                                          dstYStride, dstUVStride,
-                                         input->width(), input->height(), CONV_FORMAT_I420);
+                                         width, height, CONV_FORMAT_I420);
             } else if (IsI420(*input)) {
                 ALOGV("Convert from I420 to P210");
                 uint8_t  *srcY  = (uint8_t*)input->data()[0];
@@ -1038,7 +1036,7 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                                         layout.planes[C2PlanarLayout::PLANE_U].rowInc,
                                         layout.planes[C2PlanarLayout::PLANE_V].rowInc,
                                         dstYStride, dstUVStride,
-                                        input->width(), input->height(),
+                                        width, height,
                                         CONV_FORMAT_I420);
 
             } else {
@@ -1054,50 +1052,6 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
     }
 
     return C2_OK;
-}
-
-void C2SoftApvEnc::ColorConvertP010ToYUV422P10le(const C2GraphicView* const input,
-                                                 oapv_imgb_t* imgb) {
-    uint32_t width = input->width();
-    uint32_t height = input->height();
-
-    uint8_t* yPlane = (uint8_t*)input->data()[0];
-    auto* uvPlane = (uint8_t*)input->data()[1];
-    uint32_t stride[3];
-    stride[0] = width * 2;
-    stride[1] = stride[2] = width;
-
-    uint8_t *dst, *src;
-    uint16_t tmp;
-    for (int32_t y = 0; y < height; ++y) {
-        src = yPlane + y * stride[0];
-        dst = (uint8_t*)imgb->a[0] + y * stride[0];
-        for (int32_t x = 0; x < stride[0]; x += 2) {
-            tmp = (src[x + 1] << 2) | (src[x] >> 6);
-            dst[x] = tmp & 0xFF;
-            dst[x + 1] = tmp >> 8;
-        }
-    }
-
-    uint8_t *dst_u, *dst_v;
-    for (int32_t y = 0; y < height / 2; ++y) {
-        src = uvPlane + y * stride[1] * 2;
-        dst_u = (uint8_t*)imgb->a[1] + (y * 2) * stride[1];
-        dst_v = (uint8_t*)imgb->a[2] + (y * 2) * stride[2];
-        for (int32_t x = 0; x < stride[1] * 2; x += 4) {
-            tmp = (src[x + 1] << 2) | (src[x] >> 6);  // cb
-            dst_u[x / 2] = tmp & 0xFF;
-            dst_u[x / 2 + 1] = tmp >> 8;
-            dst_u[x / 2 + stride[1]] = dst_u[x / 2];
-            dst_u[x / 2 + stride[1] + 1] = dst_u[x / 2 + 1];
-
-            tmp = (src[x + 3] << 2) | (src[x + 2] >> 6);  // cr
-            dst_v[x / 2] = tmp & 0xFF;
-            dst_v[x / 2 + 1] = tmp >> 8;
-            dst_v[x / 2 + stride[2]] = dst_v[x / 2];
-            dst_v[x / 2 + stride[2] + 1] = dst_v[x / 2 + 1];
-        }
-    }
 }
 
 void C2SoftApvEnc::finishWork(uint64_t workIndex, const std::unique_ptr<C2Work>& work,
@@ -1347,6 +1301,8 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
         work->workletsProcessed = 1u;
         return;
     }
+
+    view->setCrop_be(C2Rect(mSize->width, mSize->height));
 
     error = setEncodeArgs(&mInputFrames, view.get(), workIndex);
     if (error != C2_OK) {
