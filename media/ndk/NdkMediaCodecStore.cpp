@@ -154,12 +154,6 @@ static void initCodecInfoMap() {
     }
 }
 
-static bool codecHandlesFormat(const AMediaCodecInfo &codecInfo,
-        sp<AMessage> format, bool isEncoder) {
-    return codecInfo.mCodecCaps->isEncoder() == isEncoder
-            && codecInfo.mCodecCaps->isFormatSupported(format);
-}
-
 static media_status_t findNextCodecForFormat(
         const AMediaFormat *format, bool isEncoder, const AMediaCodecInfo **outCodecInfo) {
     if (outCodecInfo == nullptr) {
@@ -192,8 +186,8 @@ static media_status_t findNextCodecForFormat(
 
     bool found = *outCodecInfo == nullptr;
     for (const AMediaCodecInfo &info : *infos) {
-        if (found && (format == nullptr
-                || codecHandlesFormat(info, nativeFormat, isEncoder))) {
+        if (found && info.mCodecCaps->isEncoder() == isEncoder
+                && (format == nullptr || info.mCodecCaps->isFormatSupported(nativeFormat))) {
             *outCodecInfo = &info;
             return AMEDIA_OK;
         }
