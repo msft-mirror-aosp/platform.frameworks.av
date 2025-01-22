@@ -3079,19 +3079,27 @@ status_t AudioFlinger::systemReady()
     return NO_ERROR;
 }
 
-sp<IAudioManager> AudioFlinger::getOrCreateAudioManager()
-{
-    if (mAudioManager.load() == nullptr) {
+sp<IAudioManager> AudioFlinger::getOrCreateAudioManager() {
+    sp<IAudioManager> iface = mAudioManager.load();
+    if (iface == nullptr) {
         // use checkService() to avoid blocking
-        sp<IBinder> binder =
-            defaultServiceManager()->checkService(String16(kAudioServiceName));
+        sp<IBinder> binder = defaultServiceManager()->checkService(String16(kAudioServiceName));
         if (binder != nullptr) {
-            mAudioManager = interface_cast<IAudioManager>(binder);
-        } else {
-            ALOGE("%s(): binding to audio service failed.", __func__);
+            iface = interface_cast<IAudioManager>(binder);
+            if (const auto native_iface = iface->getNativeInterface(); native_iface) {
+                mAudioManagerNative = std::move(native_iface);
+                mAudioManager.store(iface);
+            } else {
+                iface = nullptr;
+            }
         }
     }
-    return mAudioManager.load();
+    ALOGE_IF(iface == nullptr, "%s(): binding to audio service failed.", __func__);
+    return iface;
+}
+
+sp<media::IAudioManagerNative> AudioFlinger::getAudioManagerNative() const {
+    return mAudioManagerNative.load();
 }
 
 status_t AudioFlinger::getMicrophones(std::vector<media::MicrophoneInfoFw>* microphones) const

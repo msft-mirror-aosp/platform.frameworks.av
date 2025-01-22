@@ -382,6 +382,7 @@ private:
         return mEffectsFactoryHal;
     }
     sp<IAudioManager> getOrCreateAudioManager() final;
+    sp<media::IAudioManagerNative> getAudioManagerNative() const final;
 
     // Called when the last effect handle on an effect instance is removed. If this
     // effect belongs to an effect chain in mOrphanEffectChains, the chain is updated
@@ -807,8 +808,9 @@ private:
     int32_t mAAudioBurstsPerBuffer GUARDED_BY(mutex()) = 0;
     int32_t mAAudioHwBurstMinMicros GUARDED_BY(mutex()) = 0;
 
-    /** Interface for interacting with the AudioService. */
+    /** Interfaces for interacting with the AudioService. */
     mediautils::atomic_sp<IAudioManager> mAudioManager;
+    mediautils::atomic_sp<media::IAudioManagerNative> mAudioManagerNative;
 
     // Bluetooth Variable latency control logic is enabled or disabled
     std::atomic<bool> mBluetoothLatencyModesEnabled = true;
