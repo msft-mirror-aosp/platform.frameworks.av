@@ -418,6 +418,7 @@ struct MediaCodec::ResourceManagerServiceProxy :
     void addResource(const MediaResourceParcel &resource);
     void addResource(const std::vector<MediaResourceParcel>& resources);
     void removeResource(const MediaResourceParcel &resource);
+    void removeResource(const std::vector<MediaResourceParcel>& resources);
     void removeClient();
     void markClientForPendingRemoval();
     bool reclaimResource(const std::vector<MediaResourceParcel> &resources);
@@ -649,16 +650,23 @@ void MediaCodec::ResourceManagerServiceProxy::addResource(
 
 void MediaCodec::ResourceManagerServiceProxy::removeResource(
         const MediaResourceParcel &resource) {
+    std::vector<MediaResourceParcel> resources;
+    resources.push_back(resource);
+    removeResource(resources);
+}
+
+void MediaCodec::ResourceManagerServiceProxy::removeResource(
+        const std::vector<MediaResourceParcel>& resources) {
     std::scoped_lock lock{mLock};
     std::shared_ptr<IResourceManagerService> service = getService_l();
     if (service == nullptr) {
         ALOGW("Service isn't available");
         return;
     }
-    std::vector<MediaResourceParcel> resources;
-    resources.push_back(resource);
     service->removeResource(getClientInfo(), resources);
-    mMediaResourceParcel.erase(resource);
+    for (const MediaResourceParcel& resource : resources) {
+        mMediaResourceParcel.erase(resource);
+    }
 }
 
 void MediaCodec::ResourceManagerServiceProxy::removeClient() {
@@ -4549,6 +4557,7 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
 
                     CHECK_EQ(mState, STARTING);
 
+                    // Add the codec resources upon start.
                     std::vector<MediaResourceParcel> resources;
                     if (mDomain == DOMAIN_VIDEO || mDomain == DOMAIN_IMAGE) {
                         resources.push_back(
@@ -4861,6 +4870,21 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
 
                     if (mIsSurfaceToDisplay) {
                         mVideoRenderQualityTracker.resetForDiscontinuity();
+                    }
+
+                    // Remove the codec resources upon stop.
+                    std::vector<MediaResourceParcel> resources;
+                    if (android::media::codec::codec_availability() &&
+                        android::media::codec::codec_availability_support()) {
+                        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
+                                mRequiredResourceInfo);
+                        std::vector<InstanceResourceInfo>& requiredResourceInfo = *resourcesLocked;
+                        for (const InstanceResourceInfo& resource : requiredResourceInfo) {
+                            resources.push_back(getMediaResourceParcel(resource));
+                        }
+                    }
+                    if (!resources.empty()) {
+                        mResourceManagerProxy->removeResource(resources);
                     }
 
                     // Notify the RM that the codec has been stopped.
