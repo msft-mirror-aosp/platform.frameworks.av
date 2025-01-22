@@ -94,7 +94,6 @@ class AidlCamera3SharedDevice :
     std::vector<int> mSharedSurfaceIds;
     std::vector<sp<Surface>> mSharedSurfaces;
     std::vector<sp<BufferItemConsumer>> mOpaqueConsumers;
-    std::vector<sp<Camera3SharedOutputStream>> mSharedStreams;
     std::unordered_map<int32_t, OutputStreamInfo> mStreamInfoMap;
     // Streaming request ID
     int32_t mStreamingRequestId;

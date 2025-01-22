@@ -221,7 +221,6 @@ status_t AidlCamera3SharedDevice::beginConfigure() {
     mSharedSurfaces.clear();
     mOpaqueConsumers.clear();
     mSharedSurfaceIds.clear();
-    mSharedStreams.clear();
     mStreamInfoMap.clear();
 
     for (auto config : mSharedOutputConfigurations) {
@@ -266,24 +265,24 @@ status_t AidlCamera3SharedDevice::beginConfigure() {
                 mOpaqueConsumers[i]);
         mOpaqueConsumers[i]->setFrameAvailableListener(consumerListener);
         consumers.push_back({mSharedSurfaces[i], config.getMirrorMode()});
-        mSharedStreams.push_back(new Camera3SharedOutputStream(mNextStreamId, consumers,
+        sp<Camera3SharedOutputStream> newStream = new Camera3SharedOutputStream(mNextStreamId, consumers,
                 config.getWidth(),config.getHeight(), config.getFormat(), config.getUsage(),
                 dataspace, static_cast<camera_stream_rotation_t>(config.getRotation()),
                 mTimestampOffset, config.getPhysicalCameraId(), overriddenSensorPixelModes,
                 getTransportType(), config.getSurfaceSetID(), mUseHalBufManager,
                 config.getDynamicRangeProfile(), config.getStreamUseCase(),
                 mDeviceTimeBaseIsRealtime, config.getTimestampBase(),
-                config.getColorSpace(), config.useReadoutTimestamp()));
-        int id = mSharedStreams[i]->getSurfaceId(consumers[0].mSurface);
+                config.getColorSpace(), config.useReadoutTimestamp());
+        int id = newStream->getSurfaceId(consumers[0].mSurface);
         if (id < 0) {
             SET_ERR_L("Invalid surface id");
             return BAD_VALUE;
         }
         mSharedSurfaceIds.push_back(id);
-        mSharedStreams[i]->setStatusTracker(mStatusTracker);
-        mSharedStreams[i]->setBufferManager(mBufferManager);
-        mSharedStreams[i]->setImageDumpMask(mImageDumpMask);
-        res = mOutputStreams.add(mNextStreamId, mSharedStreams[i]);
+        newStream->setStatusTracker(mStatusTracker);
+        newStream->setBufferManager(mBufferManager);
+        newStream->setImageDumpMask(mImageDumpMask);
+        res = mOutputStreams.add(mNextStreamId, newStream);
         if (res < 0) {
             SET_ERR_L("Can't add new stream to set: %s (%d)", strerror(-res), res);
             return res;

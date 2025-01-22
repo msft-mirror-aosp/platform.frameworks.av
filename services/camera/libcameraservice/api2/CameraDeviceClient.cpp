@@ -2556,20 +2556,28 @@ std::vector<PhysicalCaptureResultInfo> CameraDeviceClient::convertToFMQ(
 
 bool CameraDeviceClient::matchClientRequest(const CaptureResultExtras& resultExtras,
         int* clientReqId) {
-    if (flags::camera_multi_client() && mSharedMode) {
-       if (resultExtras.requestId == mSharedStreamingRequest.first) {
-          *clientReqId = mSharedStreamingRequest.second;
-          return true;
-       }
-       if (mIsPrimaryClient) {
-          auto iter = mSharedRequestMap.find(resultExtras.requestId);
-          if (iter != mSharedRequestMap.end()) {
-              *clientReqId = iter->second;
-              return true;
-          }
-       }
+    if (!flags::camera_multi_client() || !mSharedMode) {
+        *clientReqId = resultExtras.requestId;
+        return true;
     }
-    return true;
+
+    // In shared mode, check if the result req id matches the streaming request
+    // sent by client.
+    if (resultExtras.requestId == mSharedStreamingRequest.first) {
+        *clientReqId = mSharedStreamingRequest.second;
+        return true;
+    }
+    // In shared mode, only primary clients can send the capture request. If the
+    // result req id does not match the streaming request id, check against the
+    // capture request ids sent by the primary client.
+    if (mIsPrimaryClient) {
+        auto iter = mSharedRequestMap.find(resultExtras.requestId);
+        if (iter != mSharedRequestMap.end()) {
+            *clientReqId = iter->second;
+            return true;
+        }
+    }
+    return false;
 }
 
 void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
