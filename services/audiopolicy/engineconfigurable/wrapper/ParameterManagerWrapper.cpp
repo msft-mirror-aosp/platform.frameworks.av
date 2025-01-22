@@ -110,13 +110,13 @@ status_t ParameterManagerWrapper::addCriterion(const std::string &name, bool isI
         criterionType->addValuePair(std::get<0>(pair), std::get<2>(pair), error);
 
         if (name == capEngineConfig::gOutputDeviceCriterionName) {
-            ALOGV("%s: Adding mOutputDeviceToCriterionTypeMap %d %" PRIu64" for criterionType %s",
+            ALOGV("%s: Adding mOutputDeviceToCriterionTypeMap 0x%X %" PRIu64" for criterionType %s",
                   __func__, std::get<1>(pair), std::get<0>(pair), name.c_str());
             audio_devices_t androidType = static_cast<audio_devices_t>(std::get<1>(pair));
             mOutputDeviceToCriterionTypeMap[androidType] = std::get<0>(pair);
         }
         if (name == capEngineConfig::gInputDeviceCriterionName) {
-            ALOGV("%s: Adding mInputDeviceToCriterionTypeMap %d %" PRIu64" for criterionType %s",
+            ALOGV("%s: Adding mInputDeviceToCriterionTypeMap 0x%X %" PRIu64" for criterionType %s",
                   __func__, std::get<1>(pair), std::get<0>(pair), name.c_str());
             audio_devices_t androidType = static_cast<audio_devices_t>(std::get<1>(pair));
             mInputDeviceToCriterionTypeMap[androidType] = std::get<0>(pair);
