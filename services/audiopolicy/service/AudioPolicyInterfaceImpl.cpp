@@ -423,6 +423,17 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
         }
     }
 
+    //TODO this permission check should extend to all system usages
+    if (attr.usage == AUDIO_USAGE_SPEAKER_CLEANUP) {
+        if (!(audioserver_permissions() ?
+              CHECK_PERM(MODIFY_AUDIO_ROUTING, attributionSource.uid)
+              : modifyAudioRoutingAllowed())) {
+            ALOGE("%s: permission denied: SPEAKER_CLEANUP not allowed for uid %d pid %d",
+                    __func__, attributionSource.uid, attributionSource.pid);
+            return binderStatusFromStatusT(PERMISSION_DENIED);
+        }
+    }
+
     AutoCallerClear acc;
     AudioPolicyInterface::output_type_t outputType;
     bool isSpatialized = false;

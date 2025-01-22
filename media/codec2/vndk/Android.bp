@@ -174,7 +174,6 @@ cc_defaults {
         "libui",
         "libdl",
         "libvndksupport",
-        "libprocessgroup",
     ],
 }
 
