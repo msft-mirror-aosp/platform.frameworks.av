@@ -492,11 +492,10 @@ void VideoCapabilities::initWithPlatformLimits() {
     mBlockAspectRatioRange = POSITIVE_RATIONALS;
     mAspectRatioRange      = POSITIVE_RATIONALS;
 
-    // YUV 4:2:0 requires 2:2 alignment
-    mWidthAlignment = 2;
-    mHeightAlignment = 2;
-    mBlockWidth = 2;
-    mBlockHeight = 2;
+    mWidthAlignment = 1;
+    mHeightAlignment = 1;
+    mBlockWidth = 1;
+    mBlockHeight = 1;
     mSmallerDimensionUpperLimit = VideoSize::GetAllowedDimensionRange().upper();
 }
 
