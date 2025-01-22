@@ -108,6 +108,10 @@ void AudioStreamInternalPlay::prepareBuffersForStart() {
     mFlowGraph.reset();
     // Prevent stale data from being played.
     mAudioEndpoint->eraseDataMemory();
+    // All data has been erased. To avoid mixer for the shared stream use stale
+    // counters, which may cause the service side thinking stream starts flowing before
+    // the client actually writes data, advance the client to match server position.
+    advanceClientToMatchServerPosition(0 /*serverMargin*/);
 }
 
 void AudioStreamInternalPlay::prepareBuffersForStop() {
