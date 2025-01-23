@@ -38,7 +38,7 @@ class AidlCamera3SharedDevice :
             bool legacyClient = false);
     status_t initialize(sp<CameraProviderManager> manager,
             const std::string& monitorTags) override;
-    status_t disconnectClient(int clientUid) override;
+    status_t disconnectClient(int clientPid) override;
     status_t beginConfigure() override;
     status_t getSharedStreamId(const OutputStreamInfo &config, int *streamId) override;
     status_t addSharedSurfaces(int streamId,
@@ -94,15 +94,14 @@ class AidlCamera3SharedDevice :
     std::vector<int> mSharedSurfaceIds;
     std::vector<sp<Surface>> mSharedSurfaces;
     std::vector<sp<BufferItemConsumer>> mOpaqueConsumers;
-    std::vector<sp<Camera3SharedOutputStream>> mSharedStreams;
     std::unordered_map<int32_t, OutputStreamInfo> mStreamInfoMap;
     // Streaming request ID
     int32_t mStreamingRequestId;
     static const int32_t REQUEST_ID_NONE = -1;
     int32_t mRequestIdCounter;
-    std::unordered_map<uid_t, int32_t> mClientRequestIds;
-    std::unordered_map<uid_t, SurfaceMap> mClientSurfaces;
-    std::unordered_map<uid_t, wp<NotificationListener>> mClientListeners;
+    std::unordered_map<int, int32_t> mClientRequestIds;
+    std::unordered_map<int, SurfaceMap> mClientSurfaces;
+    std::unordered_map<int, wp<NotificationListener>> mClientListeners;
     SurfaceMap mergeSurfaceMaps(const SurfaceMap& map1, const SurfaceMap& map2);
     SurfaceMap removeClientSurfaceMap(const SurfaceMap& map1, const SurfaceMap& map2);
     Mutex mSharedDeviceLock;

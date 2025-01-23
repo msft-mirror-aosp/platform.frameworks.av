@@ -221,7 +221,6 @@ status_t AidlCamera3SharedDevice::beginConfigure() {
     mSharedSurfaces.clear();
     mOpaqueConsumers.clear();
     mSharedSurfaceIds.clear();
-    mSharedStreams.clear();
     mStreamInfoMap.clear();
 
     for (auto config : mSharedOutputConfigurations) {
@@ -266,24 +265,24 @@ status_t AidlCamera3SharedDevice::beginConfigure() {
                 mOpaqueConsumers[i]);
         mOpaqueConsumers[i]->setFrameAvailableListener(consumerListener);
         consumers.push_back({mSharedSurfaces[i], config.getMirrorMode()});
-        mSharedStreams.push_back(new Camera3SharedOutputStream(mNextStreamId, consumers,
+        sp<Camera3SharedOutputStream> newStream = new Camera3SharedOutputStream(mNextStreamId, consumers,
                 config.getWidth(),config.getHeight(), config.getFormat(), config.getUsage(),
                 dataspace, static_cast<camera_stream_rotation_t>(config.getRotation()),
                 mTimestampOffset, config.getPhysicalCameraId(), overriddenSensorPixelModes,
                 getTransportType(), config.getSurfaceSetID(), mUseHalBufManager,
                 config.getDynamicRangeProfile(), config.getStreamUseCase(),
                 mDeviceTimeBaseIsRealtime, config.getTimestampBase(),
-                config.getColorSpace(), config.useReadoutTimestamp()));
-        int id = mSharedStreams[i]->getSurfaceId(consumers[0].mSurface);
+                config.getColorSpace(), config.useReadoutTimestamp());
+        int id = newStream->getSurfaceId(consumers[0].mSurface);
         if (id < 0) {
             SET_ERR_L("Invalid surface id");
             return BAD_VALUE;
         }
         mSharedSurfaceIds.push_back(id);
-        mSharedStreams[i]->setStatusTracker(mStatusTracker);
-        mSharedStreams[i]->setBufferManager(mBufferManager);
-        mSharedStreams[i]->setImageDumpMask(mImageDumpMask);
-        res = mOutputStreams.add(mNextStreamId, mSharedStreams[i]);
+        newStream->setStatusTracker(mStatusTracker);
+        newStream->setBufferManager(mBufferManager);
+        newStream->setImageDumpMask(mImageDumpMask);
+        res = mOutputStreams.add(mNextStreamId, newStream);
         if (res < 0) {
             SET_ERR_L("Can't add new stream to set: %s (%d)", strerror(-res), res);
             return res;
@@ -343,7 +342,6 @@ status_t AidlCamera3SharedDevice::addSharedSurfaces(int streamId,
               streamId, res, strerror(-res));
         return res;
     }
-
     for (size_t i = 0 ; i < outputMap.size(); i++){
         if (surfaceIds != nullptr) {
             surfaceIds->push_back(outputMap.valueAt(i));
@@ -456,9 +454,9 @@ status_t AidlCamera3SharedDevice::setSharedStreamingRequest(
         return err;
     }
     mStreamingRequestId = requestID;
-    uid_t clientUid = mAttributionAndPermissionUtils->getCallingUid();
-    mClientRequestIds[clientUid] = clientRequestId;
-    mClientSurfaces[clientUid] = surfaceMap;
+    int clientPid = mAttributionAndPermissionUtils->getCallingPid();
+    mClientRequestIds[clientPid] = clientRequestId;
+    mClientSurfaces[clientPid] = surfaceMap;
     *sharedReqID = mStreamingRequestId;
 
     return err;
@@ -466,7 +464,7 @@ status_t AidlCamera3SharedDevice::setSharedStreamingRequest(
 
 status_t AidlCamera3SharedDevice::clearSharedStreamingRequest(int64_t *lastFrameNumber) {
     Mutex::Autolock l(mSharedDeviceLock);
-    uid_t clientUid = mAttributionAndPermissionUtils->getCallingUid();
+    int clientPid = mAttributionAndPermissionUtils->getCallingPid();
     const sp<CaptureRequest> curRequest = getOngoingRepeatingRequestLocked();
     if (curRequest == nullptr) {
         CLOGE("No streaming ongoing");
@@ -474,9 +472,9 @@ status_t AidlCamera3SharedDevice::clearSharedStreamingRequest(int64_t *lastFrame
     }
 
     SurfaceMap newSurfaceMap;
-    newSurfaceMap = removeClientSurfaceMap(curRequest->mOutputSurfaces, mClientSurfaces[clientUid]);
-    mClientRequestIds.erase(clientUid);
-    mClientSurfaces.erase(clientUid);
+    newSurfaceMap = removeClientSurfaceMap(curRequest->mOutputSurfaces, mClientSurfaces[clientPid]);
+    mClientRequestIds.erase(clientPid);
+    mClientSurfaces.erase(clientPid);
     if (newSurfaceMap.empty()) {
         status_t err = clearStreamingRequest(lastFrameNumber);
         if (err != OK) {
@@ -563,9 +561,9 @@ status_t AidlCamera3SharedDevice::startStreaming(const int32_t reqId, const Surf
         mStreamingRequestId = requestID;
     }
 
-    uid_t clientUid = mAttributionAndPermissionUtils->getCallingUid();
-    mClientRequestIds[clientUid] = reqId;
-    mClientSurfaces[clientUid] = surfaceMap;
+    int clientPid = mAttributionAndPermissionUtils->getCallingPid();
+    mClientRequestIds[clientPid] = reqId;
+    mClientSurfaces[clientPid] = surfaceMap;
     *sharedReqID = mStreamingRequestId;
     return OK;
 }
@@ -577,7 +575,7 @@ status_t AidlCamera3SharedDevice::setNotifyCallback(wp<NotificationListener> lis
     if (listener == NULL) {
         return BAD_VALUE;
     }
-    mClientListeners[mAttributionAndPermissionUtils->getCallingUid()] = listener;
+    mClientListeners[mAttributionAndPermissionUtils->getCallingPid()] = listener;
     return OK;
 }
 
