@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <type_traits>
 
+#include <camera/CameraMetadata.h>
+
 namespace android {
 
 /**
@@ -41,6 +43,12 @@ constexpr std::underlying_type_t<Enum> eToI(Enum val) {
  * Returns defaultVersion if the property is not found.
  */
 int getVNDKVersionFromProp(int defaultVersion);
+
+/**
+ * Returns the deviceId for the given camera metadata. For any virtual camera, this is the id
+ * of the virtual device owning the camera. For any real camera, this is kDefaultDeviceId.
+ */
+int32_t getDeviceId(const CameraMetadata& cameraInfo);
 
 /**
  * An instance of this class will raise the scheduling policy of a given

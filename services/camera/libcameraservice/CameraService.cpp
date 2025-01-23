@@ -97,16 +97,7 @@ namespace {
     const char* kVirtualDeviceFrontCameraId = "1";
     const char* kUnknownPackageName = "<unknown>";
 
-    int32_t getDeviceId(const android::CameraMetadata& cameraInfo) {
-        if (!cameraInfo.exists(ANDROID_INFO_DEVICE_ID)) {
-            return android::kDefaultDeviceId;
-        }
-
-        const auto &deviceIdEntry = cameraInfo.find(ANDROID_INFO_DEVICE_ID);
-        return deviceIdEntry.data.i32[0];
-    }
-
-    static android::PermissionChecker::PermissionResult appOpModeToPermissionResult(int32_t res) {
+    android::PermissionChecker::PermissionResult appOpModeToPermissionResult(int32_t res) {
         switch (res) {
             case android::AppOpsManager::MODE_ERRORED:
                 return android::PermissionChecker::PERMISSION_HARD_DENIED;
