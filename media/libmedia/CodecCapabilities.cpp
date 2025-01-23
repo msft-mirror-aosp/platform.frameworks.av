@@ -407,9 +407,11 @@ void CodecCapabilities::init(std::vector<ProfileLevel> profLevs, std::vector<uin
 
     mMaxSupportedInstances = maxConcurrentInstances > 0
             ? maxConcurrentInstances : DEFAULT_MAX_SUPPORTED_INSTANCES;
-
-    int32_t maxInstances = mMaxSupportedInstances;
-    capabilitiesInfo->findInt32("max-concurrent-instances", &maxInstances);
+    AString maxConcurrentInstancesStr;
+    int32_t maxInstances
+            = capabilitiesInfo->findString("max-concurrent-instances", &maxConcurrentInstancesStr)
+            ? (int32_t)strtol(maxConcurrentInstancesStr.c_str(), NULL, 10)
+            : mMaxSupportedInstances;
     mMaxSupportedInstances =
             Range(1, MAX_SUPPORTED_INSTANCES_LIMIT).clamp(maxInstances);
 

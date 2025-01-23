@@ -311,8 +311,14 @@ bool VideoCapabilities::PerformancePoint::covers(
     int32_t width, height;
     format->findInt32(KEY_WIDTH, &width);
     format->findInt32(KEY_HEIGHT, &height);
-    double frameRate;
-    format->findDouble(KEY_FRAME_RATE, &frameRate);
+
+    // Frame rate can be int32 or float. MediaCodec accept both float and int32 values.
+    // We convert to a double since that can represent both i32 and float without precision loss.
+    int32_t i32FrameRate;
+    float fltFrameRate;
+    double frameRate = format->findInt32(KEY_FRAME_RATE, &i32FrameRate) ? (double)i32FrameRate
+            : format->findFloat(KEY_FRAME_RATE, &fltFrameRate) ? (double)fltFrameRate : 0;
+
     PerformancePoint other = PerformancePoint(
             width, height,
             // safely convert ceil(double) to int through float cast and std::round
@@ -410,9 +416,16 @@ bool VideoCapabilities::supportsFormat(const sp<AMessage> &format) const {
             ? std::make_optional<int32_t>(widthVal) : std::nullopt;
     std::optional<int32_t> height = format->findInt32(KEY_HEIGHT, &heightVal)
             ? std::make_optional<int32_t>(heightVal) : std::nullopt;
-    double rateVal;
-    std::optional<double> rate = format->findDouble(KEY_FRAME_RATE, &rateVal)
-            ? std::make_optional<double>(rateVal) : std::nullopt;
+
+    // Frame rate can be int32 or float. MediaCodec accept both float and int32 values.
+    // We convert to a double since that can represent both i32 and float without precision loss.
+    int32_t i32RateVal;
+    float fltRateVal;
+    std::optional<double> rate = format->findInt32(KEY_FRAME_RATE, &i32RateVal)
+            ? std::make_optional<double>((double)i32RateVal)
+            : format->findFloat(KEY_FRAME_RATE, &fltRateVal)
+            ? std::make_optional<double>((double)fltRateVal)
+            : std::nullopt;
 
     if (!supports(width, height, rate)) {
         return false;
@@ -479,11 +492,10 @@ void VideoCapabilities::initWithPlatformLimits() {
     mBlockAspectRatioRange = POSITIVE_RATIONALS;
     mAspectRatioRange      = POSITIVE_RATIONALS;
 
-    // YUV 4:2:0 requires 2:2 alignment
-    mWidthAlignment = 2;
-    mHeightAlignment = 2;
-    mBlockWidth = 2;
-    mBlockHeight = 2;
+    mWidthAlignment = 1;
+    mHeightAlignment = 1;
+    mBlockWidth = 1;
+    mBlockHeight = 1;
     mSmallerDimensionUpperLimit = VideoSize::GetAllowedDimensionRange().upper();
 }
 
