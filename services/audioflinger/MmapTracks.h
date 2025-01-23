@@ -61,36 +61,6 @@ public:
                                                         mSilencedNotified = true;
                                                         return silencedNotified; }
 
-    // The following functions are duplicated from PlaybackTrack
-    // TODO(b/241533526) refactor common code
-    bool hasOpControlPartial() const {
-        return mOpControlSession ? mHasOpControlPartial.load(std::memory_order_acquire) : true;
-    }
-
-    bool isPlaybackRestrictedControl() const final {
-        return !(mIsExemptedFromOpControl || hasOpControlPartial());
-    }
-
-    void maybeLogPlaybackHardening(media::IAudioManagerNative& am) const final;
-
-    /**
-     * Updates the mute state and notifies the audio service. Call this only when holding player
-     * thread lock.
-     */
-    void processMuteEvent_l(const sp<IAudioManager>& audioManager,
-                            mute_state_t muteState)
-                            /* REQUIRES(MmapPlaybackThread::mLock) */ final;
-
-    // VolumePortInterface implementation
-    void setPortVolume(float volume) override {
-        mVolume = volume;
-    }
-    void setPortMute(bool muted) override {
-        mMutedFromPort = muted;
-    }
-    float getPortVolume() const override { return mVolume; }
-    bool getPortMute() const override { return mMutedFromPort; }
-
     std::string trackFlagsAsString() const final { return {}; }
 private:
     DISALLOW_COPY_AND_ASSIGN(MmapTrack);
@@ -108,26 +78,6 @@ private:
     const uid_t mUid;
     bool  mSilenced;            // protected by MMapThread::mLock
     bool  mSilencedNotified;    // protected by MMapThread::mLock
-
-    // TODO: replace PersistableBundle with own struct
-    // access these two variables only when holding player thread lock.
-    std::unique_ptr<os::PersistableBundle> mMuteEventExtras
-            /* GUARDED_BY(MmapPlaybackThread::mLock) */;
-    mute_state_t mMuteState
-            /* GUARDED_BY(MmapPlaybackThread::mLock) */;
-    bool mMutedFromPort;
-
-    float mVolume = 0.0f;
-
-    // logically const
-    std::optional<media::permission::AppOpsSession<media::permission::DefaultAppOpsFacade>>
-            mOpControlSession;
-
-    // logically const
-    bool mIsExemptedFromOpControl = false;
-    std::atomic<bool> mHasOpControlPartial {true};
-    mutable std::atomic<bool> mPlaybackHardeningLogged {false};
-
 };  // end of Track
 
 } // namespace android
