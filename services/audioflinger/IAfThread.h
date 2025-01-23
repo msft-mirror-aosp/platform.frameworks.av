@@ -96,7 +96,10 @@ public:
     virtual const sp<IAfPatchPanel>& getPatchPanel() const = 0;
     virtual const sp<MelReporter>& getMelReporter() const = 0;
     virtual const sp<EffectsFactoryHalInterface>& getEffectsFactoryHal() const = 0;
-    virtual sp<IAudioManager> getOrCreateAudioManager() = 0;  // Tracks
+    // AudioService interfaces
+    virtual sp<IAudioManager> getOrCreateAudioManager() = 0;
+    // Populated after getOrCreateAudioManager
+    virtual sp<media::IAudioManagerNative> getAudioManagerNative() const = 0;
 
     virtual bool updateOrphanEffectChains(const sp<IAfEffectModule>& effect)
             EXCLUDES_AudioFlinger_Mutex = 0;
