@@ -23,7 +23,6 @@
 #include <audio_utils/mutex.h>
 #include <audio_utils/LinearMap.h>
 #include <binder/AppOpsManager.h>
-#include <media/AppOpsSession.h>
 #include <utils/RWLock.h>
 
 namespace android {
@@ -216,21 +215,8 @@ public:
     bool isSpatialized() const final { return mIsSpatialized; }
     bool isBitPerfect() const final { return mIsBitPerfect; }
 
-    void maybeLogPlaybackHardening(media::IAudioManagerNative& am) const final;
-    /**
-     * Updates the mute state and notifies the audio service. Call this only when holding player
-     * thread lock.
-     */
-    void processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_state_t muteState) final;
-
     bool getInternalMute() const final { return mInternalMute; }
     void setInternalMute(bool muted) final { mInternalMute = muted; }
-
-    // VolumePortInterface implementation
-    void setPortVolume(float volume) override;
-    void setPortMute(bool muted) override;
-    float getPortVolume() const override { return mVolume; }
-    bool getPortMute() const override { return mMutedFromPort; }
 
     std::string trackFlagsAsString() const final { return toString(mFlags); }
 
@@ -300,14 +286,6 @@ protected:
                        : false;
     }
 
-    bool hasOpControlPartial() const {
-        return mOpControlSession ? mHasOpControlPartial.load(std::memory_order_acquire) : true;
-    }
-
-    bool isPlaybackRestrictedControl() const final {
-        return !(mIsExemptedFromOpControl || hasOpControlPartial());
-    }
-
     bool isPlaybackRestricted() const final {
         return isPlaybackRestrictedOp() || isPlaybackRestrictedControl();
     }
@@ -359,16 +337,6 @@ protected:
     sp<media::VolumeHandler>  mVolumeHandler; // handles multiple VolumeShaper configs and operations
 
     sp<OpPlayAudioMonitor>  mOpPlayAudioMonitor;
-
-    // logically const
-    std::optional<media::permission::AppOpsSession<media::permission::DefaultAppOpsFacade>>
-            mOpControlSession;
-
-    // logically const
-    bool mIsExemptedFromOpControl = false;
-    std::atomic<bool> mHasOpControlPartial {true};
-
-    mutable std::atomic<bool> mPlaybackHardeningLogged {false};
 
     bool                mHapticPlaybackEnabled = false; // indicates haptic playback enabled or not
     // scale to play haptic data
@@ -439,13 +407,7 @@ private:
     const bool          mIsSpatialized;
     const bool          mIsBitPerfect;
 
-    // TODO: replace PersistableBundle with own struct
-    // access these two variables only when holding player thread lock.
-    std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
-    std::atomic<mute_state_t> mMuteState;
-    std::atomic<bool>         mMutedFromPort;
     bool                      mInternalMute = false;
-    std::atomic<float>        mVolume = 0.0f;
 };  // end of Track
 
 
