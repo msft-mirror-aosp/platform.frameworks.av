@@ -272,11 +272,9 @@ class AfPlaybackCommon : public virtual VolumePortInterface {
             const AttributionSourceState& attributionSource, bool shouldPlaybackHarden = true);
 
     /**
-     * Updates the mute state and notifies the audio service. Call this only when holding player
-     * thread lock.
+     * Updates the mute state and notifies the audio service.
      */
-    void processMuteEvent_l(
-            const sp<IAudioManager>& audioManager, mute_state_t muteState);
+    void processMuteEvent(media::IAudioManagerNative& am, mute_state_t muteState);
 
     void maybeLogPlaybackHardening(media::IAudioManagerNative& am) const;
 

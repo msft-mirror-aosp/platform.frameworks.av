@@ -45,4 +45,11 @@ interface IAudioManagerNative {
      * Block until AudioService synchronizes pending permission state with audioserver.
      */
     void permissionUpdateBarrier();
+
+    /**
+     * Update mute state event for port
+     * @param portId Port id to update
+     * @param event the mute event containing info about the mute
+     */
+    void portMuteEvent(in int portId, in int event);
 }

@@ -5865,10 +5865,10 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                         volume = masterVolume * track->getPortVolume();
                     }
                 }
-                if (const auto iface = mAfThreadCallback->getAudioManagerNative(); iface) {
-                    track->maybeLogPlaybackHardening(*iface);
+                const auto amn = mAfThreadCallback->getAudioManagerNative();
+                if (amn) {
+                    track->maybeLogPlaybackHardening(*amn);
                 }
-
                 handleVoipVolume_l(&volume);
 
                 // cache the combined master volume and stream type volume for fast mixer; this
@@ -5880,26 +5880,28 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                 gain_minifloat_packed_t vlr = proxy->getVolumeLR();
                 float vlf = float_from_gain(gain_minifloat_unpack_left(vlr));
                 float vrf = float_from_gain(gain_minifloat_unpack_right(vlr));
-                if (!audioserver_flags::portid_volume_management()) {
-                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                            /*muteState=*/{masterVolume == 0.f,
-                                           mStreamTypes[track->streamType()].volume == 0.f,
-                                           mStreamTypes[track->streamType()].mute,
-                                           track->isPlaybackRestrictedOp(),
-                                           vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f,
-                                           /*muteFromPortVolume=*/false,
-                                           track->isPlaybackRestrictedControl()});
-                } else {
-                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                            /*muteState=*/{masterVolume == 0.f,
-                                           track->getPortVolume() == 0.f,
-                                           /* muteFromStreamMuted= */ false,
-                                           track->isPlaybackRestrictedOp(),
-                                           vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f,
+                if (amn) {
+                    if (!audioserver_flags::portid_volume_management()) {
+                        track->processMuteEvent(*amn,
+                                /*muteState=*/{masterVolume == 0.f,
+                                               mStreamTypes[track->streamType()].volume == 0.f,
+                                               mStreamTypes[track->streamType()].mute,
+                                               track->isPlaybackRestrictedOp(),
+                                               vlf == 0.f && vrf == 0.f,
+                                               vh == 0.f,
+                                               /*muteFromPortVolume=*/false,
+                                               track->isPlaybackRestrictedControl()});
+                    } else {
+                        track->processMuteEvent(*amn,
+                                /*muteState=*/{masterVolume == 0.f,
+                                               track->getPortVolume() == 0.f,
+                                               /* muteFromStreamMuted= */ false,
+                                               track->isPlaybackRestrictedOp(),
+                                               vlf == 0.f && vrf == 0.f,
+                                               vh == 0.f,
                                            track->getPortMute(),
                                            track->isPlaybackRestrictedControl()});
+                    }
                 }
                 vlf *= volume;
                 vrf *= volume;
@@ -6065,9 +6067,11 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                     v = 0;
                 }
             }
+
             handleVoipVolume_l(&v);
-            if (const auto iface = mAfThreadCallback->getAudioManagerNative(); iface) {
-                track->maybeLogPlaybackHardening(*iface);
+            const auto amn = mAfThreadCallback->getAudioManagerNative();
+            if (amn) {
+                track->maybeLogPlaybackHardening(*amn);
             }
 
             if (track->isPausing()) {
@@ -6087,26 +6091,28 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
                     ALOGV("Track right volume out of range: %.3g", vrf);
                     vrf = GAIN_FLOAT_UNITY;
                 }
-                if (!audioserver_flags::portid_volume_management()) {
-                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                            /*muteState=*/{masterVolume == 0.f,
-                                           mStreamTypes[track->streamType()].volume == 0.f,
-                                           mStreamTypes[track->streamType()].mute,
-                                           track->isPlaybackRestrictedOp(),
-                                           vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f,
-                                           /*muteFromPortVolume=*/false,
-                                           track->isPlaybackRestrictedControl()});
-                } else {
-                    track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                            /*muteState=*/{masterVolume == 0.f,
-                                           track->getPortVolume() == 0.f,
-                                           /* muteFromStreamMuted= */ false,
-                                           track->isPlaybackRestrictedOp(),
-                                           vlf == 0.f && vrf == 0.f,
-                                           vh == 0.f,
-                                           track->getPortMute(),
-                                           track->isPlaybackRestrictedControl()});
+                if (amn) {
+                    if (!audioserver_flags::portid_volume_management()) {
+                        track->processMuteEvent(*amn,
+                                /*muteState=*/{masterVolume == 0.f,
+                                               mStreamTypes[track->streamType()].volume == 0.f,
+                                               mStreamTypes[track->streamType()].mute,
+                                               track->isPlaybackRestrictedOp(),
+                                               vlf == 0.f && vrf == 0.f,
+                                               vh == 0.f,
+                                               /*muteFromPortVolume=*/false,
+                                               track->isPlaybackRestrictedControl()});
+                    } else {
+                        track->processMuteEvent(*amn,
+                                /*muteState=*/{masterVolume == 0.f,
+                                               track->getPortVolume() == 0.f,
+                                               /* muteFromStreamMuted= */ false,
+                                               track->isPlaybackRestrictedOp(),
+                                               vlf == 0.f && vrf == 0.f,
+                                               vh == 0.f,
+                                               track->getPortMute(),
+                                               track->isPlaybackRestrictedControl()});
+                    }
                 }
                 // now apply the master volume and stream type volume and shaper volume
                 vlf *= v * vh;
@@ -6836,6 +6842,7 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
 
     const bool clientVolumeMute = (left == 0.f && right == 0.f);
 
+    const auto amn = mAfThreadCallback->getAudioManagerNative();
     if (!audioserver_flags::portid_volume_management()) {
         if (mMasterMute || mStreamTypes[track->streamType()].mute ||
             track->isPlaybackRestricted()) {
@@ -6858,15 +6865,17 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
                 right *= mMasterBalanceRight;
             }
         }
-        track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                /*muteState=*/{mMasterMute,
-                               mStreamTypes[track->streamType()].volume == 0.f,
-                               mStreamTypes[track->streamType()].mute,
-                               track->isPlaybackRestrictedOp(),
-                               clientVolumeMute,
-                               shaperVolume == 0.f,
-                               /*muteFromPortVolume=*/false,
-                               track->isPlaybackRestrictedControl()});
+        if (amn) {
+            track->processMuteEvent(*amn,
+                    /*muteState=*/{mMasterMute,
+                                   mStreamTypes[track->streamType()].volume == 0.f,
+                                   mStreamTypes[track->streamType()].mute,
+                                   track->isPlaybackRestrictedOp(),
+                                   clientVolumeMute,
+                                   shaperVolume == 0.f,
+                                   /*muteFromPortVolume=*/false,
+                                   track->isPlaybackRestrictedControl()});
+        }
     } else {
         if (mMasterMute || track->isPlaybackRestricted()) {
             left = right = 0;
@@ -6888,21 +6897,21 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
                 right *= mMasterBalanceRight;
             }
         }
-        track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                /*muteState=*/{mMasterMute,
-                               track->getPortVolume() == 0.f,
-                               /* muteFromStreamMuted= */ false,
-                               track->isPlaybackRestrictedOp(),
-                               clientVolumeMute,
-                               shaperVolume == 0.f,
-                               track->getPortMute(),
-                               track->isPlaybackRestrictedControl()});
+        if (amn) {
+            track->processMuteEvent(*amn,
+                    /*muteState=*/{mMasterMute,
+                                   track->getPortVolume() == 0.f,
+                                   /* muteFromStreamMuted= */ false,
+                                   track->isPlaybackRestrictedOp(),
+                                   clientVolumeMute,
+                                   shaperVolume == 0.f,
+                                   track->getPortMute(),
+                                   track->isPlaybackRestrictedControl()});
+        }
     }
-    if (const auto iface = mAfThreadCallback->getAudioManagerNative(); iface) {
-        track->maybeLogPlaybackHardening(*iface);
+    if (amn) {
+        track->maybeLogPlaybackHardening(*amn);
     }
-
-
     if (lastTrack) {
         track->setFinalVolume(left, right);
         if (left != mLeftVolFloat || right != mRightVolFloat) {
@@ -11386,7 +11395,7 @@ void MmapPlaybackThread::invalidateTracks(std::set<audio_port_handle_t>& portIds
 }
 
 void MmapPlaybackThread::processVolume_l()
-NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
+NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent
 {
     float volume = 0;
     if (!audioserver_flags::portid_volume_management()) {
@@ -11449,33 +11458,34 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
                 }
             }
         }
+        const auto amn = mAfThreadCallback->getAudioManagerNative();
         for (const sp<IAfMmapTrack>& track : mActiveTracks) {
             track->setMetadataHasChanged();
-            if (!audioserver_flags::portid_volume_management()) {
-                track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+            if (amn) {
+                if (!audioserver_flags::portid_volume_management()) {
+                    track->processMuteEvent(*amn,
+                            /*muteState=*/{mMasterMute,
+                            streamVolume_l() == 0.f,
+                            streamMuted_l(),
+                            // TODO(b/241533526): adjust logic to include mute from AppOps
+                            false /*muteFromPlaybackRestricted*/,
+                            false /*muteFromClientVolume*/,
+                            false /*muteFromVolumeShaper*/,
+                            false /*muteFromPortVolume*/,
+                            shouldMutePlaybackHardening});
+                } else {
+                    track->processMuteEvent(*amn,
                         /*muteState=*/{mMasterMute,
-                        streamVolume_l() == 0.f,
-                        streamMuted_l(),
-                        // TODO(b/241533526): adjust logic to include mute from AppOps
-                        false /*muteFromPlaybackRestricted*/,
-                        false /*muteFromClientVolume*/,
-                        false /*muteFromVolumeShaper*/,
-                        false /*muteFromPortVolume*/,
-                        shouldMutePlaybackHardening});
-            } else {
-                track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
-                    /*muteState=*/{mMasterMute,
-                                   track->getPortVolume() == 0.f,
-                                   /* muteFromStreamMuted= */ false,
-                                   // TODO(b/241533526): adjust logic to include mute from AppOps
-                                   false /*muteFromPlaybackRestricted*/,
-                                   false /*muteFromClientVolume*/,
-                                   false /*muteFromVolumeShaper*/,
-                                   track->getPortMute(),
-                                   shouldMutePlaybackHardening});
-            }
-            if (const auto iface = mAfThreadCallback->getAudioManagerNative(); iface) {
-                track->maybeLogPlaybackHardening(*iface);
+                                       track->getPortVolume() == 0.f,
+                                       /* muteFromStreamMuted= */ false,
+                                       // TODO(b/241533526): adjust logic to include mute from AppOp
+                                       false /*muteFromPlaybackRestricted*/,
+                                       false /*muteFromClientVolume*/,
+                                       false /*muteFromVolumeShaper*/,
+                                       track->getPortMute(),
+                                       shouldMutePlaybackHardening});
+                }
+                track->maybeLogPlaybackHardening(*amn);
             }
         }
     }

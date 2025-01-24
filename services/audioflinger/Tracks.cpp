@@ -3724,10 +3724,7 @@ void AfPlaybackCommon::maybeLogPlaybackHardening(media::IAudioManagerNative& am)
     }
 }
 
-// must be called with player thread lock held
-void AfPlaybackCommon::processMuteEvent_l(const sp<
-    IAudioManager>& audioManager, mute_state_t muteState)
-{
+void AfPlaybackCommon::processMuteEvent(media::IAudioManagerNative& am, mute_state_t muteState) {
     const auto trackId = mSelf.id();
     const auto portId = mSelf.portId();
     if (mMuteState == muteState) {
@@ -3735,23 +3732,16 @@ void AfPlaybackCommon::processMuteEvent_l(const sp<
         return;
     }
 
-    status_t result = UNKNOWN_ERROR;
-    if (audioManager && portId != AUDIO_PORT_HANDLE_NONE) {
-        if (mMuteEventExtras == nullptr) {
-            mMuteEventExtras = std::make_unique<os::PersistableBundle>();
-        }
-        mMuteEventExtras->putInt(String16(kExtraPlayerEventMuteKey), static_cast<int>(muteState));
-
-        result = audioManager->portEvent(portId, PLAYER_UPDATE_MUTED, mMuteEventExtras);
-    }
-
-    if (result == OK) {
+    const auto result = portId != AUDIO_PORT_HANDLE_NONE
+                                ? am.portMuteEvent(portId, static_cast<int>(muteState))
+                                : Status::fromExceptionCode(Status::EX_ILLEGAL_STATE);
+    if (result.isOk()) {
         ALOGI("%s(%d): processed mute state for port ID %d from %#x to %#x", __func__, trackId,
               portId, static_cast<int>(mMuteState.load()), static_cast<int>(muteState));
         mMuteState = muteState;
     } else {
-        ALOGW("%s(%d): cannot process mute state for port ID %d, status error %d", __func__,
-              trackId, portId, result);
+        ALOGW("%s(%d): cannot process mute state for port ID %d, status error %s", __func__,
+              trackId, portId, result.toString8().c_str());
     }
 }
 
