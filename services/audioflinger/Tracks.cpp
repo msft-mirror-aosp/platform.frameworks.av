@@ -1299,7 +1299,8 @@ status_t Track::getNextBuffer(AudioBufferProvider::Buffer* buffer)
     status_t status = mServerProxy->obtainBuffer(&buf);
     buffer->frameCount = buf.mFrameCount;
     buffer->raw = buf.mRaw;
-    if (buf.mFrameCount == 0 && !isStopping() && !isStopped() && !isPaused() && !isOffloaded()) {
+    if (buf.mFrameCount == 0 && !isStopping() && !isPausing()
+        && !isStopped() && !isPaused() && !isOffloaded()) {
         ALOGV("%s(%d): underrun,  framesReady(%zu) < framesDesired(%zd), state: %d",
                 __func__, mId, buf.mFrameCount, desiredFrames, (int)mState);
         mAudioTrackServerProxy->tallyUnderrunFrames(desiredFrames);
