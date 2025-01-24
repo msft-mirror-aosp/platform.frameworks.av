@@ -45,8 +45,11 @@ public:
             wp<hardware::camera2::ICameraDeviceCallbacks> cb);
     ~HeicCompositeStream() override;
 
-    static bool isHeicCompositeStream(const sp<Surface> &surface);
-    static bool isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo);
+    static bool isHeicCompositeStream(const sp<Surface>& surface, bool isCompositeHeicDisabled,
+                                      bool isCompositeHeicUltraHDRDisabled);
+    static bool isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo,
+                                          bool isCompositeHeicDisabled,
+                                          bool isCompositeHeicUltraHDRDisabled);
 
     status_t createInternalStreams(const std::vector<SurfaceHolder>& consumers,
             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,

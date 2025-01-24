@@ -152,7 +152,8 @@ binder::Status
 convertToHALStreamCombination(
     const SessionConfiguration& sessionConfiguration,
     const std::string &logicalCameraId, const CameraMetadata &deviceInfo,
-    bool isCompositeJpegRDisabled, metadataGetter getMetadata,
+    bool isCompositeJpegRDisabled, bool isCompositeHeicDisabled,
+    bool isCompositeHeicUltraHDRDisabled, metadataGetter getMetadata,
     const std::vector<std::string> &physicalCameraIds,
     aidl::android::hardware::camera::device::StreamConfiguration &streamConfiguration,
     bool overrideForPerfClass, metadata_vendor_id_t vendorTagId,

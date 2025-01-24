@@ -1184,7 +1184,8 @@ binder::Status CameraDeviceClient::createStream(
         bool isDepthCompositeStream =
                 camera3::DepthCompositeStream::isDepthCompositeStream(surfaceHolders[0].mSurface);
         bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(
-                surfaceHolders[0].mSurface);
+                surfaceHolders[0].mSurface, mDevice->isCompositeHeicDisabled(),
+                mDevice->isCompositeHeicUltraHDRDisabled());
         bool isJpegRCompositeStream =
             camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaceHolders[0].mSurface) &&
             !mDevice->isCompositeJpegRDisabled();
@@ -2173,7 +2174,9 @@ binder::Status CameraDeviceClient::switchToOffline(
             sp<Surface> s = new Surface(surface, false /*controlledByApp*/);
 #endif
             isCompositeStream = camera3::DepthCompositeStream::isDepthCompositeStream(s) ||
-                                camera3::HeicCompositeStream::isHeicCompositeStream(s) ||
+                                camera3::HeicCompositeStream::isHeicCompositeStream(
+                                        s, mDevice->isCompositeHeicDisabled(),
+                                        mDevice->isCompositeHeicUltraHDRDisabled()) ||
                                 (camera3::JpegRCompositeStream::isJpegRCompositeStream(s) &&
                                  !mDevice->isCompositeJpegRDisabled());
             if (isCompositeStream) {

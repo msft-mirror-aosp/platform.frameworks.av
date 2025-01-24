@@ -526,6 +526,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     mCompositeJpegRDisabled = mCameraCharacteristics.exists(
             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS);
+    mCompositeHeicDisabled = mCameraCharacteristics.exists(
+            ANDROID_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS);
     mCompositeHeicUltraHDRDisabled = mCameraCharacteristics.exists(
             ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS);
 
@@ -856,10 +858,11 @@ status_t AidlProviderInfo::AidlDeviceInfo3::isSessionConfigurationSupported(
 
     camera::device::StreamConfiguration streamConfiguration;
     bool earlyExit = false;
-    auto bRes = SessionConfigurationUtils::convertToHALStreamCombination(configuration,
-            mId, mCameraCharacteristics, mCompositeJpegRDisabled, getMetadata,
-            mPhysicalIds, streamConfiguration, overrideForPerfClass, mProviderTagid,
-            checkSessionParams, mAdditionalKeysForFeatureQuery, &earlyExit);
+    auto bRes = SessionConfigurationUtils::convertToHALStreamCombination(
+            configuration, mId, mCameraCharacteristics, mCompositeJpegRDisabled,
+            mCompositeHeicDisabled, mCompositeHeicUltraHDRDisabled, getMetadata, mPhysicalIds,
+            streamConfiguration, overrideForPerfClass, mProviderTagid, checkSessionParams,
+            mAdditionalKeysForFeatureQuery, &earlyExit);
 
     if (!bRes.isOk()) {
         return UNKNOWN_ERROR;
@@ -967,10 +970,11 @@ status_t AidlProviderInfo::AidlDeviceInfo3::getSessionCharacteristics(
         camera3::metadataGetter getMetadata, CameraMetadata* outChars) {
     camera::device::StreamConfiguration streamConfiguration;
     bool earlyExit = false;
-    auto res = SessionConfigurationUtils::convertToHALStreamCombination(configuration,
-            mId, mCameraCharacteristics, mCompositeJpegRDisabled, getMetadata,
-            mPhysicalIds, streamConfiguration, overrideForPerfClass, mProviderTagid,
-            /*checkSessionParams*/true, mAdditionalKeysForFeatureQuery, &earlyExit);
+    auto res = SessionConfigurationUtils::convertToHALStreamCombination(
+            configuration, mId, mCameraCharacteristics, mCompositeJpegRDisabled,
+            mCompositeHeicDisabled, mCompositeHeicUltraHDRDisabled, getMetadata, mPhysicalIds,
+            streamConfiguration, overrideForPerfClass, mProviderTagid,
+            /*checkSessionParams*/ true, mAdditionalKeysForFeatureQuery, &earlyExit);
 
     if (!res.isOk()) {
         return UNKNOWN_ERROR;
@@ -1055,7 +1059,9 @@ status_t AidlProviderInfo::convertToAidlHALStreamCombinationAndCameraIdsLocked(
             SessionConfigurationUtils::convertToHALStreamCombination(
                     cameraIdAndSessionConfig.mSessionConfiguration,
                     cameraId, deviceInfo,
-                    mManager->isCompositeJpegRDisabledLocked(cameraId), getMetadata,
+                    mManager->isCompositeJpegRDisabledLocked(cameraId),
+                    mManager->isCompositeHeicDisabledLocked(cameraId),
+                    mManager->isCompositeHeicUltraHDRDisabledLocked(cameraId), getMetadata,
                     physicalCameraIds, streamConfiguration,
                     overrideForPerfClass, mProviderTagid,
                     /*checkSessionParams*/false, /*additionalKeys*/{},
