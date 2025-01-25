@@ -78,7 +78,13 @@ void convertRGBA1010102ToYUV420Planar16(uint16_t* dstY, uint16_t* dstU, uint16_t
                                         C2Color::range_t colorRange);
 
 void convertRGBA1010102ToP210(uint16_t* dstY, uint16_t* dstUV, const uint32_t* srcRGBA,
-                              size_t srcRGBStride, size_t width, size_t height,
+                              size_t srcRGBStride, size_t dstYStride, size_t dstUVStride,
+                              size_t width, size_t height, C2Color::matrix_t colorMatrix,
+                              C2Color::range_t colorRange);
+
+void convertRGBToP210(uint16_t* dstY, uint16_t* dstUV, const uint32_t* srcRGBA,
+                              size_t srcRGBStride, size_t dstYStride, size_t dstUVStride,
+                              size_t width, size_t height,
                               C2Color::matrix_t colorMatrix, C2Color::range_t colorRange);
 
 void convertPlanar16ToY410OrRGBA1010102(uint8_t* dst, const uint16_t* srcY, const uint16_t* srcU,
