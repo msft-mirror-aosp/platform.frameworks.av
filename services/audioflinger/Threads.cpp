@@ -5741,8 +5741,9 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
             // don't count underruns that occur while stopping or pausing
             // or stopped which can occur when flush() is called while active
             size_t underrunFrames = 0;
-            if (!(track->isStopping() || track->isPausing() || track->isStopped()) &&
-                    recentUnderruns > 0) {
+            if (!(track->isStopping() || track->isPausing()
+                    || track->isStopped() || track->isPaused())
+                && recentUnderruns > 0) {
                 // FIXME fast mixer will pull & mix partial buffers, but we count as a full underrun
                 underrunFrames = recentUnderruns * mFrameCount;
             }
