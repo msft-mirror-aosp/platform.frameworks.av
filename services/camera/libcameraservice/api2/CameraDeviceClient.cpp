@@ -2328,9 +2328,8 @@ void CameraDeviceClient::notifyError(int32_t errorCode,
                                      const CaptureResultExtras& resultExtras) {
     // Thread safe. Don't bother locking.
     sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = getRemoteCallback();
-
     bool skipClientNotification = false;
-    if (flags::camera_multi_client() && mSharedMode) {
+    if (flags::camera_multi_client() && mSharedMode && (resultExtras.requestId != -1)) {
         int clientReqId;
         if (!matchClientRequest(resultExtras, &clientReqId)) {
             return;
