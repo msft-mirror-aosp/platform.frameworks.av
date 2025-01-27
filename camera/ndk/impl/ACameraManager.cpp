@@ -881,7 +881,10 @@ ACameraManager::isCameraDeviceSharingSupported(
     ret = ACameraMetadata_getConstEntry(chars, ANDROID_SHARED_SESSION_OUTPUT_CONFIGURATIONS,
             &entry);
     if (ret != ACAMERA_OK) {
-        return ret;
+        // If shared session metadata is not found return with sharing
+        // supported as false.
+        *isSharingSupported = false;
+        return ACAMERA_OK;
     }
     *isSharingSupported =  (entry.count > 0) ? true : false;
     return ACAMERA_OK;
