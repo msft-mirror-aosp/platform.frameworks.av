@@ -521,7 +521,7 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
   if (!ret) {
     dprintf(err, "Failed to create test camera (error %d)\n", ret);
     mTestCameraToken.set(nullptr);
-    return STATUS_UNKNOWN_ERROR;
+    return EOPNOTSUPP;
   }
 
   dprintf(out, "Successfully registered test camera %s\n",
