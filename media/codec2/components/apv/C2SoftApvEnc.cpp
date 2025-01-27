@@ -1023,7 +1023,7 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                     ALOGE("Not supported color format. %d", mColorFormat);
                     return C2_BAD_VALUE;
                 }
-            } else if (IsNV12(*input)) {
+            } else if (IsNV12(*input) || IsNV21(*input)) {
                 ALOGV("Convert from NV12 to P210");
                 uint8_t  *srcY  = (uint8_t*)input->data()[0];
                 uint8_t  *srcUV = (uint8_t*)input->data()[1];
@@ -1035,7 +1035,7 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
                                          layout.planes[layout.PLANE_Y].rowInc,
                                          layout.planes[layout.PLANE_U].rowInc,
                                          dstYStride, dstUVStride,
-                                         width, height, CONV_FORMAT_I420);
+                                         width, height, CONV_FORMAT_I420, IsNV12(*input));
             } else if (IsI420(*input)) {
                 ALOGV("Convert from I420 to P210");
                 uint8_t  *srcY  = (uint8_t*)input->data()[0];

@@ -116,7 +116,7 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
                               size_t srcYStride, size_t srcUVStride,
                               size_t dstYStride, size_t dstUVStride,
                               uint32_t width, uint32_t height,
-                              CONV_FORMAT_T format);
+                              CONV_FORMAT_T format, bool isNV12);
 void convertPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
                               const uint8_t *srcY, const uint8_t *srcU, const uint8_t *srcV,
                               size_t srcYStride, size_t srcUStride, size_t srcVStride,
