@@ -67,8 +67,6 @@ const size_t kMinArgs = 1;
 const size_t kMaxArgs = 5;
 const int32_t kCamType[] = {hardware::ICameraService::CAMERA_TYPE_BACKWARD_COMPATIBLE,
                             hardware::ICameraService::CAMERA_TYPE_ALL};
-const int kCameraApiVersion[] = {android::CameraService::API_VERSION_1,
-                                 android::CameraService::API_VERSION_2};
 const uint8_t kSensorPixelModes[] = {ANDROID_SENSOR_PIXEL_MODE_DEFAULT,
         ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION};
 const int32_t kRequestTemplates[] = {
@@ -432,8 +430,6 @@ void CameraFuzzer::getNumCameras() {
 void CameraFuzzer::getCameraInformation(int32_t cameraId) {
     std::string cameraIdStr = std::to_string(cameraId);
     bool isSupported = false;
-    mCameraService->supportsCameraApi(
-        cameraIdStr, kCameraApiVersion[mFuzzedDataProvider->ConsumeBool()], &isSupported);
     mCameraService->isHiddenPhysicalCamera(cameraIdStr, &isSupported);
 
     std::string parameters;

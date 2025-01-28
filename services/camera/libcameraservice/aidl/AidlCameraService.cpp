@@ -283,16 +283,6 @@ SStatus AidlCameraService::addListenerInternal(
         return convertToAidl(serviceRet);
     }
 
-    cameraStatusAndIds->erase(std::remove_if(cameraStatusAndIds->begin(),
-                                             cameraStatusAndIds->end(),
-            [this](const hardware::CameraStatus& s) {
-                bool supportsHAL3 = false;
-                binder::Status sRet =
-                            mCameraService->supportsCameraApi(s.cameraId,
-                                    UICameraService::API_VERSION_2, &supportsHAL3);
-                return !sRet.isOk() || !supportsHAL3;
-            }), cameraStatusAndIds->end());
-
     return SStatus::NO_ERROR;
 }
 ndk::ScopedAStatus AidlCameraService::removeListener(
