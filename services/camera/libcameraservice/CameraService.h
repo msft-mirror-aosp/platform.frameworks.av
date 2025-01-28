@@ -225,12 +225,6 @@ public:
 
     virtual binder::Status    notifyDisplayConfigurationChange();
 
-    // OK = supports api of that version, -EOPNOTSUPP = does not support
-    virtual binder::Status    supportsCameraApi(
-            const std::string& cameraId, int32_t apiVersion,
-            /*out*/
-            bool *isSupported);
-
     virtual binder::Status    isHiddenPhysicalCamera(
             const std::string& cameraId,
             /*out*/

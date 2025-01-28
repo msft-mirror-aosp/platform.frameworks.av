@@ -376,17 +376,12 @@ void CameraManagerGlobal::registerAvailCallback(const DeviceContext& deviceConte
     const auto& [_, newlyRegistered] = mCallbacks.insert(cb);
     // Send initial callbacks if callback is newly registered
     if (newlyRegistered) {
-        for (auto& [key, statusAndHAL3Support] : mDeviceStatusMap) {
+        for (auto& [key, logicalAndPhysicalStatus] : mDeviceStatusMap) {
             if (!isCameraAccessible(deviceContext, key.deviceId)) {
                 continue;
             }
             const std::string& cameraId = key.cameraId;
-            int32_t status = statusAndHAL3Support.getStatus();
-            // Don't send initial callbacks for camera ids which don't support
-            // camera2
-            if (!statusAndHAL3Support.supportsHAL3) {
-                continue;
-            }
+            int32_t status = logicalAndPhysicalStatus.getStatus();
 
             // Camera available/unavailable callback
             sp<AMessage> msg = new AMessage(kWhatSendSingleCallback, mHandler);
@@ -400,7 +395,7 @@ void CameraManagerGlobal::registerAvailCallback(const DeviceContext& deviceConte
 
             // Physical camera unavailable callback
             std::set<std::string> unavailablePhysicalCameras =
-                    statusAndHAL3Support.getUnavailablePhysicalIds();
+                    logicalAndPhysicalStatus.getUnavailablePhysicalIds();
             for (const auto& physicalCameraId : unavailablePhysicalCameras) {
                 sp<AMessage> msg = new AMessage(kWhatSendSinglePhysicalCameraCallback, mHandler);
                 ACameraManager_PhysicalCameraAvailabilityCallback cbFunc =
@@ -416,42 +411,23 @@ void CameraManagerGlobal::registerAvailCallback(const DeviceContext& deviceConte
     }
 }
 
-bool CameraManagerGlobal::supportsCamera2ApiLocked(const std::string &cameraId) {
-    bool camera2Support = false;
-    auto cs = getCameraServiceLocked();
-    if (cs == nullptr) {
-        return false;
-    }
-    binder::Status serviceRet =
-        cs->supportsCameraApi(cameraId,
-                hardware::ICameraService::API_VERSION_2, &camera2Support);
-    if (!serviceRet.isOk()) {
-        ALOGE("%s: supportsCameraApi2Locked() call failed for cameraId  %s",
-                __FUNCTION__, cameraId.c_str());
-        return false;
-    }
-    return camera2Support;
-}
-
 void CameraManagerGlobal::getCameraIdList(const DeviceContext& context,
         std::vector<std::string>* cameraIds) {
     // Ensure that we have initialized/refreshed the list of available devices
     Mutex::Autolock _l(mLock);
     // Needed to make sure we're connected to cameraservice
     getCameraServiceLocked();
-    for (auto& [key, statusAndHAL3Support] : mDeviceStatusMap) {
+    for (auto& [key, logicalAndPhysicalStatus] : mDeviceStatusMap) {
         if (!isCameraAccessible(context, key.deviceId)) {
             continue;
         }
 
-        int32_t status = statusAndHAL3Support.getStatus();
+        int32_t status = logicalAndPhysicalStatus.getStatus();
         if (status == hardware::ICameraServiceListener::STATUS_NOT_PRESENT ||
                 status == hardware::ICameraServiceListener::STATUS_ENUMERATING) {
             continue;
         }
-        if (!statusAndHAL3Support.supportsHAL3) {
-            continue;
-        }
+
         cameraIds->push_back(key.cameraId);
     }
 }
@@ -649,28 +625,25 @@ void CameraManagerGlobal::onStatusChangedLocked(int32_t status, const int device
         return;
     }
 
-    bool supportsHAL3 = supportsCamera2ApiLocked(cameraId);
     if (firstStatus) {
         mDeviceStatusMap.emplace(std::piecewise_construct, std::forward_as_tuple(key),
-                                 std::forward_as_tuple(status, supportsHAL3));
+                std::forward_as_tuple(status));
     } else {
         mDeviceStatusMap[key].updateStatus(status);
     }
     // Iterate through all registered callbacks
-    if (supportsHAL3) {
-        for (auto cb : mCallbacks) {
-            if (!isCameraAccessible(cb.mDeviceContext, deviceId)) {
-                continue;
-            }
-            sp<AMessage> msg = new AMessage(kWhatSendSingleCallback, mHandler);
-            ACameraManager_AvailabilityCallback cbFp = isStatusAvailable(status) ?
-                    cb.mAvailable : cb.mUnavailable;
-            msg->setPointer(kCallbackFpKey, (void *) cbFp);
-            msg->setPointer(kContextKey, cb.mContext);
-            msg->setString(kCameraIdKey, AString(cameraId.c_str()));
-            mPendingCallbackCnt++;
-            msg->post();
+    for (auto cb : mCallbacks) {
+        if (!isCameraAccessible(cb.mDeviceContext, deviceId)) {
+            continue;
         }
+        sp<AMessage> msg = new AMessage(kWhatSendSingleCallback, mHandler);
+        ACameraManager_AvailabilityCallback cbFp = isStatusAvailable(status) ?
+                cb.mAvailable : cb.mUnavailable;
+        msg->setPointer(kCallbackFpKey, (void *) cbFp);
+        msg->setPointer(kContextKey, cb.mContext);
+        msg->setString(kCameraIdKey, AString(cameraId.c_str()));
+        mPendingCallbackCnt++;
+        msg->post();
     }
     if (status == hardware::ICameraServiceListener::STATUS_NOT_PRESENT) {
         mDeviceStatusMap.erase(key);
@@ -705,8 +678,6 @@ void CameraManagerGlobal::onStatusChangedLocked(int32_t status, const int device
         return;
     }
 
-    bool supportsHAL3 = supportsCamera2ApiLocked(cameraId);
-
     bool updated = false;
     if (status == hardware::ICameraServiceListener::STATUS_PRESENT) {
         updated = mDeviceStatusMap[key].removeUnavailablePhysicalId(physicalCameraId);
@@ -715,7 +686,7 @@ void CameraManagerGlobal::onStatusChangedLocked(int32_t status, const int device
     }
 
     // Iterate through all registered callbacks
-    if (supportsHAL3 && updated) {
+    if (updated) {
         for (auto cb : mCallbacks) {
             if (!isCameraAccessible(cb.mDeviceContext, deviceId)) {
                 continue;
@@ -733,31 +704,31 @@ void CameraManagerGlobal::onStatusChangedLocked(int32_t status, const int device
     }
 }
 
-int32_t CameraManagerGlobal::StatusAndHAL3Support::getStatus() {
+int32_t CameraManagerGlobal::Status::getStatus() {
     std::lock_guard<std::mutex> lock(mLock);
     return status;
 }
 
-void CameraManagerGlobal::StatusAndHAL3Support::updateStatus(int32_t newStatus) {
+void CameraManagerGlobal::Status::updateStatus(int32_t newStatus) {
     std::lock_guard<std::mutex> lock(mLock);
     status = newStatus;
 }
 
-bool CameraManagerGlobal::StatusAndHAL3Support::addUnavailablePhysicalId(
+bool CameraManagerGlobal::Status::addUnavailablePhysicalId(
         const std::string& physicalCameraId) {
     std::lock_guard<std::mutex> lock(mLock);
     auto result = unavailablePhysicalIds.insert(physicalCameraId);
     return result.second;
 }
 
-bool CameraManagerGlobal::StatusAndHAL3Support::removeUnavailablePhysicalId(
+bool CameraManagerGlobal::Status::removeUnavailablePhysicalId(
         const std::string& physicalCameraId) {
     std::lock_guard<std::mutex> lock(mLock);
     auto count = unavailablePhysicalIds.erase(physicalCameraId);
     return count > 0;
 }
 
-std::set<std::string> CameraManagerGlobal::StatusAndHAL3Support::getUnavailablePhysicalIds() {
+std::set<std::string> CameraManagerGlobal::Status::getUnavailablePhysicalIds() {
     std::lock_guard<std::mutex> lock(mLock);
     return unavailablePhysicalIds;
 }
