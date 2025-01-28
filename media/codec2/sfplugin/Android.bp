@@ -55,6 +55,7 @@ cc_library_shared {
         "libSurfaceFlingerProperties",
         "aconfig_mediacodec_flags_c_lib",
         "android.media.codec-aconfig-cc",
+        "android.media.tv.flags-aconfig-cc",
     ],
 
     shared_libs: [
