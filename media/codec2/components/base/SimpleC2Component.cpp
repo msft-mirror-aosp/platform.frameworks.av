@@ -749,7 +749,9 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
                               size_t srcYStride, size_t srcUVStride,
                               size_t dstYStride, size_t dstUVStride,
                               uint32_t width, uint32_t height,
-                              CONV_FORMAT_T format) {
+                              CONV_FORMAT_T format, bool isNV12) {
+  // This function assumes that dstStride/width are even.
+  // The check for this is performed by the caller
   if (format != CONV_FORMAT_I420) {
     ALOGE("No support for semi-planar8 to P210. format is %d", format);
     return;
@@ -763,13 +765,26 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
     srcY += srcYStride;
   }
 
-  for (int32_t y = 0; y < (height + 1) / 2; ++y) {
-    for (int32_t x = 0; x < width; ++x) {
-      dstUV[x] = dstUV[dstUVStride + x] =
-          ((uint16_t)((double)srcUV[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
+  if (isNV12) {
+    for (int32_t y = 0; y < (height + 1) / 2; ++y) {
+        for (int32_t x = 0; x < width; x++) {
+            dstUV[x] = dstUV[dstUVStride + x] =
+                ((uint16_t)((double)srcUV[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
+        }
+        srcUV += srcUVStride;
+        dstUV += dstUVStride << 1;
     }
-    srcUV += srcUVStride;
-    dstUV += dstUVStride << 1;
+  } else { //NV21
+    for (int32_t y = 0; y < (height + 1) / 2; ++y) {
+        for (int32_t x = 0; x < width; x+=2) {
+            dstUV[x+1] = dstUV[dstUVStride + x + 1] =
+                ((uint16_t)((double)srcUV[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
+            dstUV[x] = dstUV[dstUVStride + x] =
+                ((uint16_t)((double)srcUV[x + 1] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
+        }
+        srcUV += srcUVStride;
+        dstUV += dstUVStride << 1;
+    }
   }
 }
 
