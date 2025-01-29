@@ -18,6 +18,8 @@
 #define LOG_TAG "AudioTestUtils"
 
 #include <android-base/file.h>
+#include <android/content/pm/IPackageManagerNative.h>
+#include <binder/IServiceManager.h>
 #include <system/audio_config.h>
 #include <utils/Log.h>
 
@@ -644,6 +646,28 @@ uint32_t AudioCapture::waitAndGetReceivedCbMarkerCount() const {
     return mReceivedCbMarkerCount.value_or(0);
 }
 
+status_t isAutomotivePlatform(bool* isAutomotive) {
+    const sp<IServiceManager> sm = defaultServiceManager();
+    if (sm == nullptr) {
+        ALOGE("%s: failed to retrieve defaultServiceManager", __func__);
+        return NO_INIT;
+    }
+    sp<IBinder> binder = sm->checkService(String16{"package_native"});
+    if (binder == nullptr) {
+        ALOGE("%s: failed to retrieve native package manager", __func__);
+        return NO_INIT;
+    }
+    *isAutomotive = false;
+    const auto pm = interface_cast<content::pm::IPackageManagerNative>(binder);
+    if (pm != nullptr) {
+        const auto status =
+                pm->hasSystemFeature(String16("android.hardware.type.automotive"), 0, isAutomotive);
+        return status.isOk() ? OK : status.transactionError();
+    }
+    ALOGE("%s: failed to cast to IPackageManagerNative", __func__);
+    return NO_INIT;
+}
+
 status_t listAudioPorts(std::vector<audio_port_v7>& portsVec) {
     int attempts = 5;
     status_t status;
@@ -673,34 +697,43 @@ status_t listAudioPorts(std::vector<audio_port_v7>& portsVec) {
     return status;
 }
 
-status_t getPortById(const audio_port_handle_t portId, audio_port_v7& port) {
+namespace {
+
+using PortPredicate = std::function<bool(const struct audio_port_v7& port)>;
+status_t getPort(PortPredicate pred, audio_port_v7& port) {
     std::vector<struct audio_port_v7> ports;
     status_t status = listAudioPorts(ports);
     if (status != OK) return status;
-    for (auto i = 0; i < ports.size(); i++) {
-        if (ports[i].id == portId) {
-            port = ports[i];
+    for (const auto& p : ports) {
+        if (pred(p)) {
+            port = p;
             return OK;
         }
     }
     return BAD_VALUE;
 }
 
+}  // namespace
+
+status_t getAnyPort(audio_port_role_t role, audio_port_type_t type, audio_port_v7& port) {
+    return getPort([&](const struct audio_port_v7& p) { return p.role == role && p.type == type; },
+                   port);
+}
+
+status_t getPortById(const audio_port_handle_t portId, audio_port_v7& port) {
+    return getPort([&](const struct audio_port_v7& p) { return p.id == portId; }, port);
+}
+
 status_t getPortByAttributes(audio_port_role_t role, audio_port_type_t type,
                              audio_devices_t deviceType, const std::string& address,
                              audio_port_v7& port) {
-    std::vector<struct audio_port_v7> ports;
-    status_t status = listAudioPorts(ports);
-    if (status != OK) return status;
-    for (auto i = 0; i < ports.size(); i++) {
-        if (ports[i].role == role && ports[i].type == type &&
-            ports[i].ext.device.type == deviceType &&
-            !strncmp(ports[i].ext.device.address, address.c_str(), AUDIO_DEVICE_MAX_ADDRESS_LEN)) {
-            port = ports[i];
-            return OK;
-        }
-    }
-    return BAD_VALUE;
+    return getPort(
+            [&](const struct audio_port_v7& p) {
+                return p.role == role && p.type == type && p.ext.device.type == deviceType &&
+                       !strncmp(p.ext.device.address, address.c_str(),
+                                AUDIO_DEVICE_MAX_ADDRESS_LEN);
+            },
+            port);
 }
 
 status_t listAudioPatches(std::vector<struct audio_patch>& patchesVec) {
