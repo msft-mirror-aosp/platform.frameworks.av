@@ -216,13 +216,13 @@ void computeFilterGainsAtTones(float captureDuration, int nPointFft, std::vector
     std::ifstream fin(argsR.mDumpFileName, std::ios::in | std::ios::binary);
     fin.read((char*)output.data(), totalFrameCount * sizeof(output[0]));
     fin.close();
-    PFFFT_Setup* handle = pffft_new_setup(nPointFft, PFFFT_REAL);
+    pffft::detail::PFFFT_Setup* handle = pffft_new_setup(nPointFft, pffft::detail::PFFFT_REAL);
     // ignore first few samples. This is to not analyse until audio track is re-routed to remote
     // submix source, also for the effect filter response to reach steady-state (priming / pruning
     // samples).
     int rerouteOffset = kPrimeDurationInSec * kSamplingFrequency;
     pffft_transform_ordered(handle, output.data() + rerouteOffset, fftOutput.data(), nullptr,
-                            PFFFT_FORWARD);
+                            pffft::detail::PFFFT_FORWARD);
     pffft_destroy_setup(handle);
     for (auto i = 0; i < binOffsets.size(); i++) {
         auto k = binOffsets[i];
@@ -295,8 +295,9 @@ TEST(AudioEffectTest, CheckEqualizerEffect) {
     generateMultiTone(centerFrequencies, kSamplingFrequency, kPlayBackDurationSec, kDefAmplitude,
                       input.data(), totalFrameCount);
     auto fftInput = pffft::AlignedVector<float>(kNPointFFT);
-    PFFFT_Setup* handle = pffft_new_setup(kNPointFFT, PFFFT_REAL);
-    pffft_transform_ordered(handle, input.data(), fftInput.data(), nullptr, PFFFT_FORWARD);
+    pffft::detail::PFFFT_Setup* handle = pffft_new_setup(kNPointFFT, pffft::detail::PFFFT_REAL);
+    pffft_transform_ordered(handle, input.data(), fftInput.data(), nullptr,
+                            pffft::detail::PFFFT_FORWARD);
     pffft_destroy_setup(handle);
     float inputMag[numBands];
     for (auto i = 0; i < numBands; i++) {
@@ -399,8 +400,9 @@ TEST(AudioEffectTest, CheckBassBoostEffect) {
     generateMultiTone(testFrequencies, kSamplingFrequency, kPlayBackDurationSec, kDefAmplitude,
                       input.data(), totalFrameCount);
     auto fftInput = pffft::AlignedVector<float>(kNPointFFT);
-    PFFFT_Setup* handle = pffft_new_setup(kNPointFFT, PFFFT_REAL);
-    pffft_transform_ordered(handle, input.data(), fftInput.data(), nullptr, PFFFT_FORWARD);
+    pffft::detail::PFFFT_Setup* handle = pffft_new_setup(kNPointFFT, pffft::detail::PFFFT_REAL);
+    pffft_transform_ordered(handle, input.data(), fftInput.data(), nullptr,
+                            pffft::detail::PFFFT_FORWARD);
     pffft_destroy_setup(handle);
     float inputMag[testFrequencies.size()];
     for (auto i = 0; i < testFrequencies.size(); i++) {
