@@ -192,6 +192,20 @@ cc_fuzz {
 }
 
 cc_fuzz {
+    name: "C2FuzzerAPVDec",
+    defaults: ["C2Fuzzer-defaults"],
+
+    cflags: [
+        "-DC2COMPONENTNAME=\"c2.android.apv.decoder\"",
+    ],
+
+    static_libs: [
+        "libopenapv",
+        "libcodec2_soft_apvdec",
+    ],
+}
+
+cc_fuzz {
     name: "C2FuzzerAacDec",
     defaults: ["C2Fuzzer-defaults-shipped"],
 
