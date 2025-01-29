@@ -303,6 +303,9 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     // input surface
     kParamIndexCaptureFrameRate, // input-surface, float
     kParamIndexStopTimeOffset, // input-surface, int64_t
+
+    // display processing token
+    kParamIndexDisplayProcessingToken, // int64_t
 };
 
 }
@@ -2854,6 +2857,16 @@ C2ENUM(C2PlatformConfig::encoding_quality_level_t, uint32_t,
     NONE = 0,
     S_HANDHELD = 1              // corresponds to VMAF=70
 );
+
+/**
+ * Display processing token.
+ *
+ * An int64 token specifying the display processing configuration for the frame.
+ * This value is passed to IGraphicBufferProducer via QueueBufferInput::setPictureProfileHandle().
+ */
+typedef C2StreamParam<C2Info, C2Int64Value, kParamIndexDisplayProcessingToken>
+        C2StreamDisplayProcessingToken;
+constexpr char C2_PARAMKEY_DISPLAY_PROCESSING_TOKEN[] = "display-processing-token";
 
 /**
  * Video Encoding Statistics Export
