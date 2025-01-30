@@ -4648,8 +4648,6 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
                           uid = static_cast<uid_t>(attr.uid);
                       });
             procState = getUidProcessState(uid);
-        } else if (flags::query_process_state()) {
-            procState = getUidProcessState(getClientUid());
         } else {
             procState = sCameraService->mUidPolicy->getProcState(getClientUid());
         }
