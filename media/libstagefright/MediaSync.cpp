@@ -209,7 +209,6 @@ status_t MediaSync::createInputSurface(
     BufferQueue::createBufferQueue(&bufferProducer, &bufferConsumer);
 
     sp<InputListener> listener(new InputListener(this));
-    IInterface::asBinder(bufferConsumer)->linkToDeath(listener);
     status_t status =
         bufferConsumer->consumerConnect(listener, false /* controlledByApp */);
     if (status == NO_ERROR) {

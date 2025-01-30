@@ -47,7 +47,7 @@ class IGraphicBufferProducer;
 // BufferQueue, where each buffer queued to the input is available to be
 // acquired by each of the outputs, and is able to be dequeued by the input
 // again only once all of the outputs have released it.
-class DeprecatedCamera3StreamSplitter : public BnConsumerListener {
+class DeprecatedCamera3StreamSplitter : public IConsumerListener {
   public:
     // Constructor
     DeprecatedCamera3StreamSplitter(bool useHalBufManager = false);

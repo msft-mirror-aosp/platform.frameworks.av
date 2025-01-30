@@ -591,9 +591,9 @@ TEST_P(Codec2VideoDecHidlTest, configureTunnel) {
     sp<IGraphicBufferConsumer> consumer;
     BufferQueue::createBufferQueue(&producer, &consumer);
 
-    class DummyConsumerListener : public BnConsumerListener {
+    class DummyConsumerListener : public IConsumerListener {
       public:
-        DummyConsumerListener() : BnConsumerListener() {}
+        DummyConsumerListener() : IConsumerListener() {}
         void onFrameAvailable(const BufferItem&) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
