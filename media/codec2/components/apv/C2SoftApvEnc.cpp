@@ -1177,6 +1177,16 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
     number_of_frame_info = 1;  // The real-time encoding on the device is assumed to be 1.
 
     std::vector<uint8_t> csdData;
+
+    //TODO(b/392976813): These 4 lines need to be removed once test data are fixed.
+    csdData.push_back((uint8_t)0x0);
+    csdData.push_back((uint8_t)0x0);
+    csdData.push_back((uint8_t)0x0);
+    csdData.push_back((uint8_t)0x0);
+
+    //TODO(b/392976819) This need to be removed once OpenAPV is fixed.
+    bit_depth_minus8 = 2;
+
     csdData.push_back((uint8_t)0x1);
     csdData.push_back(number_of_configuration_entry);
 
@@ -1197,8 +1207,8 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
             csdData.push_back((uint8_t)((frame_height_minus1 >> 16) & 0xff));
             csdData.push_back((uint8_t)((frame_height_minus1 >> 8) & 0xff));
             csdData.push_back((uint8_t)(frame_height_minus1 & 0xff));
-            csdData.push_back((uint8_t)(((chroma_format_idc << 4) & 0xf0) |
-                                      (bit_depth_minus8 & 0xf)));
+            csdData.push_back((uint8_t)(((bit_depth_minus8 << 4) & 0xf0) |
+                                      (chroma_format_idc & 0xf)));
             csdData.push_back((uint8_t)(capture_time_distance));
             if (color_description_present_flag) {
                 csdData.push_back(color_primaries);
