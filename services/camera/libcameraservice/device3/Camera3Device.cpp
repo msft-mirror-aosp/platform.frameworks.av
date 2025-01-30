@@ -110,6 +110,8 @@ Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraS
         mOperatingMode(NO_MODE),
         mIsConstrainedHighSpeedConfiguration(false),
         mIsCompositeJpegRDisabled(false),
+        mIsCompositeHeicDisabled(false),
+        mIsCompositeHeicUltraHDRDisabled(false),
         mStatus(STATUS_UNINITIALIZED),
         mStatusWaiters(0),
         mUsePartialResult(false),

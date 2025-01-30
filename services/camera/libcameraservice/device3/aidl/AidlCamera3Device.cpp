@@ -215,6 +215,8 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
     }
     mSupportNativeZoomRatio = manager->supportNativeZoomRatio(mId);
     mIsCompositeJpegRDisabled = manager->isCompositeJpegRDisabled(mId);
+    mIsCompositeHeicDisabled = manager->isCompositeHeicDisabled(mId);
+    mIsCompositeHeicUltraHDRDisabled = manager->isCompositeHeicUltraHDRDisabled(mId);
 
     std::vector<std::string> physicalCameraIds;
     bool isLogical = manager->isLogicalCamera(mId, &physicalCameraIds);

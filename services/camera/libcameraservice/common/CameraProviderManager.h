@@ -286,6 +286,16 @@ public:
     bool isCompositeJpegRDisabled(const std::string &id) const;
 
     /**
+     * Return true if the camera device has no composite HEIC support.
+     */
+    bool isCompositeHeicDisabled(const std::string &id) const;
+
+    /**
+     * Return true if the camera device has no composite HEIC Ultra HDR support.
+     */
+    bool isCompositeHeicUltraHDRDisabled(const std::string &id) const;
+
+    /**
      * Return the resource cost of this camera device
      */
     status_t getResourceCost(const std::string &id,
@@ -635,6 +645,7 @@ private:
             bool hasFlashUnit() const { return mHasFlashUnit; }
             bool supportNativeZoomRatio() const { return mSupportNativeZoomRatio; }
             bool isCompositeJpegRDisabled() const { return mCompositeJpegRDisabled; }
+            bool isCompositeHeicDisabled() const { return mCompositeHeicDisabled; }
             bool isCompositeHeicUltraHDRDisabled() const { return mCompositeHeicUltraHDRDisabled; }
             virtual status_t setTorchMode(bool enabled) = 0;
             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
@@ -693,14 +704,16 @@ private:
                     mTorchMaximumStrengthLevel(0), mTorchDefaultStrengthLevel(0),
                     mHasFlashUnit(false), mSupportNativeZoomRatio(false),
                     mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false),
-                    mCompositeHeicUltraHDRDisabled(false) {}
+                    mCompositeHeicDisabled(false), mCompositeHeicUltraHDRDisabled(false) {}
             virtual ~DeviceInfo() {}
         protected:
 
             bool mHasFlashUnit; // const after constructor
             bool mSupportNativeZoomRatio; // const after constructor
             const std::vector<std::string>& mPublicCameraIds;
-            bool mCompositeJpegRDisabled, mCompositeHeicUltraHDRDisabled;
+            bool mCompositeJpegRDisabled;
+            bool mCompositeHeicDisabled;
+            bool mCompositeHeicUltraHDRDisabled;
         };
         std::vector<std::unique_ptr<DeviceInfo>> mDevices;
         std::unordered_set<std::string> mUniqueCameraIds;
@@ -909,6 +922,8 @@ private:
     ProviderInfo::DeviceInfo* findDeviceInfoLocked(const std::string& id) const;
 
     bool isCompositeJpegRDisabledLocked(const std::string &id) const;
+    bool isCompositeHeicDisabledLocked(const std::string &id) const;
+    bool isCompositeHeicUltraHDRDisabledLocked(const std::string &id) const;
 
     // Map external providers to USB devices in order to handle USB hotplug
     // events for lazy HALs

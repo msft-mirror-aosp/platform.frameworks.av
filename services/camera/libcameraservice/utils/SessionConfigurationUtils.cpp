@@ -696,16 +696,18 @@ void mapStreamInfo(const OutputStreamInfo &streamInfo,
     stream->useCase = static_cast<StreamUseCases>(streamInfo.streamUseCase);
 }
 
-binder::Status mapStream(const OutputStreamInfo& streamInfo, bool isCompositeJpegRDisabled,
+binder::Status mapStream(
+        const OutputStreamInfo& streamInfo, bool isCompositeJpegRDisabled,
+        bool isCompositeHeicDisabled, bool isCompositeHeicUltraHDRDisabled,
         const CameraMetadata& deviceInfo, camera_stream_rotation_t rotation,
-        size_t* streamIdx/*out*/, const std::string &physicalId, int32_t groupId,
+        size_t* streamIdx /*out*/, const std::string& physicalId, int32_t groupId,
         const std::string& logicalCameraId,
-        aidl::android::hardware::camera::device::StreamConfiguration &streamConfiguration /*out*/,
-        bool *earlyExit /*out*/) {
+        aidl::android::hardware::camera::device::StreamConfiguration& streamConfiguration /*out*/,
+        bool* earlyExit /*out*/) {
     bool isDepthCompositeStream =
             camera3::DepthCompositeStream::isDepthCompositeStreamInfo(streamInfo);
-    bool isHeicCompositeStream =
-            camera3::HeicCompositeStream::isHeicCompositeStreamInfo(streamInfo);
+    bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStreamInfo(
+            streamInfo, isCompositeHeicDisabled, isCompositeHeicUltraHDRDisabled);
     bool isJpegRCompositeStream =
             camera3::JpegRCompositeStream::isJpegRCompositeStreamInfo(streamInfo) &&
             !isCompositeJpegRDisabled;
@@ -757,16 +759,14 @@ binder::Status mapStream(const OutputStreamInfo& streamInfo, bool isCompositeJpe
     return binder::Status::ok();
 }
 
-binder::Status
-convertToHALStreamCombination(
-        const SessionConfiguration& sessionConfiguration,
-        const std::string &logicalCameraId, const CameraMetadata &deviceInfo,
-        bool isCompositeJpegRDisabled,
-        metadataGetter getMetadata, const std::vector<std::string> &physicalCameraIds,
-        aidl::android::hardware::camera::device::StreamConfiguration &streamConfiguration,
-        bool overrideForPerfClass, metadata_vendor_id_t vendorTagId,
-        bool checkSessionParams, const std::vector<int32_t>& additionalKeys,
-        bool *earlyExit) {
+binder::Status convertToHALStreamCombination(
+        const SessionConfiguration& sessionConfiguration, const std::string& logicalCameraId,
+        const CameraMetadata& deviceInfo, bool isCompositeJpegRDisabled,
+        bool isCompositeHeicDisabled, bool isCompositeHeicUltraHDRDisabled,
+        metadataGetter getMetadata, const std::vector<std::string>& physicalCameraIds,
+        aidl::android::hardware::camera::device::StreamConfiguration& streamConfiguration,
+        bool overrideForPerfClass, metadata_vendor_id_t vendorTagId, bool checkSessionParams,
+        const std::vector<int32_t>& additionalKeys, bool* earlyExit) {
     using SensorPixelMode = aidl::android::hardware::camera::metadata::SensorPixelMode;
     auto operatingMode = sessionConfiguration.getOperatingMode();
     binder::Status res = checkOperatingMode(operatingMode, deviceInfo,
@@ -907,9 +907,10 @@ convertToHALStreamCombination(
                                 "Deferred surface sensor pixel modes not valid");
             }
             streamInfo.streamUseCase = streamUseCase;
-            auto status = mapStream(streamInfo, isCompositeJpegRDisabled, deviceInfo,
-                    camera3::CAMERA_STREAM_ROTATION_0, &streamIdx, physicalCameraId, groupId,
-                    logicalCameraId, streamConfiguration, earlyExit);
+            auto status = mapStream(streamInfo, isCompositeJpegRDisabled, isCompositeHeicDisabled,
+                                    isCompositeHeicUltraHDRDisabled, deviceInfo,
+                                    camera3::CAMERA_STREAM_ROTATION_0, &streamIdx, physicalCameraId,
+                                    groupId, logicalCameraId, streamConfiguration, earlyExit);
             if (*earlyExit || !status.isOk()) {
                 return status;
             }
@@ -933,10 +934,11 @@ convertToHALStreamCombination(
             if (!res.isOk()) return res;
 
             if (!isStreamInfoValid) {
-                auto status = mapStream(streamInfo, isCompositeJpegRDisabled, deviceInfo,
-                                        static_cast<camera_stream_rotation_t>(it.getRotation()),
-                                        &streamIdx, physicalCameraId, groupId, logicalCameraId,
-                                        streamConfiguration, earlyExit);
+                auto status = mapStream(
+                        streamInfo, isCompositeJpegRDisabled, isCompositeHeicDisabled,
+                        isCompositeHeicUltraHDRDisabled, deviceInfo,
+                        static_cast<camera_stream_rotation_t>(it.getRotation()), &streamIdx,
+                        physicalCameraId, groupId, logicalCameraId, streamConfiguration, earlyExit);
                 if (*earlyExit || !status.isOk()) {
                     return status;
                 }
