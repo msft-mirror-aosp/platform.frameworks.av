@@ -133,6 +133,8 @@ public:
 
     virtual const ::com::android::media::permission::IPermissionProvider&
             getPermissionProvider() = 0;
+
+    virtual bool isHardeningOverrideEnabled() const = 0;
 };
 
 class IAfThreadBase : public virtual RefBase {

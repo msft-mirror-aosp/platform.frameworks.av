@@ -2904,4 +2904,9 @@ Status AudioPolicyService::getMmapPolicyForDevice(
             mAudioPolicyManager->getMmapPolicyForDevice(policyType, policyInfo));
 }
 
+Status AudioPolicyService::setEnableHardening(bool shouldEnable) {
+    mShouldEnableHardening.store(shouldEnable);
+    return Status::ok();
+}
+
 } // namespace android

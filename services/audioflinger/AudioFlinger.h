@@ -421,6 +421,8 @@ private:
 
     const ::com::android::media::permission::IPermissionProvider& getPermissionProvider() final;
 
+    bool isHardeningOverrideEnabled() const final;
+
     // ---- end of IAfThreadCallback interface
 
     /* List available audio ports and their attributes */

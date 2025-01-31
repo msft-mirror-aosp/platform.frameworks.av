@@ -337,10 +337,13 @@ public:
             AudioMMapPolicyType policyType,
             AudioMMapPolicyInfo* policyInfo) override;
 
+    binder::Status setEnableHardening(bool shouldEnable) override;
+
     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
 
     // -- IAudioPolicyLocal methods
     const IPermissionProvider& getPermissionProvider() const override;
+    bool isHardeningOverrideEnabled() const override { return mShouldEnableHardening.load(); };
 
     // IBinder::DeathRecipient
     virtual     void        binderDied(const wp<IBinder>& who);
@@ -1139,6 +1142,7 @@ private:
     DestroyAudioPolicyManagerInstance mDestroyAudioPolicyManager;
     std::unique_ptr<media::UsecaseValidator> mUsecaseValidator;
     const sp<NativePermissionController> mPermissionController;
+    std::atomic<bool> mShouldEnableHardening;
 };
 
 } // namespace android
