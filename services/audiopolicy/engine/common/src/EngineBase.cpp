@@ -125,6 +125,18 @@ std::string EngineBase::getProductStrategyName(product_strategy_t id) const {
     return "";
 }
 
+engineConfig::ParsingResult EngineBase::parseAndSetDefaultConfiguration() {
+    mProductStrategies.clear();
+    mVolumeGroups.clear();
+    engineConfig::Config config = gDefaultEngineConfig;
+    android::status_t ret = engineConfig::parseLegacyVolumes(config.volumeGroups);
+    if (ret != NO_ERROR) {
+        ALOGD("%s: No legacy volume group found, using default music group", __FUNCTION__);
+        config.volumeGroups = gDefaultVolumeGroups;
+    }
+    return processParsingResult({std::make_unique<engineConfig::Config>(config), 1});
+}
+
 engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
         const media::audio::common::AudioHalEngineConfig& aidlConfig, bool)
 {
@@ -154,10 +166,7 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
             engineConfig::parse(filePath.c_str(), isConfigurable) : engineConfig::ParsingResult{};
     if (result.parsedConfig == nullptr) {
         ALOGD("%s: No configuration found, using default matching phone experience.", __FUNCTION__);
-        engineConfig::Config config = gDefaultEngineConfig;
-        android::status_t ret = engineConfig::parseLegacyVolumes(config.volumeGroups);
-        result = {std::make_unique<engineConfig::Config>(config),
-                  static_cast<size_t>(ret == NO_ERROR ? 0 : 1)};
+        return parseAndSetDefaultConfiguration();
     } else {
         // Append for internal use only volume groups (e.g. rerouting/patch)
         result.parsedConfig->volumeGroups.insert(
