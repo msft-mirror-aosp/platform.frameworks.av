@@ -433,48 +433,42 @@ protected:
     }
 
     template <typename T>
-    static status_t writeToParcel(
-            const char *name, const T& value, Parcel *parcel) = delete;
+    static status_t writeToParcel(std::string_view name, const T& value, Parcel *parcel) = delete;
     template <> // static
-    status_t writeToParcel(
-            const char *name, const int32_t& value, Parcel *parcel) {
-        return parcel->writeCString(name)
+    status_t writeToParcel(std::string_view name, const int32_t& value, Parcel *parcel) {
+        return parcel->writeString8(name.data(), name.length())
                ?: parcel->writeInt32(get_type_of<int32_t>::value)
                ?: parcel->writeInt32(value);
     }
     template <> // static
-    status_t writeToParcel(
-            const char *name, const int64_t& value, Parcel *parcel) {
-        return parcel->writeCString(name)
+    status_t writeToParcel(std::string_view name, const int64_t& value, Parcel *parcel) {
+        return parcel->writeString8(name.data(), name.length())
                ?: parcel->writeInt32(get_type_of<int64_t>::value)
                ?: parcel->writeInt64(value);
     }
     template <> // static
-    status_t writeToParcel(
-            const char *name, const double& value, Parcel *parcel) {
-        return parcel->writeCString(name)
+    status_t writeToParcel(std::string_view name, const double& value, Parcel *parcel) {
+        return parcel->writeString8(name.data(), name.length())
                ?: parcel->writeInt32(get_type_of<double>::value)
                ?: parcel->writeDouble(value);
     }
-    template <> // static
-    status_t writeToParcel(
-            const char *name, const std::pair<int64_t, int64_t>& value, Parcel *parcel) {
-        return parcel->writeCString(name)
+    template <>  // static
+    status_t writeToParcel(std::string_view name, const std::pair<int64_t, int64_t>& value,
+                           Parcel* parcel) {
+        return parcel->writeString8(name.data(), name.length())
                ?: parcel->writeInt32(get_type_of< std::pair<int64_t, int64_t>>::value)
                ?: parcel->writeInt64(value.first)
                ?: parcel->writeInt64(value.second);
     }
     template <> // static
-    status_t writeToParcel(
-            const char *name, const std::string& value, Parcel *parcel) {
-        return parcel->writeCString(name)
+    status_t writeToParcel(std::string_view name, const std::string& value, Parcel *parcel) {
+        return parcel->writeString8(name.data(), name.length())
                ?: parcel->writeInt32(get_type_of<std::string>::value)
-               ?: parcel->writeCString(value.c_str());
+               ?: parcel->writeString8(value.data(), value.length());
     }
     template <> // static
-    status_t writeToParcel(
-            const char *name, const std::monostate&, Parcel *parcel) {
-        return parcel->writeCString(name)
+    status_t writeToParcel(std::string_view name, const std::monostate&, Parcel *parcel) {
+        return parcel->writeString8(name.data(), name.length())
                ?: parcel->writeInt32(get_type_of<std::monostate>::value);
     }
 
@@ -802,6 +796,10 @@ public:
             mName = name;
         }
 
+        void setName(std::string name) {
+            mName = std::move(name);
+        }
+
         bool isNamed(const char *name) const {
             return mName == name;
         }
@@ -848,7 +846,7 @@ public:
 
         status_t writeToParcel(Parcel *parcel) const {
             return std::visit([this, parcel](auto &value) {
-                    return BaseItem::writeToParcel(mName.c_str(), value, parcel);}, mElem);
+                    return BaseItem::writeToParcel(mName, value, parcel);}, mElem);
         }
 
         void toStringBuffer(char *buffer, size_t length) const {

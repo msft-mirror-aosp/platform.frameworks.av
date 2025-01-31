@@ -60,15 +60,13 @@ status_t mediametrics::Item::readFromParcel(const Parcel& data) {
 }
 
 status_t mediametrics::Item::readFromParcel0(const Parcel& data) {
-    const char *s = data.readCString();
-    mKey = s == nullptr ? "" : s;
+    mKey = std::string{data.readString8()};
     int32_t pid, uid;
     status_t status = data.readInt32(&pid) ?: data.readInt32(&uid);
     if (status != NO_ERROR) return status;
     mPid = (pid_t)pid;
     mUid = (uid_t)uid;
-    s = data.readCString();
-    mPkgName = s == nullptr ? "" : s;
+    mPkgName = std::string(data.readString8());
     int32_t count;
     int64_t version, timestamp;
     status = data.readInt64(&version) ?: data.readInt64(&timestamp) ?: data.readInt32(&count);
@@ -103,10 +101,10 @@ status_t mediametrics::Item::writeToParcel(Parcel *data) const {
 
 status_t mediametrics::Item::writeToParcel0(Parcel *data) const {
     status_t status =
-        data->writeCString(mKey.c_str())
+        data->writeString8(String8{mKey})
         ?: data->writeInt32(mPid)
         ?: data->writeInt32(mUid)
-        ?: data->writeCString(mPkgName.c_str())
+        ?: data->writeString8(String8{mPkgName})
         ?: data->writeInt64(mPkgVersionCode)
         ?: data->writeInt64(mTimestamp);
     if (status != NO_ERROR) return status;
@@ -268,8 +266,7 @@ status_t mediametrics::Item::readFromByteString(const char *bufferptr, size_t le
 
 status_t mediametrics::Item::Prop::readFromParcel(const Parcel& data)
 {
-    const char *key = data.readCString();
-    if (key == nullptr) return BAD_VALUE;
+    const std::string key {data.readString8()};
     int32_t type;
     status_t status = data.readInt32(&type);
     if (status != NO_ERROR) return status;
@@ -293,9 +290,7 @@ status_t mediametrics::Item::Prop::readFromParcel(const Parcel& data)
         mElem = value;
     } break;
     case mediametrics::kTypeCString: {
-        const char *s = data.readCString();
-        if (s == nullptr) return BAD_VALUE;
-        mElem = s;
+        mElem = std::string{data.readString8()};
     } break;
     case mediametrics::kTypeRate: {
         std::pair<int64_t, int64_t> rate;
