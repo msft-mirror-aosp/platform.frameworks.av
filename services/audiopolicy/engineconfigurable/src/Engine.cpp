@@ -31,7 +31,6 @@
 #include <EngineConfig.h>
 #include <policy.h>
 #include <AudioIODescriptorInterface.h>
-#include <ParameterManagerWrapper.h>
 #include <media/AudioContainers.h>
 
 #include <media/TypeConverter.h>
@@ -79,7 +78,7 @@ status_t Engine::loadFromHalConfigWithFallback(
         return loadFromXmlConfigWithFallback(engineConfig::DEFAULT_PATH);
     }
 #endif
-    mPolicyParameterMgr = new ParameterManagerWrapper();
+    mPolicyParameterMgr = std::make_unique<ParameterManagerWrapper>();
     auto capResult = capEngineConfig::convert(aidlConfig);
     if (capResult.parsedConfig == nullptr) {
         ALOGE("%s CapEngine Config invalid", __func__);
@@ -110,7 +109,7 @@ status_t Engine::loadFromHalConfigWithFallback(
 
 status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath)
 {
-    mPolicyParameterMgr = new ParameterManagerWrapper(/* useLegacyVendorFile= */ true);
+    mPolicyParameterMgr = std::make_unique<ParameterManagerWrapper>(true /*useLegacyVendorFile*/);
     status_t status = loadWithFallback(xmlFilePath);
     std::string error;
     if (mPolicyParameterMgr->start(error) != NO_ERROR) {
