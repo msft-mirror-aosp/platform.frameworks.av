@@ -889,7 +889,8 @@ Track::Track(
             float volume,
             bool muted)
     :
-    AfPlaybackCommon(*this, volume, muted, attr, attributionSource, type != TYPE_PATCH),
+    AfPlaybackCommon(*this, *thread->afThreadCallback(), volume, muted,
+                     attr, attributionSource, type != TYPE_PATCH),
     TrackBase(thread, client, attr, sampleRate, format, channelMask, frameCount,
                   // TODO: Using unsecurePointer() has some associated security pitfalls
                   //       (see declaration for details).
@@ -2331,7 +2332,8 @@ OutputTrack::OutputTrack(
             size_t frameCount,
             const AttributionSourceState& attributionSource)
     :
-    AfPlaybackCommon(*this,/* volume= */ 0.0f, /* muted= */ false,
+    AfPlaybackCommon(*this, *playbackThread->afThreadCallback(), /* volume= */ 0.0f,
+                     /* muted= */ false,
                      AUDIO_ATTRIBUTES_INITIALIZER, attributionSource,
                      /* shouldPlaybackHarden= */ false),
     Track(playbackThread, NULL, AUDIO_STREAM_PATCH,
@@ -2642,8 +2644,10 @@ PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
                                                      float speed,
                                                      float volume,
                                                      bool muted)
-    : AfPlaybackCommon(*this, volume, muted, AUDIO_ATTRIBUTES_INITIALIZER,
-                      audioServerAttributionSource(getpid()), /* shouldPlaybackHarden= */ false),
+    : AfPlaybackCommon(*this, *playbackThread->afThreadCallback(), volume, muted,
+                       AUDIO_ATTRIBUTES_INITIALIZER,
+                       audioServerAttributionSource(getpid()),
+                       /* shouldPlaybackHarden= */ false),
     Track(playbackThread, NULL, streamType,
               AUDIO_ATTRIBUTES_INITIALIZER,
               sampleRate, format, channelMask, frameCount,
@@ -3670,7 +3674,10 @@ void PassthruPatchRecord::releaseBuffer(
 // ----------------------------------------------------------------------------
 // AfPlaybackCommon
 
-static bool shouldExemptFromOpControl(audio_usage_t usage) {
+static bool shouldExemptFromOpControl(audio_usage_t usage, IAfThreadCallback& cb) {
+    if (cb.isHardeningOverrideEnabled()) {
+        return false;
+    }
     // TODO(b/389136997) this should be swapped to another flag when it is added, but use this flag
     // for now since it is already in teamfood
     if (hardening_strict()) {
@@ -3685,14 +3692,14 @@ static bool shouldExemptFromOpControl(audio_usage_t usage) {
     }
 }
 
-AfPlaybackCommon::AfPlaybackCommon(IAfTrackBase& self, float volume, bool muted,
-                                 const audio_attributes_t& attr,
-                                 const AttributionSourceState& attributionSource,
-                                 bool shouldPlaybackHarden)
+AfPlaybackCommon::AfPlaybackCommon(IAfTrackBase& self, IAfThreadCallback& threadCb, float volume,
+                                   bool muted, const audio_attributes_t& attr,
+                                   const AttributionSourceState& attributionSource,
+                                   bool shouldPlaybackHarden)
     : mSelf(self),
       mMutedFromPort(muted),
       mVolume(volume),
-      mIsExemptedFromOpControl(shouldExemptFromOpControl(attr.usage)) {
+      mIsExemptedFromOpControl(shouldExemptFromOpControl(attr.usage, threadCb)) {
     using AppOpsManager::OP_CONTROL_AUDIO_PARTIAL;
     using media::permission::Ops;
     using media::permission::skipOpsForUid;
@@ -3804,7 +3811,8 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
         audio_port_handle_t portId,
         float volume,
         bool muted)
-    :   AfPlaybackCommon(*this, volume, muted, attr, attributionSource),
+    :   AfPlaybackCommon(*this, *thread->afThreadCallback(),
+                         volume, muted, attr, attributionSource),
         TrackBase(thread, NULL, attr, sampleRate, format,
                   channelMask, (size_t)0 /* frameCount */,
                   nullptr /* buffer */, (size_t)0 /* bufferSize */,

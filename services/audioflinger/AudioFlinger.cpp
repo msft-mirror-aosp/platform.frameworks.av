@@ -2400,6 +2400,12 @@ const IPermissionProvider& AudioFlinger::getPermissionProvider() {
     return mAudioPolicyServiceLocal.load()->getPermissionProvider();
 }
 
+bool AudioFlinger::isHardeningOverrideEnabled() const {
+    // This is inited as part of service construction, prior to binder registration,
+    // so it should always be non-null.
+    return mAudioPolicyServiceLocal.load()->isHardeningOverrideEnabled();
+}
+
 // removeClient_l() must be called with AudioFlinger::clientMutex() held
 void AudioFlinger::removeClient_l(pid_t pid)
 {
