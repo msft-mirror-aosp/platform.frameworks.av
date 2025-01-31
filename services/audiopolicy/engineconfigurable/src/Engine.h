@@ -33,7 +33,7 @@ class VolumeProfile;
 class Engine : public EngineBase, AudioPolicyPluginInterface
 {
 public:
-    Engine();
+    Engine() {}
     virtual ~Engine() = default;
 
     template <class RequestedInterface>
