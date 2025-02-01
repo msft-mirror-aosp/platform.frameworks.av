@@ -41,6 +41,7 @@ flag {
     bug: "367667349"
 }
 
+# unused
 flag {
     name: "bluetooth_mac_address_anonymization"
     namespace: "media_audio"

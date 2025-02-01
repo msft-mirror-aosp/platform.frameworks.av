@@ -1658,11 +1658,7 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     }
 
     if (!profile->canOpenNewIo()) {
-        if (!com::android::media::audioserver::direct_track_reprioritization()) {
-            ALOGW("%s profile %s can't open new output maxOpenCount reached", __func__,
-                  profile->getName().c_str());
-            return NAME_NOT_FOUND;
-        } else if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) != 0) {
+        if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) != 0) {
             // MMAP gracefully handles lack of an exclusive track resource by mixing
             // above the audio framework. For AAudio to know that the limit is reached,
             // return an error.
