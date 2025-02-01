@@ -265,6 +265,14 @@ flag {
     is_exported: true
 }
 
+flag {
+    name: "unify_absolute_volume_management"
+    namespace: "media_audio"
+    description: "Unify absolute volume management in AudioService for A2DP, LEA, SCO, ASHA"
+    is_exported: true
+    bug: "393657380"
+}
+
 # TODO remove
 flag {
     name: "volume_ringer_api_hardening"
