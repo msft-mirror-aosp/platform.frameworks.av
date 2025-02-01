@@ -741,9 +741,6 @@ protected:
                 // Updated by updateSuspendedSessions_l() only.
                 KeyedVector< audio_session_t, KeyedVector< int, sp<SuspendedSessionDesc> > >
                                         mSuspendedSessions;
-                // TODO: add comment and adjust size as needed
-                static const size_t     kLogSize = 4 * 1024;
-                sp<NBLog::Writer>       mNBLogWriter;
                 bool                    mSystemReady;
 
     // NO_THREAD_SAFETY_ANALYSIS - mTimestamp and mTimestampVerifier should be
@@ -1550,9 +1547,6 @@ protected:
     sp<NBAIO_Sink>          mNormalSink;
 
     uint32_t                mScreenState;   // cached copy of gScreenState
-    // TODO: add comment and adjust size as needed
-    static const size_t     kFastMixerLogSize = 8 * 1024;
-    sp<NBLog::Writer>       mFastMixerNBLogWriter;
 
     // Downstream patch latency, available if mDownstreamLatencyStatMs.getN() > 0.
     audio_utils::Statistics<double> mDownstreamLatencyStatMs{0.999};

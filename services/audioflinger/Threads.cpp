@@ -2188,7 +2188,6 @@ PlaybackThread::PlaybackThread(const sp<IAfThreadCallback>& afThreadCallback,
 {
     snprintf(mThreadName, kThreadNameLength, "AudioOut_%X", id);
     mFlagsAsString = toString(output->flags);
-    mNBLogWriter = afThreadCallback->newWriter_l(kLogSize, mThreadName);
 
     // Assumes constructor is called by AudioFlinger with its mutex() held, but
     // it would be safer to explicitly pass initial masterVolume/masterMute as
@@ -2248,7 +2247,6 @@ PlaybackThread::PlaybackThread(const sp<IAfThreadCallback>& afThreadCallback,
 
 PlaybackThread::~PlaybackThread()
 {
-    mAfThreadCallback->unregisterWriter(mNBLogWriter);
     free(mSinkBuffer);
     free(mMixerBuffer);
     free(mEffectBuffer);
@@ -4000,8 +3998,6 @@ void PlaybackThread::detachAuxEffect_l(int effectId)
 bool PlaybackThread::threadLoop()
 NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
 {
-    aflog::setThreadWriter(mNBLogWriter.get());
-
     if (mType == SPATIALIZER) {
         const pid_t tid = getTid();
         if (tid == -1) {  // odd: we are here, we must be a running thread.
@@ -4065,15 +4061,6 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
 
     acquireWakeLock();
 
-    // mNBLogWriter logging APIs can only be called by a single thread, typically the
-    // thread associated with this PlaybackThread.
-    // If you want to share the mNBLogWriter with other threads (for example, binder threads)
-    // then all such threads must agree to hold a common mutex before logging.
-    // So if you need to log when mutex is unlocked, set logString to a non-NULL string,
-    // and then that string will be logged at the next convenient opportunity.
-    // See reference to logString below.
-    const char *logString = NULL;
-
     // Estimated time for next buffer to be written to hal. This is used only on
     // suspended mode (for now) to help schedule the wait time until next iteration.
     nsecs_t timeLoopNextNs = 0;
@@ -4085,10 +4072,6 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
     // loopCount is used for statistics and diagnostics.
     for (int64_t loopCount = 0; !exitPending(); ++loopCount)
     {
-        // Log merge requests are performed during AudioFlinger binder transactions, but
-        // that does not cover audio playback. It's requested here for that reason.
-        mAfThreadCallback->requestLogMerge();
-
         cpuStats.sample(myName);
 
         Vector<sp<IAfEffectChain>> effectChains;
@@ -4151,13 +4134,6 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
             processConfigEvents_l();
             if (mCheckOutputStageEffects.load()) {
                 continue;
-            }
-
-            // See comment at declaration of logString for why this is done under mutex()
-            if (logString != NULL) {
-                mNBLogWriter->logTimestamp();
-                mNBLogWriter->log(logString);
-                logString = NULL;
             }
 
             collectTimestamps_l();
@@ -5283,18 +5259,11 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
         state->mColdFutexAddr = &mFastMixerFutex;
         state->mColdGen++;
         state->mDumpState = &mFastMixerDumpState;
-        mFastMixerNBLogWriter = afThreadCallback->newWriter_l(kFastMixerLogSize, "FastMixer");
-        state->mNBLogWriter = mFastMixerNBLogWriter.get();
         sq->end();
         {
             audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastMixer->getTid());
             sq->push(FastMixerStateQueue::BLOCK_UNTIL_PUSHED);
         }
-
-        NBLog::thread_info_t info;
-        info.id = mId;
-        info.type = NBLog::FASTMIXER;
-        mFastMixerNBLogWriter->log<NBLog::EVENT_THREAD_INFO>(info);
 
         // start the fast mixer
         mFastMixer->run("FastMixer", PRIORITY_URGENT_AUDIO);
@@ -5371,7 +5340,6 @@ MixerThread::~MixerThread()
         }
 #endif
     }
-    mAfThreadCallback->unregisterWriter(mFastMixerNBLogWriter);
     delete mAudioMixer;
 }
 
@@ -8276,7 +8244,6 @@ RecordThread::RecordThread(const sp<IAfThreadCallback>& afThreadCallback,
 {
     snprintf(mThreadName, kThreadNameLength, "AudioIn_%X", id);
     mFlagsAsString = toString(input->flags);
-    mNBLogWriter = afThreadCallback->newWriter_l(kLogSize, mThreadName);
 
     if (mInput->audioHwDev != nullptr) {
         mIsMsdDevice = strcmp(
@@ -8385,9 +8352,6 @@ RecordThread::RecordThread(const sp<IAfThreadCallback>& afThreadCallback,
 #ifdef TEE_SINK
         // FIXME
 #endif
-        mFastCaptureNBLogWriter =
-                afThreadCallback->newWriter_l(kFastCaptureLogSize, "FastCapture");
-        state->mNBLogWriter = mFastCaptureNBLogWriter.get();
         sq->end();
         {
             audio_utils::mutex::scoped_queue_wait_check queueWaitCheck(mFastCapture->getTid());
@@ -8433,8 +8397,6 @@ RecordThread::~RecordThread()
         }
         mFastCapture.clear();
     }
-    mAfThreadCallback->unregisterWriter(mFastCaptureNBLogWriter);
-    mAfThreadCallback->unregisterWriter(mNBLogWriter);
     free(mRsmpInBuffer);
 }
 

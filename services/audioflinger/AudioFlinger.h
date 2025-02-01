@@ -396,12 +396,6 @@ private:
             IAfEffectChain* srcChain = nullptr) final
             REQUIRES(mutex(), audio_utils::ThreadBase_Mutex);
 
-    // This is a helper that is called during incoming binder calls.
-    // Requests media.log to start merging log buffers
-    void requestLogMerge() final;
-    sp<NBLog::Writer> newWriter_l(size_t size, const char *name) final REQUIRES(mutex());
-    void unregisterWriter(const sp<NBLog::Writer>& writer) final;
-
     sp<audioflinger::SyncEvent> createSyncEvent(AudioSystem::sync_event_t type,
             audio_session_t triggerSession,
             audio_session_t listenerSession,
@@ -521,35 +515,6 @@ private:
         const sp<media::IAudioFlingerClient> mAudioFlingerClient;
         const std::unique_ptr<media::psh_utils::Token> mClientToken;
     };
-
-    // --- MediaLogNotifier ---
-    // Thread in charge of notifying MediaLogService to start merging.
-    // Receives requests from AudioFlinger's binder activity. It is used to reduce the amount of
-    // binder calls to MediaLogService in case of bursts of AudioFlinger binder calls.
-    class MediaLogNotifier : public Thread {
-    public:
-        MediaLogNotifier();
-
-        // Requests a MediaLogService notification. It's ignored if there has recently been another
-        void requestMerge();
-    private:
-        // Every iteration blocks waiting for a request, then interacts with MediaLogService to
-        // start merging.
-        // As every MediaLogService binder call is expensive, once it gets a request it ignores the
-        // following ones for a period of time.
-        virtual bool threadLoop() override;
-
-        bool mPendingRequests;
-
-        // Mutex and condition variable around mPendingRequests' value
-        audio_utils::mutex mMutex{audio_utils::MutexOrder::kMediaLogNotifier_Mutex};
-        audio_utils::condition_variable mCondition;
-
-        // Duration of the sleep period after a processed request
-        static const int kPostTriggerSleepPeriod = 1000000;
-    };
-
-    const sp<MediaLogNotifier> mMediaLogNotifier = sp<MediaLogNotifier>::make();
 
     // Find io handle by session id.
     // Preference is given to an io handle with a matching effect chain to session id.
