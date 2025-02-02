@@ -86,7 +86,7 @@ bool AidlCameraService::registerService(::android::CameraService* cameraService)
 
 AidlCameraService::AidlCameraService(::android::CameraService* cameraService):
       mCameraService(cameraService) {
-    mVndkVersion = getVNDKVersionFromProp(__ANDROID_API_FUTURE__);
+    mVndkVersion = getVNDKVersion();
 }
 ScopedAStatus AidlCameraService::getCameraCharacteristics(const std::string& in_cameraId,
                                                           SCameraMetadata* _aidl_return) {

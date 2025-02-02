@@ -61,7 +61,7 @@ sp<HidlCameraService> HidlCameraService::getInstance(android::CameraService *cs)
 }
 
 HidlCameraService::HidlCameraService(android::CameraService *cs) : mAidlICameraService(cs) {
-    mVndkVersion = getVNDKVersionFromProp(__ANDROID_API_FUTURE__);
+    mVndkVersion = getVNDKVersion();
 }
 
 Return<void>
