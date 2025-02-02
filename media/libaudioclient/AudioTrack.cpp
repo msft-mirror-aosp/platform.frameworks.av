@@ -602,6 +602,8 @@ status_t AudioTrack::set(
         mOffloadInfoCopy.sample_rate = sampleRate;
         mOffloadInfoCopy.channel_mask = channelMask;
         mOffloadInfoCopy.stream_type = streamType;
+        mOffloadInfoCopy.usage = mAttributes.usage;
+        mOffloadInfoCopy.bit_width = audio_bytes_per_sample(format) * 8;
     }
 
     mVolume[AUDIO_INTERLEAVE_LEFT] = 1.0f;
