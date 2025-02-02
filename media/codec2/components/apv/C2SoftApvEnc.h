@@ -84,7 +84,6 @@ struct C2SoftApvEnc final : public SimpleC2Component {
     std::shared_ptr<C2StreamColorAspectsInfo::output> mCodedColorAspects;
     std::shared_ptr<C2StreamPictureQuantizationTuning::output> mPictureQuantization;
     std::shared_ptr<C2StreamQualityTuning::output> mQuality;
-    std::shared_ptr<C2StreamBitrateModeTuning::output> mBitrateMode;
     std::shared_ptr<C2LinearBlock> mOutBlock;
     std::shared_ptr<C2StreamComplexityTuning::output> mComplexity;
     std::shared_ptr<C2StreamPixelFormatInfo::input> mPixelFormat;
