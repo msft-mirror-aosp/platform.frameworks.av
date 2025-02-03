@@ -651,7 +651,7 @@ status_t CCodecBufferChannel::attachEncryptedBuffers(
             return -ENOSYS;
         }
         // we are dealing with just one cryptoInfo or descrambler.
-        std::unique_ptr<CodecCryptoInfo> info = std::move(cryptoInfos->value[0]);
+        std::unique_ptr<CodecCryptoInfo> &info = cryptoInfos->value[0];
         if (info == nullptr) {
             ALOGE("Cannot decrypt, CryptoInfos are null.");
             return -ENOSYS;
@@ -700,7 +700,7 @@ status_t CCodecBufferChannel::attachEncryptedBuffers(
             mDecryptDestination, mHeapSeqNum, &dst.nonsecureMemory);
     for (int i = 0; i < bufferInfos->value.size(); i++) {
         if (bufferInfos->value[i].mSize > 0) {
-            std::unique_ptr<CodecCryptoInfo> info = std::move(cryptoInfos->value[cryptoInfoIdx++]);
+            std::unique_ptr<CodecCryptoInfo> &info = cryptoInfos->value[cryptoInfoIdx++];
             src.offset = srcOffset;
             src.size = bufferInfos->value[i].mSize;
             result = mCrypto->decrypt(

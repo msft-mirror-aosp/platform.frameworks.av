@@ -6630,7 +6630,11 @@ status_t MediaCodec::onQueueInputBuffer(const sp<AMessage> &msg) {
                     && (mFlags & kFlagUseCryptoAsync)) {
                 // create error detail
                 sp<AMessage> cryptoErrorInfo = new AMessage();
-                buildCryptoInfoAMessage(cryptoErrorInfo, CryptoAsync::kActionDecrypt);
+                if (msg->findObject("cryptoInfos", &obj)) {
+                    cryptoErrorInfo->setObject("cryptoInfos", obj);
+                } else {
+                    buildCryptoInfoAMessage(cryptoErrorInfo, CryptoAsync::kActionDecrypt);
+                }
                 cryptoErrorInfo->setInt32("err", err);
                 cryptoErrorInfo->setInt32("actionCode", ACTION_CODE_FATAL);
                 cryptoErrorInfo->setString("errorDetail", errorDetailMsg);
