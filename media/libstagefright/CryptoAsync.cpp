@@ -132,6 +132,9 @@ status_t CryptoAsync::decryptAndQueue(sp<AMessage> & msg) {
     }
     if (err != OK) {
         std::list<sp<AMessage>> errorList;
+        if (buffer->meta()->findObject("cryptoInfos", &obj)) {
+            msg->setObject("cryptoInfos", obj);
+        }
         msg->removeEntryByName("buffer");
         msg->setInt32("err", err);
         msg->setInt32("actionCode", ACTION_CODE_FATAL);
