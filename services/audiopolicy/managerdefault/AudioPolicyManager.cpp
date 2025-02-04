@@ -3230,8 +3230,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             //  - Preempt and input if:
             //     - It has only strictly lower priority use cases than the new client
             //     - It has equal priority use cases than the new client, was not
-            //     opened thanks to preemption, is not routed to the same device than the device to
-            //     consider or has been active since opened.
+            //     opened thanks to preemption or has been active since opened.
             //  - Order the preemption candidates by inactive first and priority second
             sp<AudioInputDescriptor> closeCandidate;
             int leastCloseRank = INT_MAX;
@@ -3249,7 +3248,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
                 int topPrio = source_priority(topPrioClient->source());
                 if (topPrio < source_priority(attributes.source)
                       || (topPrio == source_priority(attributes.source)
-                          && !(desc->isPreemptor() || desc->getDevice() == device))) {
+                          && !desc->isPreemptor())) {
                     int closeRank = (desc->isActive() ? sCloseActive : 0) + topPrio;
                     if (closeRank < leastCloseRank) {
                         leastCloseRank = closeRank;
