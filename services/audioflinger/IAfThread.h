@@ -108,11 +108,6 @@ public:
             IAfEffectChain* srcChain = nullptr)
             REQUIRES(mutex(), audio_utils::ThreadBase_Mutex) = 0;
 
-    virtual void requestLogMerge() = 0;
-    virtual sp<NBLog::Writer> newWriter_l(size_t size, const char *name)
-            REQUIRES(mutex()) = 0;
-    virtual void unregisterWriter(const sp<NBLog::Writer>& writer) = 0;
-
     virtual sp<audioflinger::SyncEvent> createSyncEvent(AudioSystem::sync_event_t type,
             audio_session_t triggerSession,
             audio_session_t listenerSession,
