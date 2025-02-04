@@ -869,6 +869,7 @@ DeviceVector Engine::getOutputDevicesForStream(audio_stream_type_t stream, bool 
 }
 
 sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_t &attr,
+                                                         bool ignorePreferredDevice,
                                                          uid_t uid,
                                                          audio_session_t session,
                                                          sp<AudioPolicyMix> *mix) const
@@ -884,10 +885,13 @@ sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_
     //
     // Honor explicit routing requests only if all active clients have a preferred route in which
     // case the last active client route is used
-    sp<DeviceDescriptor> device =
-            findPreferredDevice(inputs, attr.source, availableInputDevices);
-    if (device != nullptr) {
-        return device;
+    sp<DeviceDescriptor> device;
+    if (!com::android::media::audioserver::conditionally_ignore_preferred_input_device()
+            || !ignorePreferredDevice) {
+        device = findPreferredDevice(inputs, attr.source, availableInputDevices);
+        if (device != nullptr) {
+            return device;
+        }
     }
 
     device = policyMixes.getDeviceAndMixForInputSource(attr,
