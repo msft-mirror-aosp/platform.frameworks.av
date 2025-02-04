@@ -73,7 +73,6 @@ public:
                                            bool fromCache = false) const override;
 
     sp<DeviceDescriptor> getInputDeviceForAttributes(const audio_attributes_t &attr,
-                                                     bool ignorePreferredDevice = true,
                                                      uid_t uid = 0,
                                                      audio_session_t session = AUDIO_SESSION_NONE,
                                                      sp<AudioPolicyMix> *mix = nullptr)

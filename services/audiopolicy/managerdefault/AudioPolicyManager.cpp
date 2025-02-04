@@ -3055,8 +3055,7 @@ AudioPolicyManager::getInputForAttr(audio_attributes_t attributes_,
         } else {
             // Prevent from storing invalid requested device id in clients
             requestedDeviceId = AUDIO_PORT_HANDLE_NONE;
-            device = mEngine->getInputDeviceForAttributes(
-                    attributes, true /*ignorePreferredDevice*/, uid, session, &policyMix);
+            device = mEngine->getInputDeviceForAttributes(attributes, uid, session, &policyMix);
             ALOGV_IF(device != nullptr, "%s found device type is 0x%X",
                 __FUNCTION__, device->type());
         }
@@ -3230,8 +3229,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             //  - Preempt and input if:
             //     - It has only strictly lower priority use cases than the new client
             //     - It has equal priority use cases than the new client, was not
-            //     opened thanks to preemption, is not routed to the same device than the device to
-            //     consider or has been active since opened.
+            //     opened thanks to preemption or has been active since opened.
             //  - Order the preemption candidates by inactive first and priority second
             sp<AudioInputDescriptor> closeCandidate;
             int leastCloseRank = INT_MAX;
@@ -3249,7 +3247,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
                 int topPrio = source_priority(topPrioClient->source());
                 if (topPrio < source_priority(attributes.source)
                       || (topPrio == source_priority(attributes.source)
-                          && !(desc->isPreemptor() || desc->getDevice() == device))) {
+                          && !desc->isPreemptor())) {
                     int closeRank = (desc->isActive() ? sCloseActive : 0) + topPrio;
                     if (closeRank < leastCloseRank) {
                         leastCloseRank = closeRank;
@@ -3562,9 +3560,8 @@ bool AudioPolicyManager::checkCloseInput(const sp<AudioInputDescriptor>& input) 
     }
     for (const auto& client : input->clientsList()) {
         sp<DeviceDescriptor> device =
-            mEngine->getInputDeviceForAttributes(
-                    client->attributes(), false /*ignorePreferredDevice*/, client->uid(),
-                    client->session());
+            mEngine->getInputDeviceForAttributes(client->attributes(), client->uid(),
+                                                 client->session());
         if (!input->supportedDevices().contains(device)) {
             return true;
         }
@@ -7926,8 +7923,7 @@ sp<DeviceDescriptor> AudioPolicyManager::getNewInputDevice(
         attributes.source = AUDIO_SOURCE_VOICE_COMMUNICATION;
     }
     if (attributes.source != AUDIO_SOURCE_DEFAULT) {
-        device = mEngine->getInputDeviceForAttributes(
-                attributes, false /*ignorePreferredDevice*/, uid, session);
+        device = mEngine->getInputDeviceForAttributes(attributes, uid, session);
     }
 
     return device;
@@ -9339,7 +9335,10 @@ status_t AudioPolicyManager::getDevicesForAttributes(
 
 status_t AudioPolicyManager::getInputDevicesForAttributes(
         const audio_attributes_t &attr, DeviceVector &devices) {
-    devices = DeviceVector(mEngine->getInputDeviceForAttributes(attr));
+    devices = DeviceVector(
+            mEngine->getInputDeviceForAttributes(attr, 0 /*uid unknown here*/,
+                                                 AUDIO_SESSION_NONE,
+                                                 nullptr /* mix */));
     return NO_ERROR;
 }
 
