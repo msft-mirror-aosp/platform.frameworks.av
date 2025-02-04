@@ -3185,7 +3185,7 @@ Camera3Device::RequestThread::RequestThread(wp<Camera3Device> parent,
         mRotationOverride(rotationOverride),
         mSupportSettingsOverride(supportSettingsOverride) {
     mStatusId = statusTracker->addComponent("RequestThread");
-    mVndkVersion = getVNDKVersionFromProp(__ANDROID_API_FUTURE__);
+    mVndkVersion = getVNDKVersion();
 }
 
 Camera3Device::RequestThread::~RequestThread() {}

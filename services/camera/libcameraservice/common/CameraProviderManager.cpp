@@ -2096,11 +2096,8 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQuery
     int deviceVersion = HARDWARE_DEVICE_API_VERSION(mVersion.get_major(), mVersion.get_minor());
     if (deviceVersion == CAMERA_DEVICE_API_VERSION_1_3) {
         versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
-    } else if (deviceVersion >= CAMERA_DEVICE_API_VERSION_1_4) {
-        if (flags::feature_combination_baklava()) {
+        if (flags::feature_combination_baklava() && getVNDKVersion() > 35) {
             versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_BAKLAVA;
-        } else {
-            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
         }
     }
     res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
