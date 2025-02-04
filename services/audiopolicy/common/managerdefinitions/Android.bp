@@ -74,9 +74,9 @@ cc_library {
     export_include_dirs: ["include"],
 
     cflags: [
-        "-DENABLE_CAP_AIDL_HYBRID_MODE",
         "-Wall",
         "-Werror",
+        "-DENABLE_CAP_AIDL_HYBRID_MODE",
     ] + select(release_flag("RELEASE_HARDWARE_AUDIO_USE_CAP_AIDL"), {
         true: [],
         default: ["-DDISABLE_CAP_AIDL"],
