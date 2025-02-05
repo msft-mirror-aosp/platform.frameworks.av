@@ -1136,13 +1136,14 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
     uint8_t profile_idc = 0;
     uint8_t level_idc = 0;
     uint8_t band_idc = 0;
-    uint32_t frame_width_minus1 = 0;
-    uint32_t frame_height_minus1 = 0;
+    uint32_t frame_width = 0;
+    uint32_t frame_height = 0;
     uint8_t chroma_format_idc = 0;
     uint8_t bit_depth_minus8 = 0;
     uint8_t capture_time_distance = 0;
     uint8_t color_primaries = 0;
     uint8_t transfer_characteristics = 0;
+    uint8_t full_range_flag = 0;
     uint8_t matrix_coefficients = 0;
 
     /* pbu_header() */
@@ -1157,8 +1158,8 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
     level_idc = reader.getBits(8);              // level_idc
     band_idc = reader.getBits(3);               // band_idc
     reader.skipBits(5);                         // reserved_zero_5bits
-    frame_width_minus1 = reader.getBits(32);    // width
-    frame_height_minus1 = reader.getBits(32);   // height
+    frame_width = reader.getBits(24);           // width
+    frame_height = reader.getBits(24);          // height
     chroma_format_idc = reader.getBits(4);      // chroma_format_idc
     bit_depth_minus8 = reader.getBits(4);       // bit_depth
     capture_time_distance = reader.getBits(8);  // capture_time_distance
@@ -1171,21 +1172,13 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
         color_primaries = reader.getBits(8);           // color_primaries
         transfer_characteristics = reader.getBits(8);  // transfer_characteristics
         matrix_coefficients = reader.getBits(8);       // matrix_coefficients
+        full_range_flag = reader.getBits(1);           // full_range_flag
     }
 
     number_of_configuration_entry = 1;  // The real-time encoding on the device is assumed to be 1.
     number_of_frame_info = 1;  // The real-time encoding on the device is assumed to be 1.
 
     std::vector<uint8_t> csdData;
-
-    //TODO(b/392976813): These 4 lines need to be removed once test data are fixed.
-    csdData.push_back((uint8_t)0x0);
-    csdData.push_back((uint8_t)0x0);
-    csdData.push_back((uint8_t)0x0);
-    csdData.push_back((uint8_t)0x0);
-
-    //TODO(b/392976819) This need to be removed once OpenAPV is fixed.
-    bit_depth_minus8 = 2;
 
     csdData.push_back((uint8_t)0x1);
     csdData.push_back(number_of_configuration_entry);
@@ -1199,21 +1192,22 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
             csdData.push_back(profile_idc);
             csdData.push_back(level_idc);
             csdData.push_back(band_idc);
-            csdData.push_back((uint8_t)((frame_width_minus1 >> 24) & 0xff));
-            csdData.push_back((uint8_t)((frame_width_minus1 >> 16) & 0xff));
-            csdData.push_back((uint8_t)((frame_width_minus1 >> 8) & 0xff));
-            csdData.push_back((uint8_t)(frame_width_minus1 & 0xff));
-            csdData.push_back((uint8_t)((frame_height_minus1 >> 24) & 0xff));
-            csdData.push_back((uint8_t)((frame_height_minus1 >> 16) & 0xff));
-            csdData.push_back((uint8_t)((frame_height_minus1 >> 8) & 0xff));
-            csdData.push_back((uint8_t)(frame_height_minus1 & 0xff));
-            csdData.push_back((uint8_t)(((bit_depth_minus8 << 4) & 0xf0) |
-                                      (chroma_format_idc & 0xf)));
+            csdData.push_back((uint8_t)((frame_width >> 24) & 0xff));
+            csdData.push_back((uint8_t)((frame_width >> 16) & 0xff));
+            csdData.push_back((uint8_t)((frame_width >> 8) & 0xff));
+            csdData.push_back((uint8_t)(frame_width & 0xff));
+            csdData.push_back((uint8_t)((frame_height >> 24) & 0xff));
+            csdData.push_back((uint8_t)((frame_height >> 16) & 0xff));
+            csdData.push_back((uint8_t)((frame_height >> 8) & 0xff));
+            csdData.push_back((uint8_t)(frame_height & 0xff));
+            csdData.push_back((uint8_t)(((chroma_format_idc << 4) & 0xf0) |
+                                      (bit_depth_minus8 & 0xf)));
             csdData.push_back((uint8_t)(capture_time_distance));
             if (color_description_present_flag) {
                 csdData.push_back(color_primaries);
                 csdData.push_back(transfer_characteristics);
                 csdData.push_back(matrix_coefficients);
+                csdData.push_back(full_range_flag << 7);
             }
         }
     }
