@@ -3802,20 +3802,11 @@ void AudioFlinger::dumpToThreadLog_l(const sp<IAfThreadBase> &thread)
 {
     constexpr int THREAD_DUMP_TIMEOUT_MS = 2;
     constexpr auto PREFIX = "- ";
-    if (com::android::media::audioserver::fdtostring_timeout_fix()) {
-        using ::android::audio_utils::FdToString;
+    using ::android::audio_utils::FdToString;
 
-        auto writer = OR_RETURN(FdToString::createWriter(PREFIX));
-        thread->dump(writer.borrowFdUnsafe(), {} /* args */);
-        mThreadLog.logs(-1 /* time */, FdToString::closeWriterAndGetString(std::move(writer)));
-    } else {
-        audio_utils::FdToStringOldImpl fdToString("- ", THREAD_DUMP_TIMEOUT_MS);
-        const int fd = fdToString.borrowFdUnsafe();
-        if (fd >= 0) {
-            thread->dump(fd, {} /* args */);
-            mThreadLog.logs(-1 /* time */, fdToString.closeAndGetString());
-        }
-    }
+    auto writer = OR_RETURN(FdToString::createWriter(PREFIX));
+    thread->dump(writer.borrowFdUnsafe(), {} /* args */);
+    mThreadLog.logs(-1 /* time */, FdToString::closeWriterAndGetString(std::move(writer)));
 }
 
 // checkThread_l() must be called with AudioFlinger::mutex() held

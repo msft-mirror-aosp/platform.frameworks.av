@@ -5,6 +5,7 @@
 package: "com.android.media.audioserver"
 container: "system"
 
+# shipped 24Q3
 flag {
     name: "conditionally_ignore_preferred_input_device"
     namespace: "media_audio"
@@ -37,6 +38,7 @@ flag {
     bug: "364923030"
 }
 
+# shipped 24Q3
 flag {
     name: "fdtostring_timeout_fix"
     namespace: "media_audio"
