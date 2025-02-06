@@ -698,15 +698,11 @@ sp<OpPlayAudioMonitor> OpPlayAudioMonitor::createIfNeeded(
             const AttributionSourceState& attributionSource, const audio_attributes_t& attr, int id,
             audio_stream_type_t streamType)
 {
-    Vector<String16> packages;
     const uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
-    getPackagesForUid(uid, packages);
     if (isServiceUid(uid)) {
-        if (packages.isEmpty()) {
-            ALOGW("OpPlayAudio: not muting track:%d usage:%d for service UID %d", id, attr.usage,
-                  uid);
-            return nullptr;
-        }
+        ALOGW("OpPlayAudio: not muting track:%d usage:%d for service UID %d", id, attr.usage,
+              uid);
+        return nullptr;
     }
     // stream type has been filtered by audio policy to indicate whether it can be muted
     if (streamType == AUDIO_STREAM_ENFORCED_AUDIBLE) {
@@ -797,14 +793,6 @@ void OpPlayAudioMonitor::PlayAudioOpCallback::opChanged(int32_t op,
     if (monitor != NULL) {
         monitor->checkPlayAudioForUsage(/*doBroadcast=*/true);
     }
-}
-
-// static
-void OpPlayAudioMonitor::getPackagesForUid(
-    uid_t uid, Vector<String16>& packages)
-{
-    PermissionController permissionController;
-    permissionController.getPackagesForUid(uid, packages);
 }
 
 // ----------------------------------------------------------------------------

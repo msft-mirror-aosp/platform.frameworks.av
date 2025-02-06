@@ -45,7 +45,6 @@ private:
                        const AttributionSourceState& attributionSource,
                        audio_usage_t usage, int id, uid_t uid);
     void onFirstRef() override;
-    static void getPackagesForUid(uid_t uid, Vector<String16>& packages);
 
     AppOpsManager mAppOpsManager;
 
