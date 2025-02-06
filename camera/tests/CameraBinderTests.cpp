@@ -389,15 +389,6 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
 
     for (int32_t i = 0; i < numCameras; i++) {
         std::string cameraId = std::to_string(i);
-        bool isSupported = false;
-        res = service->supportsCameraApi(cameraId,
-                hardware::ICameraService::API_VERSION_2, &isSupported);
-        EXPECT_TRUE(res.isOk()) << res;
-
-        // We only care about binder calls for the Camera2 API.  Camera1 is deprecated.
-        if (!isSupported) {
-            continue;
-        }
 
         // Check metadata binder call
         CameraMetadata metadata;

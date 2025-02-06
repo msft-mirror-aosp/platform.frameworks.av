@@ -45,8 +45,10 @@ struct Route {
     std::string sink;
 };
 
+status_t isAutomotivePlatform(bool* isAutomotive);
 status_t listAudioPorts(std::vector<audio_port_v7>& portsVec);
 status_t listAudioPatches(std::vector<struct audio_patch>& patchesVec);
+status_t getAnyPort(audio_port_role_t role, audio_port_type_t type, audio_port_v7& port);
 status_t getPortByAttributes(audio_port_role_t role, audio_port_type_t type,
                              audio_devices_t deviceType, const std::string& address,
                              audio_port_v7& port);

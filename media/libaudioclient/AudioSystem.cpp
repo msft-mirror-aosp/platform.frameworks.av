@@ -155,8 +155,8 @@ public:
                 return;
             }
             if (!mService || mService->getDelegate() != service) {
-                ALOGW("%s: %s unmatched service death pointers, ignoring",
-                        __func__, getServiceName());
+                ALOGW("%s: %s unmatched service death pointers, previous %p, ignoring",
+                        __func__, getServiceName(), mService.get());
                 return;
             }
             mValid = false;
@@ -238,9 +238,12 @@ public:
             ALOGW_IF(old != mService,
                     "%s: service changed during callback, continuing.", __func__);
         }
-        mService = af;
-        ul.unlock();
-        if (af) onNewServiceWithAdapter(af);
+        if (af) {
+            ul.unlock();
+            onNewServiceWithAdapter(af);
+        } else {
+            mService = nullptr;
+        }
         return OK;
     }
 
@@ -270,6 +273,11 @@ private:
         bool reportNoError = false;
         {
             std::lock_guard l(mMutex);
+            if (mService == service ||
+                    (mService && service && mService->getDelegate() == service->getDelegate())) {
+                ALOGW("%s: %s  same service, ignoring", __func__, getServiceName());
+                return;
+            }
             ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
                     __func__, getServiceName());
             if (mClient == nullptr) {
@@ -1002,6 +1010,10 @@ public:
         sp<AudioSystem::AudioPolicyServiceClient> client;
         {
             std::lock_guard l(mMutex);
+            if (aps == mService) {
+                ALOGW_IF("%s: %s same service, ignoring", __func__, getServiceName());
+                return;
+            }
             ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
                     __func__, getServiceName());
             if (mClient == nullptr) {
@@ -1025,12 +1037,13 @@ public:
         {
             std::lock_guard l(mMutex);
             if (!mValid) {
-                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
+                ALOGW("%s: %s service already invalidated, previous %p, ignoring",
+                        __func__, getServiceName(), mService.get());
                 return;
             }
             if (mService != service) {
-                ALOGW("%s: %s unmatched service death pointers, ignoring",
-                        __func__, getServiceName());
+                ALOGW("%s: %s unmatched service death pointers, previous %p, ignoring",
+                        __func__, getServiceName(), mService.get());
                 return;
             }
             mValid = false;
@@ -1108,9 +1121,12 @@ public:
                 return OK;
             }
         }
-        mService = aps;
-        ul.unlock();
-        if (aps) onNewService(aps);
+        if (aps) {
+            ul.unlock();
+            onNewService(aps);
+        } else {
+            mService = nullptr;
+        }
         return OK;
     }
 
@@ -1399,7 +1415,8 @@ status_t AudioSystem::getInputForAttr(const audio_attributes_t* attr,
                                       audio_config_base_t* config,
                                       audio_input_flags_t flags,
                                       audio_port_handle_t* selectedDeviceId,
-                                      audio_port_handle_t* portId) {
+                                      audio_port_handle_t* portId,
+                                      audio_source_t* source) {
     if (attr == NULL) {
         ALOGE("getInputForAttr NULL attr - shouldn't happen");
         return BAD_VALUE;
@@ -1447,7 +1464,7 @@ status_t AudioSystem::getInputForAttr(const audio_attributes_t* attr,
     *selectedDeviceId = VALUE_OR_RETURN_STATUS(
             aidl2legacy_int32_t_audio_port_handle_t(response.selectedDeviceId));
     *portId = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_port_handle_t(response.portId));
-
+    *source = VALUE_OR_RETURN_STATUS(aidl2legacy_AudioSource_audio_source_t(response.source));
     return OK;
 }
 

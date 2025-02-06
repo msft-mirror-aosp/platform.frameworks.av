@@ -225,12 +225,6 @@ public:
 
     virtual binder::Status    notifyDisplayConfigurationChange();
 
-    // OK = supports api of that version, -EOPNOTSUPP = does not support
-    virtual binder::Status    supportsCameraApi(
-            const std::string& cameraId, int32_t apiVersion,
-            /*out*/
-            bool *isSupported);
-
     virtual binder::Status    isHiddenPhysicalCamera(
             const std::string& cameraId,
             /*out*/
@@ -651,6 +645,12 @@ public:
         sp<CameraService::BasicClient> getCameraClient(const std::string& id) const;
 
         /**
+         * Return a strong pointer to the highest priority client among all the clients which
+         * have opened this camera ID in shared mode, or empty if none exists.
+         */
+        sp<CameraService::BasicClient> getHighestPrioritySharedClient(const std::string& id) const;
+
+        /**
          * Return a string describing the current state.
          */
         std::string toString() const;
@@ -858,6 +858,9 @@ private:
         void registerMonitorUid(uid_t uid, bool openCamera);
         void unregisterMonitorUid(uid_t uid, bool closeCamera);
 
+        void addSharedClientPid(uid_t uid, int pid);
+        void removeSharedClientPid(uid_t uid, int pid);
+
         // Implementation of IServiceManager::LocalRegistrationCallback
         virtual void onServiceRegistration(const String16& name,
                         const sp<IBinder>& binder) override;
@@ -875,6 +878,9 @@ private:
             int32_t procAdj;
             bool hasCamera;
             size_t refCount;
+            // This field is only valid when camera has been opened in shared mode, to adjust the
+            // priority of active clients based on the latest process score and state.
+            std::unordered_set<int> sharedClientPids;
         };
 
         Mutex mUidLock;
@@ -1107,6 +1113,18 @@ private:
      */
     void finishConnectLocked(const sp<BasicClient>& client, const DescriptorPtr& desc,
             int oomScoreOffset, bool systemNativeClient);
+
+    /**
+     * When multiple clients open the camera in shared mode, adjust the priority of active clients
+     * based on the latest process score and state.
+     */
+    void updateSharedClientAccessPriorities(std::vector<int> sharedClientPids);
+
+    /**
+     * Update all clients on any changes in the primary or secondary client status if the priority
+     * of any client changes when multiple clients are sharing a camera.
+     */
+    void notifySharedClientPrioritiesChanged(const std::string& cameraId);
 
     /**
      * Returns the underlying camera Id string mapped to a camera id int

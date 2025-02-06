@@ -139,15 +139,13 @@ NotifyMsg createRequestErrorNotifyMsg(int frameNumber) {
 
 std::shared_ptr<EglFrameBuffer> allocateTemporaryFramebuffer(
     EGLDisplay eglDisplay, const uint width, const int height) {
-  const AHardwareBuffer_Desc desc{
-      .width = static_cast<uint32_t>(width),
-      .height = static_cast<uint32_t>(height),
-      .layers = 1,
-      .format = AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420,
-      .usage = AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
-               AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-      .rfu0 = 0,
-      .rfu1 = 0};
+  const AHardwareBuffer_Desc desc{.width = static_cast<uint32_t>(width),
+                                  .height = static_cast<uint32_t>(height),
+                                  .layers = 1,
+                                  .format = kHardwareBufferFormat,
+                                  .usage = kHardwareBufferUsage,
+                                  .rfu0 = 0,
+                                  .rfu1 = 0};
 
   AHardwareBuffer* hwBufferPtr;
   int status = AHardwareBuffer_allocate(&desc, &hwBufferPtr);

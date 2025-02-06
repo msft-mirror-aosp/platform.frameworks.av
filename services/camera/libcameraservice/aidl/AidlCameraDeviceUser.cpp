@@ -57,7 +57,7 @@ inline ScopedAStatus fromUStatus(const UStatus& status) {
 AidlCameraDeviceUser::AidlCameraDeviceUser(const sp<UICameraDeviceUser>& deviceRemote):
       mDeviceRemote(deviceRemote) {
     mInitSuccess = initDevice();
-    mVndkVersion = getVNDKVersionFromProp(__ANDROID_API_FUTURE__);
+    mVndkVersion = getVNDKVersion();
 }
 
 bool AidlCameraDeviceUser::initDevice() {

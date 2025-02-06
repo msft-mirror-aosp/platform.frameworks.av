@@ -45,7 +45,6 @@ private:
                        const AttributionSourceState& attributionSource,
                        audio_usage_t usage, int id, uid_t uid);
     void onFirstRef() override;
-    static void getPackagesForUid(uid_t uid, Vector<String16>& packages);
 
     AppOpsManager mAppOpsManager;
 
@@ -215,20 +214,8 @@ public:
     bool isSpatialized() const final { return mIsSpatialized; }
     bool isBitPerfect() const final { return mIsBitPerfect; }
 
-    /**
-     * Updates the mute state and notifies the audio service. Call this only when holding player
-     * thread lock.
-     */
-    void processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_state_t muteState) final;
-
     bool getInternalMute() const final { return mInternalMute; }
     void setInternalMute(bool muted) final { mInternalMute = muted; }
-
-    // VolumePortInterface implementation
-    void setPortVolume(float volume) override;
-    void setPortMute(bool muted) override;
-    float getPortVolume() const override { return mVolume; }
-    bool getPortMute() const override { return mMutedFromPort; }
 
     std::string trackFlagsAsString() const final { return toString(mFlags); }
 
@@ -293,12 +280,9 @@ protected:
 
     bool isPlaybackRestrictedOp() const final {
         // The monitor is only created for tracks that can be silenced.
-        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false;
-    }
-
-    bool isPlaybackRestrictedControl() const final {
-        return false;
-        // return mOpAudioControlSoftMonitor ? !mOpAudioControlSoftMonitor->hasOp() : false;
+        return mOpPlayAudioMonitor
+                       ? !mOpPlayAudioMonitor->hasOpPlayAudio()
+                       : false;
     }
 
     bool isPlaybackRestricted() const final {
@@ -422,13 +406,7 @@ private:
     const bool          mIsSpatialized;
     const bool          mIsBitPerfect;
 
-    // TODO: replace PersistableBundle with own struct
-    // access these two variables only when holding player thread lock.
-    std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
-    std::atomic<mute_state_t> mMuteState;
-    std::atomic<bool>         mMutedFromPort;
     bool                      mInternalMute = false;
-    std::atomic<float>        mVolume = 0.0f;
 };  // end of Track
 
 

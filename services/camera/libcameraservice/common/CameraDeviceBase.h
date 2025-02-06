@@ -110,6 +110,8 @@ class CameraDeviceBase : public virtual FrameProducer {
     virtual const CameraMetadata& infoPhysical(const std::string& physicalId) const = 0;
 
     virtual bool isCompositeJpegRDisabled() const { return false; };
+    virtual bool isCompositeHeicDisabled() const { return false; }
+    virtual bool isCompositeHeicUltraHDRDisabled() const { return false; }
 
     struct PhysicalCameraSettings {
         std::string cameraId;

@@ -102,10 +102,6 @@ IEffect::Status LoudnessEnhancerContext::process(float* in, float* out, int samp
 }
 
 void LoudnessEnhancerContext::init_params() {
-    int channelCount = ::aidl::android::hardware::audio::common::getChannelCount(
-            mCommon.input.base.channelMask);
-    LOG_ALWAYS_FATAL_IF(channelCount != 2, "channel count %d not supported", channelCount);
-
     mGain = LOUDNESS_ENHANCER_DEFAULT_TARGET_GAIN_MB;
     float targetAmp = pow(10, mGain / 2000.0f);  // mB to linear amplification
     LOG(VERBOSE) << __func__ << "Target gain = " << mGain << "mB <=> factor = " << targetAmp;

@@ -480,6 +480,10 @@ void* AudioStream::wrapUserThread() {
         // Run callback loop. This may take a very long time.
         procResult = mThreadProc(mThreadArg);
         mThreadRegistrationResult = unregisterThread();
+    } else {
+        // If we cannot register the thread then it has probably become disconnected.
+        // The only way to inform the app from this thread is with an error callback.
+        maybeCallErrorCallback(AAUDIO_ERROR_DISCONNECTED);
     }
     return procResult;
 }

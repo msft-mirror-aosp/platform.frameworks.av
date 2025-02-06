@@ -66,7 +66,6 @@ struct C2SoftApvDec final : public SimpleC2Component {
     std::shared_ptr<IntfImpl> mIntf;
     uint8_t *mOutBufferFlush;
     uint32_t mOutputDelay;
-    bool mHeaderDecoded;
     std::atomic_uint64_t mOutIndex;
     std::shared_ptr<C2GraphicBlock> mOutBlock;
 
@@ -97,7 +96,7 @@ struct C2SoftApvDec final : public SimpleC2Component {
             coeffs(C2Color::MATRIX_UNSPECIFIED),
             fullRange(C2Color::RANGE_UNSPECIFIED) { }
 
-        bool operator==(const VuiColorAspects &o) {
+        bool operator==(const VuiColorAspects &o) const {
             return primaries == o.primaries && transfer == o.transfer && coeffs == o.coeffs
                 && fullRange == o.fullRange;
         }
@@ -113,8 +112,8 @@ struct C2SoftApvDec final : public SimpleC2Component {
 
         ApvHdrInfo()
             : has_hdr_mdcv(false),
-            has_hdr_cll(false),
-            has_itut_t35(false) { }
+            has_itut_t35(false),
+            has_hdr_cll(false) { }
 
         // Master Display Color Volume
         struct HdrMdcv {

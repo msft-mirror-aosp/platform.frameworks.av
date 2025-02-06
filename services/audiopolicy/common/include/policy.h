@@ -157,7 +157,8 @@ static inline bool apm_audio_out_device_distinguishes_on_address(audio_devices_t
 static inline bool apm_audio_in_device_distinguishes_on_address(audio_devices_t device)
 {
     return device == AUDIO_DEVICE_IN_REMOTE_SUBMIX ||
-           device == AUDIO_DEVICE_IN_BUS;
+           device == AUDIO_DEVICE_IN_BUS ||
+           device == AUDIO_DEVICE_IN_ECHO_REFERENCE;
 }
 
 /**

@@ -900,6 +900,14 @@ sp<DeviceDescriptor> Engine::getInputDeviceForAttributes(const audio_attributes_
     }
 
     device = getDeviceForInputSource(attr.source);
+
+    if (device != nullptr && device->type() == AUDIO_DEVICE_IN_ECHO_REFERENCE) {
+        sp<DeviceDescriptor> device2 = getInputDeviceForEchoRef(attr, availableInputDevices);
+        if (device2 != nullptr) {
+            return device2;
+        }
+    }
+
     if (device == nullptr || !audio_is_remote_submix_device(device->type())) {
         // Return immediately if the device is null or it is not a remote submix device.
         return device;

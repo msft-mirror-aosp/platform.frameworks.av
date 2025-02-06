@@ -86,6 +86,10 @@ std::vector<CompToFiles> gCompToFiles = {
          "bbb_vp9_704x480_280kbps_24fps_altref_2.info", ""},
         {"av01", "bbb_av1_640_360.av1", "bbb_av1_640_360.info", "bbb_av1_640_360_chksum.md5"},
         {"av01", "bbb_av1_176_144.av1", "bbb_av1_176_144.info", "bbb_av1_176_144_chksm.md5"},
+        {"apv", "trim_pattern_640x480_30fps_16mbps_apv_10bit.apv",
+                "trim_pattern_640x480_30fps_16mbps_apv_10bit.info", ""},
+        {"apv", "trim_pattern_1280x720_30fps_30mbps_apv_10bit.apv",
+                "trim_pattern_1280x720_30fps_30mbps_apv_10bit.info", ""},
 };
 
 class LinearBuffer : public C2Buffer {
@@ -587,9 +591,9 @@ TEST_P(Codec2VideoDecHidlTest, configureTunnel) {
     sp<IGraphicBufferConsumer> consumer;
     BufferQueue::createBufferQueue(&producer, &consumer);
 
-    class DummyConsumerListener : public BnConsumerListener {
+    class DummyConsumerListener : public IConsumerListener {
       public:
-        DummyConsumerListener() : BnConsumerListener() {}
+        DummyConsumerListener() : IConsumerListener() {}
         void onFrameAvailable(const BufferItem&) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -734,7 +738,8 @@ TEST_P(Codec2VideoDecHidlTest, AdaptiveDecodeTest) {
     if (mDisableTest) GTEST_SKIP() << "Test is disabled";
     if (!(strcasestr(mMime.c_str(), "avc") || strcasestr(mMime.c_str(), "hevc") ||
           strcasestr(mMime.c_str(), "vp8") || strcasestr(mMime.c_str(), "vp9") ||
-          strcasestr(mMime.c_str(), "mpeg2") || strcasestr(mMime.c_str(), "av01"))) {
+          strcasestr(mMime.c_str(), "mpeg2") || strcasestr(mMime.c_str(), "av01") ||
+          strcasestr(mMime.c_str(), "apv"))) {
         return;
     }
 

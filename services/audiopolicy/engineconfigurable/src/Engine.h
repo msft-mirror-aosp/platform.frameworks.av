@@ -16,24 +16,26 @@
 
 #pragma once
 
+#include <memory>
+
 #include "Collection.h"
 #include "EngineBase.h"
 #include <AudioPolicyPluginInterface.h>
 #include <CapEngineConfig.h>
 #include <EngineInterface.h>
+#include <ParameterManagerWrapper.h>
 
 namespace android {
 class AudioPolicyManagerObserver;
 
 namespace audio_policy {
 
-class ParameterManagerWrapper;
 class VolumeProfile;
 
 class Engine : public EngineBase, AudioPolicyPluginInterface
 {
 public:
-    Engine();
+    Engine() = default;
     virtual ~Engine() = default;
 
     template <class RequestedInterface>
@@ -157,7 +159,7 @@ private:
     /**
      * Policy Parameter Manager hidden through a wrapper.
      */
-    ParameterManagerWrapper *mPolicyParameterMgr;
+    std::unique_ptr<ParameterManagerWrapper> mPolicyParameterMgr;
 };
 
 } // namespace audio_policy

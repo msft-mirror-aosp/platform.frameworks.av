@@ -122,14 +122,20 @@ HeicCompositeStream::~HeicCompositeStream() {
     mMainImageSurface.clear();
 }
 
-bool HeicCompositeStream::isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo) {
-    return ((streamInfo.dataSpace == static_cast<android_dataspace_t>(HAL_DATASPACE_HEIF) ||
-                (streamInfo.dataSpace == static_cast<android_dataspace_t>(kUltraHDRDataSpace))) &&
+bool HeicCompositeStream::isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo,
+                                                    bool isCompositeHeicDisabled,
+                                                    bool isCompositeHeicUltraHDRDisabled) {
+    return (((streamInfo.dataSpace == static_cast<android_dataspace_t>(HAL_DATASPACE_HEIF) &&
+              !isCompositeHeicDisabled) ||
+             (streamInfo.dataSpace == static_cast<android_dataspace_t>(kUltraHDRDataSpace) &&
+              !isCompositeHeicUltraHDRDisabled)) &&
             (streamInfo.format == HAL_PIXEL_FORMAT_BLOB));
 }
 
-bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
-    ANativeWindow *anw = surface.get();
+bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface>& surface,
+                                                bool isCompositeHeicDisabled,
+                                                bool isCompositeHeicUltraHDRDisabled) {
+    ANativeWindow* anw = surface.get();
     status_t err;
     int format;
     if ((err = anw->query(anw, NATIVE_WINDOW_FORMAT, &format)) != OK) {
@@ -147,8 +153,10 @@ bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
         return false;
     }
 
-    return ((format == HAL_PIXEL_FORMAT_BLOB) && ((dataspace == HAL_DATASPACE_HEIF) ||
-                (dataspace == static_cast<int>(kUltraHDRDataSpace))));
+    return ((format == HAL_PIXEL_FORMAT_BLOB) &&
+            ((dataspace == HAL_DATASPACE_HEIF && !isCompositeHeicDisabled) ||
+             (dataspace == static_cast<int>(kUltraHDRDataSpace) &&
+              !isCompositeHeicUltraHDRDisabled)));
 }
 
 status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHolder>& consumers,

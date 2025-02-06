@@ -499,7 +499,20 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
     int resV = validate_camera_metadata_structure(buffer, &expectedSize);
     if (resV == OK || resV == CAMERA_METADATA_VALIDATION_SHIFTED) {
         set_camera_metadata_vendor_id(buffer, mProviderTagid);
-        mCameraCharacteristics = buffer;
+        if (flags::metadata_resize_fix()) {
+            //b/379388099: Create a CameraCharacteristics object slightly larger
+            //to accommodate framework addition/modification. This is to
+            //optimize memory because the CameraMetadata::update() doubles the
+            //memory footprint, which could be significant if original
+            //CameraCharacteristics is already large.
+            mCameraCharacteristics = {
+                    get_camera_metadata_entry_count(buffer) + CHARACTERISTICS_EXTRA_ENTRIES,
+                    get_camera_metadata_data_count(buffer) + CHARACTERISTICS_EXTRA_DATA_SIZE
+            };
+            mCameraCharacteristics.append(buffer);
+        } else {
+            mCameraCharacteristics = buffer;
+        }
     } else {
         ALOGE("%s: Malformed camera metadata received from HAL", __FUNCTION__);
         return;
@@ -526,6 +539,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     mCompositeJpegRDisabled = mCameraCharacteristics.exists(
             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS);
+    mCompositeHeicDisabled = mCameraCharacteristics.exists(
+            ANDROID_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS);
     mCompositeHeicUltraHDRDisabled = mCameraCharacteristics.exists(
             ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS);
 
@@ -703,7 +718,20 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
             int res = validate_camera_metadata_structure(pBuffer, &expectedSize);
             if (res == OK || res == CAMERA_METADATA_VALIDATION_SHIFTED) {
                 set_camera_metadata_vendor_id(pBuffer, mProviderTagid);
-                mPhysicalCameraCharacteristics[id] = pBuffer;
+                if (flags::metadata_resize_fix()) {
+                    //b/379388099: Create a CameraCharacteristics object slightly larger
+                    //to accommodate framework addition/modification. This is to
+                    //optimize memory because the CameraMetadata::update() doubles the
+                    //memory footprint, which could be significant if original
+                    //CameraCharacteristics is already large.
+                    mPhysicalCameraCharacteristics[id] = {
+                          get_camera_metadata_entry_count(pBuffer) + CHARACTERISTICS_EXTRA_ENTRIES,
+                          get_camera_metadata_data_count(pBuffer) + CHARACTERISTICS_EXTRA_DATA_SIZE
+                    };
+                    mPhysicalCameraCharacteristics[id].append(pBuffer);
+                } else {
+                    mPhysicalCameraCharacteristics[id] = pBuffer;
+                }
             } else {
                 ALOGE("%s: Malformed camera metadata received from HAL", __FUNCTION__);
                 return;
@@ -743,7 +771,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     std::filesystem::path sharedSessionConfigFilePath =
             std::string(SHARED_SESSION_FILE_PATH) + std::string(SHARED_SESSION_FILE_NAME);
-    if (flags::camera_multi_client() && std::filesystem::exists(sharedSessionConfigFilePath)) {
+    if (flags::camera_multi_client() && std::filesystem::exists(sharedSessionConfigFilePath)
+            && mSystemCameraKind == SystemCameraKind::SYSTEM_ONLY_CAMERA) {
         addSharedSessionConfigurationTags(id);
     }
 
@@ -856,10 +885,11 @@ status_t AidlProviderInfo::AidlDeviceInfo3::isSessionConfigurationSupported(
 
     camera::device::StreamConfiguration streamConfiguration;
     bool earlyExit = false;
-    auto bRes = SessionConfigurationUtils::convertToHALStreamCombination(configuration,
-            mId, mCameraCharacteristics, mCompositeJpegRDisabled, getMetadata,
-            mPhysicalIds, streamConfiguration, overrideForPerfClass, mProviderTagid,
-            checkSessionParams, mAdditionalKeysForFeatureQuery, &earlyExit);
+    auto bRes = SessionConfigurationUtils::convertToHALStreamCombination(
+            configuration, mId, mCameraCharacteristics, mCompositeJpegRDisabled,
+            mCompositeHeicDisabled, mCompositeHeicUltraHDRDisabled, getMetadata, mPhysicalIds,
+            streamConfiguration, overrideForPerfClass, mProviderTagid, checkSessionParams,
+            mAdditionalKeysForFeatureQuery, &earlyExit);
 
     if (!bRes.isOk()) {
         return UNKNOWN_ERROR;
@@ -967,10 +997,11 @@ status_t AidlProviderInfo::AidlDeviceInfo3::getSessionCharacteristics(
         camera3::metadataGetter getMetadata, CameraMetadata* outChars) {
     camera::device::StreamConfiguration streamConfiguration;
     bool earlyExit = false;
-    auto res = SessionConfigurationUtils::convertToHALStreamCombination(configuration,
-            mId, mCameraCharacteristics, mCompositeJpegRDisabled, getMetadata,
-            mPhysicalIds, streamConfiguration, overrideForPerfClass, mProviderTagid,
-            /*checkSessionParams*/true, mAdditionalKeysForFeatureQuery, &earlyExit);
+    auto res = SessionConfigurationUtils::convertToHALStreamCombination(
+            configuration, mId, mCameraCharacteristics, mCompositeJpegRDisabled,
+            mCompositeHeicDisabled, mCompositeHeicUltraHDRDisabled, getMetadata, mPhysicalIds,
+            streamConfiguration, overrideForPerfClass, mProviderTagid,
+            /*checkSessionParams*/ true, mAdditionalKeysForFeatureQuery, &earlyExit);
 
     if (!res.isOk()) {
         return UNKNOWN_ERROR;
@@ -1055,7 +1086,9 @@ status_t AidlProviderInfo::convertToAidlHALStreamCombinationAndCameraIdsLocked(
             SessionConfigurationUtils::convertToHALStreamCombination(
                     cameraIdAndSessionConfig.mSessionConfiguration,
                     cameraId, deviceInfo,
-                    mManager->isCompositeJpegRDisabledLocked(cameraId), getMetadata,
+                    mManager->isCompositeJpegRDisabledLocked(cameraId),
+                    mManager->isCompositeHeicDisabledLocked(cameraId),
+                    mManager->isCompositeHeicUltraHDRDisabledLocked(cameraId), getMetadata,
                     physicalCameraIds, streamConfiguration,
                     overrideForPerfClass, mProviderTagid,
                     /*checkSessionParams*/false, /*additionalKeys*/{},

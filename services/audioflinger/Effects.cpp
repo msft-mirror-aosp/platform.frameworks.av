@@ -1576,6 +1576,11 @@ bool EffectModule::isSpatializer() const {
     return IAfEffectModule::isSpatializer(&mDescriptor.type);
 }
 
+bool EffectModule::isEffect(const effect_uuid_t &uuid) const {
+    using android::effect::utils::operator==;
+    return mDescriptor.uuid == uuid;
+}
+
 status_t EffectModule::setHapticScale_l(int id, os::HapticScale hapticScale) {
     if (mStatus != NO_ERROR) {
         return mStatus;

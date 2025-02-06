@@ -399,6 +399,30 @@ bool CameraProviderManager::isCompositeJpegRDisabledLocked(const std::string &id
     return deviceInfo->isCompositeJpegRDisabled();
 }
 
+bool CameraProviderManager::isCompositeHeicDisabled(const std::string &id) const {
+    std::lock_guard<std::mutex> lock(mInterfaceMutex);
+    return isCompositeHeicDisabledLocked(id);
+}
+
+bool CameraProviderManager::isCompositeHeicDisabledLocked(const std::string &id) const {
+    auto deviceInfo = findDeviceInfoLocked(id);
+    if (deviceInfo == nullptr) return false;
+
+    return deviceInfo->isCompositeHeicDisabled();
+}
+
+bool CameraProviderManager::isCompositeHeicUltraHDRDisabled(const std::string &id) const {
+    std::lock_guard<std::mutex> lock(mInterfaceMutex);
+    return isCompositeHeicUltraHDRDisabledLocked(id);
+}
+
+bool CameraProviderManager::isCompositeHeicUltraHDRDisabledLocked(const std::string &id) const {
+    auto deviceInfo = findDeviceInfoLocked(id);
+    if (deviceInfo == nullptr) return false;
+
+    return deviceInfo->isCompositeHeicUltraHDRDisabled();
+}
+
 status_t CameraProviderManager::getResourceCost(const std::string &id,
         CameraResourceCost* cost) const {
     std::lock_guard<std::mutex> lock(mInterfaceMutex);
@@ -2072,11 +2096,8 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQuery
     int deviceVersion = HARDWARE_DEVICE_API_VERSION(mVersion.get_major(), mVersion.get_minor());
     if (deviceVersion == CAMERA_DEVICE_API_VERSION_1_3) {
         versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
-    } else if (deviceVersion >= CAMERA_DEVICE_API_VERSION_1_4) {
-        if (flags::feature_combination_baklava()) {
+        if (flags::feature_combination_baklava() && getVNDKVersion() > 35) {
             versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_BAKLAVA;
-        } else {
-            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
         }
     }
     res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
@@ -2256,6 +2277,10 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::fillHeicStreamCombina
 }
 
 status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveHeicTags(bool maxResolution) {
+    if (mCompositeHeicDisabled) {
+        return OK;
+    }
+
     int32_t scalerStreamSizesTag =
             SessionConfigurationUtils::getAppropriateModeTag(
                     ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS, maxResolution);

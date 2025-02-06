@@ -1658,11 +1658,7 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     }
 
     if (!profile->canOpenNewIo()) {
-        if (!com::android::media::audioserver::direct_track_reprioritization()) {
-            ALOGW("%s profile %s can't open new output maxOpenCount reached", __func__,
-                  profile->getName().c_str());
-            return NAME_NOT_FOUND;
-        } else if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) != 0) {
+        if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) != 0) {
             // MMAP gracefully handles lack of an exclusive track resource by mixing
             // above the audio framework. For AAudio to know that the limit is reached,
             // return an error.
@@ -3143,6 +3139,7 @@ AudioPolicyManager::getInputForAttr(audio_attributes_t attributes_,
     ret.portId = allocatedPortId;
     ret.virtualDeviceId = permReq.virtualDeviceId;
     ret.config = legacy2aidl_audio_config_base_t_AudioConfigBase(config, true /*isInput*/).value();
+    ret.source = legacy2aidl_audio_source_t_AudioSource(attributes.source).value();
     return ret;
 }
 
@@ -3199,8 +3196,10 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
         return input;
     }
 
-    // Reuse an already opened input if a client with the same session ID already exists
-    // on that input
+    // Reuse an already opened input if:
+    //  - a client with the same session ID already exists on that input
+    //  - OR the requested device is a remote submix device with the same adrress
+    //    as the one connected to that input
     for (size_t i = 0; i < mInputs.size(); i++) {
         sp <AudioInputDescriptor> desc = mInputs.valueAt(i);
         if (desc->mProfile != profile) {
@@ -3211,6 +3210,11 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             if (session == client->session()) {
                 return desc->mIoHandle;
             }
+        }
+        if (audio_is_remote_submix_device(device->type())
+                && (device->address() != "0")
+                && device->equals(desc->getDevice())) {
+            return desc->mIoHandle;
         }
     }
 
@@ -4090,6 +4094,7 @@ status_t AudioPolicyManager::registerPolicyMixes(const Vector<AudioMix>& mixes)
     bool checkOutputs = false;
     sp<HwModule> rSubmixModule;
     Vector<AudioMix> registeredMixes;
+    AudioDeviceTypeAddrVector devices;
     // examine each mix's route type
     for (size_t i = 0; i < mixes.size(); i++) {
         AudioMix mix = mixes[i];
@@ -4213,6 +4218,7 @@ status_t AudioPolicyManager::registerPolicyMixes(const Vector<AudioMix>& mixes)
                 break;
             } else {
                 checkOutputs = true;
+                devices.push_back(AudioDeviceTypeAddr(mix.mDeviceType, mix.mDeviceAddress.c_str()));
                 registeredMixes.add(mix);
             }
         }
@@ -4228,7 +4234,10 @@ status_t AudioPolicyManager::registerPolicyMixes(const Vector<AudioMix>& mixes)
         }
     } else if (checkOutputs) {
         checkForDeviceAndOutputChanges();
-        updateCallAndOutputRouting();
+        changeOutputDevicesMuteState(devices);
+        updateCallAndOutputRouting(false /* forceVolumeReeval */, 0 /* delayMs */,
+            true /* skipDelays */);
+        changeOutputDevicesMuteState(devices);
     }
     return res;
 }
@@ -4239,6 +4248,7 @@ status_t AudioPolicyManager::unregisterPolicyMixes(Vector<AudioMix> mixes)
     status_t res = NO_ERROR;
     bool checkOutputs = false;
     sp<HwModule> rSubmixModule;
+    AudioDeviceTypeAddrVector devices;
     // examine each mix's route type
     for (const auto& mix : mixes) {
         if ((mix.mRouteFlags & MIX_ROUTE_FLAG_LOOP_BACK) == MIX_ROUTE_FLAG_LOOP_BACK) {
@@ -4286,6 +4296,7 @@ status_t AudioPolicyManager::unregisterPolicyMixes(Vector<AudioMix> mixes)
                 res = INVALID_OPERATION;
                 continue;
             } else {
+                devices.push_back(AudioDeviceTypeAddr(mix.mDeviceType, mix.mDeviceAddress.c_str()));
                 checkOutputs = true;
             }
         }
@@ -4293,7 +4304,10 @@ status_t AudioPolicyManager::unregisterPolicyMixes(Vector<AudioMix> mixes)
 
     if (res == NO_ERROR && checkOutputs) {
         checkForDeviceAndOutputChanges();
-        updateCallAndOutputRouting();
+        changeOutputDevicesMuteState(devices);
+        updateCallAndOutputRouting(false /* forceVolumeReeval */, 0 /* delayMs */,
+            true /* skipDelays */);
+        changeOutputDevicesMuteState(devices);
     }
     return res;
 }
@@ -7578,6 +7592,9 @@ void AudioPolicyManager::checkOutputForAttributes(const audio_attributes_t &attr
         for (audio_io_handle_t srcOut : srcOutputs) {
             sp<SwAudioOutputDescriptor> desc = mPreviousOutputs.valueFor(srcOut);
             if (desc == nullptr) continue;
+            if (desc == mSpatializerOutput && newDevices == oldDevices) {
+                continue;
+            }
 
             if (desc->isStrategyActive(psId) && maxLatency < desc->latency()) {
                 maxLatency = desc->latency();

@@ -96,7 +96,10 @@ public:
     virtual const sp<IAfPatchPanel>& getPatchPanel() const = 0;
     virtual const sp<MelReporter>& getMelReporter() const = 0;
     virtual const sp<EffectsFactoryHalInterface>& getEffectsFactoryHal() const = 0;
-    virtual sp<IAudioManager> getOrCreateAudioManager() = 0;  // Tracks
+    // AudioService interfaces
+    virtual sp<IAudioManager> getOrCreateAudioManager() = 0;
+    // Populated after getOrCreateAudioManager
+    virtual sp<media::IAudioManagerNative> getAudioManagerNative() const = 0;
 
     virtual bool updateOrphanEffectChains(const sp<IAfEffectModule>& effect)
             EXCLUDES_AudioFlinger_Mutex = 0;
@@ -104,11 +107,6 @@ public:
             IAfPlaybackThread* srcThread, IAfPlaybackThread* dstThread,
             IAfEffectChain* srcChain = nullptr)
             REQUIRES(mutex(), audio_utils::ThreadBase_Mutex) = 0;
-
-    virtual void requestLogMerge() = 0;
-    virtual sp<NBLog::Writer> newWriter_l(size_t size, const char *name)
-            REQUIRES(mutex()) = 0;
-    virtual void unregisterWriter(const sp<NBLog::Writer>& writer) = 0;
 
     virtual sp<audioflinger::SyncEvent> createSyncEvent(AudioSystem::sync_event_t type,
             audio_session_t triggerSession,
@@ -130,6 +128,8 @@ public:
 
     virtual const ::com::android::media::permission::IPermissionProvider&
             getPermissionProvider() = 0;
+
+    virtual bool isHardeningOverrideEnabled() const = 0;
 };
 
 class IAfThreadBase : public virtual RefBase {

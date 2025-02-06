@@ -131,6 +131,10 @@ class Camera3Device :
     const CameraMetadata& info() const override;
     const CameraMetadata& infoPhysical(const std::string& physicalId) const override;
     bool isCompositeJpegRDisabled() const override { return mIsCompositeJpegRDisabled; };
+    bool isCompositeHeicDisabled() const override { return mIsCompositeHeicDisabled; }
+    bool isCompositeHeicUltraHDRDisabled() const override {
+        return mIsCompositeHeicUltraHDRDisabled;
+    }
 
     // Capture and setStreamingRequest will configure streams if currently in
     // idle state
@@ -618,6 +622,8 @@ class Camera3Device :
     CameraMetadata             mDeviceInfo;
     bool                       mSupportNativeZoomRatio;
     bool                       mIsCompositeJpegRDisabled;
+    bool                       mIsCompositeHeicDisabled;
+    bool                       mIsCompositeHeicUltraHDRDisabled;
     std::unordered_map<std::string, CameraMetadata> mPhysicalDeviceInfoMap;
 
     CameraMetadata             mRequestTemplateCache[CAMERA_TEMPLATE_COUNT];
