@@ -412,6 +412,9 @@ TEST_F(AudioSystemTest, DevicesForRoleAndStrategy) {
                 outputDevices.push_back(outputDevice);
             }
         }
+        if (outputDevices.empty()) {
+            GTEST_SKIP() << "No speaker device found";
+        }
         EXPECT_EQ(OK, AudioSystem::setDevicesRoleForStrategy(mediaStrategy.getId(),
                                                              DEVICE_ROLE_PREFERRED, outputDevices));
         EXPECT_EQ(OK, AudioSystem::getDevicesForRoleAndStrategy(mediaStrategy.getId(),
@@ -425,8 +428,13 @@ TEST_F(AudioSystemTest, DevicesForRoleAndStrategy) {
 }
 
 TEST_F(AudioSystemTest, VolumeIndexForAttributes) {
+    std::optional<audio_port_v7> speakerPort = audio_port_v7{};
+    if (getPortByAttributes(AUDIO_PORT_ROLE_SINK, AUDIO_PORT_TYPE_DEVICE, AUDIO_DEVICE_OUT_SPEAKER,
+                            "", *speakerPort) != OK) {
+        speakerPort.reset();
+    }
     AudioVolumeGroupVector groups;
-    EXPECT_EQ(OK, AudioSystem::listAudioVolumeGroups(groups));
+    ASSERT_EQ(OK, AudioSystem::listAudioVolumeGroups(groups));
     for (const auto& group : groups) {
         if (group.getAudioAttributes().empty()) continue;
         const audio_attributes_t attr = group.getAudioAttributes()[0];
@@ -438,14 +446,15 @@ TEST_F(AudioSystemTest, VolumeIndexForAttributes) {
         EXPECT_EQ(OK, AudioSystem::getVolumeGroupFromAudioAttributes(attr, vg));
         EXPECT_EQ(group.getId(), vg);
 
-        int index;
-        EXPECT_EQ(OK,
-                  AudioSystem::getVolumeIndexForAttributes(attr, index, AUDIO_DEVICE_OUT_SPEAKER));
-
-        int indexTest;
-        EXPECT_EQ(OK, AudioSystem::getStreamVolumeIndex(streamType, &indexTest,
-                                                        AUDIO_DEVICE_OUT_SPEAKER));
-        EXPECT_EQ(index, indexTest);
+        if (speakerPort.has_value()) {
+            int index;
+            EXPECT_EQ(OK, AudioSystem::getVolumeIndexForAttributes(attr, index,
+                                                                   speakerPort->ext.device.type));
+            int indexTest;
+            EXPECT_EQ(OK, AudioSystem::getStreamVolumeIndex(streamType, &indexTest,
+                                                            speakerPort->ext.device.type));
+            EXPECT_EQ(index, indexTest);
+        }
     }
 }
 
