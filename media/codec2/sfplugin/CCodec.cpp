@@ -16,7 +16,9 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "CCodec"
+#define ATRACE_TAG  ATRACE_TAG_VIDEO
 #include <utils/Log.h>
+#include <utils/Trace.h>
 
 #include <sstream>
 #include <thread>
@@ -883,6 +885,7 @@ struct CCodec::ClientListener : public Codec2Client::Listener {
             const std::weak_ptr<Codec2Client::Component>& component,
             std::list<std::unique_ptr<C2Work>>& workItems) override {
         (void)component;
+        ScopedTrace trace(ATRACE_TAG, "CCodec::ClientListener-WorkDone");
         sp<CCodec> codec(mCodec.promote());
         if (!codec) {
             return;
@@ -2878,6 +2881,7 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
             break;
         }
         case kWhatWorkDone: {
+            ScopedTrace trace(ATRACE_TAG, "CCodec::msg-onWorkDone");
             std::unique_ptr<C2Work> work;
             bool shouldPost = false;
             {

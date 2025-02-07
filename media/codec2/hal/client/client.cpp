@@ -3111,9 +3111,12 @@ c2_status_t Codec2Client::Component::queue(
     }
     if (mAidlBase) {
         c2_aidl::WorkBundle workBundle;
-        if (!c2_aidl::utils::ToAidl(&workBundle, *items, mAidlBufferPoolSender.get())) {
-            LOG(ERROR) << "queue -- bad input.";
-            return C2_TRANSACTION_FAILED;
+        {
+            ScopedTrace trace(ATRACE_TAG, "CCodec::Codec2Client::ToAidl");
+            if (!c2_aidl::utils::ToAidl(&workBundle, *items, mAidlBufferPoolSender.get())) {
+                LOG(ERROR) << "queue -- bad input.";
+                return C2_TRANSACTION_FAILED;
+            }
         }
         ::ndk::ScopedAStatus transStatus = mAidlBase->queue(workBundle);
         return GetC2Status(transStatus, "queue");
@@ -3446,7 +3449,7 @@ status_t Codec2Client::Component::queueToOutputSurface(
         const C2ConstGraphicBlock& block,
         const QueueBufferInput& input,
         QueueBufferOutput* output) {
-    ScopedTrace trace(ATRACE_TAG,"Codec2Client::Component::queueToOutputSurface");
+    ScopedTrace trace(ATRACE_TAG,"CCodec::Codec2Client::Component::queueToOutputSurface");
     if (mAidlBase) {
         std::shared_ptr<AidlGraphicBufferAllocator> gba =
                 mGraphicBufferAllocators->current();
