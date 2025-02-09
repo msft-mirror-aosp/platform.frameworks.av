@@ -475,7 +475,7 @@ TEST_F(AudioPolicyManagerTest, BuiltInStrategyIdsAreValid) {
 class AudioPolicyManagerTestWithDefaultEngineConfig : public AudioPolicyManagerTest {
   protected:
     // The APM will use the default engine config from EngineDefaultConfig.h.
-    std::string getEngineConfigFilePath() const override { return ""; }
+    std::string getEngineConfigFilePath() const override { return "non_existent_file.xml"; }
 };
 
 TEST_F(AudioPolicyManagerTestWithDefaultEngineConfig, BuiltInStrategyIdsAreValid) {

@@ -31,7 +31,6 @@
 #include <EngineConfig.h>
 #include <policy.h>
 #include <AudioIODescriptorInterface.h>
-#include <ParameterManagerWrapper.h>
 #include <media/AudioContainers.h>
 
 #include <media/TypeConverter.h>
@@ -66,13 +65,20 @@ const InputSourceCollection &Engine::getCollection<audio_source_t>() const
     return mInputSourceCollection;
 }
 
-Engine::Engine() : mPolicyParameterMgr(new ParameterManagerWrapper())
-{
-}
-
 status_t Engine::loadFromHalConfigWithFallback(
         const media::audio::common::AudioHalEngineConfig& aidlConfig) {
-
+#ifdef DISABLE_CAP_AIDL
+    (void) aidlConfig;
+    ALOGE("%s CapEngine Config disabled, falling back on vendor XML for engine", __func__);
+    return loadFromXmlConfigWithFallback(engineConfig::DEFAULT_PATH);
+#else
+#ifdef ENABLE_CAP_AIDL_HYBRID_MODE
+    if (!aidlConfig.capSpecificConfig.value().domains.has_value()) {
+        ALOGE("%s CapEngine Config missing, falling back on vendor XML for engine", __func__);
+        return loadFromXmlConfigWithFallback(engineConfig::DEFAULT_PATH);
+    }
+#endif
+    mPolicyParameterMgr = std::make_unique<ParameterManagerWrapper>();
     auto capResult = capEngineConfig::convert(aidlConfig);
     if (capResult.parsedConfig == nullptr) {
         ALOGE("%s CapEngine Config invalid", __func__);
@@ -92,20 +98,24 @@ status_t Engine::loadFromHalConfigWithFallback(
     };
     loadCriteria(capResult.parsedConfig->capCriteria);
     std::string error;
-    if (mPolicyParameterMgr == nullptr || mPolicyParameterMgr->start(error) != NO_ERROR) {
-        ALOGE("%s: could not start Policy PFW: %s", __FUNCTION__, error.c_str());
-        return NO_INIT;
+    if (mPolicyParameterMgr->start(error) != NO_ERROR) {
+        ALOGE("%s: could not start Policy PFW: %s, fallback on default", __func__ , error.c_str());
+        auto result = parseAndSetDefaultConfiguration();
+        return result.nbSkippedElement == 0 ? NO_ERROR : BAD_VALUE;
     }
     return mPolicyParameterMgr->setConfiguration(capResult);
+#endif
 }
 
 status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath)
 {
+    mPolicyParameterMgr = std::make_unique<ParameterManagerWrapper>(true /*useLegacyVendorFile*/);
     status_t status = loadWithFallback(xmlFilePath);
     std::string error;
-    if (mPolicyParameterMgr == nullptr || mPolicyParameterMgr->start(error) != NO_ERROR) {
-        ALOGE("%s: could not start Policy PFW: %s", __FUNCTION__, error.c_str());
-        return NO_INIT;
+    if (mPolicyParameterMgr->start(error) != NO_ERROR) {
+        ALOGE("%s: could not start Policy PFW: %s, fallback on default", __func__ , error.c_str());
+        auto result = parseAndSetDefaultConfiguration();
+        return result.nbSkippedElement == 0 ? NO_ERROR : BAD_VALUE;
     }
     return status;
 }
@@ -191,6 +201,10 @@ bool Engine::setPropertyForKey(const Property &property, const Key &key)
 
 status_t Engine::setPhoneState(audio_mode_t mode)
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     status_t status = mPolicyParameterMgr->setPhoneState(mode);
     if (status != NO_ERROR) {
         return status;
@@ -200,12 +214,20 @@ status_t Engine::setPhoneState(audio_mode_t mode)
 
 audio_mode_t Engine::getPhoneState() const
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return AUDIO_MODE_NORMAL;
+    }
     return mPolicyParameterMgr->getPhoneState();
 }
 
 status_t Engine::setForceUse(audio_policy_force_use_t usage,
                                       audio_policy_forced_cfg_t config)
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     status_t status = mPolicyParameterMgr->setForceUse(usage, config);
     if (status != NO_ERROR) {
         return status;
@@ -215,12 +237,20 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage,
 
 audio_policy_forced_cfg_t Engine::getForceUse(audio_policy_force_use_t usage) const
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return AUDIO_POLICY_FORCE_NONE;
+    }
     return mPolicyParameterMgr->getForceUse(usage);
 }
 
 status_t Engine::setOutputDevicesConnectionState(const DeviceVector &devices,
                                                  audio_policy_dev_state_t state)
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     for (const auto &device : devices) {
         mPolicyParameterMgr->setDeviceConnectionState(device->type(), device->address(), state);
     }
@@ -236,6 +266,10 @@ status_t Engine::setOutputDevicesConnectionState(const DeviceVector &devices,
 status_t Engine::setDeviceConnectionState(const sp<DeviceDescriptor> device,
                                           audio_policy_dev_state_t state)
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     mPolicyParameterMgr->setDeviceConnectionState(device->type(), device->address(), state);
     if (audio_is_output_device(device->type())) {
         return mPolicyParameterMgr->setAvailableOutputDevices(
@@ -533,6 +567,10 @@ void Engine::setDeviceAddressForProductStrategy(product_strategy_t strategy,
 
 bool Engine::setDeviceTypesForProductStrategy(product_strategy_t strategy, uint64_t devices)
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return false;
+    }
     if (getProductStrategies().find(strategy) == getProductStrategies().end()) {
         ALOGE("%s: set device %" PRId64 " on invalid strategy %d", __FUNCTION__, devices, strategy);
         return false;
@@ -546,6 +584,10 @@ bool Engine::setDeviceTypesForProductStrategy(product_strategy_t strategy, uint6
 
 bool Engine::setDeviceForInputSource(const audio_source_t &inputSource, uint64_t device)
 {
+    if (mPolicyParameterMgr == nullptr) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return false;
+    }
     DeviceTypeSet types = mPolicyParameterMgr->convertDeviceCriterionValueToDeviceTypes(
                 device, false /*isOut*/);
     ALOG_ASSERT(types.size() <= 1, "one input device expected at most");
