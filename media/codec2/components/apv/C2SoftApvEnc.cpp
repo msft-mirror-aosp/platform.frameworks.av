@@ -36,6 +36,7 @@
 #include <util/C2InterfaceHelper.h>
 #include <cmath>
 #include "C2SoftApvEnc.h"
+#include "isAtLeastRelease.h"
 
 namespace android {
 
@@ -1403,6 +1404,13 @@ __attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* Creat
         ALOGV("APV SW Codec is not enabled");
         return nullptr;
     }
+
+    bool enabled = isAtLeastRelease(36, "Baklava");
+    ALOGD("isAtLeastRelease(36, Baklava) says enable: %s", enabled ? "yes" : "no");
+    if (!enabled) {
+        return nullptr;
+    }
+
     return new ::android::C2SoftApvEncFactory();
 }
 
