@@ -5128,6 +5128,9 @@ void MPEG4Writer::Track::writeApvcBox() {
     CHECK_GE(mCodecSpecificDataSize, 4u);
 
     mOwner->beginBox("apvC");
+    // apvC extends FullBox and hence the need to write first
+    // 4 bytes here when compared with av1C which extends Box.
+    mOwner->writeInt32(0);  // version=0, flags=0
     mOwner->write(mCodecSpecificData, mCodecSpecificDataSize);
     mOwner->endBox();  // apvC
 }
