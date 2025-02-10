@@ -30,6 +30,7 @@
 #include <Codec2Mapper.h>
 #include <SimpleC2Interface.h>
 #include "C2SoftApvDec.h"
+#include "isAtLeastRelease.h"
 
 #include <cutils/properties.h>
 
@@ -1515,6 +1516,13 @@ __attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* Creat
         ALOGV("APV SW Codec is not enabled");
         return nullptr;
     }
+
+    bool enabled = isAtLeastRelease(36, "Baklava");
+    ALOGD("isAtLeastRelease(36, Baklava) says enable: %s", enabled ? "yes" : "no");
+    if (!enabled) {
+        return nullptr;
+    }
+
     return new ::android::C2SoftApvDecFactory();
 }
 
