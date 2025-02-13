@@ -306,6 +306,15 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
     // queues as they are thread-safe, only send/receive operation must be protected.
     std::mutex mCommandReplyLock;
 
+    /*
+     * This lock is exclusively intended to serialize binder calls to remote
+     * IStream[Common|Out|In] objects in Audio HAL. Thereby, preventing any race conditions in Audio
+     * HAL. The only exception for above is when calling the IStream[Common|Out|In]::dump API.
+     * Please note that lock doesn't prevent access to IStream[Common|Out|In] class fields. That
+     * explains why there is no 'GUARDED_BY' annotations.
+     */
+    std::mutex mCallLock;
+
   private:
     static audio_config_base_t configToBase(const audio_config& config) {
         audio_config_base_t result = AUDIO_CONFIG_BASE_INITIALIZER;

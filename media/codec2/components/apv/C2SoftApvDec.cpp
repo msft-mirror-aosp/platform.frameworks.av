@@ -1243,19 +1243,15 @@ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
     getHDR10PlusInfoData(&hdrInfo, work);
 
     uint32_t format = HAL_PIXEL_FORMAT_YV12;
-    std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;
-    if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10 &&
-        mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
-        IntfImpl::Lock lock = mIntf->lock();
-        codedColorAspects = mIntf->getColorAspects_l();
-
-        bool allowRGBA1010102 = false;
-        if (codedColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
-            codedColorAspects->matrix == C2Color::MATRIX_BT2020 &&
-            codedColorAspects->transfer == C2Color::TRANSFER_ST2084) {
-            allowRGBA1010102 = true;
+    if (mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
+        if (isHalPixelFormatSupported((AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210)) {
+            format = AHARDWAREBUFFER_FORMAT_YCbCr_P210;
+        } else if (isHalPixelFormatSupported(
+                        (AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
+            format = HAL_PIXEL_FORMAT_YCBCR_P010;
+        } else {
+            format = HAL_PIXEL_FORMAT_YV12;
         }
-        format = getHalPixelFormatForBitDepth10(allowRGBA1010102);
     }
 
     if (mHalPixelFormat != format) {
