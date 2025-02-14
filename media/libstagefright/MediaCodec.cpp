@@ -6138,12 +6138,24 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
     // Update the width and the height.
     int32_t left = 0, top = 0, right = 0, bottom = 0, width = 0, height = 0;
     bool newSubsession = false;
-    if (android::media::codec::provider_->subsession_metrics()
-            && mOutputFormat->findInt32("width", &width)
-            && mOutputFormat->findInt32("height", &height)
-            && (width != mWidth || height != mHeight)) {
-        // consider a new subsession if the width or height changes.
-        newSubsession = true;
+    if (android::media::codec::provider_->subsession_metrics()) {
+        // consider a new subsession if the actual video size changes
+        // TODO: if the resolution of the clip changes "mid-stream" and crop params did not change
+        // or changed in such a way that the actual video size did not change then new subsession is
+        // not detected.
+        // TODO: although rare, the buffer attributes (rect(...), width, height) need not be a true
+        // representation of actual stream attributes (rect(...), width, height). It is only
+        // required that actual video frame is correctly presented in the rect() region of the
+        // buffer making this approach of detecting subsession less reliable.
+        if (mOutputFormat->findRect("crop", &left, &top, &right, &bottom)) {
+            if ((right - left + 1) != mWidth || (bottom - top + 1) != mHeight) {
+                newSubsession = true;
+            }
+        } else if (mOutputFormat->findInt32("width", &width) &&
+                   mOutputFormat->findInt32("height", &height) &&
+                   (width != mWidth || height != mHeight)) {
+            newSubsession = true;
+        }
     }
     // TODO: properly detect new audio subsession
 
