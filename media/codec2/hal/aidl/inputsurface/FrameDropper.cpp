@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 The Android Open Source Project
+ * Copyright (C) 2015 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,14 +15,13 @@
  */
 
 //#define LOG_NDEBUG 0
-#define LOG_TAG "C2AIDL-FrameDropper"
+#define LOG_TAG "FrameDropper"
 #include <utils/Log.h>
 
-#include <codec2/aidl/inputsurface/FrameDropper.h>
-
+#include <media/stagefright/bqhelper/FrameDropper.h>
 #include <media/stagefright/foundation/ADebug.h>
 
-namespace aidl::android::hardware::media::c2::implementation {
+namespace android {
 
 static const int64_t kMaxJitterUs = 2000;
 
@@ -34,17 +33,18 @@ FrameDropper::FrameDropper()
 FrameDropper::~FrameDropper() {
 }
 
-void FrameDropper::setMaxFrameRate(float maxFrameRate) {
+status_t FrameDropper::setMaxFrameRate(float maxFrameRate) {
     if (maxFrameRate < 0) {
         mMinIntervalUs = -1LL;
-        return;
+        return OK;
     }
 
     if (maxFrameRate == 0) {
-        ALOGW("framerate should be positive but got %f.", maxFrameRate);
-        return;
+        ALOGE("framerate should be positive but got %f.", maxFrameRate);
+        return BAD_VALUE;
     }
     mMinIntervalUs = (int64_t) (1000000.0f / maxFrameRate);
+    return OK;
 }
 
 bool FrameDropper::shouldDrop(int64_t timeUs) {
@@ -74,4 +74,4 @@ bool FrameDropper::shouldDrop(int64_t timeUs) {
     return false;
 }
 
-}  // namespace aidl::android::hardware::media::c2::implementation
+}  // namespace android
