@@ -3168,7 +3168,7 @@ status_t RecordTrack::setParameters(const String8& keyValuePairs) {
     if (thread == nullptr) {
         ALOGE("%s(%d): thread is dead", __func__, mId);
         return FAILED_TRANSACTION;
-    } else if (thread->type() == IAfThreadBase::DIRECT) {
+    } else if (thread->type() == IAfThreadBase::DIRECT_RECORD) {
         return thread->setParameters(keyValuePairs);
     } else {
         return PERMISSION_DENIED;
