@@ -2916,6 +2916,21 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
                             : work->worklets.front()->output.configUpdate) {
                         updates.push_back(C2Param::Copy(*param));
                     }
+                    // Check for change in resources required.
+                    if (!updates.empty() && android::media::codec::codec_availability_support()) {
+                        for (const std::unique_ptr<C2Param>& param : updates) {
+                            if (param->index() == C2ResourcesNeededTuning::PARAM_TYPE) {
+                                // Update the required resources.
+                                if (mCodecResources) {
+                                    mCodecResources->updateRequiredResources(
+                                            C2ResourcesNeededTuning::From(param.get()));
+                                }
+                                // Report to MediaCodec
+                                mCallback->onRequiredResourcesChanged();
+                                break;
+                            }
+                        }
+                    }
                     unsigned stream = 0;
                     std::vector<std::shared_ptr<C2Buffer>> &outputBuffers =
                         work->worklets.front()->output.buffers;

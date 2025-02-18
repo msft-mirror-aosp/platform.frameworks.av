@@ -108,6 +108,7 @@ c2_status_t queryGlobalResources(const std::shared_ptr<Codec2Client>& client,
 static status_t getSystemResource(const C2ResourcesNeededTuning* systemResourcesInfo,
                                   const std::string& storeName,
                                   std::vector<InstanceResourceInfo>& resources) {
+    resources.clear();
     if (systemResourcesInfo && *systemResourcesInfo) {
         for (size_t i = 0; i < systemResourcesInfo->flexCount(); ++i) {
             const C2SystemResourceStruct& resource =
@@ -184,6 +185,14 @@ status_t CCodecResources::queryRequiredResources(
 std::vector<InstanceResourceInfo> CCodecResources::getRequiredResources() {
     Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(mResources);
     return *resourcesLocked;
+}
+
+status_t CCodecResources::updateRequiredResources(
+        const C2ResourcesNeededTuning* systemResourcesInfo) {
+    // Update the required resources from the given systemResourcesInfo.
+    Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(mResources);
+    std::vector<InstanceResourceInfo>& resources = *resourcesLocked;
+    return getSystemResource(systemResourcesInfo, mStoreName, resources);
 }
 
 } // namespace android
