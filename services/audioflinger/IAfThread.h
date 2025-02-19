@@ -685,6 +685,9 @@ public:
     virtual void invalidateTracks(std::set<audio_port_handle_t>& portIds)
             EXCLUDES_ThreadBase_Mutex = 0;
 
+    virtual void invalidateTracks(audio_stream_type_t streamType)
+            EXCLUDES_ThreadBase_Mutex = 0;
+
     // Sets the UID records silence - TODO(b/291317898)  move to IAfMmapCaptureThread
     virtual void setRecordSilenced(audio_port_handle_t portId, bool silenced)
             EXCLUDES_ThreadBase_Mutex = 0;
