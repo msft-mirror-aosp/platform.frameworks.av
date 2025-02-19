@@ -1186,6 +1186,7 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
         transfer_characteristics = reader.getBits(8);  // transfer_characteristics
         matrix_coefficients = reader.getBits(8);       // matrix_coefficients
         full_range_flag = reader.getBits(1);           // full_range_flag
+        reader.skipBits(7);                            // reserved_zero_7bits
     }
 
     number_of_configuration_entry = 1;  // The real-time encoding on the device is assumed to be 1.
