@@ -381,6 +381,11 @@ private:
                                              uint32_t flags,
                                              status_t* err);
 
+    // Convert all dynamic (non-constant) resource types into
+    // constant resource counts.
+    std::vector<InstanceResourceInfo> computeDynamicResources(
+            const std::vector<InstanceResourceInfo>& resources);
+
 private:
     enum State {
         UNINITIALIZED,
@@ -819,6 +824,9 @@ private:
     CodecErrorLog mErrorLog;
     // Required resource info for this codec.
     Mutexed<std::vector<InstanceResourceInfo>> mRequiredResourceInfo;
+
+    // Default frame-rate.
+    float mFrameRate = 30.0;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
 };
