@@ -144,6 +144,7 @@ public:
         MMAP_CAPTURE,   // Thread class for MMAP capture stream
         SPATIALIZER,    //
         BIT_PERFECT,    // Thread class for BitPerfectThread
+        DIRECT_RECORD,  // Thread class for DirectRecordThread
         // When adding a value, also update IAfThreadBase::threadTypeToString()
     };
 
