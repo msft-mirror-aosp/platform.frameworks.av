@@ -289,6 +289,15 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
 
     status_t exit();
 
+    template <typename T, typename Callable, typename... Args>
+    auto serializeCall(const std::shared_ptr<T>& obj, Callable&& func, Args&&... args)
+            EXCLUDES(mCallLock) {
+        std::lock_guard lock(mCallLock);
+        return std::invoke(std::forward<Callable&&>(func),
+                           std::forward<const std::shared_ptr<T>&>(obj),
+                           std::forward<Args&&>(args)...);
+    }
+
     void onAsyncTransferReady();
     void onAsyncDrainReady();
     void onAsyncError();
@@ -305,15 +314,6 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
     // only accessed by the I/O thread. Also, there is no need to protect lookup operations on the
     // queues as they are thread-safe, only send/receive operation must be protected.
     std::mutex mCommandReplyLock;
-
-    /*
-     * This lock is exclusively intended to serialize binder calls to remote
-     * IStream[Common|Out|In] objects in Audio HAL. Thereby, preventing any race conditions in Audio
-     * HAL. The only exception for above is when calling the IStream[Common|Out|In]::dump API.
-     * Please note that lock doesn't prevent access to IStream[Common|Out|In] class fields. That
-     * explains why there is no 'GUARDED_BY' annotations.
-     */
-    std::mutex mCallLock;
 
   private:
     static audio_config_base_t configToBase(const audio_config& config) {
@@ -334,7 +334,17 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
             ::aidl::android::hardware::audio::core::StreamDescriptor::Reply* reply = nullptr,
             StatePositions* statePositions = nullptr);
 
-    const std::shared_ptr<::aidl::android::hardware::audio::core::IStreamCommon> mStream;
+    /*
+     * This lock is exclusively intended to serialize binder calls to remote
+     * IStream[Common|Out|In] objects in Audio HAL. Thereby, preventing any race conditions in Audio
+     * HAL. The only exception for above is when calling the IStream[Common|Out|In]::dump API.
+     * Please note that lock doesn't prevent access to IStream[Common|Out|In] class fields. That
+     * explains why there is no 'GUARDED_BY' annotations.
+     */
+    std::mutex mCallLock;
+
+    using Stream = ::aidl::android::hardware::audio::core::IStreamCommon;
+    const std::shared_ptr<Stream> mStream;
     const std::shared_ptr<::aidl::android::media::audio::IHalAdapterVendorExtension> mVendorExt;
     const int64_t mLastReplyLifeTimeNs;
     std::mutex mLock;
@@ -445,7 +455,8 @@ class StreamOutHalAidl : public virtual StreamOutHalInterface,
     static ConversionResult<::aidl::android::hardware::audio::common::SourceMetadata>
     legacy2aidl_SourceMetadata(const StreamOutHalInterface::SourceMetadata& legacy);
 
-    const std::shared_ptr<::aidl::android::hardware::audio::core::IStreamOut> mStream;
+    using Stream = ::aidl::android::hardware::audio::core::IStreamOut;
+    const std::shared_ptr<Stream> mStream;
     const wp<CallbackBroker> mCallbackBroker;
     mediautils::atomic_wp<StreamOutHalInterfaceCallback> mClientCallback;
 
@@ -502,7 +513,8 @@ class StreamInHalAidl : public StreamInHalInterface, public StreamHalAidl {
     static ConversionResult<::aidl::android::hardware::audio::common::SinkMetadata>
     legacy2aidl_SinkMetadata(const StreamInHalInterface::SinkMetadata& legacy);
 
-    const std::shared_ptr<::aidl::android::hardware::audio::core::IStreamIn> mStream;
+    using Stream = ::aidl::android::hardware::audio::core::IStreamIn;
+    const std::shared_ptr<Stream> mStream;
     const wp<MicrophoneInfoProvider> mMicInfoProvider;
 
     // Can not be constructed directly by clients.
