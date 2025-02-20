@@ -944,18 +944,6 @@ void C2SoftApvEnc::setParams(oapve_param_t& param) {
     param.band_idc = mIntf->getBandIdc_l();
     param.profile_idc = mIntf->getProfile_l();
     param.level_idc = mIntf->getLevel_l();
-    mColorAspects = mIntf->getColorAspects_l();
-    param.color_primaries = mColorAspects->primaries;
-    param.transfer_characteristics = mColorAspects->transfer;
-    param.matrix_coefficients = mColorAspects->matrix;
-    param.full_range_flag = mColorAspects->range;
-
-    if (param.color_primaries != C2Color::PRIMARIES_UNSPECIFIED ||
-            param.transfer_characteristics != C2Color::TRANSFER_UNSPECIFIED ||
-            param.matrix_coefficients != C2Color::MATRIX_UNSPECIFIED ||
-            param.full_range_flag != C2Color::RANGE_UNSPECIFIED) {
-        param.color_description_present_flag = 1;
-    }
 }
 
 c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2GraphicView* const input,
@@ -1186,6 +1174,7 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
         transfer_characteristics = reader.getBits(8);  // transfer_characteristics
         matrix_coefficients = reader.getBits(8);       // matrix_coefficients
         full_range_flag = reader.getBits(1);           // full_range_flag
+        reader.skipBits(7);                            // reserved_zero_7bits
     }
 
     number_of_configuration_entry = 1;  // The real-time encoding on the device is assumed to be 1.

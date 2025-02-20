@@ -49,12 +49,6 @@ using ::aidl::android::hardware::audio::core::StreamDescriptor;
 using ::aidl::android::media::audio::common::MicrophoneDynamicInfo;
 using ::aidl::android::media::audio::IHalAdapterVendorExtension;
 
-#define SERIALIZE_CALL(mtx, exp)   \
-    [&]() -> decltype(exp) {       \
-        std::lock_guard lock(mtx); \
-        return exp;                \
-    }()
-
 namespace android {
 
 using HalCommand = StreamDescriptor::Command;
@@ -135,7 +129,7 @@ StreamHalAidl::StreamHalAidl(std::string_view className, bool isInput, const aud
 StreamHalAidl::~StreamHalAidl() {
     AUGMENT_LOG(D);
     if (mStream != nullptr) {
-        ndk::ScopedAStatus status = SERIALIZE_CALL(mCallLock, mStream->close());
+        ndk::ScopedAStatus status = serializeCall(mStream, &Stream::close);
         AUGMENT_LOG_IF(E, !status.isOk(), "status %s", status.getDescription().c_str());
     }
 }
@@ -174,7 +168,7 @@ status_t StreamHalAidl::setParameters(const String8& kvPairs) {
     (void)VALUE_OR_RETURN_STATUS(filterOutAndProcessParameter<int>(
             parameters, String8(AudioParameter::keyStreamHwAvSync), [&](int hwAvSyncId) {
                 return statusTFromBinderStatus(
-                        SERIALIZE_CALL(mCallLock, mStream->updateHwAvSyncId(hwAvSyncId)));
+                        serializeCall(mStream, &Stream::updateHwAvSyncId, hwAvSyncId));
             }));
     return parseAndSetVendorParameters(mVendorExt, mStream, parameters);
 }
@@ -212,7 +206,7 @@ status_t StreamHalAidl::addEffect(sp<EffectHalInterface> effect) {
     }
     auto aidlEffect = sp<effect::EffectHalAidl>::cast(effect);
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->addEffect(aidlEffect->getIEffect())));
+            serializeCall(mStream, &Stream::addEffect, aidlEffect->getIEffect()));
 }
 
 status_t StreamHalAidl::removeEffect(sp<EffectHalInterface> effect) {
@@ -224,7 +218,7 @@ status_t StreamHalAidl::removeEffect(sp<EffectHalInterface> effect) {
     }
     auto aidlEffect = sp<effect::EffectHalAidl>::cast(effect);
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->removeEffect(aidlEffect->getIEffect())));
+            serializeCall(mStream, &Stream::removeEffect, aidlEffect->getIEffect()));
 }
 
 status_t StreamHalAidl::standby() {
@@ -562,7 +556,7 @@ status_t StreamHalAidl::exit() {
     AUGMENT_LOG(D);
     TIME_CHECK();
     if (!mStream) return NO_INIT;
-    return statusTFromBinderStatus(SERIALIZE_CALL(mCallLock, mStream->prepareToClose()));
+    return statusTFromBinderStatus(serializeCall(mStream, &Stream::prepareToClose));
 }
 
 void StreamHalAidl::onAsyncTransferReady() {
@@ -815,14 +809,14 @@ status_t StreamOutHalAidl::setVolume(float left, float right) {
             volumes[i] = (left + right) / 2;
         }
     }
-    return statusTFromBinderStatus(SERIALIZE_CALL(mCallLock, mStream->setHwVolume(volumes)));
+    return statusTFromBinderStatus(serializeCall(mStream, &Stream::setHwVolume, volumes));
 }
 
 status_t StreamOutHalAidl::selectPresentation(int presentationId, int programId) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->selectPresentation(presentationId, programId)));
+            serializeCall(mStream, &Stream::selectPresentation, presentationId, programId));
 }
 
 status_t StreamOutHalAidl::write(const void *buffer, size_t bytes, size_t *written) {
@@ -942,7 +936,7 @@ status_t StreamOutHalAidl::updateSourceMetadata(
     ::aidl::android::hardware::audio::common::SourceMetadata aidlMetadata =
               VALUE_OR_RETURN_STATUS(legacy2aidl_SourceMetadata(sourceMetadata));
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->updateMetadata(aidlMetadata)));
+            serializeCall(mStream, &Stream::updateMetadata, aidlMetadata));
 }
 
 status_t StreamOutHalAidl::getDualMonoMode(audio_dual_mono_mode_t* mode) {
@@ -953,7 +947,7 @@ status_t StreamOutHalAidl::getDualMonoMode(audio_dual_mono_mode_t* mode) {
     }
     ::aidl::android::media::audio::common::AudioDualMonoMode aidlMode;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->getDualMonoMode(&aidlMode))));
+            serializeCall(mStream, &Stream::getDualMonoMode, &aidlMode)));
     *mode = VALUE_OR_RETURN_STATUS(
             ::aidl::android::aidl2legacy_AudioDualMonoMode_audio_dual_mono_mode_t(aidlMode));
     return OK;
@@ -965,7 +959,7 @@ status_t StreamOutHalAidl::setDualMonoMode(audio_dual_mono_mode_t mode) {
     ::aidl::android::media::audio::common::AudioDualMonoMode aidlMode = VALUE_OR_RETURN_STATUS(
             ::aidl::android::legacy2aidl_audio_dual_mono_mode_t_AudioDualMonoMode(mode));
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->setDualMonoMode(aidlMode)));
+            serializeCall(mStream, &Stream::setDualMonoMode, aidlMode));
 }
 
 status_t StreamOutHalAidl::getAudioDescriptionMixLevel(float* leveldB) {
@@ -975,14 +969,14 @@ status_t StreamOutHalAidl::getAudioDescriptionMixLevel(float* leveldB) {
         return BAD_VALUE;
     }
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->getAudioDescriptionMixLevel(leveldB)));
+            serializeCall(mStream, &Stream::getAudioDescriptionMixLevel, leveldB));
 }
 
 status_t StreamOutHalAidl::setAudioDescriptionMixLevel(float leveldB) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->setAudioDescriptionMixLevel(leveldB)));
+            serializeCall(mStream, &Stream::setAudioDescriptionMixLevel, leveldB));
 }
 
 status_t StreamOutHalAidl::getPlaybackRateParameters(audio_playback_rate_t* playbackRate) {
@@ -993,7 +987,7 @@ status_t StreamOutHalAidl::getPlaybackRateParameters(audio_playback_rate_t* play
     }
     ::aidl::android::media::audio::common::AudioPlaybackRate aidlRate;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->getPlaybackRateParameters(&aidlRate))));
+            serializeCall(mStream, &Stream::getPlaybackRateParameters, &aidlRate)));
     *playbackRate = VALUE_OR_RETURN_STATUS(
             ::aidl::android::aidl2legacy_AudioPlaybackRate_audio_playback_rate_t(aidlRate));
     return OK;
@@ -1005,7 +999,7 @@ status_t StreamOutHalAidl::setPlaybackRateParameters(const audio_playback_rate_t
     ::aidl::android::media::audio::common::AudioPlaybackRate aidlRate = VALUE_OR_RETURN_STATUS(
             ::aidl::android::legacy2aidl_audio_playback_rate_t_AudioPlaybackRate(playbackRate));
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->setPlaybackRateParameters(aidlRate)));
+            serializeCall(mStream, &Stream::setPlaybackRateParameters, aidlRate));
 }
 
 status_t StreamOutHalAidl::setEventCallback(
@@ -1023,8 +1017,7 @@ status_t StreamOutHalAidl::setLatencyMode(audio_latency_mode_t mode) {
     if (!mStream) return NO_INIT;
     ::aidl::android::media::audio::common::AudioLatencyMode aidlMode = VALUE_OR_RETURN_STATUS(
             ::aidl::android::legacy2aidl_audio_latency_mode_t_AudioLatencyMode(mode));
-    return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->setLatencyMode(aidlMode)));
+    return statusTFromBinderStatus(serializeCall(mStream, &Stream::setLatencyMode, aidlMode));
 };
 
 status_t StreamOutHalAidl::getRecommendedLatencyModes(std::vector<audio_latency_mode_t> *modes) {
@@ -1035,7 +1028,7 @@ status_t StreamOutHalAidl::getRecommendedLatencyModes(std::vector<audio_latency_
     }
     std::vector<::aidl::android::media::audio::common::AudioLatencyMode> aidlModes;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->getRecommendedLatencyModes(&aidlModes))));
+            serializeCall(mStream, &Stream::getRecommendedLatencyModes, &aidlModes)));
     *modes = VALUE_OR_RETURN_STATUS(
             ::aidl::android::convertContainer<std::vector<audio_latency_mode_t>>(
                     aidlModes,
@@ -1131,8 +1124,8 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
     }
     if (updateMetadata) {
         AUGMENT_LOG(D, "set offload metadata %s", mOffloadMetadata.toString().c_str());
-        if (status_t status = statusTFromBinderStatus(SERIALIZE_CALL(
-                    mCallLock, mStream->updateOffloadMetadata(mOffloadMetadata)));
+        if (status_t status = statusTFromBinderStatus(
+                    serializeCall(mStream, &Stream::updateOffloadMetadata, mOffloadMetadata));
             status != OK) {
             AUGMENT_LOG(E, "updateOffloadMetadata failed %d", status);
             return status;
@@ -1166,7 +1159,7 @@ status_t StreamInHalAidl::setGain(float gain) {
     if (!mStream) return NO_INIT;
     const size_t channelCount = audio_channel_count_from_in_mask(mConfig.channel_mask);
     std::vector<float> gains(channelCount != 0 ? channelCount : 1, gain);
-    return statusTFromBinderStatus(SERIALIZE_CALL(mCallLock, mStream->setHwGain(gains)));
+    return statusTFromBinderStatus(serializeCall(mStream, &Stream::setHwGain, gains));
 }
 
 status_t StreamInHalAidl::read(void *buffer, size_t bytes, size_t *read) {
@@ -1205,7 +1198,7 @@ status_t StreamInHalAidl::getActiveMicrophones(std::vector<media::MicrophoneInfo
     if (!staticInfo) return INVALID_OPERATION;
     std::vector<MicrophoneDynamicInfo> dynamicInfo;
     RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->getActiveMicrophones(&dynamicInfo))));
+            serializeCall(mStream, &Stream::getActiveMicrophones, &dynamicInfo)));
     std::vector<media::MicrophoneInfoFw> result;
     result.reserve(dynamicInfo.size());
     for (const auto& d : dynamicInfo) {
@@ -1236,7 +1229,7 @@ status_t StreamInHalAidl::updateSinkMetadata(
     ::aidl::android::hardware::audio::common::SinkMetadata aidlMetadata =
               VALUE_OR_RETURN_STATUS(legacy2aidl_SinkMetadata(sinkMetadata));
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->updateMetadata(aidlMetadata)));
+            serializeCall(mStream, &Stream::updateMetadata, aidlMetadata));
 }
 
 status_t StreamInHalAidl::setPreferredMicrophoneDirection(audio_microphone_direction_t direction) {
@@ -1247,14 +1240,14 @@ status_t StreamInHalAidl::setPreferredMicrophoneDirection(audio_microphone_direc
                       ::aidl::android::legacy2aidl_audio_microphone_direction_t_MicrophoneDirection(
                               direction));
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->setMicrophoneDirection(aidlDirection)));
+            serializeCall(mStream, &Stream::setMicrophoneDirection, aidlDirection));
 }
 
 status_t StreamInHalAidl::setPreferredMicrophoneFieldDimension(float zoom) {
     TIME_CHECK();
     if (!mStream) return NO_INIT;
     return statusTFromBinderStatus(
-            SERIALIZE_CALL(mCallLock, mStream->setMicrophoneFieldDimension(zoom)));
+            serializeCall(mStream, &Stream::setMicrophoneFieldDimension, zoom));
 }
 
 } // namespace android
