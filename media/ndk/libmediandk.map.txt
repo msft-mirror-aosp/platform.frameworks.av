@@ -44,7 +44,7 @@ LIBMEDIANDK {
     AImageReader_newWithDataSpace; # introduced=UpsideDownCake
     AImageReader_setBufferRemovedListener; # introduced=26
     AImageReader_setImageListener; # introduced=24
-    AImageReader_setUsage; # introduced=36 llndk
+    AImageReader_setUsage; # introduced=36 llndk systemapi
     AImage_delete; # introduced=24
     AImage_deleteAsync; # introduced=26
     AImage_getCropRect; # introduced=24
