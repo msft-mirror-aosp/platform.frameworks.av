@@ -144,6 +144,7 @@ public:
         MMAP_CAPTURE,   // Thread class for MMAP capture stream
         SPATIALIZER,    //
         BIT_PERFECT,    // Thread class for BitPerfectThread
+        DIRECT_RECORD,  // Thread class for DirectRecordThread
         // When adding a value, also update IAfThreadBase::threadTypeToString()
     };
 
@@ -682,6 +683,9 @@ public:
 
     // TODO(b/291317898)  move to IAfThreadBase?
     virtual void invalidateTracks(std::set<audio_port_handle_t>& portIds)
+            EXCLUDES_ThreadBase_Mutex = 0;
+
+    virtual void invalidateTracks(audio_stream_type_t streamType)
             EXCLUDES_ThreadBase_Mutex = 0;
 
     // Sets the UID records silence - TODO(b/291317898)  move to IAfMmapCaptureThread
