@@ -537,6 +537,8 @@ public:
 
     virtual IAfTrack* getTrackById_l(audio_port_handle_t trackId) REQUIRES(mutex()) = 0;
 
+    virtual std::vector<sp<IAfTrack>> getTracks_l() REQUIRES(mutex()) = 0;
+
     virtual bool hasMixer() const = 0;
 
     virtual status_t setRequestedLatencyMode(audio_latency_mode_t mode) = 0;
