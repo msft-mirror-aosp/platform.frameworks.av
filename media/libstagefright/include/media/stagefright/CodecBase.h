@@ -219,6 +219,10 @@ struct CodecBase : public AHandler, /* static */ ColorUtils {
          * @param updatedMetrics metrics need to be updated.
          */
         virtual void onMetricsUpdated(const sp<AMessage> &updatedMetrics) = 0;
+        /**
+         * Notify MediaCodec that there is a change in the required resources.
+         */
+        virtual void onRequiredResourcesChanged() = 0;
     };
 
     /**
