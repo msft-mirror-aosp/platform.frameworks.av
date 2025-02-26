@@ -112,7 +112,7 @@ bool statsd_audiorecord(const std::shared_ptr<const mediametrics::Item>& item,
 
     int32_t port_id = -1;
     if (item->getInt32("android.media.audiorecord.portId", &port_id)) {
-        metrics_proto.set_port_id(count);
+        metrics_proto.set_port_id(port_id);
     }
 
     int32_t frame_count = -1;

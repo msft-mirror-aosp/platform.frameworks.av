@@ -944,6 +944,36 @@ void C2SoftApvEnc::setParams(oapve_param_t& param) {
     param.band_idc = mIntf->getBandIdc_l();
     param.profile_idc = mIntf->getProfile_l();
     param.level_idc = mIntf->getLevel_l();
+    mColorAspects = mIntf->getColorAspects_l();
+    ColorAspects sfAspects;
+    if (!C2Mapper::map(mColorAspects->primaries, &sfAspects.mPrimaries)) {
+        sfAspects.mPrimaries = android::ColorAspects::PrimariesUnspecified;
+    }
+    if (!C2Mapper::map(mColorAspects->range, &sfAspects.mRange)) {
+        sfAspects.mRange = android::ColorAspects::RangeUnspecified;
+    }
+    if (!C2Mapper::map(mColorAspects->matrix, &sfAspects.mMatrixCoeffs)) {
+        sfAspects.mMatrixCoeffs = android::ColorAspects::MatrixUnspecified;
+    }
+    if (!C2Mapper::map(mColorAspects->transfer, &sfAspects.mTransfer)) {
+        sfAspects.mTransfer = android::ColorAspects::TransferUnspecified;
+    }
+
+    int32_t isoPrimaries, isoTransfer, isoMatrix;
+    bool isoFullRange;
+    ColorUtils::convertCodecColorAspectsToIsoAspects(sfAspects,
+        &isoPrimaries, &isoTransfer, &isoMatrix, &isoFullRange);
+    param.color_primaries = isoPrimaries;
+    param.transfer_characteristics = isoTransfer;
+    param.matrix_coefficients = isoMatrix;
+    param.full_range_flag = isoFullRange;
+
+    if (mColorAspects->primaries != C2Color::PRIMARIES_UNSPECIFIED ||
+            mColorAspects->transfer != C2Color::TRANSFER_UNSPECIFIED ||
+            mColorAspects->matrix != C2Color::MATRIX_UNSPECIFIED ||
+            mColorAspects->range != C2Color::RANGE_UNSPECIFIED) {
+        param.color_description_present_flag = 1;
+    }
 }
 
 c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2GraphicView* const input,
