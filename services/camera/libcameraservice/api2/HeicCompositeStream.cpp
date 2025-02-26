@@ -1952,6 +1952,17 @@ void HeicCompositeStream::CodecCallbackHandler::onMessageReceived(const sp<AMess
                      break;
                  }
 
+                 case MediaCodec::CB_METRICS_FLUSHED:
+                 case MediaCodec::CB_REQUIRED_RESOURCES_CHANGED:
+                 {
+                    // Nothing to do. Informational. Safe to ignore.
+                    break;
+                 }
+
+                 case MediaCodec::CB_CRYPTO_ERROR:
+                 // unexpected as we are not using crypto
+                 case MediaCodec::CB_LARGE_FRAME_OUTPUT_AVAILABLE:
+                 // unexpected as we are not using large frames
                  default: {
                      ALOGE("kWhatCallbackNotify: callbackID(%d) is unexpected.", cbID);
                      break;
