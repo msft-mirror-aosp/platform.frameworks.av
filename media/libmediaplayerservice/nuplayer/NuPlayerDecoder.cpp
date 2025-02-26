@@ -214,6 +214,28 @@ void NuPlayer::Decoder::onMessageReceived(const sp<AMessage> &msg) {
                     break;
                 }
 
+                case MediaCodec::CB_CRYPTO_ERROR:
+                {
+                    status_t err;
+                    CHECK(msg->findInt32("err", &err));
+                    AString comment;
+                    msg->findString("errorDetail", &comment);
+                    ALOGE("Decoder (%s) reported crypto error : 0x%x (%s)",
+                            mIsAudio ? "audio" : "video", err, comment.c_str());
+
+                    handleError(err);
+                    break;
+                }
+
+                case MediaCodec::CB_REQUIRED_RESOURCES_CHANGED:
+                case MediaCodec::CB_METRICS_FLUSHED:
+                {
+                    // Nothing to do. Informational. Safe to ignore.
+                    break;
+                }
+
+                case MediaCodec::CB_LARGE_FRAME_OUTPUT_AVAILABLE:
+                // unexpected as we are not using large frames
                 default:
                 {
                     TRESPASS();
