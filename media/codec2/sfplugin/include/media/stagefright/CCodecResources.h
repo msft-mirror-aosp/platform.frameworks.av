@@ -32,12 +32,19 @@ class CCodecResources {
 public:
     CCodecResources(const std::string& storeName);
 
+    /// Gets the globally available resources from the
+    /// default store.
     static std::vector<GlobalResourceInfo> GetGloballyAvailableResources();
 
+    /// Queries the regurired resources for the given codec component.
     status_t queryRequiredResources(
             const std::shared_ptr<Codec2Client::Component>& comp);
 
+    /// Gets the required resources.
     std::vector<InstanceResourceInfo> getRequiredResources();
+
+    /// Updates the required resources.
+    status_t updateRequiredResources(const C2ResourcesNeededTuning* systemResourcesInfo);
 
 private:
     const std::string mStoreName;
