@@ -419,6 +419,7 @@ struct MediaCodec::ResourceManagerServiceProxy :
     status_t init();
     void addResource(const MediaResourceParcel &resource);
     void addResource(const std::vector<MediaResourceParcel>& resources);
+    void updateResource(const std::vector<MediaResourceParcel>& resources);
     void removeResource(const MediaResourceParcel &resource);
     void removeResource(const std::vector<MediaResourceParcel>& resources);
     void removeClient();
@@ -648,6 +649,17 @@ void MediaCodec::ResourceManagerServiceProxy::addResource(
     service->addResource(getClientInfo(), mClient, resources);
     std::copy(resources.begin(), resources.end(),
               std::inserter(mMediaResourceParcel, mMediaResourceParcel.end()));
+}
+
+void MediaCodec::ResourceManagerServiceProxy::updateResource(
+        const std::vector<MediaResourceParcel>& resources) {
+    std::scoped_lock lock{mLock};
+    std::shared_ptr<IResourceManagerService> service = getService_l();
+    if (service == nullptr) {
+        ALOGW("Service isn't available");
+        return;
+    }
+    service->updateResource(getClientInfo(), resources);
 }
 
 void MediaCodec::ResourceManagerServiceProxy::removeResource(
@@ -1290,20 +1302,71 @@ static float getOperatingFrameRate(const sp<AMessage>& format,
     return frameRate;
 }
 
-bool MediaCodec::getRequiredSystemResources() {
-    if (android::media::codec::codec_availability() &&
-        android::media::codec::codec_availability_support()) {
-        // Get the required system resources now.
-        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
-                mRequiredResourceInfo);
-        *resourcesLocked = mCodec->getRequiredSystemResources();
-        // Update the dynamic resource usage with the current operating frame-rate.
-        *resourcesLocked = computeDynamicResources(*resourcesLocked);
+inline MediaResourceParcel getMediaResourceParcel(const InstanceResourceInfo& resourceInfo) {
+    MediaResourceParcel resource;
+    resource.type = getResourceType(resourceInfo.mName);
+    resource.value = resourceInfo.mStaticCount;
+    return resource;
+}
 
-        return !(*resourcesLocked).empty();
+void MediaCodec::updateResourceUsage(
+        const std::vector<InstanceResourceInfo>& oldResources,
+        const std::vector<InstanceResourceInfo>& newResources) {
+    std::vector<MediaResourceParcel> resources;
+
+    // Add all the new resources first.
+    for (const InstanceResourceInfo& resource : newResources) {
+        resources.push_back(getMediaResourceParcel(resource));
     }
 
-    return false;
+    // Look for resources that aren't required anymore.
+    for (const InstanceResourceInfo& oldRes : oldResources) {
+        auto found = std::find_if(newResources.begin(),
+                                  newResources.end(),
+                                  [oldRes](const InstanceResourceInfo& newRes) {
+                                      return oldRes.mName == newRes.mName; });
+
+        // If this old resource isn't found in updated resources, that means its
+        // not required anymore.
+        // Set the count to 0, so that it will be removed from the RM.
+        if (found == newResources.end()) {
+            MediaResourceParcel res = getMediaResourceParcel(oldRes);
+            res.value = 0;
+            resources.push_back(res);
+        }
+    }
+
+    // update/notify the RM about change in resource usage.
+    if (!resources.empty()) {
+        mResourceManagerProxy->updateResource(resources);
+    }
+}
+
+bool MediaCodec::getRequiredSystemResources() {
+    bool success = false;
+    std::vector<InstanceResourceInfo> oldResources;
+    std::vector<InstanceResourceInfo> newResources;
+
+    if (android::media::codec::codec_availability() &&
+        android::media::codec::codec_availability_support()) {
+        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
+                mRequiredResourceInfo);
+        // Make a copy of the previous required resources, if there were any.
+        oldResources = *resourcesLocked;
+        // Get the required system resources now.
+        newResources = mCodec->getRequiredSystemResources();
+        // Update the dynamic resource usage with the current operating frame-rate.
+        newResources = computeDynamicResources(newResources);
+        *resourcesLocked = newResources;
+        success  = !newResources.empty();
+    }
+
+    // Since the required resources has been updated/changed,
+    // we should update/notify the RM with the updated usage.
+    if (!oldResources.empty()) {
+        updateResourceUsage(oldResources, newResources);
+    }
+    return success;
 }
 
 /**
@@ -4236,16 +4299,6 @@ inline void MediaCodec::initClientConfigParcel(ClientConfigParcel& clientConfig)
     clientConfig.id = mCodecId;
 }
 
-inline MediaResourceParcel getMediaResourceParcel(const InstanceResourceInfo& resourceInfo) {
-    MediaResourceParcel resource;
-    resource.type = getResourceType(resourceInfo.mName);
-    resource.value = resourceInfo.mStaticCount;
-    // TODO: How do we use this info and pass it on to RM to track?
-    //resource.value = resourceInfo.mPerFrameCount;
-
-    return resource;
-}
-
 void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
     switch (msg->what()) {
         case kWhatCodecNotify:
@@ -5024,7 +5077,9 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                         for (const InstanceResourceInfo& resource : *resourcesLocked) {
                             resources.push_back(getMediaResourceParcel(resource));
                         }
+                        (*resourcesLocked).clear();
                     }
+                    // Notify the RM to remove those resources.
                     if (!resources.empty()) {
                         mResourceManagerProxy->removeResource(resources);
                     }

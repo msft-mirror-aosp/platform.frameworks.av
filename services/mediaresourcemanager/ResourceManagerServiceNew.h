@@ -52,6 +52,9 @@ public:
                        const std::shared_ptr<IResourceManagerClient>& client,
                        const std::vector<MediaResourceParcel>& resources) override;
 
+    Status updateResource(const ClientInfoParcel& clientInfo,
+                          const std::vector<MediaResourceParcel>& resources) override;
+
     Status removeResource(const ClientInfoParcel& clientInfo,
                           const std::vector<MediaResourceParcel>& resources) override;
 
