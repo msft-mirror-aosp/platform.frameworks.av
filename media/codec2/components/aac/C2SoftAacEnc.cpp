@@ -398,7 +398,7 @@ void C2SoftAacEnc::process(
         MaybeLogTimestampWarning(mLastFrameEndTimestampUs->peekll(), inputTimestampUs.peekll());
         inputTimestampUs = *mLastFrameEndTimestampUs;
     }
-    if (capacity > 0) {
+    if (capacity > 0 || eos) {
         if (!mNextFrameTimestampUs) {
             mNextFrameTimestampUs = work->input.ordinal.timestamp;
         }

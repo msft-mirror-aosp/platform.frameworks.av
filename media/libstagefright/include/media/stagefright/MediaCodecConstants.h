@@ -593,9 +593,9 @@ inline constexpr int32_t APVProfile422_10HDR10Plus  = 0x2000;
 
 inline static const char *asString_APVProfile(int32_t i, const char *def = "??") {
     switch (i) {
-        case APVProfile422_10:           return "APVProfile422_10";
-        case APVProfile422_10HDR10:      return "APVProfile422_10HDR10";
-        case APVProfile422_10HDR10Plus:  return "APVProfile422_10HDR10Plus";
+        case APVProfile422_10:           return "422_10";
+        case APVProfile422_10HDR10:      return "422_10HDR10";
+        case APVProfile422_10HDR10Plus:  return "422_10HDR10Plus";
         default:                        return def;
     }
 }

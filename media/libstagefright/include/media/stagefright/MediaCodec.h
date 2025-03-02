@@ -122,7 +122,7 @@ struct MediaCodec : public AHandler {
         CB_OUTPUT_AVAILABLE = 2,
         CB_ERROR = 3,
         CB_OUTPUT_FORMAT_CHANGED = 4,
-        CB_RESOURCE_RECLAIMED = 5,
+        CB_RESOURCE_RECLAIMED = 5,      // deprecated and not used
         CB_CRYPTO_ERROR = 6,
         CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
 
@@ -381,6 +381,8 @@ private:
                                              uint32_t flags,
                                              status_t* err);
 
+    // Get the required system resources for the current configuration.
+    bool getRequiredSystemResources();
     // Convert all dynamic (non-constant) resource types into
     // constant resource counts.
     std::vector<InstanceResourceInfo> computeDynamicResources(
@@ -722,7 +724,7 @@ private:
     void onCryptoError(const sp<AMessage> &msg);
     void onError(status_t err, int32_t actionCode, const char *detail = NULL);
     void onOutputFormatChanged();
-    void onRequiredResourcesChanged(const std::vector<InstanceResourceInfo>& resourceInfo);
+    void onRequiredResourcesChanged();
 
     status_t onSetParameters(const sp<AMessage> &params);
 
