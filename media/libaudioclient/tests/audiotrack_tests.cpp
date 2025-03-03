@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
+#include <thread>
+
 //#define LOG_NDEBUG 0
 #define LOG_TAG "AudioTrackTests"
 
+#include <android-base/logging.h>
 #include <binder/ProcessState.h>
 #include <gtest/gtest.h>
 
@@ -175,6 +178,42 @@ TEST(AudioTrackTest, TestAudioCbNotifier) {
     EXPECT_EQ(INVALID_OPERATION, ap->getAudioTrackHandle()->removeAudioDeviceCallback(cbOld));
     EXPECT_EQ(OK, ap->getAudioTrackHandle()->removeAudioDeviceCallback(cb));
     ap->stop();
+}
+
+TEST(AudioTrackTest, OffloadCompletion) {
+    audio_offload_info_t info = AUDIO_INFO_INITIALIZER;
+    info.sample_rate = 48000;
+    info.channel_mask = AUDIO_CHANNEL_OUT_STEREO;
+    info.format = AUDIO_FORMAT_APE;
+    info.stream_type = AUDIO_STREAM_MUSIC;
+    info.bit_rate = 236256;
+    info.duration_us = 120 * 1000000;  // 120 sec to ensure the offloading choice
+
+    audio_config_base_t config = {/* .sample_rate = */ info.sample_rate,
+                                  /* .channel_mask = */ info.channel_mask,
+                                  /* .format = */ AUDIO_FORMAT_PCM_16_BIT};
+    audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
+    attributes.content_type = AUDIO_CONTENT_TYPE_MUSIC;
+    attributes.usage = AUDIO_USAGE_MEDIA;
+    attributes.flags = AUDIO_FLAG_NONE;
+
+    if (AUDIO_OFFLOAD_NOT_SUPPORTED == AudioSystem::getOffloadSupport(info)) {
+        GTEST_SKIP() << "offload playback is not supported for "
+                     << audio_format_to_string(info.format);
+    }
+    auto ap = sp<AudioPlayback>::make(info.sample_rate, info.format, info.channel_mask,
+                                      AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD, AUDIO_SESSION_NONE,
+                                      AudioTrack::TRANSFER_OBTAIN, nullptr, &info);
+    ASSERT_EQ(OK, ap->loadResource("/data/local/tmp/sine960hz_48000_3s.ape"))
+            << "unable to open the media file";
+    ASSERT_EQ(OK, ap->create()) << "track creation failed";
+    EXPECT_EQ(OK, ap->start()) << "audio track start failed";
+    LOG(INFO) << __func__ << ": Started track";
+    EXPECT_EQ(OK, ap->onProcess());
+    LOG(INFO) << __func__ << ": onProcess done";
+    ap->stop();
+    LOG(INFO) << __func__ << ": Stopped track, waiting for stream end";
+    EXPECT_TRUE(ap->waitForStreamEnd()) << "Did not receive onStreamEnd";
 }
 
 class AudioTrackCreateTest
