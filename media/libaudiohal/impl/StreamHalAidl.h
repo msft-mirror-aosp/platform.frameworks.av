@@ -51,9 +51,8 @@ class StreamContextAidl {
     typedef AidlMessageQueue<int8_t,
             ::aidl::android::hardware::common::fmq::SynchronizedReadWrite> DataMQ;
 
-    StreamContextAidl(
-            ::aidl::android::hardware::audio::core::StreamDescriptor& descriptor,
-            bool isAsynchronous, int ioHandle)
+    StreamContextAidl(::aidl::android::hardware::audio::core::StreamDescriptor& descriptor,
+                      bool isAsynchronous, int ioHandle, bool hasClipTransitionSupport)
         : mFrameSizeBytes(descriptor.frameSizeBytes),
           mCommandMQ(new CommandMQ(descriptor.command)),
           mReplyMQ(new ReplyMQ(descriptor.reply)),
@@ -62,29 +61,10 @@ class StreamContextAidl {
           mIsAsynchronous(isAsynchronous),
           mIsMmapped(isMmapped(descriptor)),
           mMmapBufferDescriptor(maybeGetMmapBuffer(descriptor)),
-          mIoHandle(ioHandle) {}
-    StreamContextAidl(StreamContextAidl&& other) :
-            mFrameSizeBytes(other.mFrameSizeBytes),
-            mCommandMQ(std::move(other.mCommandMQ)),
-            mReplyMQ(std::move(other.mReplyMQ)),
-            mBufferSizeFrames(other.mBufferSizeFrames),
-            mDataMQ(std::move(other.mDataMQ)),
-            mIsAsynchronous(other.mIsAsynchronous),
-            mIsMmapped(other.mIsMmapped),
-            mMmapBufferDescriptor(std::move(other.mMmapBufferDescriptor)),
-            mIoHandle(other.mIoHandle) {}
-    StreamContextAidl& operator=(StreamContextAidl&& other) {
-        mFrameSizeBytes = other.mFrameSizeBytes;
-        mCommandMQ = std::move(other.mCommandMQ);
-        mReplyMQ = std::move(other.mReplyMQ);
-        mBufferSizeFrames = other.mBufferSizeFrames;
-        mDataMQ = std::move(other.mDataMQ);
-        mIsAsynchronous = other.mIsAsynchronous;
-        mIsMmapped = other.mIsMmapped;
-        mMmapBufferDescriptor = std::move(other.mMmapBufferDescriptor);
-        mIoHandle = other.mIoHandle;
-        return *this;
-    }
+          mIoHandle(ioHandle),
+          mHasClipTransitionSupport(hasClipTransitionSupport) {}
+    StreamContextAidl(StreamContextAidl&&) = default;
+    StreamContextAidl& operator=(StreamContextAidl&&) = default;
     bool isValid() const {
         return mFrameSizeBytes != 0 &&
                 mCommandMQ != nullptr && mCommandMQ->isValid() &&
@@ -110,6 +90,7 @@ class StreamContextAidl {
     const MmapBufferDescriptor& getMmapBufferDescriptor() const { return mMmapBufferDescriptor; }
     size_t getMmapBurstSize() const { return mMmapBufferDescriptor.burstSizeFrames; }
     int getIoHandle() const { return mIoHandle; }
+    bool hasClipTransitionSupport() const { return mHasClipTransitionSupport; }
 
   private:
     static std::unique_ptr<DataMQ> maybeCreateDataMQ(
@@ -143,6 +124,7 @@ class StreamContextAidl {
     bool mIsMmapped;
     MmapBufferDescriptor mMmapBufferDescriptor;
     int mIoHandle;
+    bool mHasClipTransitionSupport;
 };
 
 class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelperAidl {
@@ -204,6 +186,8 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
     struct StatePositions {
         int64_t framesAtFlushOrDrain;
         int64_t framesAtStandby;
+        enum DrainState : int32_t { NONE, ALL, EN /*early notify*/, EN_RECEIVED };
+        DrainState drainState;
     };
 
     template<class T>
