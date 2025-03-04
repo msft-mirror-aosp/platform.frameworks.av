@@ -449,6 +449,8 @@ class StreamOutHalAidl : public virtual StreamOutHalInterface,
     void onDrainReady() override;
     void onError(bool isHardError) override;
 
+    status_t dump(int fd, const Vector<String16>& args) override;
+
   private:
     friend class sp<StreamOutHalAidl>;
 
@@ -506,6 +508,8 @@ class StreamInHalAidl : public StreamInHalInterface, public StreamHalAidl {
 
     // Called when the metadata of the stream's sink has been changed.
     status_t updateSinkMetadata(const SinkMetadata& sinkMetadata) override;
+
+    status_t dump(int fd, const Vector<String16>& args) override;
 
   private:
     friend class sp<StreamInHalAidl>;
