@@ -67,6 +67,8 @@ static const std::vector<Feature> ENCODER_FEATURES = {
     Feature(FEATURE_QpBounds, (1 << 3), false),
     Feature(FEATURE_EncodingStatistics, (1 << 4), false),
     Feature(FEATURE_HdrEditing, (1 << 5), false),
+    Feature(FEATURE_HlgEditing, (1 << 6), true),
+    Feature(FEATURE_Roi, (1 << 7), true),
     // feature to exclude codec from REGULAR codec list
     Feature(FEATURE_SpecialCodec,     (1 << 30), false, true),
 };
