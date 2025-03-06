@@ -287,6 +287,9 @@ class C2SoftApvDec::IntfImpl : public SimpleInterface<void>::BaseParams {
         if (isHalPixelFormatSupported((AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210)) {
             pixelFormats.push_back(AHARDWAREBUFFER_FORMAT_YCbCr_P210);
         }
+        if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_RGBA_1010102)) {
+            pixelFormats.push_back(HAL_PIXEL_FORMAT_RGBA_1010102);
+        }
 
         // If color format surface isn't added to supported formats, there is no way to know
         // when the color-format is configured to surface. This is necessary to be able to
@@ -958,7 +961,6 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
             fillEmptyWork(work);
             return;
         }
-
         bool reportResolutionChange = false;
         for (int i = 0; i < mOutFrames.num_frms; i++) {
             oapv_frm_info_t* finfo = &aui.frm_info[i];
@@ -1285,12 +1287,18 @@ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
     }
 
     uint32_t format = HAL_PIXEL_FORMAT_YV12;
+    std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;
     if (mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
         if (isHalPixelFormatSupported((AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210)) {
             format = AHARDWAREBUFFER_FORMAT_YCbCr_P210;
         } else if (isHalPixelFormatSupported(
                         (AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
             format = HAL_PIXEL_FORMAT_YCBCR_P010;
+        } else if (isHalPixelFormatSupported(
+                        (AHardwareBuffer_Format)HAL_PIXEL_FORMAT_RGBA_1010102)) {
+            IntfImpl::Lock lock = mIntf->lock();
+            codedColorAspects = mIntf->getColorAspects_l();
+            format = HAL_PIXEL_FORMAT_RGBA_1010102;
         } else {
             format = HAL_PIXEL_FORMAT_YV12;
         }
@@ -1343,7 +1351,28 @@ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
     size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
     size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
 
-    if(format == AHARDWAREBUFFER_FORMAT_YCbCr_P210) {
+    if(format == HAL_PIXEL_FORMAT_RGBA_1010102) {
+        if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
+            const uint16_t* srcY = (const uint16_t*)imgbOutput->a[0];
+            const uint16_t* srcU = (const uint16_t*)imgbOutput->a[1];
+            const uint16_t* srcV = (const uint16_t*)imgbOutput->a[2];
+            size_t srcYStride = imgbOutput->s[0] / 2;
+            size_t srcUStride = imgbOutput->s[1] / 2;
+            size_t srcVStride = imgbOutput->s[2] / 2;
+            dstYStride /= 4;
+            if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_PLANAR2) {
+                ALOGV("OAPV_CS_P210 to RGBA1010102");
+                convertP210ToRGBA1010102((uint32_t *)dstY, srcY, srcU, srcYStride, srcUStride,
+                                           dstYStride, mWidth, mHeight, codedColorAspects);
+            } else {
+                ALOGE("Not supported convert format : %d", OAPV_CS_GET_FORMAT(imgbOutput->cs));
+            }
+        } else {
+            ALOGE("Not supported convert from bitdepth:%d, format: %d, to format: %d",
+                  OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs), OAPV_CS_GET_FORMAT(imgbOutput->cs),
+                  format);
+        }
+    } else if(format == AHARDWAREBUFFER_FORMAT_YCbCr_P210) {
         if(OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
             const uint16_t *srcY = (const uint16_t *)imgbOutput->a[0];
             const uint16_t *srcU = (const uint16_t *)imgbOutput->a[1];
