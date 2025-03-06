@@ -271,16 +271,10 @@ status_t StreamHalAidl::standby() {
     }
 }
 
-status_t StreamHalAidl::dump(int fd, const Vector<String16>& args) {
+status_t StreamHalAidl::dump(int fd, const Vector<String16>& args __unused) {
     AUGMENT_LOG(D);
-    TIME_CHECK();
-    if (!mStream) return NO_INIT;
-    Vector<String16> newArgs = args;
-    newArgs.push(String16(kDumpFromAudioServerArgument));
-    // Do not serialize the dump call with mCallLock
-    status_t status = mStream->dump(fd, Args(newArgs).args(), newArgs.size());
     mStreamPowerLog.dump(fd);
-    return status;
+    return OK;
 }
 
 status_t StreamHalAidl::start() {
@@ -1137,6 +1131,18 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
     return OK;
 }
 
+status_t StreamOutHalAidl::dump(int fd, const Vector<String16>& args) {
+    AUGMENT_LOG(D);
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    Vector<String16> newArgs = args;
+    newArgs.push(String16(kDumpFromAudioServerArgument));
+    // Do not serialize the dump call with mCallLock
+    status_t status = mStream->dump(fd, Args(newArgs).args(), newArgs.size());
+    StreamHalAidl::dump(fd, args);
+    return status;
+}
+
 // static
 ConversionResult<::aidl::android::hardware::audio::common::SinkMetadata>
 StreamInHalAidl::legacy2aidl_SinkMetadata(const StreamInHalInterface::SinkMetadata& legacy) {
@@ -1251,6 +1257,18 @@ status_t StreamInHalAidl::setPreferredMicrophoneFieldDimension(float zoom) {
     if (!mStream) return NO_INIT;
     return statusTFromBinderStatus(
             serializeCall(mStream, &Stream::setMicrophoneFieldDimension, zoom));
+}
+
+status_t StreamInHalAidl::dump(int fd, const Vector<String16>& args) {
+    AUGMENT_LOG(D);
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    Vector<String16> newArgs = args;
+    newArgs.push(String16(kDumpFromAudioServerArgument));
+    // Do not serialize the dump call with mCallLock
+    status_t status = mStream->dump(fd, Args(newArgs).args(), newArgs.size());
+    StreamHalAidl::dump(fd, args);
+    return status;
 }
 
 } // namespace android
