@@ -261,6 +261,14 @@ status_t AudioPlayback::onProcess(bool testSeek) {
         return INVALID_OPERATION;
 }
 
+void AudioPlayback::pause() {
+    mTrack->pause();
+}
+
+void AudioPlayback::resume() {
+    mTrack->start();
+}
+
 void AudioPlayback::stop() {
     {
         std::lock_guard lock(mMutex);

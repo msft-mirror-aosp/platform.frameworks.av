@@ -124,6 +124,8 @@ class AudioPlayback : public AudioTrack::IAudioTrackCallback {
     status_t waitForConsumption(bool testSeek = false) EXCLUDES(mMutex);
     status_t fillBuffer();
     status_t onProcess(bool testSeek = false);
+    void pause();
+    void resume();
     void stop() EXCLUDES(mMutex);
     bool waitForStreamEnd();
 
