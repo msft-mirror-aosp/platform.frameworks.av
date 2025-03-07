@@ -3778,6 +3778,11 @@ IAfTrack* PlaybackThread::getTrackById_l(
     return nullptr;
 }
 
+// getTracks_l must be called with holding thread lock
+std::vector<sp<IAfTrack>> PlaybackThread::getTracks_l() {
+    return std::vector(mTracks.begin(), mTracks.end());
+}
+
 status_t PlaybackThread::addEffectChain_l(const sp<IAfEffectChain>& chain)
 {
     audio_session_t session = chain->sessionId();

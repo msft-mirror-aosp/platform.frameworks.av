@@ -1177,6 +1177,8 @@ public:
 
     IAfTrack* getTrackById_l(audio_port_handle_t trackId) final REQUIRES(mutex());
 
+    std::vector<sp<IAfTrack>> getTracks_l() final REQUIRES(mutex());
+
     bool hasMixer() const final {
                     return mType == MIXER || mType == DUPLICATING || mType == SPATIALIZER;
                 }
