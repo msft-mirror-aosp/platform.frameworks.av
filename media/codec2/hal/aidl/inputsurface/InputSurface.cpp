@@ -391,6 +391,7 @@ InputSurface::~InputSurface() {
 ::ndk::ScopedAStatus InputSurface::connect(
         const std::shared_ptr<IInputSink>& sink,
         std::shared_ptr<IInputSurfaceConnection>* connection) {
+    std::unique_lock<std::mutex> l(mLock);
     mConnection = SharedRefBase::make<InputSurfaceConnection>(sink, mSource);
     *connection = mConnection;
     return ::ndk::ScopedAStatus::ok();
@@ -441,12 +442,12 @@ bool InputSurface::updateStreamConfig(
     if (config.mAdjustedFpsMode != C2TimestampGapAdjustmentStruct::NONE && (
             config.mAdjustedFpsMode != mStreamConfig.mAdjustedFpsMode ||
             config.mAdjustedGapUs != mStreamConfig.mAdjustedGapUs)) {
-        // TODO: configure GapUs to connection
-        // The original codes do not update config, figure out why.
         mStreamConfig.mAdjustedFpsMode = config.mAdjustedFpsMode;
         mStreamConfig.mAdjustedGapUs = config.mAdjustedGapUs;
         fixedModeUpdate = (config.mAdjustedFpsMode == C2TimestampGapAdjustmentStruct::FIXED_GAP);
-        // TODO: update Gap to Connection.
+        if (mConnection) {
+            mConnection->setAdjustTimestampGapUs(mStreamConfig.mAdjustedGapUs);
+        }
     }
     // TRICKY: we do not unset max fps to 0 unless using fixed fps
     if ((config.mMaxFps > 0 || (fixedModeUpdate && config.mMaxFps == -1))
@@ -532,8 +533,22 @@ bool InputSurface::updateStreamConfig(
 }
 
 void InputSurface::updateWorkStatusConfig(WorkStatusConfig &config) {
-    (void)config;
-    // TODO
+    std::unique_lock<std::mutex> l(mLock);
+    if (!mConnection) {
+        ALOGE("work status is updated though there is no connection.");
+        return;
+    }
+    if (mWorkStatusConfig.mLastDoneIndex != config.mLastDoneIndex) {
+        mWorkStatusConfig.mLastDoneIndex = config.mLastDoneIndex;
+        mConnection->onInputBufferDone(mWorkStatusConfig.mLastDoneIndex);
+    }
+    if (mWorkStatusConfig.mLastDoneCount != config.mLastDoneCount) {
+        mWorkStatusConfig.mLastDoneCount = config.mLastDoneCount;
+    }
+    if (mWorkStatusConfig.mEmptyCount != config.mEmptyCount) {
+        mWorkStatusConfig.mEmptyCount = config.mEmptyCount;
+        mConnection->onInputBufferEmptied();
+    }
 }
 
 bool InputSurface::updateConfig(
