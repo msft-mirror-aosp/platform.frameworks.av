@@ -1459,6 +1459,11 @@ status_t EffectModule::sendSetAudioDevicesCommand(
     }
     status_t status = NO_ERROR;
     if ((mDescriptor.flags & EFFECT_FLAG_DEVICE_MASK) == EFFECT_FLAG_DEVICE_IND) {
+        // for AIDL, use setDevices to pass the AudioDeviceTypeAddrVector
+        if (!EffectConfiguration::isHidl()) {
+            return mEffectInterface->setDevices(devices);
+        }
+
         status_t cmdStatus;
         uint32_t size = sizeof(status_t);
         // FIXME: use audio device types and addresses when the hal interface is ready.
