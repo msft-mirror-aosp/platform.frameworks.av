@@ -93,19 +93,19 @@ class IEffectMock : public ::aidl::android::hardware::audio::effect::BnEffect {
     MOCK_METHOD(ndk::ScopedAStatus, reopen, (IEffect::OpenEffectReturn * ret), (override));
 
     ndk::ScopedAStatus setParameter(const Parameter& param) {
-        if (param == expectParam)
+        if (param == mExpectParam)
             return ndk::ScopedAStatus::ok();
         else {
             ALOGW("%s mismatch, %s vs %s", __func__, param.toString().c_str(),
-                  expectParam.toString().c_str());
+                  mExpectParam.toString().c_str());
             return ndk::ScopedAStatus::fromStatus(STATUS_BAD_VALUE);
         }
     }
 
-    void setExpectParameter(const Parameter& param) { expectParam = param; }
+    void setExpectParameter(const Parameter& param) { mExpectParam = param; }
 
   private:
-    Parameter expectParam;
+    Parameter mExpectParam;
 };
 
 // Predefined vector of {audio_devices_t, AudioDeviceDescription} pair
@@ -295,12 +295,9 @@ class EffectHalAidlTest : public testing::Test {
             AudioDeviceTypeAddrVector deviceTypes;
             std::vector<AudioDeviceDescription> deviceDescs;
             for (size_t w = 0; w < window; w++) {
-                AudioDeviceTypeAddr deviceType(kAudioDevicePairs[i + w].first /* audio_device_t */,
-                                               "");
-                AudioDeviceDescription deviceDesc{
-                        kAudioDevicePairs[i + w].second /* AudioDeviceDescription */};
-                deviceTypes.emplace_back(std::move(deviceType));
-                deviceDescs.emplace_back(std::move(deviceDesc));
+                deviceTypes.emplace_back(kAudioDevicePairs[i + w].first /* audio_device_t */, "");
+                deviceDescs.emplace_back(
+                        kAudioDevicePairs[i + w].second /* AudioDeviceDescription */);
             }
             const Parameter expect = Parameter::make<Parameter::deviceDescription>(deviceDescs);
             mIEffectMock->setExpectParameter(expect);
