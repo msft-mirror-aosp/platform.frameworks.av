@@ -1568,6 +1568,9 @@ status_t StagefrightRecorder::setupRTPRecording() {
 
     if (mAudioSource != AUDIO_SOURCE_CNT) {
         source = createAudioSource();
+        if (source == NULL) {
+            return UNKNOWN_ERROR;
+        }
         mAudioEncoderSource = source;
     } else {
         setDefaultVideoEncoderIfNecessary();

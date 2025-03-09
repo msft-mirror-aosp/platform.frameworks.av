@@ -56,6 +56,17 @@ interface IResourceManagerService {
             in MediaResourceParcel[] resources);
 
     /**
+     * Update the client with given list of resources.
+     * This is used to update the existing resource values with an updated value.
+     *
+     * @param clientInfo info of the calling client.
+     * @param resources an array of resources to be updated.
+     */
+    void updateResource(
+            in ClientInfoParcel clientInfo,
+            in MediaResourceParcel[] resources);
+
+    /**
      * Remove the listed resources from a client.
      *
      * @param clientInfo info of the calling client.

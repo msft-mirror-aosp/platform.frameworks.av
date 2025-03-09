@@ -146,7 +146,7 @@ struct C2SoftApvDec final : public SimpleC2Component {
 
     int mOutCsp;
 
-    void getVuiParams();
+    void getVuiParams(const std::unique_ptr<C2Work> &work);
     void getHdrInfo(struct ApvHdrInfo *buffer, int id);
     void getHDRStaticParams(const struct ApvHdrInfo *buffer, const std::unique_ptr<C2Work>& work);
     void getHDR10PlusInfoData(const struct ApvHdrInfo *buffer, const std::unique_ptr<C2Work>& work);
