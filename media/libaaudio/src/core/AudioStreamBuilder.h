@@ -17,6 +17,7 @@
 #ifndef AAUDIO_AUDIO_STREAM_BUILDER_H
 #define AAUDIO_AUDIO_STREAM_BUILDER_H
 
+#include <set>
 #include <stdint.h>
 
 #include <aaudio/AAudio.h>
@@ -121,6 +122,10 @@ public:
             privacySensitive ? PRIVACY_SENSITIVE_ENABLED : PRIVACY_SENSITIVE_DISABLED;
         return this;
     }
+
+    aaudio_result_t addTag(const char* tag);
+
+    void clearTags();
 
     aaudio_result_t build(AudioStream **streamPtr);
 

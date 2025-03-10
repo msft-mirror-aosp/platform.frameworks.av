@@ -28,6 +28,7 @@
 #include <utils/Vector.h>
 
 #include <media/AidlConversion.h>
+#include <media/AudioContainers.h>
 #include <media/AudioResamplerPublic.h>
 #include <media/AudioSystem.h>
 #include <media/AudioTrack.h>
@@ -148,7 +149,7 @@ class MediaPlayerService : public BnMediaPlayerService
 
         // AudioRouting
         virtual status_t        setOutputDevice(audio_port_handle_t deviceId);
-        virtual status_t        getRoutedDeviceId(audio_port_handle_t* deviceId);
+        virtual status_t        getRoutedDeviceIds(DeviceIdVector& deviceIds);
         virtual status_t        enableAudioDeviceCallback(bool enabled);
 
     private:
@@ -181,7 +182,7 @@ class MediaPlayerService : public BnMediaPlayerService
         audio_output_flags_t    mFlags;
         sp<media::VolumeHandler>       mVolumeHandler;
         audio_port_handle_t     mSelectedDeviceId;
-        audio_port_handle_t     mRoutedDeviceId;
+        DeviceIdVector          mRoutedDeviceIds;
         bool                    mDeviceCallbackEnabled;
         wp<AudioSystem::AudioDeviceCallback>        mDeviceCallback;
         mutable Mutex           mLock;
@@ -401,7 +402,7 @@ private:
         virtual status_t releaseDrm();
         // AudioRouting
         virtual status_t setOutputDevice(audio_port_handle_t deviceId);
-        virtual status_t getRoutedDeviceId(audio_port_handle_t* deviceId);
+        virtual status_t getRoutedDeviceIds(DeviceIdVector& deviceIds);
         virtual status_t enableAudioDeviceCallback(bool enabled);
 
     private:
@@ -414,7 +415,7 @@ private:
             ~AudioDeviceUpdatedNotifier() {}
 
             virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
-                                             audio_port_handle_t deviceId);
+                                             const DeviceIdVector& deviceIds);
 
         private:
             wp<MediaPlayerBase> mListener;

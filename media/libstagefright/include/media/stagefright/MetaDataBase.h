@@ -85,6 +85,7 @@ enum {
     kKeyPixelFormat       = 'pixf',  // int32_t
     kKeyColorFormat       = 'colf',  // int32_t
     kKeyColorSpace        = 'cols',  // int32_t
+    kKeyGainmap           = 'gmap',  // int32_t
     kKeyPlatformPrivate   = 'priv',  // pointer
     kKeyDecoderComponent  = 'decC',  // cstring
     kKeyBufferID          = 'bfID',

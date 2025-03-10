@@ -142,40 +142,21 @@ status_t Engine::setForceUse(audio_policy_force_use_t usage, audio_policy_forced
     return EngineBase::setForceUse(usage, config);
 }
 
-bool Engine::isBtScoActive(DeviceVector& availableOutputDevices,
-                           const SwAudioOutputCollection &outputs) const {
+bool Engine::isBtScoActive(DeviceVector& availableOutputDevices) const {
+    // SCO is considered active if:
+    // 1) a SCO device is connected
+    // 2) the preferred device for PHONE strategy is BT SCO: this is controlled only by java
+    // AudioService and is only true if the SCO audio link as been confirmed active by BT.
     if (availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()) {
         return false;
     }
-    // SCO is active if:
-    // 1) we are in a call and SCO is the preferred device for PHONE strategy
-    if (isInCall() && audio_is_bluetooth_out_sco_device(
+
+    if (!audio_is_bluetooth_out_sco_device(
             getPreferredDeviceTypeForLegacyStrategy(availableOutputDevices, STRATEGY_PHONE))) {
-        return true;
+        return false;
     }
 
-    // 2) A strategy for which the preferred device is SCO is active
-    for (const auto &ps : getOrderedProductStrategies()) {
-        if (outputs.isStrategyActive(ps) &&
-            !getPreferredAvailableDevicesForProductStrategy(availableOutputDevices, ps)
-                .getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()) {
-            return true;
-        }
-    }
-    // 3) a ringtone is active and SCO is used for ringing
-    if (outputs.isActiveLocally(toVolumeSource(AUDIO_STREAM_RING))
-          && (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
-                    == AUDIO_POLICY_FORCE_BT_SCO)) {
-        return true;
-    }
-    // 4) an active input is routed from SCO
-    DeviceVector availableInputDevices = getApmObserver()->getAvailableInputDevices();
-    const auto &inputs = getApmObserver()->getInputs();
-    if (inputs.activeInputsCountOnDevices(availableInputDevices.getDevicesFromType(
-            AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET)) > 0) {
-        return true;
-    }
-    return false;
+    return true;
 }
 
 void Engine::filterOutputDevicesForStrategy(legacy_strategy strategy,
@@ -186,7 +167,7 @@ void Engine::filterOutputDevicesForStrategy(legacy_strategy strategy,
 
     if (com::android::media::audioserver::use_bt_sco_for_media()) {
         // remove A2DP and LE Audio devices whenever BT SCO is in use
-        if (isBtScoActive(availableOutputDevices, outputs)) {
+        if (isBtScoActive(availableOutputDevices)) {
             availableOutputDevices.remove(
                 availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllA2dpSet()));
             availableOutputDevices.remove(
@@ -358,69 +339,58 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
 
         // if SCO headset is connected and we are told to use it, play ringtone over
         // speaker and BT SCO
-        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()) {
-            DeviceVector devices2;
-            devices2 = availableOutputDevices.getFirstDevicesFromTypes({
+        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllScoSet()).isEmpty()
+                && audio_is_bluetooth_out_sco_device(getPreferredDeviceTypeForLegacyStrategy(
+                            availableOutputDevices, STRATEGY_PHONE))) {
+            DeviceVector devices2 = availableOutputDevices.getFirstDevicesFromTypes({
                     AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT, AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
                     AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
+            // devices2 cannot be empty at this point
             // Use ONLY Bluetooth SCO output when ringing in vibration mode
             if (!((getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) == AUDIO_POLICY_FORCE_SYSTEM_ENFORCED)
-                    && (strategy == STRATEGY_ENFORCED_AUDIBLE))) {
-                if (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
-                        == AUDIO_POLICY_FORCE_BT_SCO) {
-                    if (!devices2.isEmpty()) {
-                        devices = devices2;
-                        break;
-                    }
-                }
+                        && (strategy == STRATEGY_ENFORCED_AUDIBLE))
+                    && (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
+                        == AUDIO_POLICY_FORCE_BT_SCO)) {
+                devices = devices2;
+                break;
             }
             // Use both Bluetooth SCO and phone default output when ringing in normal mode
-            if (audio_is_bluetooth_out_sco_device(getPreferredDeviceTypeForLegacyStrategy(
-                    availableOutputDevices, STRATEGY_PHONE))) {
-                if (strategy == STRATEGY_SONIFICATION) {
-                    devices.replaceDevicesByType(
-                            AUDIO_DEVICE_OUT_SPEAKER,
-                            availableOutputDevices.getDevicesFromType(
-                                    AUDIO_DEVICE_OUT_SPEAKER_SAFE));
-                }
-                if (!devices2.isEmpty()) {
-                    devices.add(devices2);
-                    break;
-                }
+            if (strategy == STRATEGY_SONIFICATION) {
+                devices.replaceDevicesByType(
+                        AUDIO_DEVICE_OUT_SPEAKER,
+                        availableOutputDevices.getDevicesFromType(
+                                AUDIO_DEVICE_OUT_SPEAKER_SAFE));
             }
+            devices.add(devices2);
+            break;
         }
 
         // if LEA headset is connected and we are told to use it, play ringtone over
         // speaker and BT LEA
-        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllBleSet()).isEmpty()) {
+        if (!availableOutputDevices.getDevicesFromTypes(getAudioDeviceOutAllBleSet()).isEmpty()
+                && audio_is_ble_out_device(getPreferredDeviceTypeForLegacyStrategy(
+                                       availableOutputDevices, STRATEGY_PHONE))) {
             DeviceVector devices2;
             devices2 = availableOutputDevices.getFirstDevicesFromTypes({
                     AUDIO_DEVICE_OUT_BLE_HEADSET, AUDIO_DEVICE_OUT_BLE_SPEAKER});
+            // devices2 cannot be empty at this point
             // Use ONLY Bluetooth LEA output when ringing in vibration mode
             if (!((getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) == AUDIO_POLICY_FORCE_SYSTEM_ENFORCED)
-                    && (strategy == STRATEGY_ENFORCED_AUDIBLE))) {
-                if (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
-                        == AUDIO_POLICY_FORCE_BT_BLE) {
-                    if (!devices2.isEmpty()) {
-                        devices = devices2;
-                        break;
-                    }
-                }
+                        && (strategy == STRATEGY_ENFORCED_AUDIBLE))
+                    && (getForceUse(AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING)
+                                               == AUDIO_POLICY_FORCE_BT_BLE)) {
+                devices = devices2;
+                break;
             }
             // Use both Bluetooth LEA and phone default output when ringing in normal mode
-            if (audio_is_ble_out_device(getPreferredDeviceTypeForLegacyStrategy(
-                    availableOutputDevices, STRATEGY_PHONE))) {
-                if (strategy == STRATEGY_SONIFICATION) {
-                    devices.replaceDevicesByType(
-                            AUDIO_DEVICE_OUT_SPEAKER,
-                            availableOutputDevices.getDevicesFromType(
-                                    AUDIO_DEVICE_OUT_SPEAKER_SAFE));
-                }
-                if (!devices2.isEmpty()) {
-                    devices.add(devices2);
-                    break;
-                }
+            if (strategy == STRATEGY_SONIFICATION) {
+                devices.replaceDevicesByType(
+                        AUDIO_DEVICE_OUT_SPEAKER,
+                        availableOutputDevices.getDevicesFromType(
+                                AUDIO_DEVICE_OUT_SPEAKER_SAFE));
             }
+            devices.add(devices2);
+            break;
         }
 
         // The second device used for sonification is the same as the device used by media strategy
@@ -483,19 +453,22 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
                 // Get the last connected device of wired and bluetooth a2dp
                 devices2 = availableOutputDevices.getFirstDevicesFromTypes(
                         getLastRemovableMediaDevices(GROUP_NONE, excludedDevices));
+                if (com::android::media::audioserver::use_bt_sco_for_media()) {
+                    if (isBtScoActive(availableOutputDevices)
+                         && !(devices2.getDevicesFromTypes(
+                                 getAudioDeviceOutAllA2dpSet()).isEmpty()
+                             && devices2.getDevicesFromTypes(
+                                     getAudioDeviceOutAllBleSet()).isEmpty())) {
+                        devices2 = availableOutputDevices.getFirstDevicesFromTypes(
+                                { AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT,
+                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
+                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
+                    }
+                }
             } else {
                 // Get the last connected device of wired except bluetooth a2dp
                 devices2 = availableOutputDevices.getFirstDevicesFromTypes(
                         getLastRemovableMediaDevices(GROUP_WIRED, excludedDevices));
-            }
-        }
-
-        if (com::android::media::audioserver::use_bt_sco_for_media()) {
-            if (devices2.isEmpty() && isBtScoActive(availableOutputDevices, outputs)) {
-                devices2 = availableOutputDevices.getFirstDevicesFromTypes(
-                        { AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT,
-                          AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
-                          AUDIO_DEVICE_OUT_BLUETOOTH_SCO});
             }
         }
 
