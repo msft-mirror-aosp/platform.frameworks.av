@@ -94,6 +94,11 @@ void convertPlanar16ToY410OrRGBA1010102(uint8_t* dst, const uint16_t* srcY, cons
                                         std::shared_ptr<const C2ColorAspectsStruct> aspects,
                                         CONV_FORMAT_T format);
 
+void convertP210ToRGBA1010102(uint32_t* dst, const uint16_t* srcY, const uint16_t* srcUV,
+                                size_t srcYStride, size_t srcUVStride, size_t dstStride,
+                                size_t width, size_t height,
+                                std::shared_ptr<const C2ColorAspectsStruct> aspects);
+
 void convertPlanar16ToP010(uint16_t* dstY, uint16_t* dstUV, const uint16_t* srcY,
                            const uint16_t* srcU, const uint16_t* srcV, size_t srcYStride,
                            size_t srcUStride, size_t srcVStride, size_t dstYStride,

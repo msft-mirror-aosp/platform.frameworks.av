@@ -49,6 +49,27 @@ using ::aidl::android::hardware::audio::core::StreamDescriptor;
 using ::aidl::android::media::audio::common::MicrophoneDynamicInfo;
 using ::aidl::android::media::audio::IHalAdapterVendorExtension;
 
+/**
+ * Notes on the position handling implementation. First, please consult
+ * "On position reporting" comment in StreamHalInterface.h for the context.
+ *
+ * The adaptation layer for AIDL HALs needs to emulate the HIDL HAL behavior
+ * (that's until some future release when the framework stops supporting HIDL
+ * HALs and it will be possible to remove the code in the framework which
+ * translates resetting positions into continuous) by resetting the reported
+ * position after certain events, depending on the kind of the audio data
+ * stream. Unlike the AIDL interface, the interface between the HAL adaptation
+ * layer and the framework uses separate method calls for controlling the stream
+ * state and retrieving the position. Because of that, the code which implements
+ * position reporting (methods 'getRenderPosition' and 'getObservablePosition')
+ * needs to use stored stream positions which it had at certain state changing
+ * events, like flush or drain. These are stored in the field called
+ * 'mStatePositions'. This field is updated in the code which changes the stream
+ * state. There are two places for that: the 'sendCommand' method, which is used
+ * for all streams, and handlers of asynchronous stream events called
+ * 'onAsync...'.
+ */
+
 namespace android {
 
 using HalCommand = StreamDescriptor::Command;
@@ -271,16 +292,10 @@ status_t StreamHalAidl::standby() {
     }
 }
 
-status_t StreamHalAidl::dump(int fd, const Vector<String16>& args) {
+status_t StreamHalAidl::dump(int fd, const Vector<String16>& args __unused) {
     AUGMENT_LOG(D);
-    TIME_CHECK();
-    if (!mStream) return NO_INIT;
-    Vector<String16> newArgs = args;
-    newArgs.push(String16(kDumpFromAudioServerArgument));
-    // Do not serialize the dump call with mCallLock
-    status_t status = mStream->dump(fd, Args(newArgs).args(), newArgs.size());
     mStreamPowerLog.dump(fd);
-    return status;
+    return OK;
 }
 
 status_t StreamHalAidl::start() {
@@ -567,7 +582,17 @@ void StreamHalAidl::onAsyncTransferReady() {
         std::lock_guard l(mCommandReplyLock);
         state = getState();
     }
+    bool isCallbackExpected = false;
     if (state == StreamDescriptor::State::TRANSFERRING) {
+        isCallbackExpected = true;
+    } else if (mContext.hasClipTransitionSupport() && state == StreamDescriptor::State::DRAINING) {
+        std::lock_guard l(mLock);
+        isCallbackExpected = mStatePositions.drainState == StatePositions::DrainState::EN_RECEIVED;
+        if (!isCallbackExpected) {
+            AUGMENT_LOG(W, "drainState %d", static_cast<int>(mStatePositions.drainState));
+        }
+    }
+    if (isCallbackExpected) {
         // Retrieve the current state together with position counters unconditionally
         // to ensure that the state on our side gets updated.
         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(),
@@ -585,17 +610,27 @@ void StreamHalAidl::onAsyncDrainReady() {
         std::lock_guard l(mCommandReplyLock);
         state = getState();
     }
-    if (state == StreamDescriptor::State::DRAINING) {
+    if (state == StreamDescriptor::State::DRAINING ||
+            (mContext.hasClipTransitionSupport() &&
+                    (state == StreamDescriptor::State::TRANSFERRING ||
+                            state == StreamDescriptor::State::IDLE))) {
         // Retrieve the current state together with position counters unconditionally
         // to ensure that the state on our side gets updated.
         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(), nullptr,
                     true /*safeFromNonWorkerThread */);
         // For compatibility with HIDL behavior, apply a "soft" position reset
-        // after receiving the "drain ready" callback.
+        // after receiving the "drain ready" callback for the clip end.
         std::lock_guard l(mLock);
-        if (mLastReply.observable.frames != StreamDescriptor::Position::UNKNOWN) {
+        if (mLastReply.observable.frames != StreamDescriptor::Position::UNKNOWN &&
+                (!mContext.hasClipTransitionSupport() ||
+                        (mStatePositions.drainState == StatePositions::DrainState::EN_RECEIVED
+                                || mStatePositions.drainState == StatePositions::DrainState::ALL))) {
+            AUGMENT_LOG(D, "setting position %lld as clip end",
+                    (long long)mLastReply.observable.frames);
             mStatePositions.framesAtFlushOrDrain = mLastReply.observable.frames;
         }
+        mStatePositions.drainState = mStatePositions.drainState == StatePositions::DrainState::EN ?
+                StatePositions::DrainState::EN_RECEIVED : StatePositions::DrainState::NONE;
     } else {
         AUGMENT_LOG(W, "unexpected onDrainReady in the state %s", toString(state).c_str());
     }
@@ -688,20 +723,28 @@ status_t StreamHalAidl::sendCommand(
             }
             mLastReply = *reply;
             mLastReplyExpirationNs = uptimeNanos() + mLastReplyLifeTimeNs;
-            if (!mIsInput && reply->status == STATUS_OK &&
-                    reply->observable.frames != StreamDescriptor::Position::UNKNOWN) {
-                if (command.getTag() == StreamDescriptor::Command::standby &&
-                        reply->state == StreamDescriptor::State::STANDBY) {
-                    mStatePositions.framesAtStandby = reply->observable.frames;
-                } else if (command.getTag() == StreamDescriptor::Command::flush &&
-                           reply->state == StreamDescriptor::State::IDLE) {
-                    mStatePositions.framesAtFlushOrDrain = reply->observable.frames;
-                } else if (!mContext.isAsynchronous() &&
-                        command.getTag() == StreamDescriptor::Command::drain &&
-                        (reply->state == StreamDescriptor::State::IDLE ||
-                                reply->state == StreamDescriptor::State::DRAINING)) {
-                    mStatePositions.framesAtFlushOrDrain = reply->observable.frames;
-                } // for asynchronous drain, the frame count is saved in 'onAsyncDrainReady'
+            if (!mIsInput && reply->status == STATUS_OK) {
+                if (reply->observable.frames != StreamDescriptor::Position::UNKNOWN) {
+                    if (command.getTag() == StreamDescriptor::Command::standby &&
+                            reply->state == StreamDescriptor::State::STANDBY) {
+                        mStatePositions.framesAtStandby = reply->observable.frames;
+                    } else if (command.getTag() == StreamDescriptor::Command::flush &&
+                            reply->state == StreamDescriptor::State::IDLE) {
+                        mStatePositions.framesAtFlushOrDrain = reply->observable.frames;
+                    } else if (!mContext.isAsynchronous() &&
+                            command.getTag() == StreamDescriptor::Command::drain &&
+                            (reply->state == StreamDescriptor::State::IDLE ||
+                                    reply->state == StreamDescriptor::State::DRAINING)) {
+                        mStatePositions.framesAtFlushOrDrain = reply->observable.frames;
+                    } // for asynchronous drain, the frame count is saved in 'onAsyncDrainReady'
+                }
+                if (mContext.isAsynchronous() &&
+                        command.getTag() == StreamDescriptor::Command::drain) {
+                    mStatePositions.drainState =
+                            command.get<StreamDescriptor::Command::drain>() ==
+                            StreamDescriptor::DrainMode::DRAIN_ALL ?
+                            StatePositions::DrainState::ALL : StatePositions::DrainState::EN;
+                }
             }
             if (statePositions != nullptr) {
                 *statePositions = mStatePositions;
@@ -1137,6 +1180,18 @@ status_t StreamOutHalAidl::filterAndUpdateOffloadMetadata(AudioParameter &parame
     return OK;
 }
 
+status_t StreamOutHalAidl::dump(int fd, const Vector<String16>& args) {
+    AUGMENT_LOG(D);
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    Vector<String16> newArgs = args;
+    newArgs.push(String16(kDumpFromAudioServerArgument));
+    // Do not serialize the dump call with mCallLock
+    status_t status = mStream->dump(fd, Args(newArgs).args(), newArgs.size());
+    StreamHalAidl::dump(fd, args);
+    return status;
+}
+
 // static
 ConversionResult<::aidl::android::hardware::audio::common::SinkMetadata>
 StreamInHalAidl::legacy2aidl_SinkMetadata(const StreamInHalInterface::SinkMetadata& legacy) {
@@ -1251,6 +1306,18 @@ status_t StreamInHalAidl::setPreferredMicrophoneFieldDimension(float zoom) {
     if (!mStream) return NO_INIT;
     return statusTFromBinderStatus(
             serializeCall(mStream, &Stream::setMicrophoneFieldDimension, zoom));
+}
+
+status_t StreamInHalAidl::dump(int fd, const Vector<String16>& args) {
+    AUGMENT_LOG(D);
+    TIME_CHECK();
+    if (!mStream) return NO_INIT;
+    Vector<String16> newArgs = args;
+    newArgs.push(String16(kDumpFromAudioServerArgument));
+    // Do not serialize the dump call with mCallLock
+    status_t status = mStream->dump(fd, Args(newArgs).args(), newArgs.size());
+    StreamHalAidl::dump(fd, args);
+    return status;
 }
 
 } // namespace android
