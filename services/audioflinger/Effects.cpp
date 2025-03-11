@@ -3394,7 +3394,7 @@ void EffectChain::EffectCallback::onEffectDisable(const sp<IAfEffectBase>& effec
     if (t == nullptr) {
         return;
     }
-    t->onEffectDisable();
+    t->onEffectDisable(effect->asEffectModule());
 }
 
 bool EffectChain::EffectCallback::disconnectEffectHandle(IAfEffectHandle *handle,
