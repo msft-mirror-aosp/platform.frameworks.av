@@ -130,6 +130,7 @@ flag {
   namespace: "codec_fwk"
   description: "Feature flag for exposing number of input slots"
   bug: "159891571"
+  is_exported: true
 }
 
 flag {
@@ -207,6 +208,7 @@ flag {
   namespace: "codec_fwk"
   description: "Feature flag for subsession codec metrics"
   bug: "363382811"
+  is_exported: true
 }
 
 flag {

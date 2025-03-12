@@ -91,6 +91,8 @@ const char * const AudioParameter::keyOffloadCodecChannels = AUDIO_OFFLOAD_CODEC
 const char * const AudioParameter::keyOffloadCodecDelaySamples = AUDIO_OFFLOAD_CODEC_DELAY_SAMPLES;
 const char * const AudioParameter::keyOffloadCodecPaddingSamples =
         AUDIO_OFFLOAD_CODEC_PADDING_SAMPLES;
+const char * const AudioParameter::keyClipTransitionSupport =
+        AUDIO_PARAMETER_CLIP_TRANSITION_SUPPORT;
 
 AudioParameter::AudioParameter(const String8& keyValuePairs)
 {
