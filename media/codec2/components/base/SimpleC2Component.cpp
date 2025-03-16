@@ -354,6 +354,67 @@ void convertYUV420Planar16ToY410OrRGBA1010102(
     }
 }
 
+void convertP210ToRGBA1010102(uint32_t* dst, const uint16_t* srcY, const uint16_t* srcUV,
+                                size_t srcYStride, size_t srcUVStride, size_t dstStride,
+                                size_t width, size_t height,
+                                std::shared_ptr<const C2ColorAspectsStruct> aspects) {
+    C2ColorAspectsStruct _aspects = FillMissingColorAspects(aspects, width, height);
+    struct Coeffs coeffs = GetCoeffsForAspects(_aspects);
+
+    int32_t _y = coeffs._y;
+    int32_t _b_u = coeffs._b_u;
+    int32_t _neg_g_u = -coeffs._g_u;
+    int32_t _neg_g_v = -coeffs._g_v;
+    int32_t _r_v = coeffs._r_v;
+    int32_t _c16 = coeffs._c16;
+
+    for (size_t y = 0; y < height; y++) {
+        uint32_t *dstTop = (uint32_t *)dst;
+        uint16_t *ySrcTop = (uint16_t *)srcY;
+        uint16_t *uSrc = (uint16_t *)srcUV;
+        uint16_t *vSrc = (uint16_t *)(srcUV + 1);
+        for (size_t x = 0; x < width; x += 2) {
+            int32_t u, v, y00, y01;
+            u = ((*uSrc) >> 6) - 512;
+            uSrc += 2;
+            v = ((*vSrc) >> 6) - 512;
+            vSrc += 2;
+
+            y00 = ((*ySrcTop) >> 6) - _c16;
+            ySrcTop += 1;
+            y01 = ((*ySrcTop) >> 6) - _c16;
+            ySrcTop += 1;
+
+            int32_t u_b = u * _b_u;
+            int32_t u_g = u * _neg_g_u;
+            int32_t v_g = v * _neg_g_v;
+            int32_t v_r = v * _r_v;
+
+            int32_t yMult, b, g, r;
+            yMult = y00 * _y + 512;
+            b = (yMult + u_b) / 1024;
+            g = (yMult + v_g + u_g) / 1024;
+            r = (yMult + v_r) / 1024;
+            b = CLIP3(0, b, 1023);
+            g = CLIP3(0, g, 1023);
+            r = CLIP3(0, r, 1023);
+            *dstTop++ = 3 << 30 | (b << 20) | (g << 10) | r;
+
+            yMult = y01 * _y + 512;
+            b = (yMult + u_b) / 1024;
+            g = (yMult + v_g + u_g) / 1024;
+            r = (yMult + v_r) / 1024;
+            b = CLIP3(0, b, 1023);
+            g = CLIP3(0, g, 1023);
+            r = CLIP3(0, r, 1023);
+            *dstTop++ = 3 << 30 | (b << 20) | (g << 10) | r;
+        }
+        srcY += srcYStride;
+        srcUV += srcUVStride;
+        dst += dstStride;
+    }
+}
+
 void convertYUV420Planar16ToYV12(uint8_t *dstY, uint8_t *dstU, uint8_t *dstV, const uint16_t *srcY,
                                  const uint16_t *srcU, const uint16_t *srcV, size_t srcYStride,
                                  size_t srcUStride, size_t srcVStride, size_t dstYStride,
