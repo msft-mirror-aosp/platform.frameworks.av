@@ -35,12 +35,12 @@ static constexpr auto kShortCallbackTimeout = std::chrono::milliseconds(500);
 static constexpr auto kLongCallbackTimeout = std::chrono::seconds(10);
 
 void OnAudioDeviceUpdateNotifier::onAudioDeviceUpdate(audio_io_handle_t audioIo,
-                                                      audio_port_handle_t deviceId) {
-    ALOGI("%s: audioIo=%d deviceId=%d", __func__, audioIo, deviceId);
+                                                      const DeviceIdVector& deviceIds) {
+    ALOGI("%s: audioIo=%d deviceIds=%s", __func__, audioIo, toString(deviceIds).c_str());
     {
         std::lock_guard lock(mMutex);
         mAudioIo = audioIo;
-        mDeviceId = deviceId;
+        mDeviceIds = deviceIds;
     }
     mCondition.notify_all();
 }
@@ -49,20 +49,23 @@ status_t OnAudioDeviceUpdateNotifier::waitForAudioDeviceCb(audio_port_handle_t e
     std::unique_lock lock(mMutex);
     base::ScopedLockAssertion lock_assertion(mMutex);
     if (mAudioIo == AUDIO_IO_HANDLE_NONE ||
-        (expDeviceId != AUDIO_PORT_HANDLE_NONE && expDeviceId != mDeviceId)) {
+        (expDeviceId != AUDIO_PORT_HANDLE_NONE &&
+         std::find(mDeviceIds.begin(), mDeviceIds.end(), expDeviceId) == mDeviceIds.end())) {
         mCondition.wait_for(lock, std::chrono::milliseconds(500));
         if (mAudioIo == AUDIO_IO_HANDLE_NONE ||
-            (expDeviceId != AUDIO_PORT_HANDLE_NONE && expDeviceId != mDeviceId)) {
+            (expDeviceId != AUDIO_PORT_HANDLE_NONE &&
+             std::find(mDeviceIds.begin(), mDeviceIds.end(), expDeviceId) == mDeviceIds.end())) {
             return TIMED_OUT;
         }
     }
     return OK;
 }
 
-std::pair<audio_io_handle_t, audio_port_handle_t>
-OnAudioDeviceUpdateNotifier::getLastPortAndDevice() const {
+std::pair<audio_io_handle_t, DeviceIdVector> OnAudioDeviceUpdateNotifier::getLastPortAndDevices()
+        const {
     std::lock_guard lock(mMutex);
-    return {mAudioIo, mDeviceId};
+    ALOGI("%s: audioIo=%d deviceIds=%s", __func__, mAudioIo, toString(mDeviceIds).c_str());
+    return {mAudioIo, mDeviceIds};
 }
 
 AudioPlayback::AudioPlayback(uint32_t sampleRate, audio_format_t format,
@@ -256,6 +259,14 @@ status_t AudioPlayback::onProcess(bool testSeek) {
         return fillBuffer();
     else
         return INVALID_OPERATION;
+}
+
+void AudioPlayback::pause() {
+    mTrack->pause();
+}
+
+void AudioPlayback::resume() {
+    mTrack->start();
 }
 
 void AudioPlayback::stop() {
@@ -823,13 +834,15 @@ status_t getPatchForInputMix(audio_io_handle_t audioIo, audio_patch& patch) {
     return BAD_VALUE;
 }
 
-bool patchContainsOutputDevice(audio_port_handle_t deviceId, audio_patch patch) {
+// Check if the patch matches all the output devices in the deviceIds vector.
+bool patchMatchesOutputDevices(const DeviceIdVector& deviceIds, audio_patch patch) {
+    DeviceIdVector patchDeviceIds;
     for (auto j = 0; j < patch.num_sinks; j++) {
-        if (patch.sinks[j].type == AUDIO_PORT_TYPE_DEVICE && patch.sinks[j].id == deviceId) {
-            return true;
+        if (patch.sinks[j].type == AUDIO_PORT_TYPE_DEVICE) {
+            patchDeviceIds.push_back(patch.sinks[j].id);
         }
     }
-    return false;
+    return areDeviceIdsEqual(deviceIds, patchDeviceIds);
 }
 
 bool patchContainsInputDevice(audio_port_handle_t deviceId, audio_patch patch) {
@@ -841,10 +854,10 @@ bool patchContainsInputDevice(audio_port_handle_t deviceId, audio_patch patch) {
     return false;
 }
 
-bool checkPatchPlayback(audio_io_handle_t audioIo, audio_port_handle_t deviceId) {
+bool checkPatchPlayback(audio_io_handle_t audioIo, const DeviceIdVector& deviceIds) {
     struct audio_patch patch;
     if (getPatchForOutputMix(audioIo, patch) == OK) {
-        return patchContainsOutputDevice(deviceId, patch);
+        return patchMatchesOutputDevices(deviceIds, patch);
     }
     return false;
 }

@@ -827,15 +827,18 @@ class DeviceHalAidlTest : public testing::Test {
   public:
     void SetUp() override {
         mModule = ndk::SharedRefBase::make<ModuleMock>(getTestConfiguration());
-        mDevice = sp<DeviceHalAidl>::make("test", mModule, nullptr /*vext*/);
+        mVendorExt = ndk::SharedRefBase::make<TestHalAdapterVendorExtension>();
+        mDevice = sp<DeviceHalAidl>::make("test", mModule, mVendorExt);
     }
     void TearDown() override {
         mDevice.clear();
+        mVendorExt.reset();
         mModule.reset();
     }
 
   protected:
     std::shared_ptr<ModuleMock> mModule;
+    std::shared_ptr<TestHalAdapterVendorExtension> mVendorExt;
     sp<DeviceHalAidl> mDevice;
 };
 
@@ -988,7 +991,8 @@ class StreamHalAidlVendorParametersTest : public testing::Test {
         mVendorExt = ndk::SharedRefBase::make<TestHalAdapterVendorExtension>();
         struct audio_config config = AUDIO_CONFIG_INITIALIZER;
         ::aidl::android::hardware::audio::core::StreamDescriptor descriptor;
-        StreamContextAidl context(descriptor, false /*isAsynchronous*/, 0);
+        StreamContextAidl context(descriptor, false /*isAsynchronous*/, 0,
+                                  false /*hasClipTransitionSupport*/);
         mStream = sp<StreamHalAidl>::make("test", false /*isInput*/, config, 0 /*nominalLatency*/,
                                           std::move(context), mStreamCommon, mVendorExt);
     }

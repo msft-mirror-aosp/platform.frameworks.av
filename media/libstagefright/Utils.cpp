@@ -2101,6 +2101,11 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
         meta->setInt32(kKeyMaxHeight, maxHeight);
     }
 
+    int32_t gainmap;
+    if (msg->findInt32("gainmap", &gainmap)) {
+        meta->setInt32(kKeyGainmap, gainmap);
+    }
+
     int32_t fps;
     float fpsFloat;
     if (msg->findInt32("frame-rate", &fps) && fps > 0) {

@@ -151,6 +151,8 @@ public:
     static const char * const keyOffloadCodecDelaySamples;
     static const char * const keyOffloadCodecPaddingSamples;
 
+    static const char * const keyClipTransitionSupport;
+
     String8 toString() const { return toStringImpl(true); }
     String8 keysToString() const { return toStringImpl(false); }
 
