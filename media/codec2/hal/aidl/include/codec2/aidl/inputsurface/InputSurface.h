@@ -95,7 +95,7 @@ struct InputSurface : public BnInputSurface {
     //
     // Config for current work status w.r.t input buffers
     struct WorkStatusConfig {
-        int32_t mLastDoneIndex = -1;      // Last work done input buffer index
+        uint64_t mLastDoneIndex = UINT64_MAX;      // Last work done buffer frame index
         uint32_t mLastDoneCount = 0;      // # of work done count
         uint64_t mEmptyCount = 0;         // # of input buffers being emptied
     };
