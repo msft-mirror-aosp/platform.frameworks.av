@@ -29,6 +29,10 @@
 
 #include <utils/Log.h>
 
+#include <android-base/properties.h>
+#ifdef __ANDROID__
+#include <android/api-level.h>
+#endif  //__ANDROID__
 #include "AC4Parser.h"
 #include "MPEG4Extractor.h"
 #include "SampleTable.h"
@@ -84,6 +88,22 @@ enum {
     // but we only allow up to this size.
     kMaxAtomSize = 64 * 1024 * 1024,
 };
+
+static bool isAtLeastRelease([[maybe_unused]] int version,
+                             [[maybe_unused]] const std::string codeName) {
+#ifdef __ANDROID__
+    static std::once_flag sCheckOnce;
+    static std::string sDeviceCodeName;
+    static int sDeviceApiLevel = 0;
+    std::call_once(sCheckOnce, [&]() {
+        sDeviceCodeName = base::GetProperty("ro.build.version.codename", "");
+        sDeviceApiLevel = android_get_device_api_level();
+    });
+    return sDeviceApiLevel >= version || sDeviceCodeName == codeName;
+#else   //__ANDROID__
+    return true;
+#endif  //__ANDROID__
+}
 
 class MPEG4Source : public MediaTrackHelper {
 static const size_t  kMaxPcmFrameSize = 8192;
@@ -372,7 +392,9 @@ static const char *FourCC2MIME(uint32_t fourcc) {
             return MEDIA_MIMETYPE_VIDEO_HEVC;
 
         case FOURCC("apv1"):
-            if (!com::android::media::extractor::flags::extractor_mp4_enable_apv()) {
+            // Enable APV codec support from Android Baklava
+            if (!(isAtLeastRelease(36, "Baklava") &&
+                  com::android::media::extractor::flags::extractor_mp4_enable_apv())) {
                 ALOGV("APV support not enabled");
                 return "application/octet-stream";
             }
@@ -2637,7 +2659,9 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
         }
 
         case FOURCC("apvC"): {
-            if (!com::android::media::extractor::flags::extractor_mp4_enable_apv()) {
+            // Enable APV codec support from Android Baklava
+            if (!(isAtLeastRelease(36, "Baklava") &&
+                  com::android::media::extractor::flags::extractor_mp4_enable_apv())) {
                 ALOGV("APV support not enabled");
                 *offset += chunk_size;
                 break;
@@ -5239,8 +5263,12 @@ MPEG4Source::MPEG4Source(
     mIsAVC = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_AVC);
     mIsHEVC = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_HEVC) ||
               !strcasecmp(mime, MEDIA_MIMETYPE_IMAGE_ANDROID_HEIC);
-    mIsAPV = com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
-             !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_APV);
+    // Enable APV codec support from Android Baklava
+    mIsAPV = false;
+    if (isAtLeastRelease(36, "Baklava")) {
+        mIsAPV = com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
+                 !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_APV);
+    }
     mIsAC4 = !strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AC4);
     mIsDolbyVision = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_DOLBY_VISION);
     mIsHeif = !strcasecmp(mime, MEDIA_MIMETYPE_IMAGE_ANDROID_HEIC) && mItemTable != NULL;

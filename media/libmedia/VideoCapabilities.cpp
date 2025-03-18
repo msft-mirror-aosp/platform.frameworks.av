@@ -69,8 +69,8 @@ std::optional<Range<int32_t>> VideoCapabilities::getSupportedWidthsFor(int32_t h
         ALOGE("unsupported height");
         return std::nullopt;
     }
-    const int32_t heightInBlocks = divUp(height, mBlockHeight);
 
+    const int32_t heightInBlocks = divUp(height, mBlockHeight);
     // constrain by block count and by block aspect ratio
     const int32_t minWidthInBlocks = std::max(
             divUp(mBlockCountRange.lower(), heightInBlocks),
@@ -94,6 +94,10 @@ std::optional<Range<int32_t>> VideoCapabilities::getSupportedWidthsFor(int32_t h
             (int32_t)std::ceil(mAspectRatioRange.lower().asDouble()
                     * height),
             (int32_t)(mAspectRatioRange.upper().asDouble() * height));
+    if (range.empty()) {
+        return std::nullopt;
+    }
+
     return range;
 }
 
@@ -104,8 +108,8 @@ std::optional<Range<int32_t>> VideoCapabilities::getSupportedHeightsFor(int32_t 
         ALOGE("unsupported width");
         return std::nullopt;
     }
-    const int32_t widthInBlocks = divUp(width, mBlockWidth);
 
+    const int32_t widthInBlocks = divUp(width, mBlockWidth);
     // constrain by block count and by block aspect ratio
     const int32_t minHeightInBlocks = std::max(
             divUp(mBlockCountRange.lower(), widthInBlocks),
@@ -129,6 +133,10 @@ std::optional<Range<int32_t>> VideoCapabilities::getSupportedHeightsFor(int32_t 
             (int32_t)std::ceil(width /
                     mAspectRatioRange.upper().asDouble()),
             (int32_t)(width / mAspectRatioRange.lower().asDouble()));
+    if (range.empty()) {
+        return std::nullopt;
+    }
+
     return range;
 }
 
@@ -142,12 +150,15 @@ std::optional<Range<double>> VideoCapabilities::getSupportedFrameRatesFor(
 
     const int32_t blockCount =
             divUp(width, mBlockWidth) * divUp(height, mBlockHeight);
-
-    return std::make_optional(Range(
+    Range<double> result = Range(
             std::max(mBlocksPerSecondRange.lower() / (double) blockCount,
                 (double) mFrameRateRange.lower()),
             std::min(mBlocksPerSecondRange.upper() / (double) blockCount,
-                (double) mFrameRateRange.upper())));
+                (double) mFrameRateRange.upper()));
+    if (result.empty()) {
+        return std::nullopt;
+    }
+    return result;
 }
 
 int32_t VideoCapabilities::getBlockCount(int32_t width, int32_t height) const {
@@ -613,9 +624,16 @@ std::optional<std::pair<Range<int32_t>, Range<int32_t>>> VideoCapabilities
         return std::nullopt;
     }
 
-    return std::make_optional(std::pair(
-            Range(range.value().first.getWidth(), range.value().second.getWidth()),
-            Range(range.value().first.getHeight(), range.value().second.getHeight())));
+    Range<int32_t> widthRange
+            = Range(range.value().first.getWidth(), range.value().second.getWidth());
+    Range<int32_t> heightRange
+            = Range(range.value().first.getHeight(), range.value().second.getHeight());
+    if (widthRange.empty() || heightRange.empty()) {
+        ALOGW("could not parse size range: %s", str.c_str());
+        return std::nullopt;
+    }
+
+    return std::make_optional(std::pair(widthRange, heightRange));
 }
 
 // static
