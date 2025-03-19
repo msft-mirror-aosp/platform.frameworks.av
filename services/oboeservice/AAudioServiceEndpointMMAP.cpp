@@ -243,6 +243,21 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
     ALOGD("%s(format = 0x%X) deviceIds = %s, sessionId = %d",
           __func__, config->format, toString(getDeviceIds()).c_str(), getSessionId());
 
+    ALOGD("%s bufferCapacity = %d, deviceSampleRate = %d, requestedSampleRate = %d",
+          __func__, getBufferCapacity(), config->sample_rate, getSampleRate());
+
+    const int32_t requestedSampleRate = getSampleRate();
+    const int32_t deviceSampleRate = config->sample_rate;
+
+    // When sample rate conversion is needed, we use the device sample rate and the
+    // requested sample rate to scale the capacity in configureDataInformation().
+    // Thus, we should scale the capacity here to cancel out the
+    // (requestedSampleRate / deviceSampleRate) scaling there.
+    if (requestedSampleRate != AAUDIO_UNSPECIFIED && requestedSampleRate != deviceSampleRate) {
+        setBufferCapacity(static_cast<int64_t>(getBufferCapacity()) * deviceSampleRate /
+                          requestedSampleRate);
+    }
+
     // Create MMAP/NOIRQ buffer.
     result = createMmapBuffer_l();
     if (result != AAUDIO_OK) {
