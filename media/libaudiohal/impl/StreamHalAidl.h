@@ -37,9 +37,6 @@
 #include "ConversionHelperAidl.h"
 #include "StreamPowerLog.h"
 
-using ::aidl::android::hardware::audio::common::AudioOffloadMetadata;
-using ::aidl::android::hardware::audio::core::MmapBufferDescriptor;
-
 namespace android {
 
 class StreamContextAidl {
@@ -87,10 +84,14 @@ class StreamContextAidl {
     ReplyMQ* getReplyMQ() const { return mReplyMQ.get(); }
     bool isAsynchronous() const { return mIsAsynchronous; }
     bool isMmapped() const { return mIsMmapped; }
-    const MmapBufferDescriptor& getMmapBufferDescriptor() const { return mMmapBufferDescriptor; }
+    const ::aidl::android::hardware::audio::core::MmapBufferDescriptor&
+            getMmapBufferDescriptor() const { return mMmapBufferDescriptor; }
     size_t getMmapBurstSize() const { return mMmapBufferDescriptor.burstSizeFrames; }
     int getIoHandle() const { return mIoHandle; }
     bool hasClipTransitionSupport() const { return mHasClipTransitionSupport; }
+    void updateMmapBufferDescriptor(
+            ::aidl::android::hardware::audio::core::MmapBufferDescriptor&& desc) {
+        mMmapBufferDescriptor = std::move(desc); }
 
   private:
     static std::unique_ptr<DataMQ> maybeCreateDataMQ(
@@ -106,7 +107,7 @@ class StreamContextAidl {
         using Tag = ::aidl::android::hardware::audio::core::StreamDescriptor::AudioBuffer::Tag;
         return descriptor.audio.getTag() == Tag::mmap;
     }
-    static MmapBufferDescriptor maybeGetMmapBuffer(
+    static ::aidl::android::hardware::audio::core::MmapBufferDescriptor maybeGetMmapBuffer(
             ::aidl::android::hardware::audio::core::StreamDescriptor& descriptor) {
         using Tag = ::aidl::android::hardware::audio::core::StreamDescriptor::AudioBuffer::Tag;
         if (descriptor.audio.getTag() == Tag::mmap) {
@@ -122,7 +123,7 @@ class StreamContextAidl {
     std::unique_ptr<DataMQ> mDataMQ;
     bool mIsAsynchronous;
     bool mIsMmapped;
-    MmapBufferDescriptor mMmapBufferDescriptor;
+    ::aidl::android::hardware::audio::core::MmapBufferDescriptor mMmapBufferDescriptor;
     int mIoHandle;
     bool mHasClipTransitionSupport;
 };
@@ -183,9 +184,13 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
     // For tests.
     friend class sp<StreamHalAidl>;
 
-    struct StatePositions {
+    struct FrameCounters {
         int64_t framesAtFlushOrDrain;
         int64_t framesAtStandby;
+    };
+    struct StatePositions {
+        FrameCounters observable;
+        FrameCounters hardware;
         enum DrainState : int32_t { NONE, ALL, EN /*early notify*/, EN_RECEIVED };
         DrainState drainState;
     };
@@ -288,7 +293,7 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
 
     const bool mIsInput;
     const audio_config_base_t mConfig;
-    const StreamContextAidl mContext;
+    StreamContextAidl mContext;
     // This lock is used to make sending of a command and receiving a reply an atomic
     // operation. Otherwise, when two threads are trying to send a command, they may both advance to
     // reading of the reply once the HAL has consumed the command from the MQ, and that creates a
@@ -340,6 +345,8 @@ class StreamHalAidl : public virtual StreamHalInterface, public ConversionHelper
     // mStreamPowerLog is used for audio signal power logging.
     StreamPowerLog mStreamPowerLog;
     std::atomic<pid_t> mWorkerTid = -1;
+    int32_t mAidlInterfaceVersion = -1;
+    bool mSupportsCreateMmapBuffer = false;
 };
 
 class CallbackBroker;
@@ -446,7 +453,7 @@ class StreamOutHalAidl : public virtual StreamOutHalInterface,
     const wp<CallbackBroker> mCallbackBroker;
     mediautils::atomic_wp<StreamOutHalInterfaceCallback> mClientCallback;
 
-    AudioOffloadMetadata mOffloadMetadata;
+    ::aidl::android::hardware::audio::common::AudioOffloadMetadata mOffloadMetadata;
 
     // Can not be constructed directly by clients.
     StreamOutHalAidl(

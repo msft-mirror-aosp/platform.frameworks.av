@@ -46,6 +46,7 @@ using ::aidl::android::hardware::audio::core::IStreamIn;
 using ::aidl::android::hardware::audio::core::IStreamOut;
 using ::aidl::android::hardware::audio::core::MmapBufferDescriptor;
 using ::aidl::android::hardware::audio::core::StreamDescriptor;
+using ::aidl::android::hardware::audio::core::VendorParameter;
 using ::aidl::android::media::audio::common::MicrophoneDynamicInfo;
 using ::aidl::android::media::audio::IHalAdapterVendorExtension;
 
@@ -73,7 +74,15 @@ using ::aidl::android::media::audio::IHalAdapterVendorExtension;
 namespace android {
 
 using HalCommand = StreamDescriptor::Command;
+
 namespace {
+
+static constexpr int32_t kAidlVersion1 = 1;
+static constexpr int32_t kAidlVersion2 = 2;
+static constexpr int32_t kAidlVersion3 = 3;
+
+static constexpr const char* kCreateMmapBuffer = "aosp.createMmapBuffer";
+
 template<HalCommand::Tag cmd> HalCommand makeHalCommand() {
     return HalCommand::make<cmd>(::aidl::android::media::audio::common::Void{});
 }
@@ -135,15 +144,27 @@ StreamHalAidl::StreamHalAidl(std::string_view className, bool isInput, const aud
         mStreamPowerLog.init(config.sample_rate, config.channel_mask, config.format);
     }
 
-    if (mStream != nullptr) {
-        mContext.getCommandMQ()->setErrorHandler(
-                fmqErrorHandler<StreamContextAidl::CommandMQ::Error>("CommandMQ"));
-        mContext.getReplyMQ()->setErrorHandler(
-                fmqErrorHandler<StreamContextAidl::ReplyMQ::Error>("ReplyMQ"));
-        if (mContext.getDataMQ() != nullptr) {
-            mContext.getDataMQ()->setErrorHandler(
-                    fmqErrorHandler<StreamContextAidl::DataMQ::Error>("DataMQ"));
+    if (mStream == nullptr) return;
+
+    mContext.getCommandMQ()->setErrorHandler(
+            fmqErrorHandler<StreamContextAidl::CommandMQ::Error>("CommandMQ"));
+    mContext.getReplyMQ()->setErrorHandler(
+            fmqErrorHandler<StreamContextAidl::ReplyMQ::Error>("ReplyMQ"));
+    if (mContext.getDataMQ() != nullptr) {
+        mContext.getDataMQ()->setErrorHandler(
+                fmqErrorHandler<StreamContextAidl::DataMQ::Error>("DataMQ"));
+    }
+
+    if (auto status = mStream->getInterfaceVersion(&mAidlInterfaceVersion); status.isOk()) {
+        if (mAidlInterfaceVersion > kAidlVersion3) {
+            mSupportsCreateMmapBuffer = true;
+        } else {
+            VendorParameter createMmapBuffer{.id = kCreateMmapBuffer};
+            mSupportsCreateMmapBuffer =
+                    mStream->setVendorParameters({createMmapBuffer}, false).isOk();
         }
+    } else {
+        AUGMENT_LOG(E, "failed to retrieve stream interface version: %s", status.getMessage());
     }
 }
 
@@ -400,12 +421,17 @@ status_t StreamHalAidl::getHardwarePosition(int64_t *frames, int64_t *timestamp)
     AUGMENT_LOG(V);
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
-    RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
+    StatePositions statePositions{};
+    RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply, &statePositions));
     if (reply.hardware.frames == StreamDescriptor::Position::UNKNOWN ||
         reply.hardware.timeNs == StreamDescriptor::Position::UNKNOWN) {
+        AUGMENT_LOG(W, "No position was reported by the HAL");
         return INVALID_OPERATION;
     }
-    *frames = reply.hardware.frames;
+    int64_t mostRecentResetPoint = std::max(statePositions.hardware.framesAtStandby,
+                                            statePositions.hardware.framesAtFlushOrDrain);
+    int64_t aidlFrames = reply.hardware.frames;
+    *frames = aidlFrames <= mostRecentResetPoint ? 0 : aidlFrames - mostRecentResetPoint;
     *timestamp = reply.hardware.timeNs;
     return OK;
 }
@@ -627,7 +653,7 @@ void StreamHalAidl::onAsyncDrainReady() {
                                 || mStatePositions.drainState == StatePositions::DrainState::ALL))) {
             AUGMENT_LOG(D, "setting position %lld as clip end",
                     (long long)mLastReply.observable.frames);
-            mStatePositions.framesAtFlushOrDrain = mLastReply.observable.frames;
+            mStatePositions.observable.framesAtFlushOrDrain = mLastReply.observable.frames;
         }
         mStatePositions.drainState = mStatePositions.drainState == StatePositions::DrainState::EN ?
                 StatePositions::DrainState::EN_RECEIVED : StatePositions::DrainState::NONE;
@@ -650,12 +676,25 @@ status_t StreamHalAidl::createMmapBuffer(int32_t minSizeFrames __unused,
     if (!mContext.isMmapped()) {
         return BAD_VALUE;
     }
+    if (mSupportsCreateMmapBuffer && (mAidlInterfaceVersion <= kAidlVersion3)) {
+        std::vector<VendorParameter> parameters;
+        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+                        mStream->getVendorParameters({kCreateMmapBuffer}, &parameters)));
+        if (parameters.size() == 1) {
+            std::optional<MmapBufferDescriptor> result;
+            RETURN_STATUS_IF_ERROR(parameters[0].ext.getParcelable(&result));
+            mContext.updateMmapBufferDescriptor(std::move(*result));
+        } else {
+            AUGMENT_LOG(E, "invalid output from 'createMmapBuffer' via 'getVendorParameters': %s",
+                        internal::ToString(parameters).c_str());
+            return INVALID_OPERATION;
+        }
+    }
     const MmapBufferDescriptor& bufferDescriptor = mContext.getMmapBufferDescriptor();
     info->shared_memory_fd = bufferDescriptor.sharedMemory.fd.get();
     info->buffer_size_frames = mContext.getBufferSizeFrames();
     info->burst_size_frames = bufferDescriptor.burstSizeFrames;
     info->flags = static_cast<audio_mmap_buffer_flag>(bufferDescriptor.flags);
-
     return OK;
 }
 
@@ -727,15 +766,18 @@ status_t StreamHalAidl::sendCommand(
                 if (reply->observable.frames != StreamDescriptor::Position::UNKNOWN) {
                     if (command.getTag() == StreamDescriptor::Command::standby &&
                             reply->state == StreamDescriptor::State::STANDBY) {
-                        mStatePositions.framesAtStandby = reply->observable.frames;
+                        mStatePositions.observable.framesAtStandby = reply->observable.frames;
+                        mStatePositions.hardware.framesAtStandby = reply->hardware.frames;
                     } else if (command.getTag() == StreamDescriptor::Command::flush &&
                             reply->state == StreamDescriptor::State::IDLE) {
-                        mStatePositions.framesAtFlushOrDrain = reply->observable.frames;
+                        mStatePositions.observable.framesAtFlushOrDrain = reply->observable.frames;
+                        mStatePositions.hardware.framesAtFlushOrDrain = reply->observable.frames;
                     } else if (!mContext.isAsynchronous() &&
                             command.getTag() == StreamDescriptor::Command::drain &&
                             (reply->state == StreamDescriptor::State::IDLE ||
                                     reply->state == StreamDescriptor::State::DRAINING)) {
-                        mStatePositions.framesAtFlushOrDrain = reply->observable.frames;
+                        mStatePositions.observable.framesAtFlushOrDrain = reply->observable.frames;
+                        mStatePositions.hardware.framesAtFlushOrDrain = reply->observable.frames;
                     } // for asynchronous drain, the frame count is saved in 'onAsyncDrainReady'
                 }
                 if (mContext.isAsynchronous() &&
@@ -767,15 +809,19 @@ status_t StreamHalAidl::updateCountersIfNeeded(
         ::aidl::android::hardware::audio::core::StreamDescriptor::Reply* reply,
         StatePositions* statePositions) {
     bool doUpdate = false;
+    HalCommand cmd;
     {
         std::lock_guard l(mLock);
         doUpdate = uptimeNanos() > mLastReplyExpirationNs;
+        cmd = mContext.isMmapped() && mSupportsCreateMmapBuffer
+                && mLastReply.state == StreamDescriptor::State::ACTIVE
+                ? makeHalCommand<HalCommand::Tag::burst>(0)
+                : makeHalCommand<HalCommand::Tag::getStatus>();
     }
     if (doUpdate) {
         // Since updates are paced, it is OK to perform them from any thread, they should
         // not interfere with I/O operations of the worker.
-        return sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(),
-                reply, true /*safeFromNonWorkerThread */, statePositions);
+        return sendCommand(cmd, reply, true /*safeFromNonWorkerThread */, statePositions);
     } else if (reply != nullptr) {  // provide cached reply
         std::lock_guard l(mLock);
         *reply = mLastReply;
@@ -882,10 +928,10 @@ status_t StreamOutHalAidl::getRenderPosition(uint64_t *dspFrames) {
     // See the table at the start of 'StreamHalInterface' on when it needs to reset.
     int64_t mostRecentResetPoint;
     if (!mContext.isAsynchronous() && audio_has_proportional_frames(mConfig.format)) {
-        mostRecentResetPoint = statePositions.framesAtStandby;
+        mostRecentResetPoint = statePositions.observable.framesAtStandby;
     } else {
-        mostRecentResetPoint =
-                std::max(statePositions.framesAtStandby, statePositions.framesAtFlushOrDrain);
+        mostRecentResetPoint = std::max(statePositions.observable.framesAtStandby,
+                statePositions.observable.framesAtFlushOrDrain);
     }
     *dspFrames = aidlFrames <= mostRecentResetPoint ? 0 : aidlFrames - mostRecentResetPoint;
     return OK;
@@ -961,8 +1007,8 @@ status_t StreamOutHalAidl::getPresentationPosition(uint64_t *frames, struct time
     if (!mContext.isAsynchronous() && audio_has_proportional_frames(mConfig.format)) {
         *frames = aidlFrames;
     } else {
-        const int64_t mostRecentResetPoint =
-                std::max(statePositions.framesAtStandby, statePositions.framesAtFlushOrDrain);
+        const int64_t mostRecentResetPoint = std::max(statePositions.observable.framesAtStandby,
+                statePositions.observable.framesAtFlushOrDrain);
         *frames = aidlFrames <= mostRecentResetPoint ? 0 : aidlFrames - mostRecentResetPoint;
     }
     timestamp->tv_sec = aidlTimestamp / NANOS_PER_SECOND;
