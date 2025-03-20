@@ -61,6 +61,10 @@ using ::aidl::android::media::audio::common::PcmType;
 
 class VendorParameterMock {
   public:
+    void clearParameters() {
+        mAsyncParameters.clear();
+        mSyncParameters.clear();
+    }
     const std::vector<std::string>& getRetrievedParameterIds() const { return mGetParameterIds; }
     const std::vector<VendorParameter>& getAsyncParameters() const { return mAsyncParameters; }
     const std::vector<VendorParameter>& getSyncParameters() const { return mSyncParameters; }
@@ -995,6 +999,8 @@ class StreamHalAidlVendorParametersTest : public testing::Test {
                                   false /*hasClipTransitionSupport*/);
         mStream = sp<StreamHalAidl>::make("test", false /*isInput*/, config, 0 /*nominalLatency*/,
                                           std::move(context), mStreamCommon, mVendorExt);
+        // The stream may check for some properties after creating.
+        mStreamCommon->clearParameters();
     }
     void TearDown() override {
         mStream.clear();
