@@ -22,10 +22,10 @@
 namespace android {
 
 class C2SoftIamfDec : public SimpleC2Component {
+  public:
     // Forward declaration of the C2 interface implementation.
     class IntfImpl;
 
-  public:
     C2SoftIamfDec(const char* name, c2_node_id_t id, const std::shared_ptr<IntfImpl>& intfImpl);
     virtual ~C2SoftIamfDec();
 
@@ -41,7 +41,9 @@ class C2SoftIamfDec : public SimpleC2Component {
 
   private:
     std::shared_ptr<IntfImpl> mIntf;
-}
+
+    C2_DO_NOT_COPY(C2SoftIamfDec);
+};
 
 }  // namespace android
 
