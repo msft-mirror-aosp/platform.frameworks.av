@@ -545,7 +545,7 @@ public:
     mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kThreadBase_Mutex};
 
     void onEffectEnable(const sp<IAfEffectModule>& effect) final EXCLUDES_ThreadBase_Mutex;
-    void onEffectDisable() final EXCLUDES_ThreadBase_Mutex;
+    void onEffectDisable(const sp<IAfEffectModule>& effect) final EXCLUDES_ThreadBase_Mutex;
 
                 // invalidateTracksForAudioSession_l must be called with holding mutex().
     void invalidateTracksForAudioSession_l(audio_session_t /* sessionId */) const override
