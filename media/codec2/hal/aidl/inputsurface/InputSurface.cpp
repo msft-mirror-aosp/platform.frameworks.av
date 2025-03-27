@@ -169,8 +169,8 @@ public:
                 .build());
 
         addParameter(
-                DefineParam(mInputDone, C2_PARAMKEY_LAYER_INDEX)
-                .withDefault(new C2StreamLayerIndexInfo::output(0u, UINT32_MAX))
+                DefineParam(mInputDone, C2_PARAMKEY_OUTPUT_COUNTER)
+                .withDefault(new C2PortConfigCounterTuning::output(UINT64_MAX))
                 .withFields({C2F(mInputDone, value).any()})
                 .withSetter(BasicSetter<decltype(mInputDone)::element_type>)
                 .build());
@@ -178,13 +178,13 @@ public:
                 DefineParam(mInputDoneCount, C2_PARAMKEY_LAYER_INDEX)
                 .withDefault(new C2StreamLayerCountInfo::input(0u, 0))
                 .withFields({C2F(mInputDoneCount, value).any()})
-                .withSetter(InputDoneCountSetter)
+                .withSetter(BasicSetter<decltype(mInputDoneCount)::element_type>)
                 .build());
         addParameter(
                 DefineParam(mEmptyCount, C2_PARAMKEY_LAYER_COUNT)
                 .withDefault(new C2StreamLayerCountInfo::output(0u, 0))
                 .withFields({C2F(mEmptyCount, value).any()})
-                .withSetter(EmptyCountSetter)
+                .withSetter(BasicSetter<decltype(mEmptyCount)::element_type>)
                 .build());
     }
 
@@ -222,11 +222,7 @@ public:
     }
 
     void getWorkStatusConfig(WorkStatusConfig* _Nonnull config) {
-        if (mInputDone->value == UINT32_MAX) {
-            config->mLastDoneIndex = -1;
-        } else {
-            config->mLastDoneIndex = mInputDone->value;
-        }
+        config->mLastDoneIndex = mInputDone->value;
         config->mLastDoneCount = mInputDoneCount->value;
         config->mEmptyCount = mEmptyCount->value;
     }
@@ -248,20 +244,6 @@ private:
             C2InterfaceHelper::C2P<C2StreamBlockCountInfo::output> &me) {
         (void)mayBlock;
         me.set().value = c2_min(me.v.value, kDefaultImageBufferCount);
-        return C2R::Ok();
-    }
-
-    static C2R InputDoneCountSetter(bool mayBlock,
-            C2InterfaceHelper::C2P<C2StreamLayerCountInfo::input> &me) {
-        (void)mayBlock;
-        me.set().value = me.v.value + 1;
-        return C2R::Ok();
-    }
-
-    static C2R EmptyCountSetter(bool mayBlock,
-            C2InterfaceHelper::C2P<C2StreamLayerCountInfo::output> &me) {
-        (void)mayBlock;
-        me.set().value = me.v.value + 1;
         return C2R::Ok();
     }
 
@@ -289,7 +271,7 @@ private:
 
     // current work status configuration
     // TODO: remove this and move this to onWorkDone()
-    std::shared_ptr<C2StreamLayerIndexInfo::output> mInputDone;
+    std::shared_ptr<C2PortConfigCounterTuning::output> mInputDone;
     std::shared_ptr<C2StreamLayerCountInfo::input> mInputDoneCount;
     std::shared_ptr<C2StreamLayerCountInfo::output> mEmptyCount;
 };
@@ -409,6 +391,7 @@ InputSurface::~InputSurface() {
 ::ndk::ScopedAStatus InputSurface::connect(
         const std::shared_ptr<IInputSink>& sink,
         std::shared_ptr<IInputSurfaceConnection>* connection) {
+    std::unique_lock<std::mutex> l(mLock);
     mConnection = SharedRefBase::make<InputSurfaceConnection>(sink, mSource);
     *connection = mConnection;
     return ::ndk::ScopedAStatus::ok();
@@ -459,12 +442,12 @@ bool InputSurface::updateStreamConfig(
     if (config.mAdjustedFpsMode != C2TimestampGapAdjustmentStruct::NONE && (
             config.mAdjustedFpsMode != mStreamConfig.mAdjustedFpsMode ||
             config.mAdjustedGapUs != mStreamConfig.mAdjustedGapUs)) {
-        // TODO: configure GapUs to connection
-        // The original codes do not update config, figure out why.
         mStreamConfig.mAdjustedFpsMode = config.mAdjustedFpsMode;
         mStreamConfig.mAdjustedGapUs = config.mAdjustedGapUs;
         fixedModeUpdate = (config.mAdjustedFpsMode == C2TimestampGapAdjustmentStruct::FIXED_GAP);
-        // TODO: update Gap to Connection.
+        if (mConnection) {
+            mConnection->setAdjustTimestampGapUs(mStreamConfig.mAdjustedGapUs);
+        }
     }
     // TRICKY: we do not unset max fps to 0 unless using fixed fps
     if ((config.mMaxFps > 0 || (fixedModeUpdate && config.mMaxFps == -1))
@@ -550,8 +533,22 @@ bool InputSurface::updateStreamConfig(
 }
 
 void InputSurface::updateWorkStatusConfig(WorkStatusConfig &config) {
-    (void)config;
-    // TODO
+    std::unique_lock<std::mutex> l(mLock);
+    if (!mConnection) {
+        ALOGE("work status is updated though there is no connection.");
+        return;
+    }
+    if (mWorkStatusConfig.mLastDoneIndex != config.mLastDoneIndex) {
+        mWorkStatusConfig.mLastDoneIndex = config.mLastDoneIndex;
+        mConnection->onInputBufferDone(mWorkStatusConfig.mLastDoneIndex);
+    }
+    if (mWorkStatusConfig.mLastDoneCount != config.mLastDoneCount) {
+        mWorkStatusConfig.mLastDoneCount = config.mLastDoneCount;
+    }
+    if (mWorkStatusConfig.mEmptyCount != config.mEmptyCount) {
+        mWorkStatusConfig.mEmptyCount = config.mEmptyCount;
+        mConnection->onInputBufferEmptied();
+    }
 }
 
 bool InputSurface::updateConfig(

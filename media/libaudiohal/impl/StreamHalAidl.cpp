@@ -428,10 +428,15 @@ status_t StreamHalAidl::getHardwarePosition(int64_t *frames, int64_t *timestamp)
         AUGMENT_LOG(W, "No position was reported by the HAL");
         return INVALID_OPERATION;
     }
-    int64_t mostRecentResetPoint = std::max(statePositions.hardware.framesAtStandby,
-                                            statePositions.hardware.framesAtFlushOrDrain);
-    int64_t aidlFrames = reply.hardware.frames;
-    *frames = aidlFrames <= mostRecentResetPoint ? 0 : aidlFrames - mostRecentResetPoint;
+    if (mSupportsCreateMmapBuffer) {
+        // HAL is required to report continuous position. Reset for compatibility.
+        int64_t mostRecentResetPoint = std::max(statePositions.hardware.framesAtStandby,
+                statePositions.hardware.framesAtFlushOrDrain);
+        int64_t aidlFrames = reply.hardware.frames;
+        *frames = aidlFrames <= mostRecentResetPoint ? 0 : aidlFrames - mostRecentResetPoint;
+    } else {
+        *frames = reply.hardware.frames;
+    }
     *timestamp = reply.hardware.timeNs;
     return OK;
 }
@@ -771,13 +776,13 @@ status_t StreamHalAidl::sendCommand(
                     } else if (command.getTag() == StreamDescriptor::Command::flush &&
                             reply->state == StreamDescriptor::State::IDLE) {
                         mStatePositions.observable.framesAtFlushOrDrain = reply->observable.frames;
-                        mStatePositions.hardware.framesAtFlushOrDrain = reply->observable.frames;
+                        mStatePositions.hardware.framesAtFlushOrDrain = reply->hardware.frames;
                     } else if (!mContext.isAsynchronous() &&
                             command.getTag() == StreamDescriptor::Command::drain &&
                             (reply->state == StreamDescriptor::State::IDLE ||
                                     reply->state == StreamDescriptor::State::DRAINING)) {
                         mStatePositions.observable.framesAtFlushOrDrain = reply->observable.frames;
-                        mStatePositions.hardware.framesAtFlushOrDrain = reply->observable.frames;
+                        mStatePositions.hardware.framesAtFlushOrDrain = reply->hardware.frames;
                     } // for asynchronous drain, the frame count is saved in 'onAsyncDrainReady'
                 }
                 if (mContext.isAsynchronous() &&

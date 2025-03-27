@@ -1800,7 +1800,7 @@ void ThreadBase::onEffectEnable(const sp<IAfEffectModule>& effect) {
     }
 }
 
-void ThreadBase::onEffectDisable() {
+void ThreadBase::onEffectDisable([[maybe_unused]] const sp<IAfEffectModule>& effect) {
     if (isOffloadOrMmap()) {
         audio_utils::lock_guard _l(mutex());
         broadcast_l();
